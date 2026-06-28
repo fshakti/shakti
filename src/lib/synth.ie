@@ -1,0 +1,136 @@
+# synth — software synthesizer (Linux, homemade C module in src/synth.c)
+# Requires shakti built with SHAKTI_SYNTH:1.
+#
+#   import synth
+#   synth.open()
+#   synth.set_metro(1)
+#   synth.set_metro_sound(0)   # 0:click, 1:analog drum
+#   while synth.alive():
+#       synth.tick()
+#   synth.close()
+
+def open():
+    r : synth_open()
+    if type(r) != "error":
+        print("synth open — window active; close it or type quit to leave repl")
+    return r
+
+def close():
+    synth_close()
+
+def alive():
+    return synth_alive()
+
+def tick():
+    synth_tick()
+
+def set_steps(n):
+    synth_set_steps(n)
+
+def steps():
+    return synth_steps()
+
+def set_metro(n):
+    synth_set_metro(n)
+
+def metro_on():
+    return synth_metro_on()
+
+def set_metro_sound(sound):
+    synth_set_metro_sound(sound)
+
+def metro_sound():
+    return synth_metro_sound()
+
+def set_mute(n):
+    synth_set_mute(n)
+
+def mute_on():
+    return synth_mute_on()
+
+def note_on(note, vel:0.85):
+    synth_note_on(note, vel)
+
+def note_off(note):
+    synth_note_off(note)
+
+def set_bpm(bpm):
+    synth_set_bpm(bpm)
+
+def bpm():
+    return synth_bpm()
+
+def set_level(level):
+    synth_set_level(level)
+
+def level():
+    return synth_level()
+
+def set_cutoff(cutoff):
+    synth_set_cutoff(cutoff)
+
+def cutoff():
+    return synth_cutoff()
+
+def set_reso(reso):
+    synth_set_reso(reso)
+
+def reso():
+    return synth_reso()
+
+def set_row(row, mask):
+    synth_set_seq_row(row, mask)
+
+def play(enabled):
+    synth_play(enabled)
+
+def playing():
+    return synth_playing()
+
+def mouse_press(x, y):
+    synth_mouse_press(x, y)
+
+def mouse_release(x, y):
+    synth_mouse_release(x, y)
+
+def set_viz(mode):
+    synth_set_viz(mode)
+
+def viz_mode():
+    return synth_viz_mode()
+
+def load_sample(path):
+  synth_load_sample(path)
+
+def sample_loaded():
+  return synth_sample_loaded()
+
+def sample_name():
+  return synth_sample_name()
+
+def set_row_note(row, midi):
+  synth_set_row_note(row, midi)
+
+def row_note(row):
+  return synth_row_note(row)
+
+def looper_rec(enabled):
+  synth_looper_rec(enabled)
+
+def looper_play(enabled):
+  synth_looper_play(enabled)
+
+def looper_clear():
+  synth_looper_clear()
+
+def looper_overdub(enabled):
+  synth_looper_overdub(enabled)
+
+def looper_rec_on():
+  return synth_looper_rec_on()
+
+def looper_play_on():
+  return synth_looper_play_on()
+
+def looper_has_loop():
+  return synth_looper_has_loop()

@@ -1,0 +1,23 @@
+# Native matrix types demo
+
+m : [[1, 2], [3, 4]]
+print("int matrix:", m)
+print("type:", type(m))
+print("shape:", shape(m))
+print("row 0:", m[0])
+print("cell [1,0]:", m[1, 0])
+
+a : [[1, 2], [3, 4]]
+b : [[5, 6], [7, 8]]
+print("element-wise *:", a * b)
+print("matmul a @ b:", a @ b)
+
+f : [[1.0, 2.0], [3.0, 4.0]]
+print("sum(f):", sum(f))
+
+flags : [[True, False], [False, True]]
+print("bool matrix:", flags)
+print("flags > 0:", flags > 0)
+
+t : table(data: [[10, 20], [30, 40]])
+print("table column as matrix:", t["data"])

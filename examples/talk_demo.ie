@@ -1,0 +1,7 @@
+# Manual demo: listen until 2s silence, Enter, or left-click; then print transcript.
+# Usage:
+#   export SHAKTI_LIB:/path/to/shakti/src/lib
+#   ./shakti examples/talk_demo.ie
+
+import talk
+talk(2)

@@ -1,0 +1,13 @@
+# RDMA client for ipc_rdma.ie — set host to server address.
+import ipc
+
+host : "127.0.0.1"
+port : 19100
+
+if ipc.rdma_available() = 0:
+    print("no RDMA device")
+else:
+    c : ipc.connect(host, port, "rdma")
+    ipc.send(c, "ping")
+    print("reply:", ipc.recv(c))
+    ipc.close(c)

@@ -1,0 +1,33 @@
+# Synth + unified input jam demo (Linux/macOS with synth build).
+#
+#   export SHAKTI_LIB=$PWD/src/lib
+#   ./shakti examples/synth_input.ie
+#
+# Maps QWERTY keys to synth notes via input(2) key up/down stream.
+# Close the synth window or press Ctrl+C to exit.
+
+import synth
+import input
+
+synth.open()
+input_set_own_gui(1)
+input.hz : 120
+
+print("Jam mode — key down/up from terminal or synth window; close window to exit")
+
+for ev in input(2):
+    synth.tick()
+    if not synth.alive():
+        break
+    kind : ev["kind"]
+    code : ev["code"]
+    idx : input.qwerty[str(code)]
+    if idx < 0:
+        continue
+    note : 60 + idx
+    if kind = "down":
+        synth.note_on(note, 0.88)
+    elif kind = "up":
+        synth.note_off(note)
+
+print("Done")

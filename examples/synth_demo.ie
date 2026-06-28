@@ -1,0 +1,12 @@
+# Shakti synth demo — async window + event loop
+# See examples/synth_input.ie for unified input(2) key events + synth jam.
+import synth
+
+synth.open()
+synth.set_steps(16)
+print("synth open — MUTE / METRO in header; close window or Ctrl+C to exit")
+
+while synth.alive():
+    synth.tick()
+
+print("steps:", synth.steps())
