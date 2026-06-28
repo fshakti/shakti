@@ -7,9 +7,6 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#if defined(__AVX512F__) && defined(__AVX512BW__)
-#include <immintrin.h>
-#endif
 static inline double sql_to_float(V*v){return !v?0.:v->t==T_INT?(double)v->j:v->t==T_FLOAT?v->f:v->t==T_BOOL?v->b?1.:0.:0.;}
 enum {
     COL_NAME = 0,
@@ -70,54 +67,14 @@ static V*tbl_filter_mask(V*tbl,V*mask){
             int64_t j = 0;
             const int64_t *src = col->J;
             int64_t *dst = nc2->J;
-#if defined(__AVX512F__) && defined(__AVX512BW__)
-            int64_t k = 0;
-            for (; k + 8 <= nr; k += 8) {
-                __mmask8 m = 0;
-                for (int b = 0; b < 8; b++) {
-                    if (B[k + b]) m |= (1 << b);
-                }
-                if (m) {
-                    __m512i v = _mm512_loadu_si512((void*)&src[k]);
-                    _mm512_mask_compressstoreu_epi64(&dst[j], m, v);
-                    j += __builtin_popcount(m);
-                }
-            }
-            for (; k < nr; k++) {
-                if (B[k]) dst[j++] = src[k];
-            }
-#else
-            for (int64_t k = 0; k < nr; k++) {
-                if (B[k]) dst[j++] = src[k];
-            }
-#endif
+            j = mat_compress_i64_masked(dst, j, src, B, nr);
             new_data->L[c] = nc2;
         } else if (col->t == T_FVEC) {
             V *nc2 = v_fvec(count);
             int64_t j = 0;
             const double *src = col->F;
             double *dst = nc2->F;
-#if defined(__AVX512F__) && defined(__AVX512BW__)
-            int64_t k = 0;
-            for (; k + 8 <= nr; k += 8) {
-                __mmask8 m = 0;
-                for (int b = 0; b < 8; b++) {
-                    if (B[k + b]) m |= (1 << b);
-                }
-                if (m) {
-                    __m512d v = _mm512_loadu_pd(&src[k]);
-                    _mm512_mask_compressstoreu_pd(&dst[j], m, v);
-                    j += __builtin_popcount(m);
-                }
-            }
-            for (; k < nr; k++) {
-                if (B[k]) dst[j++] = src[k];
-            }
-#else
-            for (int64_t k = 0; k < nr; k++) {
-                if (B[k]) dst[j++] = src[k];
-            }
-#endif
+            j = mat_compress_f64_masked(dst, j, src, B, nr);
             new_data->L[c] = nc2;
         } else if (col->t == T_BVEC) {
             V *nc2 = v_bvec(count);

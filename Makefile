@@ -1,13 +1,25 @@
 # GNU Make build: standalone CLI.
 BUILD := .build
+UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
+UNAME_M := $(shell uname -m 2>/dev/null || echo unknown)
+
+ifeq ($(UNAME_S),Darwin)
+  CC ?= clang
+  OBJC ?= clang
+endif
 CC ?= gcc
 
-UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 ifeq ($(UNAME_S),Darwin)
-  LIBOMP_PREFIX ?= /opt/homebrew/opt/libomp
-  ifneq ($(wildcard $(LIBOMP_PREFIX)/include/omp.h),)
+  ifneq ($(wildcard /opt/homebrew/opt/libomp/include/omp.h),)
+    LIBOMP_PREFIX := /opt/homebrew/opt/libomp
+  else ifneq ($(wildcard /usr/local/opt/libomp/include/omp.h),)
+    LIBOMP_PREFIX := /usr/local/opt/libomp
+  endif
+  ifneq ($(LIBOMP_PREFIX),)
     OMP_CFLAGS = -Xpreprocessor -fopenmp -I$(LIBOMP_PREFIX)/include
     OMP_LDFLAGS = -L$(LIBOMP_PREFIX)/lib -lomp
+  else
+    $(warning libomp not found — OpenMP disabled. Install with: brew install libomp)
   endif
 else
   OMP_CFLAGS = -fopenmp
@@ -164,11 +176,34 @@ test-macros: src/a.h
 	$(BUILD)/macros_smoke
 endif
 
+ifneq ($(wildcard scripts/parse_golden.sh),)
 test-parse: shakti
 	@bash scripts/parse_golden.sh
+endif
 
+ifneq ($(wildcard scripts/run_bench.sh),)
 bench-parse: shakti
 	@bash scripts/run_bench.sh
+endif
+
+ifneq ($(wildcard scripts/bench_mat.sh),)
+bench-mat: prod-speed
+	@bash scripts/bench_mat.sh
+
+ifeq ($(UNAME_S),Darwin)
+test-mac: prod test test-parse
+	@echo "test-mac: all macOS checks passed"
+
+bench-mac: prod-speed bench-parse bench-mat
+	@echo "bench-mac: all macOS benchmarks passed"
+else
+test-mac:
+	@echo "test-mac: skipped (Darwin only)"
+
+bench-mac:
+	@echo "bench-mac: skipped (Darwin only)"
+endif
+endif
 
 clean:
 	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
@@ -190,9 +225,17 @@ prod-size: clean-shakti-artifacts shakti
 
 SHAKTI_PORTABLE_CPU ?= 0
 ifeq ($(SHAKTI_PORTABLE_CPU),1)
-  PROD_SPEED_ARCH := -march=x86-64-v2 -mtune=generic
+  ifeq ($(UNAME_M),arm64)
+    PROD_SPEED_ARCH := -mcpu=apple-m1
+  else
+    PROD_SPEED_ARCH := -march=x86-64-v2 -mtune=generic
+  endif
 else
-  PROD_SPEED_ARCH := -march=native
+  ifeq ($(UNAME_M),arm64)
+    PROD_SPEED_ARCH := -mcpu=native
+  else
+    PROD_SPEED_ARCH := -march=native
+  endif
 endif
 PROD_SPEED_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -O3 -DNDEBUG $(PROD_RELEASE_CFLAGS) $(PROD_SPEED_ARCH)
 PROD_SPEED_LDFLAGS := $(LDFLAGS)
@@ -216,4 +259,23 @@ size-report: prod
 	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --report
 endif
 
-.PHONY: test test-macros test-parse bench-parse clean prod prod-size prod-speed clean-shakti-artifacts shakti bench bench-update bench-report internal-bench-scaffold bench-compare size-check size-update size-report
+check-deps:
+ifeq ($(UNAME_S),Darwin)
+	@missing=; \
+	if [ ! -f /opt/homebrew/opt/libomp/include/omp.h ] && [ ! -f /usr/local/opt/libomp/include/omp.h ]; then \
+	  missing="$$missing libomp"; \
+	fi; \
+	if ! command -v brew >/dev/null 2>&1 || ! brew list expat >/dev/null 2>&1; then \
+	  missing="$$missing expat"; \
+	fi; \
+	if [ -n "$$missing" ]; then \
+	  echo "Missing Homebrew packages:$$missing"; \
+	  echo "Install with: brew install$$missing"; \
+	  exit 1; \
+	fi; \
+	echo "macOS dependencies OK"
+else
+	@echo "check-deps: no-op on $(UNAME_S)"
+endif
+
+.PHONY: test test-macros test-parse bench-parse bench-mat bench-mac test-mac clean prod prod-size prod-speed clean-shakti-artifacts shakti bench bench-update bench-report internal-bench-scaffold bench-compare size-check size-update size-report check-deps

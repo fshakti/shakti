@@ -88,7 +88,7 @@ CSV/XML load and CSV save do **not** round-trip matrix columns as typed matrices
 
 ### Performance
 
-On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `@`, element-wise ops, comparisons, and table filters when the CPU supports them. Smaller matrices use scalar code. There is no GPU backend.
+On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `@`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code. There is no GPU backend.
 
 Example: [`examples/matrix.ie`](../examples/matrix.ie).
 

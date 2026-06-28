@@ -29,4 +29,9 @@ void mat_filter_imat_rows(int64_t *dst, const int64_t *src, const unsigned char 
 void mat_filter_bmat_rows(unsigned char *dst, const unsigned char *src, const unsigned char *mask,
                           int64_t nr, int64_t cols);
 
+int64_t mat_compress_i64_masked(int64_t *dst, int64_t j, const int64_t *src,
+                                const unsigned char *mask, int64_t nr);
+int64_t mat_compress_f64_masked(double *dst, int64_t j, const double *src,
+                                const unsigned char *mask, int64_t nr);
+
 #endif

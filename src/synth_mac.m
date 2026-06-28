@@ -7,6 +7,20 @@
 
 #include "synth_platform.h"
 #include "input.h"
+/* a.h short-name macros collide with Apple SDK / local identifiers (st, in, im, etc.) */
+#undef ia
+#undef it
+#undef ih
+#undef ii
+#undef ij
+#undef ik
+#undef il
+#undef im
+#undef in
+#undef cc
+#undef cd
+#undef ss
+#undef st
 #include <stdio.h>
 
 #define SYNTH_MAC_DESIGN_W 960

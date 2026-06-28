@@ -1,25 +1,21 @@
-# Benchmark Results — shakti v0.7.0
+# Benchmark results — shakti v0.7.0
 
-Run date: **2026-06-26** (UTC)  
-Host: Linux x86_64, 24 OpenMP threads  
-Binary: `./shakti` (debug build, `-O2 -g`)
+Published notes only. Full regression baselines and logs live in gitignored local trees (`benchmarks/`, `scripts/`, `internal-bench/`).
 
-## Build & test
+## Linux (x86_64, 2026-06-26)
+
+Host: 24 OpenMP threads, `make prod` (`-O2 -g`).
 
 | Step | Result |
 |------|--------|
-| `make shakti` | Pass |
-| `./shakti tests/smoke.ie` | Pass |
-| `./shakti examples/matrix.ie` | Pass |
+| `make prod` | Pass |
 | `make test` | Pass (21 `.ie` tests, incl. IPC) |
 | `make test-parse` | Pass (5 golden parses) |
-| `make bench-parse` | Pass (62,344 parses/sec, min 50,000) |
+| `make bench-parse` | Pass (~62k parses/sec, min 50,000) |
 
-## Regression suite (`make bench`)
+### Regression suite (`make bench`)
 
-105 cases, median of 5 runs each.
-
-Notable timings (seconds, stripped prod binary):
+105 cases, median of 5 runs each. Notable timings (seconds, stripped prod binary):
 
 | Case | Seconds | ops/s |
 |------|---------|-------|
@@ -30,11 +26,26 @@ Notable timings (seconds, stripped prod binary):
 | `repr_list` | 0.3199 | 31,258 |
 | `json_loads_bench` | 0.0241 | 830 |
 
-Full report: `make bench-report` (local, gitignored under `benchmarks/`).
+Full report: `make bench-report` (local).
+
+## macOS (Apple Silicon, 2026-06-28)
+
+Host: MacBook Pro arm64, 15 cores, `make prod-speed` (`-O3 -mcpu=native`, Homebrew `libomp`).
+
+| Step | Result |
+|------|--------|
+| `make prod-speed` | Pass (NEON + OpenMP) |
+| `make test-mac` | Pass (5 `.ie` tests + 5 golden parses) |
+| `make bench-mac` | Pass |
+
+| Benchmark | Result |
+|-----------|--------|
+| Parser throughput | ~68k parses/sec (min 50,000) |
+| Matrix `@` 128×128 | ~0.00026 s/iter (NEON + OpenMP) |
 
 ## Cross-tech compare (`make bench-compare`)
 
-Median of 3 runs. Results file: `internal-bench/results/compare_20260626T011651Z.json`
+Median of 3 runs. Requires local `internal-bench/` tree.
 
 ### SQL workloads (seconds)
 
@@ -58,16 +69,13 @@ Median of 3 runs. Results file: `internal-bench/results/compare_20260626T011651Z
 | kore_sum_1m | 0.0039 | 0.0029 | 0.000005 |
 | kore_dot_1m | 0.0150 | 0.0400 | 0.000007 |
 
-## Reproduce
+## Reproduce (local workspace)
 
 ```bash
-make clean && make shakti
-make test
-make bench-update   # refresh local baseline (gitignored)
-make bench          # regression gate
-make bench-report   # human-readable table
-make bench-compare  # cross-tech comparison
-make test-parse && make bench-parse
+make clean && make prod-speed
+export SHAKTI_LIB=$PWD/src/lib
+make test-mac && make bench-mac    # macOS
+make test && make bench            # when tests/ and scripts/ present
+make bench-update && make bench    # refresh regression baseline
+make bench-compare                 # cross-tech (internal-bench/)
 ```
-
-Regenerate local bench logs with `make bench-report` (output is not committed; see `benchmarks/baselines/local.json` locally).

@@ -416,7 +416,7 @@ V *bi_talk_listen(V **a, int n) {
     free(text);
     return out;
 }
-V *bi_talk_set_locale(V **a, in) {
+V *bi_talk_set_locale(V **a, int n) {
     P(n<1||a[0]->t!=T_STR,v_err("talk_set_locale(locale)"))
     char err[512];
     err[0] = 0;
@@ -426,6 +426,6 @@ V *bi_talk_set_locale(V **a, in) {
     }
     return v_nil();
 }
-V *bi_talk_set_model(V **a, in) {
+V *bi_talk_set_model(V **a, int n) {
     return bi_talk_set_locale(a, n);
 }
