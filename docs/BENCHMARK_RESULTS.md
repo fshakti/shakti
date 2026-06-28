@@ -49,14 +49,14 @@ Median of 3 runs. Results file: `internal-bench/results/compare_20260626T011651Z
 
 ### Vector workloads (seconds)
 
-| Workload | shakti | numpy |  |
+| Workload | shakti | numpy | kore |
 |----------|--------|-------|------|
 | vec_add_1m | 0.0127 | 0.0028 | — |
 | vec_mul_1m | 0.0179 | 0.0070 | — |
 | vec_compare_1m | 0.0064 | 0.0016 | — |
 | vec_filter_mask_1m | 0.0063 | 0.0062 | — |
-| host_sum_1m | 0.0039 | 0.0029 | 0.000005 |
-| host_dot_1m | 0.0150 | 0.0400 | 0.000007 |
+| kore_sum_1m | 0.0039 | 0.0029 | 0.000005 |
+| kore_dot_1m | 0.0150 | 0.0400 | 0.000007 |
 
 ## Reproduce
 
