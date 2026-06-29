@@ -889,8 +889,28 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         fprintf(fp, "}"); break;
     case T_TABLE: {
         V *cols = v->keys, *data = v->vals;
-        int nc = cols->n;
         int64_t nr = v->n;
+        int nc = cols->n;
+        if(repr_mode) {
+            fprintf(fp, "[");
+            int64_t nr = v->n;
+            for(int64_t i=0;i<nr;++i) {
+                if(i) fprintf(fp,", ");
+                fprintf(fp, "{");
+                for(int c=0;c<nc;++c) {
+                    if(c) fprintf(fp,", ");
+                    V *col = data->L[c];
+                    print_val(cols->L[c],fp,1);
+                    fprintf(fp,": ");
+                    if(col->t == T_IVEC) fprintf(fp, "%lld",(long long)col->J[i]);
+                    else if(col->t == T_FVEC) fprintf(fp, "%g",col->F[i]);
+                    else if(col->t == T_LIST) print_val(col->L[i],fp,1);
+                }
+                fprintf(fp, "}");
+            }
+            fprintf(fp, "]");
+            break;
+        }
         int *widths = calloc(nc, sizeof(int));
         for(int c=0;c<nc;c++) {
             int w = strlen(cols->L[c]->s);
