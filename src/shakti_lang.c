@@ -3831,7 +3831,7 @@ V *eval(Node *n, Env *e) {
                 for(int i=0; i<params->n; i++) {
                     if(i < nargs) {
                         env_set(call_env, params->L[i]->s, args[i]);
-                    } else if(attr->defaults && i < attr->defaults->n && attr->defaults->L[i]->t != T_NIL) {
+                    } else if(attr->defaults && i < attr->defaults->n) {
                         env_set(call_env, params->L[i]->s, attr->defaults->L[i]);
                     }
                 }
@@ -3907,7 +3907,7 @@ V *eval(Node *n, Env *e) {
         for(int i=0; i<params->n; i++) {
             if(i < nargs) {
                 env_set(call_env, params->L[i]->s, args[i]);
-            } else if(fn->defaults && i < fn->defaults->n && fn->defaults->L[i]->t != T_NIL) {
+            } else if(fn->defaults && i < fn->defaults->n) {
                 env_set(call_env, params->L[i]->s, fn->defaults->L[i]);
             }
         }
