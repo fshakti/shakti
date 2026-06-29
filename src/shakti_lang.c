@@ -3836,11 +3836,20 @@ V *eval(Node *n, Env *e) {
             const char *method = fn_node->sval;
             int nargs_total = n->nch - 1;
             V **args = calloc(nargs_total+1, sizeof(V*));
-            int nargs = 0;
+            V **kwnames = calloc(nargs_total+1, sizeof(V*));
+            V **kwvals = calloc(nargs_total+1, sizeof(V*));
+
+            int nargs = 0, nkw = 0;
             for(int i=1; i<n->nch; i++) {
-                if(n->ch[i]->type != N_KWARG)
+                if(n->ch[i]->type == N_KWARG) {
+                    kwnames[nkw] = v_str(n->ch[i]->sval);
+                    kwvals[nkw] = eval(n->ch[i]->ch[0], e);
+                    nkw++;
+                } else {
                     args[nargs++] = eval(n->ch[i], e);
+                }
             }
+
             V *attr = NULL;
             if(obj->t == T_DICT) {
                 attr = v_dict_get(obj, method);
@@ -3855,6 +3864,8 @@ V *eval(Node *n, Env *e) {
                         env_set(call_env, params->L[i]->s, attr->defaults->L[i]);
                     }
                 }
+                for(int i=0;i<nkw;i++)
+                    env_set(call_env, kwnames[i]->s, kwvals[i]);
                 Node *body = fn_ast[(int)attr->j];
                 V *result = eval(body, call_env);
                 if(g_returning) {
@@ -3865,13 +3876,15 @@ V *eval(Node *n, Env *e) {
                 env_free(call_env);
                 v_free(obj);
                 for(int i=0;i<nargs;i++) v_free(args[i]);
-                free(args);
+                for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+                free(args); free(kwnames); free(kwvals);
                 return result;
             }
             V *r = method_call(obj, method, args, nargs, e);
             v_free(obj);
             for(int i=0;i<nargs;i++) v_free(args[i]);
-            free(args);
+            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+            free(args); free(kwnames); free(kwvals);
             return r;
         }
         int nargs_total = n->nch - 1;
