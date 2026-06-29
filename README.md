@@ -33,17 +33,13 @@ The standalone binary auto-detects `src/lib` next to the executable when `SHAKTI
 
 ### Local workspace targets
 
-These require gitignored `tests/`, `scripts/`, or `benchmarks/` trees in your working copy (not in the published repo):
+These require gitignored `tests/` and `scripts/` trees in your working copy (not in the published repo):
 
 | Target | Purpose |
 |--------|---------|
 | `make test` | Run `tests/*.ie` |
 | `make test-parse` | Golden parser tests (`scripts/parse_golden.sh`) |
-| `make bench-parse` | Parser throughput gate |
-| `make bench-mat` | Matrix `@` SIMD benchmark (`make prod-speed` first) |
 | `make test-mac` | macOS: `test` + `test-parse` |
-| `make bench-mac` | macOS: `bench-parse` + `bench-mat` |
-| `make bench` | Regression suite (`scripts/bench_check.py`) |
 
 ## run
 
@@ -77,8 +73,8 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the full index.
 - [docs/SQL.md](docs/SQL.md) — `import sql`
 - [docs/INPUT.md](docs/INPUT.md) — `import input`
 - [docs/IPC.md](docs/IPC.md) — `import ipc` (TCP, UDS, RDMA)
-- [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) — benchmark notes
 - [docs/SYNTH.md](docs/SYNTH.md) — `import synth`
+- [docs/SAMPLES.md](docs/SAMPLES.md) — optional local sample packs
 - [docs/TALK.md](docs/TALK.md) — `import talk` (macOS)
 - [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) — linked libraries and optional assets
 

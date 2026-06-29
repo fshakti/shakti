@@ -17,15 +17,6 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
-## Benchmark fixtures
-
-Committed under `benchmarks/fixtures/` (local gitignored tree may also hold baselines):
-
-| File | Origin |
-|------|--------|
-| `kick_24bit.wav`, `tone_16bit.wav` | Generated in-repo for synth load benchmarks (no external license) |
-| `small.csv`, `large.json` | Synthetic test data |
-
 ## Optional audio sample packs (not distributed)
 
 Sample libraries under `samples/` are **gitignored** and installed locally by the user. They are not part of the Apache-2.0 source release.
@@ -34,7 +25,7 @@ Sample libraries under `samples/` are **gitignored** and installed locally by th
 |------|---------|---------|
 | BSR Samples Yellow (BSRSamples001) | User zip → `samples/bsr_yellow/` | Commercial/sample-pack license from the vendor; verify terms before redistribution or release |
 
-See [`samples/README.md`](../samples/README.md) for layout and `synth.load_sample()` usage.
+See [SAMPLES.md](SAMPLES.md) for layout and `synth.load_sample()` usage.
 
 ## Apple / Microsoft SDKs
 

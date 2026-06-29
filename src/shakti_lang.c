@@ -4566,8 +4566,8 @@ int shakti_lang_main(int argc, char **argv) {
     char *cmd = NULL;
     int interactive = 0;
     int parse_dump = 0;
-    int parse_bench = 0;
-    int parse_bench_iters = 100000;
+    int parse_profile = 0;
+    int parse_profile_iters = 100000;
     while(i < argc && argv[i][0] == '-') {
         if(!strcmp(argv[i], "-c") && i+1 < argc) {
             cmd = argv[++i];
@@ -4575,16 +4575,16 @@ int shakti_lang_main(int argc, char **argv) {
             interactive = 1;
         } else if(!strcmp(argv[i], "--parse-dump")) {
             parse_dump = 1;
-        } else if(!strcmp(argv[i], "--parse-bench")) {
-            parse_bench = 1;
-        } else if(!strcmp(argv[i], "--parse-bench-iters") && i+1 < argc) {
-            parse_bench_iters = atoi(argv[++i]);
-            if (parse_bench_iters < 1) parse_bench_iters = 1;
+        } else if(!strcmp(argv[i], "--parse-profile")) {
+            parse_profile = 1;
+        } else if(!strcmp(argv[i], "--parse-profile-iters") && i+1 < argc) {
+            parse_profile_iters = atoi(argv[++i]);
+            if (parse_profile_iters < 1) parse_profile_iters = 1;
         }
         i++;
     }
 
-    if (parse_bench) {
+    if (parse_profile) {
         const char *src = cmd;
         char *file_buf = NULL;
         if (!src && i < argc) {
@@ -4594,13 +4594,13 @@ int shakti_lang_main(int argc, char **argv) {
         }
         if (!src) src = "x = 1 2 3\ny = abs -1.2\n";
         clock_t t0 = clock();
-        for (int k = 0; k < parse_bench_iters; k++) {
+        for (int k = 0; k < parse_profile_iters; k++) {
             Node *prog = parse(src);
             node_free(prog);
         }
         double sec = (double)(clock() - t0) / (double)CLOCKS_PER_SEC;
-        printf("parse_bench: %d iters in %.3fs (%.0f parses/sec)\n",
-               parse_bench_iters, sec, (double)parse_bench_iters / sec);
+        printf("parse_profile: %d iters in %.3fs (%.0f parses/sec)\n",
+               parse_profile_iters, sec, (double)parse_profile_iters / sec);
         free(file_buf);
         env_free(global);
         return 0;

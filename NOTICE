@@ -13,7 +13,4 @@ See docs/THIRD_PARTY.md.
 
 Optional local audio sample packs (e.g. BSR Samples Yellow) are not
 distributed with this repository. Install and license verification are
-the user's responsibility. See samples/README.md.
-
-Benchmark WAV fixtures under benchmarks/fixtures/ are generated in-repo
-for regression testing and carry no external sample-pack license.
+the user's responsibility. See docs/SAMPLES.md.

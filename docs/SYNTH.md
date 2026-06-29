@@ -60,7 +60,7 @@ Module [`src/lib/synth.ie`](../src/lib/synth.ie): `open`, `close`, `alive`, `tic
 
 ## Samples
 
-Local sample packs live under [`samples/`](../samples/) (gitignored). See [`samples/README.md`](../samples/README.md).
+Local sample packs live under [`samples/`](../samples/) (gitignored). See [SAMPLES.md](SAMPLES.md).
 
 | API | Purpose |
 |-----|---------|

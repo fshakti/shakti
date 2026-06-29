@@ -103,16 +103,3 @@ See [EXAMPLES.md](EXAMPLES.md). IPC-specific:
 | [`examples/ipc_rdma.ie`](../examples/ipc_rdma.ie) | RDMA server |
 | [`examples/ipc_rdma_client.ie`](../examples/ipc_rdma_client.ie) | RDMA client |
 
-## Benchmarks
-
-Regression cases in `benchmarks/suites/ipc.ie` (included in `make bench`):
-
-| Case | Description |
-|------|-------------|
-| `ipc_uds_roundtrip_bench` | 200 send/recv round trips over UDS (256 B payload) |
-| `ipc_tcp_roundtrip_bench` | 200 send/recv round trips over TCP loopback |
-| `ipc_shm_cycle_bench` | 500 `shm_open` / `shm_close` cycles |
-| `ipc_rdma_available_bench` | 100k `ipc_rdma_available()` calls |
-
-Refresh baseline after IPC changes: `make bench-update`.
-

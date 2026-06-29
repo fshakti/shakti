@@ -149,27 +149,6 @@ test: shakti
 	done
 endif
 
-ifneq ($(wildcard scripts/bench_check.py),)
-bench: prod
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --check
-
-bench-update: prod
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --update
-
-bench-report: shakti
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --report
-endif
-
-ifneq ($(wildcard internal-bench/run_compare.py),)
-bench-compare: shakti
-	python3 internal-bench/run_compare.py
-endif
-
-ifneq ($(wildcard scripts/scaffold_internal_bench.py),)
-internal-bench-scaffold:
-	python3 scripts/scaffold_internal_bench.py
-endif
-
 ifneq ($(wildcard tests/macros_smoke.c),)
 test-macros: src/a.h
 	gcc $(CFLAGS) -I$(BUILD) -o $(BUILD)/macros_smoke tests/macros_smoke.c
@@ -181,28 +160,12 @@ test-parse: shakti
 	@bash scripts/parse_golden.sh
 endif
 
-ifneq ($(wildcard scripts/run_bench.sh),)
-bench-parse: shakti
-	@bash scripts/run_bench.sh
-endif
-
-ifneq ($(wildcard scripts/bench_mat.sh),)
-bench-mat: prod-speed
-	@bash scripts/bench_mat.sh
-
 ifeq ($(UNAME_S),Darwin)
 test-mac: prod test test-parse
 	@echo "test-mac: all macOS checks passed"
-
-bench-mac: prod-speed bench-parse bench-mat
-	@echo "bench-mac: all macOS benchmarks passed"
 else
 test-mac:
 	@echo "test-mac: skipped (Darwin only)"
-
-bench-mac:
-	@echo "bench-mac: skipped (Darwin only)"
-endif
 endif
 
 clean:
@@ -278,4 +241,4 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: test test-macros test-parse bench-parse bench-mat bench-mac test-mac clean prod prod-size prod-speed clean-shakti-artifacts shakti bench bench-update bench-report internal-bench-scaffold bench-compare size-check size-update size-report check-deps
+.PHONY: test test-macros test-parse test-mac clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps

@@ -4,7 +4,7 @@ Interpreted language (v0.8.0): standalone C CLI, GNU Make build, Apache-2.0.
 
 - **Remote:** https://github.com/quillquant/shakti.git (`master`)
 - **Published tree:** `src/`, `examples/`, `docs/`, `README.md`, `Makefile`, `LICENSE`, `NOTICE`, `CONTEXT.md`
-- **Local-only (gitignored):** `tests/`, `benchmarks/`, `scripts/`, `internal-bench/`, `android/`, `cmake/`, `.github/`, `docs/results/`
+- **Local-only (gitignored):** `tests/`, `scripts/`, `android/`, `cmake/`, `.github/`, `docs/results/`
 
 ## Platform notes
 
@@ -45,8 +45,7 @@ Requires gitignored `tests/` and `scripts/` trees:
 ```bash
 make prod-speed
 make test-mac      # Darwin
-make bench-mac     # Darwin
-make test && make bench   # full local regression when scripts/benchmarks present
+make test          # when tests/ is present
 ```
 
 ## History
