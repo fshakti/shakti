@@ -1,6 +1,6 @@
 # Shakti — project context
 
-Interpreted language (v0.7.0): standalone C CLI, GNU Make build, Apache-2.0.
+Interpreted language (v0.8.0): standalone C CLI, GNU Make build, Apache-2.0.
 
 - **Remote:** https://github.com/quillquant/shakti.git (`master`)
 - **Published tree:** `src/`, `examples/`, `docs/`, `README.md`, `Makefile`, `LICENSE`, `NOTICE`, `CONTEXT.md`
@@ -20,13 +20,15 @@ Interpreted language (v0.7.0): standalone C CLI, GNU Make build, Apache-2.0.
 
 ## Modules
 
-| Module | Doc |
-|--------|-----|
-| `import synth` | [docs/SYNTH.md](docs/SYNTH.md) |
-| `import talk` | [docs/TALK.md](docs/TALK.md) (macOS) |
-| `import input` | [docs/RUNTIME_API.md](docs/RUNTIME_API.md) |
-| `import ipc` | [docs/IPC.md](docs/IPC.md) — UDS/TCP/RDMA sync + poll-based async |
-| `import sql` | [docs/RUNTIME_API.md](docs/RUNTIME_API.md) |
+| Module | Doc | Example |
+|--------|-----|---------|
+| `import sql` | [docs/SQL.md](docs/SQL.md) | [examples/sql_demo.ie](examples/sql_demo.ie) |
+| `import input` | [docs/INPUT.md](docs/INPUT.md) | [examples/input_demo.ie](examples/input_demo.ie) |
+| `import synth` | [docs/SYNTH.md](docs/SYNTH.md) | [examples/synth_demo.ie](examples/synth_demo.ie) |
+| `import talk` | [docs/TALK.md](docs/TALK.md) | [examples/talk_demo.ie](examples/talk_demo.ie) |
+| `import ipc` | [docs/IPC.md](docs/IPC.md) | [examples/ipc_echo.ie](examples/ipc_echo.ie) |
+
+Full list: [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
 ## Verify (published build)
 

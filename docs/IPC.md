@@ -94,6 +94,8 @@ See [`examples/ipc_rdma.ie`](../examples/ipc_rdma.ie).
 
 ## Examples
 
+See [EXAMPLES.md](EXAMPLES.md). IPC-specific:
+
 | File | Description |
 |------|-------------|
 | [`examples/ipc_echo.ie`](../examples/ipc_echo.ie) | UDS echo server |

@@ -119,7 +119,7 @@ Supported formats: **CSV** and **XML** only. `save` writes **CSV** only.
 
 ## Input
 
-Module: `import input` ([`src/lib/input.ie`](../src/lib/input.ie)). Example: [`examples/synth_input.ie`](../examples/synth_input.ie).
+Module: `import input` — see [INPUT.md](INPUT.md). Examples: [`input_demo.ie`](../examples/input_demo.ie), [`synth_input.ie`](../examples/synth_input.ie).
 
 ```ie
 import input
@@ -147,7 +147,7 @@ wait(-1)                    # block until first event
 
 ## SQL
 
-Run `import sql` first — enables statement syntax:
+Run `import sql` first — see [SQL.md](SQL.md). Example: [`sql_demo.ie`](../examples/sql_demo.ie).
 
 ```ie
 import sql
@@ -160,14 +160,16 @@ update name : "ADA" from u where id = 1
 delete from u where id = 2
 ```
 
-`by col1, col2` groups and sorts ascending. No separate `group by` / `order by`.
+`by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Join (`t1 join t2 on col`) is not yet implemented.
 
 ## Modules
 
 | Module | Doc | Example |
 |--------|-----|---------|
+| `sql` | [SQL.md](SQL.md) | [`examples/sql_demo.ie`](../examples/sql_demo.ie) |
+| `input` | [INPUT.md](INPUT.md) | [`examples/input_demo.ie`](../examples/input_demo.ie) |
 | `synth` | [SYNTH.md](SYNTH.md) | [`examples/synth_demo.ie`](../examples/synth_demo.ie) |
 | `talk` | [TALK.md](TALK.md) | [`examples/talk_demo.ie`](../examples/talk_demo.ie) |
-| `input` | above | [`examples/synth_input.ie`](../examples/synth_input.ie) |
 | `ipc` | [IPC.md](IPC.md) | [`examples/ipc_echo.ie`](../examples/ipc_echo.ie) |
-| `sql` | above | — |
+
+Index: [EXAMPLES.md](EXAMPLES.md).

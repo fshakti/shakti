@@ -1,0 +1,20 @@
+# BSR Yellow sample demo — load a 24-bit kick into the SAMP row.
+# Run from repo root: export SHAKTI_LIB=$PWD/src/lib && ./shakti examples/synth_bsr_sample.ie
+import synth
+
+kick : "samples/bsr_yellow/BSR_Samples_Yellow_BSRSamples001/BSR_Samples_Yellow_Drums/BSR_Samples_Yellow_KickDrum/BSR_Samples_Yellow_KickDrum_25.wav"
+
+synth.open()
+synth.set_mute(0)
+synth.set_bpm(120)
+synth.set_steps(16)
+synth.load_sample(kick)
+print("loaded:", synth.sample_loaded(), synth.sample_name())
+
+# Row 6 = SAMP — trigger on steps 0 and 8
+synth.set_row(6, 257)
+synth.play(1)
+
+print("BSR kick on SAMP row — close window when done")
+while synth.alive():
+    synth.tick()

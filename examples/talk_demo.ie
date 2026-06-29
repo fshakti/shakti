@@ -1,7 +1,11 @@
-# Manual demo: listen until 2s silence, Enter, or left-click; then print transcript.
-# Usage:
-#   export SHAKTI_LIB:/path/to/shakti/src/lib
+# Speech-to-text demo (macOS only; requires microphone + Speech Recognition permission).
+#   export SHAKTI_LIB=$PWD/src/lib
 #   ./shakti examples/talk_demo.ie
 
 import talk
-talk(2)
+
+talk.set_locale("en-US")
+print("talk — speak, then pause ~2s, press Enter, or click to finish")
+
+text : talk.listen(2)
+print("transcript:", text)

@@ -1194,6 +1194,11 @@ static uint32_t synth_r32le(const unsigned char *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 static uint16_t synth_r16le(const unsigned char *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static int32_t synth_r24le(const unsigned char *p) {
+    int32_t v = (int32_t)p[0] | ((int32_t)p[1] << 8) | ((int32_t)p[2] << 16);
+    if (v & 0x800000) v |= ~0xffffff;
+    return v;
+}
 static void synth_sample_basename(const char *path, char *out, size_t cap) {
     const char *slash = strrchr(path, '/');
     const char *base = slash ? slash + 1 : path;
@@ -1206,7 +1211,8 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     uint16_t fmt_ch = 0, fmt_bits = 0, fmt_tag = 0;
     long data_pos = 0;
     float *pcm = NULL;
-    int i, n, ch, frames;
+    int i, n, frames;
+    size_t bps;
     f = fopen(path, "rb");
     if (!f) return -1;
     if (fread(hdr, 1, 12, f) != 12 || memcmp(hdr, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4)) {
@@ -1236,11 +1242,12 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
             fseek(f, (long)chunk_sz + (chunk_sz & 1u), SEEK_CUR);
         }
     }
-    if (fmt_tag != 1 || fmt_bits != 16 || fmt_ch < 1 || fmt_ch > 2 || !data_bytes || !fmt_rate) {
+    if (fmt_tag != 1 || (fmt_bits != 16 && fmt_bits != 24) || fmt_ch < 1 || fmt_ch > 2 || !data_bytes || !fmt_rate) {
         fclose(f);
         return -1;
     }
-    frames = (int)(data_bytes / ((size_t)fmt_ch * 2u));
+    bps = (size_t)fmt_ch * ((size_t)fmt_bits / 8u);
+    frames = (int)(data_bytes / bps);
     pcm = (float *)malloc((size_t)frames * sizeof(float));
     if (!pcm) {
         fclose(f);
@@ -1248,12 +1255,21 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     }
     fseek(f, data_pos, SEEK_SET);
     for (i = 0; i < frames; i++) {
-        int16_t s0 = 0, s1 = 0;
-        unsigned char b[4];
-        if (fread(b, 1, (size_t)fmt_ch * 2u, f) != (size_t)fmt_ch * 2u) break;
-        s0 = (int16_t)(b[0] | (b[1] << 8));
-        if (fmt_ch == 2) s1 = (int16_t)(b[2] | (b[3] << 8));
-        pcm[i] = (fmt_ch == 2) ? ((float)s0 + (float)s1) * 0.5f / 32768.f : (float)s0 / 32768.f;
+        if (fmt_bits == 16) {
+            int16_t s0 = 0, s1 = 0;
+            unsigned char b[4];
+            if (fread(b, 1, (size_t)fmt_ch * 2u, f) != (size_t)fmt_ch * 2u) break;
+            s0 = (int16_t)(b[0] | (b[1] << 8));
+            if (fmt_ch == 2) s1 = (int16_t)(b[2] | (b[3] << 8));
+            pcm[i] = (fmt_ch == 2) ? ((float)s0 + (float)s1) * 0.5f / 32768.f : (float)s0 / 32768.f;
+        } else {
+            int32_t s0 = 0, s1 = 0;
+            unsigned char b[6];
+            if (fread(b, 1, (size_t)fmt_ch * 3u, f) != (size_t)fmt_ch * 3u) break;
+            s0 = synth_r24le(b);
+            if (fmt_ch == 2) s1 = synth_r24le(b + 3);
+            pcm[i] = (fmt_ch == 2) ? ((float)s0 + (float)s1) * 0.5f / 8388608.f : (float)s0 / 8388608.f;
+        }
     }
     fclose(f);
     n = i;

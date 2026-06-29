@@ -1,32 +1,35 @@
-# Benchmark results — shakti v0.7.0
+# Benchmark Results — shakti v0.8.0
 
 Published notes only. Full regression baselines and logs live in gitignored local trees (`benchmarks/`, `scripts/`, `internal-bench/`).
 
-## Linux (x86_64, 2026-06-26)
+## Linux (x86_64, 2026-06-29)
 
-Host: 24 OpenMP threads, `make prod` (`-O2 -g`).
+Host: 24 OpenMP threads, `make prod` (`-O2`, stripped).
 
 | Step | Result |
 |------|--------|
 | `make prod` | Pass |
-| `make test` | Pass (21 `.ie` tests, incl. IPC) |
-| `make test-parse` | Pass (5 golden parses) |
-| `make bench-parse` | Pass (~62k parses/sec, min 50,000) |
+| `make test` | Pass (22 `.ie` tests, incl. IPC + `synth_sample_load`) |
+| `make bench` | Pass (111 cases within tolerance) |
 
 ### Regression suite (`make bench`)
 
-105 cases, median of 5 runs each. Notable timings (seconds, stripped prod binary):
+111 cases, median of 5 runs each. Notable timings (seconds, prod binary):
 
 | Case | Seconds | ops/s |
 |------|---------|-------|
-| `sum_1m` | 0.0020 | 4,990 |
-| `vec_add_1m` | 0.0107 | 938 |
-| `sql_select_100k` | 0.0269 | 558 |
-| `sorted_10k` | 1.3927 | 14 |
-| `repr_list` | 0.3199 | 31,258 |
-| `json_loads_bench` | 0.0241 | 830 |
+| `sum_1m` | 0.0021 | 4,795 |
+| `vec_add_1m` | 0.0079 | 1,270 |
+| `sql_select_100k` | 0.0263 | 570 |
+| `sorted_10k` | 1.4210 | 14 |
+| `repr_list` | 0.3245 | 30,816 |
+| `json_loads_bench` | 0.0246 | 815 |
+| `synth_load_sample_24bit` | 0.0066 | 22,811 |
+| `synth_load_sample_16bit` | 0.0165 | 9,083 |
 
-Full report: `make bench-report` (local).
+Synth sample benches load committed fixtures under `benchmarks/fixtures/` (24-bit stereo kick, 16-bit mono tone); see `benchmarks/suites/synth_samples.ie`.
+
+Full report: `make bench-report` (local baseline: `benchmarks/baselines/local.json`, gitignored).
 
 ## macOS (Apple Silicon, 2026-06-28)
 
@@ -45,7 +48,7 @@ Host: MacBook Pro arm64, 15 cores, `make prod-speed` (`-O3 -mcpu=native`, Homebr
 
 ## Cross-tech compare (`make bench-compare`)
 
-Median of 3 runs. Requires local `internal-bench/` tree.
+Median of 3 runs. Requires local `internal-bench/` tree. Prior run: `internal-bench/results/compare_20260626T011651Z.json` (2026-06-26).
 
 ### SQL workloads (seconds)
 
@@ -72,10 +75,13 @@ Median of 3 runs. Requires local `internal-bench/` tree.
 ## Reproduce (local workspace)
 
 ```bash
-make clean && make prod-speed
+make clean && make prod          # or: make prod-speed
 export SHAKTI_LIB=$PWD/src/lib
-make test-mac && make bench-mac    # macOS
-make test && make bench            # when tests/ and scripts/ present
-make bench-update && make bench    # refresh regression baseline
-make bench-compare                 # cross-tech (internal-bench/)
+make test && make bench           # Linux (tests/ and scripts/ present)
+make test-mac && make bench-mac   # macOS
+make bench-update                 # refresh regression baseline
+make bench-report                 # human-readable table
+make bench-compare                # cross-tech (internal-bench/)
 ```
+
+Baseline JSON is not committed; published summary lives in this file.

@@ -1,0 +1,32 @@
+# In-memory table SQL — requires `import sql` before statement syntax.
+#   export SHAKTI_LIB=$PWD/src/lib
+#   ./shakti examples/sql_demo.ie
+
+import sql
+
+sales : table(
+    id:[1, 2, 3, 4],
+    dept:["sales", "eng", "sales", "eng"],
+    amount:[10, 25, 30, 40]
+)
+
+print("rows:", shape(sales)[0])
+
+by_dept : select amount by dept from sales where amount > 15
+print("sum amount by dept (amount > 15):")
+print(by_dept)
+
+totals : select sum amount by dept from sales
+print("sum amount by dept (all rows):")
+print(totals)
+
+create table roster (id: 0, name: "")
+insert into roster (id, name) values (1, "ada")
+insert into roster (id, name) values (2, "bob")
+update name : "ADA" from roster where id = 1
+print("roster after update:")
+print(roster)
+
+delete from roster where id = 2
+print("roster after delete:")
+print(roster)

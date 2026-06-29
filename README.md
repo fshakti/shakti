@@ -1,6 +1,6 @@
 # shakti
 
-Small interpreted language (0.7.0).
+Small interpreted language (0.8.0).
 
 ## build
 
@@ -54,25 +54,37 @@ These require gitignored `tests/`, `scripts/`, or `benchmarks/` trees in your wo
 
 ## examples
 
-| file | what it does |
-|------|----------------|
-| [`examples/matrix.ie`](examples/matrix.ie) | native matrix types |
-| [`examples/synth_demo.ie`](examples/synth_demo.ie) | synth window + event loop |
-| [`examples/synth_song.ie`](examples/synth_song.ie) | Twinkle + drum loop with live UI |
-| [`examples/synth_input.ie`](examples/synth_input.ie) | jam keys via `input(2)` + synth |
-| [`examples/talk_demo.ie`](examples/talk_demo.ie) | speech-to-text (macOS, `import talk`) |
-| [`examples/bridge.ie`](examples/bridge.ie) | bridge hand dealer / HCP filter |
-| [`examples/ipc_echo.ie`](examples/ipc_echo.ie) | local IPC echo (UDS) |
-| [`examples/ipc_rdma.ie`](examples/ipc_rdma.ie) | RDMA/RoCE IPC server (Linux) |
+See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the full index.
+
+| Module | file | what it does |
+|--------|------|----------------|
+| *(core)* | [`examples/matrix.ie`](examples/matrix.ie) | native matrix types |
+| `sql` | [`examples/sql_demo.ie`](examples/sql_demo.ie) | in-memory table SQL |
+| `input` | [`examples/input_demo.ie`](examples/input_demo.ie) | readline + event poll |
+| `synth` | [`examples/synth_demo.ie`](examples/synth_demo.ie) | synth window + event loop |
+| `synth` | [`examples/synth_song.ie`](examples/synth_song.ie) | Twinkle + drum loop with live UI |
+| `synth` | [`examples/synth_input.ie`](examples/synth_input.ie) | jam keys via `input(2)` + synth |
+| `synth` | [`examples/synth_bsr_sample.ie`](examples/synth_bsr_sample.ie) | BSR sample on SAMP row (local `samples/`) |
+| `talk` | [`examples/talk_demo.ie`](examples/talk_demo.ie) | speech-to-text (macOS) |
+| `ipc` | [`examples/ipc_echo.ie`](examples/ipc_echo.ie) + [`ipc_echo_client.ie`](examples/ipc_echo_client.ie) | local UDS echo |
+| `ipc` | [`examples/ipc_rdma.ie`](examples/ipc_rdma.ie) + [`ipc_rdma_client.ie`](examples/ipc_rdma_client.ie) | RDMA/RoCE IPC (Linux + NIC) |
+| *(stdlib)* | [`examples/bridge.ie`](examples/bridge.ie) | bridge hand dealer / HCP filter |
 
 ## docs
 
-- [docs/RUNTIME_API.md](docs/RUNTIME_API.md) — syntax, builtins, matrices, SQL, I/O
+- [docs/EXAMPLES.md](docs/EXAMPLES.md) — examples by module
+- [docs/RUNTIME_API.md](docs/RUNTIME_API.md) — syntax, builtins, matrices, I/O
+- [docs/SQL.md](docs/SQL.md) — `import sql`
+- [docs/INPUT.md](docs/INPUT.md) — `import input`
 - [docs/IPC.md](docs/IPC.md) — `import ipc` (TCP, UDS, RDMA)
 - [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) — benchmark notes
 - [docs/SYNTH.md](docs/SYNTH.md) — `import synth`
 - [docs/TALK.md](docs/TALK.md) — `import talk` (macOS)
-- [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) — linked system libraries
+- [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) — linked libraries and optional assets
+
+## acknowledgements
+
+Thank-yous coming soon.
 
 ## license
 

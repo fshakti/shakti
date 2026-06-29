@@ -1,15 +1,41 @@
-# Third-party dependencies
+# Third-party dependencies and optional assets
 
-The standalone `shakti` build has no vendored C libraries.
+The standalone `shakti` binary has **no vendored C libraries** in the published tree.
 
-System libraries linked on Linux/macOS desktop builds:
+## Linked system libraries
 
-| Library | Purpose |
-|---------|---------|
-| libexpat | XML table loading (`load("file.xml")`) |
-| libgomp | OpenMP (Linux, default with GCC) |
-| libomp | OpenMP (macOS via Homebrew: `brew install libomp`) |
-| libX11, libasound | synth UI (Linux) |
-| Cocoa, Core Audio | synth UI (macOS) |
-| Speech, AVFoundation | talk module (macOS) |
-| librdmacm, libibverbs | optional RDMA IPC when dev headers present (Linux) |
+| Library | Purpose | Platform |
+|---------|---------|----------|
+| libexpat | XML table loading (`load("file.xml")`) | Linux, macOS |
+| libX11, libasound | Synth UI | Linux |
+| Cocoa, Core Audio, Core Foundation | Synth UI | macOS |
+| Speech, AVFoundation | `import talk` | macOS |
+| librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
+| libgomp | OpenMP (matrix / reduce paths) | Linux (default with GCC) |
+| libomp | OpenMP (`brew install libomp`) | macOS |
+| libpthread, libm, librt, libdl | Runtime | Linux |
+
+Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
+
+## Benchmark fixtures
+
+Committed under `benchmarks/fixtures/` (local gitignored tree may also hold baselines):
+
+| File | Origin |
+|------|--------|
+| `kick_24bit.wav`, `tone_16bit.wav` | Generated in-repo for synth load benchmarks (no external license) |
+| `small.csv`, `large.json` | Synthetic test data |
+
+## Optional audio sample packs (not distributed)
+
+Sample libraries under `samples/` are **gitignored** and installed locally by the user. They are not part of the Apache-2.0 source release.
+
+| Pack | Install | License |
+|------|---------|---------|
+| BSR Samples Yellow (BSRSamples001) | User zip → `samples/bsr_yellow/` | Commercial/sample-pack license from the vendor; verify terms before redistribution or release |
+
+See [`samples/README.md`](../samples/README.md) for layout and `synth.load_sample()` usage.
+
+## Apple / Microsoft SDKs
+
+macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses. Windows/Android tooling in the local-only tree is not part of the published release.

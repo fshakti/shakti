@@ -2,3 +2,18 @@ shakti
 Copyright 2026 Shakti / shakti contributors
 
 Licensed under the Apache License, Version 2.0. See LICENSE.
+
+---
+
+Third-party notices
+
+Linked system libraries (libexpat, X11, ALSA, Cocoa, Core Audio, OpenMP,
+optional RDMA stacks, etc.) are provided by the host OS or toolchain.
+See docs/THIRD_PARTY.md.
+
+Optional local audio sample packs (e.g. BSR Samples Yellow) are not
+distributed with this repository. Install and license verification are
+the user's responsibility. See samples/README.md.
+
+Benchmark WAV fixtures under benchmarks/fixtures/ are generated in-repo
+for regression testing and carry no external sample-pack license.

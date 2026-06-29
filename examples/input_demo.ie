@@ -1,0 +1,23 @@
+# Terminal + event-hub input demo (no synth window).
+#   export SHAKTI_LIB=$PWD/src/lib
+#   ./shakti examples/input_demo.ie
+#   echo hello | ./shakti examples/input_demo.ie   # readline path
+
+import input
+
+print("input demo — readline + 3s of key/mouse polling (input(50))")
+print("type a line at the prompt, then press keys in this terminal")
+
+line : readline("line? ")
+if len(line) > 0:
+    print("readline:", line)
+
+input.hz : 120
+t_end : clock() + 3.0
+n : 0
+while clock() < t_end:
+    for ev in input(50):
+        n : n + 1
+        print("event", n, ev["kind"], ev["code"], ev["utf8"])
+
+print("polled", n, "events; mouse", input.x, input.y, "wheel", input.wheel)

@@ -58,4 +58,27 @@ Module [`src/lib/synth.ie`](../src/lib/synth.ie): `open`, `close`, `alive`, `tic
 | `synth_set_metro(on)` | Metronome on/off |
 | `synth_set_metro_sound(0\|1)` | Click vs drum |
 
+## Samples
+
+Local sample packs live under [`samples/`](../samples/) (gitignored). See [`samples/README.md`](../samples/README.md).
+
+| API | Purpose |
+|-----|---------|
+| `load_sample(path)` | Load a `.wav` (16- or 24-bit PCM) into row 6 (`SAMP`) |
+| `sample_loaded()` | `1` if a sample is loaded |
+| `sample_name()` | Basename of the loaded file |
+
+Example: [`examples/synth_bsr_sample.ie`](../examples/synth_bsr_sample.ie) loads a BSR Yellow kick drum.
+
+**Limits:** stereo is downmixed to mono; sample rate is resampled to 48 kHz; playback buffer holds at most **8 seconds**.
+
+## Examples
+
+| File | Description |
+|------|-------------|
+| [`synth_demo.ie`](../examples/synth_demo.ie) | Window + event loop |
+| [`synth_song.ie`](../examples/synth_song.ie) | Twinkle + drum sequencer |
+| [`synth_input.ie`](../examples/synth_input.ie) | Keyboard jam with `input(2)` |
+| [`synth_bsr_sample.ie`](../examples/synth_bsr_sample.ie) | Load sample into SAMP row |
+
 Disable at build: `SHAKTI_SYNTH=0 make prod`.
