@@ -1,0 +1,63 @@
+# lissen — Lissen fan platform API (https://www.lissen.com/)
+#
+# Requires curl on PATH. Authenticated calls need a bearer token:
+#   export SHAKTI_LISSEN_TOKEN=...
+# or:
+#   lissen.set_token("...")
+#
+#   import lissen
+#   me : lissen.me()
+#   lissen.open(lissen.home_url())
+
+def query(path, input_json:"{}"):
+    return lissen_trpc_query(path, input_json)
+
+def query_dict(path, input):
+    return lissen_trpc_query(path, json_dumps(input))
+
+def mutation(path, input_json:"{}"):
+    return lissen_trpc_mutation(path, input_json)
+
+def mutation_dict(path, input):
+    return lissen_trpc_mutation(path, json_dumps(input))
+
+def me():
+    return query("user.me")
+
+def set_token(tok):
+    lissen_set_token(tok)
+
+def token():
+    return lissen_get_token()
+
+def set_api_base(url):
+    lissen_set_api_base(url)
+
+def api_base():
+    return lissen_get_api_base()
+
+def app_url(kind, id):
+    return lissen_app_url(kind, id)
+
+def home_url():
+    return lissen_app_url("home")
+
+def web_url(path:""):
+    return lissen_web_url(path)
+
+def open(url):
+    return lissen_open(url)
+
+def unwrap(resp):
+    if hasattr(resp, "result"):
+        data : resp["result"]["data"]
+        if hasattr(data, "json"):
+            return data["json"]
+        return data
+    return resp
+
+def api_error(resp):
+    out : 0
+    if hasattr(resp, "error"):
+        out : resp["error"]
+    return out

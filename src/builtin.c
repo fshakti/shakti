@@ -97,6 +97,15 @@ extern V *bi_ipc_send(V**,in);
 extern V *bi_ipc_set_nonblock(V**,in);
 extern V *bi_ipc_shm_close(V**,in);
 extern V *bi_ipc_shm_open(V**,in);
+extern V *bi_lissen_trpc_query(V**,in);
+extern V *bi_lissen_trpc_mutation(V**,in);
+extern V *bi_lissen_set_token(V**,in);
+extern V *bi_lissen_get_token(V**,in);
+extern V *bi_lissen_set_api_base(V**,in);
+extern V *bi_lissen_get_api_base(V**,in);
+extern V *bi_lissen_app_url(V**,in);
+extern V *bi_lissen_web_url(V**,in);
+extern V *bi_lissen_open(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
@@ -108,6 +117,8 @@ static const char *BUILTINS[] = {
     "input_set_x","input_set_y","input_set_wheel","input_get_qwerty","input_set_own_gui","input_qwerty_reload",
     "ipc_accept","ipc_close","ipc_connect","ipc_listen","ipc_poll","ipc_recv","ipc_recv_nowait",
     "ipc_rdma_available","ipc_send","ipc_set_nonblock","ipc_shm_close","ipc_shm_open",
+    "lissen_trpc_query","lissen_trpc_mutation","lissen_set_token","lissen_get_token",
+    "lissen_set_api_base","lissen_get_api_base","lissen_app_url","lissen_web_url","lissen_open",
     "read","write","readlines",
     "listdir","walk","stat",
     "path_join","path_exists","path_isdir","path_isfile",
@@ -807,6 +818,8 @@ BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
 BI0(ipc_recv) BI0(ipc_recv_nowait) BI0(ipc_rdma_available) BI0(ipc_send)
 BI0(ipc_set_nonblock) BI0(ipc_shm_close) BI0(ipc_shm_open)
 #endif
+BI0(lissen_trpc_query) BI0(lissen_trpc_mutation) BI0(lissen_set_token) BI0(lissen_get_token)
+BI0(lissen_set_api_base) BI0(lissen_get_api_base) BI0(lissen_app_url) BI0(lissen_web_url) BI0(lissen_open)
 #undef BI0
 #undef BIKW
 #undef BIE
@@ -879,6 +892,15 @@ static const BiEntry bi_tab[] = {
     {"keys", bi_w_keys},
     {"ktable", bi_w_ktable},
     {"len", bi_w_len},
+    {"lissen_app_url", bi_w_lissen_app_url},
+    {"lissen_get_api_base", bi_w_lissen_get_api_base},
+    {"lissen_get_token", bi_w_lissen_get_token},
+    {"lissen_open", bi_w_lissen_open},
+    {"lissen_set_api_base", bi_w_lissen_set_api_base},
+    {"lissen_set_token", bi_w_lissen_set_token},
+    {"lissen_trpc_mutation", bi_w_lissen_trpc_mutation},
+    {"lissen_trpc_query", bi_w_lissen_trpc_query},
+    {"lissen_web_url", bi_w_lissen_web_url},
     {"list", bi_w_list},
     {"listdir", bi_w_listdir},
     {"log", bi_w_log},

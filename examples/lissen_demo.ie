@@ -1,0 +1,25 @@
+# Lissen integration demo — https://www.lissen.com/
+#
+# Unauthenticated: prints API base and app/web URLs.
+# With token:        export SHAKTI_LISSEN_TOKEN=...  then run again for user.me.
+#
+#   ./shakti examples/lissen_demo.ie
+
+import lissen
+
+print("Lissen API:", lissen.api_base())
+print("App URL:", lissen.home_url())
+print("Web:", lissen.web_url())
+
+tok : lissen.token()
+if tok:
+    print("Token set — calling user.me")
+    resp : lissen.me()
+    err : lissen.api_error(resp)
+    if err:
+        print("error:", err["message"])
+    else:
+        print("user:", lissen.unwrap(resp))
+else:
+    print("No SHAKTI_LISSEN_TOKEN — skipping authenticated API call")
+    print("Open https://www.lissen.com/get-app to install the app")

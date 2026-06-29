@@ -1,6 +1,6 @@
 # shakti
 
-Small interpreted language (0.8.0).
+Small interpreted language (0.8.1).
 
 ## build
 
@@ -64,6 +64,7 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the full index.
 | `talk` | [`examples/talk_demo.ie`](examples/talk_demo.ie) | speech-to-text (macOS) |
 | `ipc` | [`examples/ipc_echo.ie`](examples/ipc_echo.ie) + [`ipc_echo_client.ie`](examples/ipc_echo_client.ie) | local UDS echo |
 | `ipc` | [`examples/ipc_rdma.ie`](examples/ipc_rdma.ie) + [`ipc_rdma_client.ie`](examples/ipc_rdma_client.ie) | RDMA/RoCE IPC (Linux + NIC) |
+| `lissen` | [`examples/lissen_demo.ie`](examples/lissen_demo.ie) | Lissen fan platform API |
 | *(stdlib)* | [`examples/bridge.ie`](examples/bridge.ie) | bridge hand dealer / HCP filter |
 
 ## docs
@@ -73,6 +74,7 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the full index.
 - [docs/SQL.md](docs/SQL.md) — `import sql`
 - [docs/INPUT.md](docs/INPUT.md) — `import input`
 - [docs/IPC.md](docs/IPC.md) — `import ipc` (TCP, UDS, RDMA)
+- [docs/LISSEN.md](docs/LISSEN.md) — `import lissen` ([Lissen](https://www.lissen.com/))
 - [docs/SYNTH.md](docs/SYNTH.md) — `import synth`
 - [docs/SAMPLES.md](docs/SAMPLES.md) — optional local sample packs
 - [docs/TALK.md](docs/TALK.md) — `import talk` (macOS)

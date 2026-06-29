@@ -26,7 +26,7 @@ else
   OMP_LDFLAGS = -lgomp
 endif
 
-CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-function -std=gnu11 -D_GNU_SOURCE \
+CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-function -std=gnu11 -D_GNU_SOURCE -DSHAKTI_HAVE_LISSEN=1 \
 	-I$(BUILD) -Isrc \
 	$(OMP_CFLAGS)
 
@@ -42,7 +42,7 @@ else
 endif
 
 LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c
-LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/host_bridge.c
+LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/host_bridge.c src/lissen.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1
@@ -149,6 +149,17 @@ test: shakti
 	done
 endif
 
+ifneq ($(wildcard scripts/bench_check.py),)
+bench: prod
+	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --check
+
+bench-update: prod
+	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --update
+
+bench-report: shakti
+	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --report
+endif
+
 ifneq ($(wildcard tests/macros_smoke.c),)
 test-macros: src/a.h
 	gcc $(CFLAGS) -I$(BUILD) -o $(BUILD)/macros_smoke tests/macros_smoke.c
@@ -241,4 +252,4 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: test test-macros test-parse test-mac clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps
+.PHONY: test test-macros test-parse test-mac bench bench-update bench-report clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps

@@ -23,6 +23,7 @@ export SHAKTI_LIB=$PWD/src/lib
 | `import ipc` | [`ipc_echo_client.ie`](../examples/ipc_echo_client.ie) | Client for `ipc_echo.ie` |
 | `import ipc` | [`ipc_rdma.ie`](../examples/ipc_rdma.ie) | RDMA/RoCE server (Linux + NIC) |
 | `import ipc` | [`ipc_rdma_client.ie`](../examples/ipc_rdma_client.ie) | Client for `ipc_rdma.ie` |
+| `import lissen` | [`lissen_demo.ie`](../examples/lissen_demo.ie) | Lissen platform API + app URLs |
 
 ## Other
 
@@ -39,4 +40,5 @@ export SHAKTI_LIB=$PWD/src/lib
 | `synth` | [SYNTH.md](SYNTH.md) |
 | `talk` | [TALK.md](TALK.md) |
 | `ipc` | [IPC.md](IPC.md) |
+| `lissen` | [LISSEN.md](LISSEN.md) |
 | Language & builtins | [RUNTIME_API.md](RUNTIME_API.md) |

@@ -1,6 +1,6 @@
 # Shakti — project context
 
-Interpreted language (v0.8.0): standalone C CLI, GNU Make build, Apache-2.0.
+Interpreted language (v0.8.1): standalone C CLI, GNU Make build, Apache-2.0.
 
 - **Remote:** https://github.com/quillquant/shakti.git (`master`)
 - **Published tree:** `src/`, `examples/`, `docs/`, `README.md`, `Makefile`, `LICENSE`, `NOTICE`, `CONTEXT.md`
@@ -27,6 +27,7 @@ Interpreted language (v0.8.0): standalone C CLI, GNU Make build, Apache-2.0.
 | `import synth` | [docs/SYNTH.md](docs/SYNTH.md) | [examples/synth_demo.ie](examples/synth_demo.ie) |
 | `import talk` | [docs/TALK.md](docs/TALK.md) | [examples/talk_demo.ie](examples/talk_demo.ie) |
 | `import ipc` | [docs/IPC.md](docs/IPC.md) | [examples/ipc_echo.ie](examples/ipc_echo.ie) |
+| `import lissen` | [docs/LISSEN.md](docs/LISSEN.md) | [examples/lissen_demo.ie](examples/lissen_demo.ie) |
 
 Full list: [docs/EXAMPLES.md](docs/EXAMPLES.md).
 

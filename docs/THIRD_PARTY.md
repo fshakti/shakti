@@ -15,6 +15,8 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | libomp | OpenMP (`brew install libomp`) | macOS |
 | libpthread, libm, librt, libdl | Runtime | Linux |
 
+`import lissen` uses `curl` on `PATH` for HTTPS to the Lissen API (not linked at build time).
+
 Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 ## Optional audio sample packs (not distributed)
