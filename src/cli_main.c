@@ -13,6 +13,7 @@
 #endif
 extern int shakti_lang_main(int argc, char **argv);
 static const char *shakti_banner_qr[] = {
+    "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
     "█ ▄▄▄▄▄ ██▀▄██   ▀█ ▄▄▄▄▄ █",
     "█ █   █ █▄▀█▄▀▀█▄██ █   █ █",
     "█ █▄▄▄█ ██▄▀▀ ▄  ▀█ █▄▄▄█ █",
@@ -41,7 +42,7 @@ static const char *shakti_qr_next(const char *s) {
     if ((c & 0xF8) == 0xF0) return s + 4;
     return s + 1;
 }
-static void shakti_print_qr_line(const char *line) {
+static void shakti_print_qr_line(const char *line,int row) {
     for (const char *p = line; *p; p = shakti_qr_next(p)) {
         if (*p == ' ') fprintf(stderr, SHAKTI_QR_BLUE " " SHAKTI_QR_RST);
         else {
@@ -51,7 +52,8 @@ static void shakti_print_qr_line(const char *line) {
             if (n >= sizeof ch) n = sizeof ch - 1;
             memcpy(ch, p, n);
             ch[n] = 0;
-            fprintf(stderr, SHAKTI_QR_ORANGE SHAKTI_QR_BLUE "%s" SHAKTI_QR_RST, ch);
+            if(row)fprintf(stderr, SHAKTI_QR_ORANGE SHAKTI_QR_BLUE "%s" SHAKTI_QR_RST, ch);
+            else fprintf(stderr, SHAKTI_QR_ORANGE "%s" SHAKTI_QR_RST, ch);
         }
     }
 }
@@ -68,7 +70,7 @@ static void shakti_print_banner(void) {
         else fprintf(stderr, "%*s", SHAKTI_BANNER_COL, "");
         if (i < (int)SHAKTI_BANNER_QR_N) {
             fputc(' ', stderr);
-            shakti_print_qr_line(shakti_banner_qr[i]);
+            shakti_print_qr_line(shakti_banner_qr[i],i);
         }
         fprintf(stderr, "\n");
     }
@@ -88,7 +90,7 @@ static int shakti_wants_banner(int argc, char **argv) {
     if(r<argc)has_script=1;
     P(quiet,0)
     P(force,1)
-    P(has_script||(has_c&&!interactive),0)
+    P(has_script&&!has_c&&!interactive,0)
     return 1;}
 static void shakti_strip_banner_flags(int *argc, char **argv) {
     int w=1,r;
