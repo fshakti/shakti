@@ -2060,12 +2060,14 @@ static Node *parse_def(Lexer *l) {
     Node *params = node_new(N_LIST);
     Node *defaults = node_new(N_LIST);
     if(lex_peek(l).type != T_RPAREN_) {
-        if(lex_peek(l).type == T_STAR_) { lex_next(l); }
-        if(lex_peek(l).type == T_DSTAR_) { lex_next(l); }
+        char b = 0;
+        if(lex_peek(l).type == T_STAR_) { lex_next(l); b = 1; }
+        if(lex_peek(l).type == T_DSTAR_) { lex_next(l); b = 2; }
         Token p = lex_next(l);
-        Node *pn = node_new(N_NAME); pn->sval = strdup(p.sval);
+        Node *pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = b;
         node_add(params, pn);
         if(lex_peek(l).type == T_COLON_) {
+            if(b) expect(l, T_COMMA_);
             lex_next(l); node_add(defaults, parse_expr(l));
         } else {
             node_add(defaults, node_new(N_NONE));
@@ -2073,12 +2075,14 @@ static Node *parse_def(Lexer *l) {
         while(lex_peek(l).type == T_COMMA_) {
             lex_next(l);
             if(lex_peek(l).type == T_RPAREN_) break;
-            if(lex_peek(l).type == T_STAR_) { lex_next(l); }
-            if(lex_peek(l).type == T_DSTAR_) { lex_next(l); }
+            if(lex_peek(l).type == T_STAR_) { lex_next(l); b = 1; }
+            else if(lex_peek(l).type == T_DSTAR_) { lex_next(l); b = 2; }
+            else b=0;
             p = lex_next(l);
-            pn = node_new(N_NAME); pn->sval = strdup(p.sval);
+            pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = b;
             node_add(params, pn);
             if(lex_peek(l).type == T_COLON_) {
+                if(b) expect(l, T_COMMA_);
                 lex_next(l); node_add(defaults, parse_expr(l));
             } else {
                 node_add(defaults, node_new(N_NONE));
@@ -2118,7 +2122,7 @@ static Node *parse_try(Lexer *l) {
         node_add(n, node_new(N_PASS));
     }
     if(lex_peek(l).type == T_ELSE_) {
-        lex_next(l); 
+        lex_next(l);
         Node *else_body = parse_progn(l);
         node_add(n, else_body);
     }
@@ -3925,10 +3929,19 @@ V *eval(Node *n, Env *e) {
                 Env *call_env = env_new(attr->closure);
                 V *params = attr->params;
                 for(int i=0; i<params->n; i++) {
-                    if(i < nargs) {
-                        env_set(call_env, params->L[i]->s, args[i]);
+                    V*p = params->L[i];
+                    if(p->b == 1) {
+                        V*rest = v_list(0);
+                        for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                        env_set(call_env, p->s, rest);
+                    } else if (p->b == 2) {
+                        V*kk = v_list(nkw),*kv = v_list(nkw);
+                        i(nkw,kk->L[i]=v_ref(kwnames[i]);kv->L[i]=v_ref(kwvals[i]));
+                        env_set(call_env, p->s, v_dict(kk, kv));
+                    } else if(i < nargs) {
+                        env_set(call_env, p->s, args[i]);
                     } else if(attr->defaults && i < attr->defaults->n) {
-                        env_set(call_env, params->L[i]->s, attr->defaults->L[i]);
+                        env_set(call_env, p->s, attr->defaults->L[i]);
                     }
                 }
                 for(int i=0;i<nkw;i++)
@@ -4003,10 +4016,19 @@ V *eval(Node *n, Env *e) {
                 Env *call_env = env_new(fn->closure);
                 V *params = fn->params;
                 for(int i=0; i<params->n; i++) {
-                    if(i < nargs) {
-                        env_set(call_env, params->L[i]->s, args[i]);
+                    V*p = params->L[i];
+                    if(p->b == 1) {
+                        V*rest = v_list(0);
+                        for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                        env_set(call_env, p->s, rest);
+                    } else if (p->b == 2) {
+                        V*kk = v_list(nkw),*kv = v_list(nkw);
+                        i(nkw,kk->L[i]=v_ref(kwnames[i]);kv->L[i]=v_ref(kwvals[i]));
+                        env_set(call_env, p->s, v_dict(kk, kv));
+                    } else if(i < nargs) {
+                        env_set(call_env, p->s, args[i]);
                     } else if(fn->defaults && i < fn->defaults->n) {
-                        env_set(call_env, params->L[i]->s, fn->defaults->L[i]);
+                        env_set(call_env, p->s, fn->defaults->L[i]);
                     }
                 }
                 for(int i=0;i<nkw;i++)
@@ -4035,7 +4057,16 @@ V *eval(Node *n, Env *e) {
         Env *call_env = env_new(fn->closure);
         V *params = fn->params;
         for(int i=0; i<params->n; i++) {
-            if(i < nargs) {
+            V*p = params->L[i];
+            if(p->b == 1) {
+                V*rest = v_list(0);
+                for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                env_set(call_env, p->s, rest);
+            } else if (p->b == 2) {
+                V*kk = v_list(nkw),*kv = v_list(nkw);
+                i(nkw,kk->L[i]=v_ref(kwnames[i]);kv->L[i]=v_ref(kwvals[i]));
+                env_set(call_env, p->s, v_dict(kk, kv));
+            } else if(i < nargs) {
                 env_set(call_env, params->L[i]->s, args[i]);
             } else if(fn->defaults && i < fn->defaults->n) {
                 env_set(call_env, params->L[i]->s, fn->defaults->L[i]);
@@ -4170,8 +4201,9 @@ V *eval(Node *n, Env *e) {
         V *params = v_list(n->ch[0]->nch);
         V *defaults = v_list(n->ch[0]->nch);
         for(int i=0; i<n->ch[0]->nch; i++) {
-            params->L[i] = v_str(n->ch[0]->ch[i]->sval);
-            if(n->nch > 2 && i < n->ch[2]->nch && n->ch[2]->ch[i]->type != N_NONE) {
+            Node*arg = n->ch[0]->ch[i];
+            V *a = params->L[i] = v_str(arg->sval);
+            if(!(a->b=arg->ival) && n->nch > 2 && i < n->ch[2]->nch && n->ch[2]->ch[i]->type != N_NONE) {
                 defaults->L[i] = eval(n->ch[2]->ch[i], e);
             } else {
                 defaults->L[i] = v_nil();
