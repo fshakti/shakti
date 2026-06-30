@@ -1111,6 +1111,7 @@ static Token lex_raw(Lexer *l) {
         if(p >= l->len || s[p]=='\n' || s[p]=='#') {
             if(p < l->len && s[p]=='#') skip_comment(l);
             if(l->pos < l->len && s[l->pos]=='\n') { l->pos++; l->at_line_start=1; }
+            l->line++;
             return lex_raw(l);
         }
         P(l->paren_depth > 0,lex_raw(l))
@@ -1137,6 +1138,7 @@ static Token lex_raw(Lexer *l) {
     if(c == '\n') {
         l->pos = p+1;
         l->at_line_start = 1;
+        l->line++;
         P(l->paren_depth > 0,lex_raw(l))
         return make_tok(T_NEWLINE_);
     }
@@ -4888,6 +4890,7 @@ int shakti_lang_main(int argc, char **argv) {
         if(g_error && g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
         if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
         v_free(r);
+        if(interactive) run_repl(global);
         free(src);
         env_free(global);
         return script_err ? 1 : 0;
