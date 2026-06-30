@@ -7,3 +7,6 @@
 #   create table name (col: default, ...)
 #   insert into name (cols...) values (...)
 #   table1 join table2 on col
+
+load:load
+save:save
