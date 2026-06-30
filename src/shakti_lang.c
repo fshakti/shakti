@@ -476,6 +476,7 @@ void v_free(V *v) {
     free(v);
 }
 int fn_ast_store(Node *n) {
+    if(n == NULL) return -3;
     if(fn_ast_n >= MAX_FN) { fprintf(stderr,"too many functions\n"); exit(1); }
     fn_ast[fn_ast_n] = n;
     return fn_ast_n++;
@@ -985,6 +986,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
     case T_FN:
         if(v->n == -1)fprintf(fp,"%s",v->s);
         else if(v->n == -2)fprintf(fp,"<super>");
+        else if(v->j == -3)fprintf(fp,"<file>");
         else fprintf(fp, "<fn>");         break;
     case T_INPUT: fprintf(fp, "<input>"); break;
     }
@@ -3081,10 +3083,11 @@ static void for_set_vars(Node *vars, V *item, Env *e) {
         env_set(e, vars->sval, item);
     }
 }
-static V *do_import(const char *name, Env *e) {
-    P(!name || !name[0],v_err("import requires a module name"))
+
+static Node*module_code(const char*name) {
     char path[8192];
     FILE *f = NULL;
+    P(!name,NULL);
     f = fopen(name, "r");
     if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen(path,"r"); }
     if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); f=fopen(path,"r"); }
@@ -3105,20 +3108,19 @@ static V *do_import(const char *name, Env *e) {
         if(g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,dotpath); f=fopen(path,"r"); }
         if(!f) { snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen(path,"r"); }
     }
-    P(!f,v_errf("cannot import '%s'", name))
+    P(!f,NULL);
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
     char *buf = malloc(sz+2);
     fread(buf, 1, sz, f); buf[sz]='\n'; buf[sz+1]=0;
     fclose(f);
-    Env *mod_env = env_new(e);
-    int old_dynamic = dynamic_has_sql;
-    dynamic_has_sql = shakti_sql_enabled(e);
     Node *prog = parse(buf);
-    if(dynamic_has_sql) env_set(e, SHAKTI_SQL_FLAG, v_bool(1));
-    dynamic_has_sql = old_dynamic;
+    free(buf);
+    return prog;
+}
+static V*module_dict(Node*prog,Env*e) {
+    Env *mod_env = env_new(e);
     V *r = eval(prog, mod_env);
     v_free(r);
-    free(buf);
     V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
     i(mod_env->len,{
         mk->L[i] = v_str(mod_env->names[i]);
@@ -3126,6 +3128,34 @@ static V *do_import(const char *name, Env *e) {
     })
     V *mod_dict = v_dict(mk, mv);
     v_free(mk); v_free(mv);
+    env_free(mod_env);
+    return mod_dict;
+}
+
+V*load_module(const char *name) {
+    P(!name || !name[0],v_err("import requires a module name"))
+    int old_dynamic = dynamic_has_sql;
+    dynamic_has_sql = 0;
+    Node *prog = module_code(name);
+    dynamic_has_sql = old_dynamic;
+    P(!prog,v_errf("cannot import '%s'", name))
+    return module_dict(prog, NULL);
+}
+
+static V *do_import(const char *name, Env *e) {
+    P(!name || !name[0],v_err("import requires a module name"))
+
+    int old_dynamic = dynamic_has_sql;
+    dynamic_has_sql = shakti_sql_enabled(e);
+
+    Node*prog = module_code(name);
+
+    if(dynamic_has_sql) env_set(e, SHAKTI_SQL_FLAG, v_bool(1));
+    dynamic_has_sql = old_dynamic;
+
+    P(!prog,v_errf("cannot import '%s'", name))
+    V *mod_dict = module_dict(prog, e);
+
     char *dot = strchr(name, '.');
     if(dot) {
         char parent[256];
@@ -3147,7 +3177,6 @@ static V *do_import(const char *name, Env *e) {
         env_set(e, name, mod_dict);
     }
     v_free(mod_dict);
-    env_free(mod_env);
     return v_nil();
 }
 static V *eval_select_name(Node *n, Env *e) {
@@ -3806,7 +3835,8 @@ V *eval(Node *n, Env *e) {
             V *al = v_list(n->nch - 1);
             for(int i=1; i<n->nch; i++) al->L[i-1] = eval(n->ch[i], e);
             V *r = builtin_call("__invoke__", (V*[]){obj, al}, 2, NULL, NULL, 0, e);
-            v_free(obj); v_free(al); return r;
+            v_free(obj); v_free(al);
+            return r;
         }
         for(int i=1; i<n->nch; i++) {
             if (obj->t == T_ERR) break;
@@ -3838,6 +3868,11 @@ V *eval(Node *n, Env *e) {
             } else if(obj->t==T_DICT) {
                 if(idx->t==T_STR) {
                     V *found = v_dict_get(obj, idx->s);
+                    if(found && found->t == T_FN && found->j == -3 && found->params == NULL && found->defaults) {
+                        V *data = table_load(found->defaults->s, NULL);
+                        v_free(found);
+                        found=data;
+                    }
                     next = found ? v_ref(found) : v_nil();
                 } else {
                     next = v_nil();
@@ -3930,6 +3965,11 @@ V *eval(Node *n, Env *e) {
             if(attr && attr->t == T_FN) {
                 if(attr->n == -2) {
                     attr = obj->vals->L[0]->L[attr->j];
+                }
+                if(attr->j == -3 && attr->params == NULL && attr->defaults) {
+                    V *r = table_load(attr->defaults->s, NULL);
+                    v_free(obj);
+                    return r;
                 }
 
                 Env *call_env = env_new(attr->closure);
@@ -4047,6 +4087,12 @@ V *eval(Node *n, Env *e) {
             v_free(args); v_free(kwnames); v_free(kwvals);
             return v_errf("'%s' is not callable", fn_node->sval ? fn_node->sval : "?");
         }
+        if(fn->j == -3 && fn->params == NULL && fn->defaults) {
+            V *r = table_load(fn->defaults->s, NULL);
+            v_free(fn); v_free(args); v_free(kwnames); v_free(kwvals);
+            return r;
+        }
+
         Env *call_env = env_new(fn->closure);
         V *params = fn->params;
         for(int i=0; i<params->n; i++) {

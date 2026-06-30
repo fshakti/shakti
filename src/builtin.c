@@ -1191,7 +1191,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         }
         return table_load(args[0]->s, cols);
     }
-    P(!strcmp(name,"save"),nargs>1&&args[1]->t==T_STR?(table_save(args[0],args[1]->s)?v_err("save failed"):v_nil()):v_err("save(table,path)"))
+    P(!strcmp(name,"save"),nargs>1&&args[1]->t==T_STR?table_save(args[0],args[1]->s):v_err("save(table,path)"))
     if(is_host_builtin(name)) return host_builtin_call(name, args, nargs);
     return v_errf("unknown builtin '%s'",name);
 }

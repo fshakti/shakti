@@ -139,7 +139,8 @@ t : load("file.xml")
 save(t, "out.csv")
 ```
 
-Supported formats: **CSV** and **XML** only. `save` writes **CSV** only.
+- Extensible: **csv** files are handled by [`csv.ie`](../src/lib/csv.ie),
+  json files are handled by [`json.ie`](../src/lib/json.ie) and so on
 
 ## Input
 

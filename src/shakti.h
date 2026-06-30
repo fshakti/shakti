@@ -333,7 +333,7 @@ void node_sprint(Node *n, FILE *fp);
 V *eval(Node *n, Env *e);
 int shakti_lang_main(int argc, char **argv);
 V *table_load(const char *path, V *columns_opt);
-int table_save(V *table, const char *path);
+V *table_save(V *table, const char *path);
 V *method_call(V *obj, const char *method, V **args, int nargs, Env *e);
 V *builtin_call(const char *name, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e);
 V *table_sql_select(V *from, V *cols, V *by, V *where);

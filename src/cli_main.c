@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
 #if defined __has_include
 #if __has_include("shakti_version.h")
 #include "shakti_version.h"
@@ -98,7 +100,9 @@ static void shakti_strip_banner_flags(int *argc, char **argv) {
         if(shakti_flag_is(argv[r],"--quiet","-q")||!strcmp(argv[r],"--banner"))continue;
         argv[w++]=argv[r];}
     *argc=w;}
+int start_dir;
 int main(int argc, char **argv) {
+    start_dir=open(".",O_RDONLY|O_DIRECTORY);
     setenv("OMP_PROC_BIND", "true", 0);
     setenv("OMP_PLACES", "cores", 0);
     if(argc>=3&&!strcmp(argv[1],"run")){
