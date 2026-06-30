@@ -1,0 +1,34 @@
+#
+# n.b. differences from python:
+#
+# - `self` is implicit/always available
+# - `__init__` is optional
+# - name base-classes directly
+#
+
+class base:
+	name:"base"
+	did_base_init:False
+	def __init__():
+		self.did_base_init:True
+		print(["base init"])
+	def doit():
+		print(["base doit"])
+
+class foo(base):
+	name: "foo"
+	def __init__(x):
+		base.__init__()
+		print(["foo init",x])
+
+print(base)
+b:base()
+print(b)
+b.doit()
+print(b.did_base_init)
+
+print(foo)
+a:foo(42)
+print(a)
+a.doit()
+print(a.did_base_init)
