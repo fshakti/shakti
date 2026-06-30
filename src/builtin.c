@@ -1163,7 +1163,17 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         V*fnv=args[0],*al=args[1];
         P(fnv->n == -1,builtin_call(fnv->s, al->L, al->n, NULL, NULL, 0, e))
         Env*ce=env_new(fnv->closure);V*p=fnv->params;
-        for(int i=0;i<p->n && i<al->n;i++) env_set(ce,p->L[i]->s,al->L[i]);
+        for(int i=0;i<p->n && i<al->n;i++) {
+            if(!p->L[i]->b) {
+                env_set(ce,p->L[i]->s,al->L[i]);
+            } else if(p->L[i]->b == 1) {
+                V*rest = v_list(al->n - i);int j=i;i(al->n-i,rest->L[i]=al->L[i+j]);
+                env_set(ce,p->L[i]->s,rest);
+            } else if(p->L[i]->b == 2) {
+                V*keys = v_list(nkw), *vals = v_list(nkw); i(nkw,keys->L[i]=kwn[i];vals->L[i]=kwv[i]);
+                env_set(ce,p->L[i]->s,v_dict(keys,vals));
+            }
+        }
         Node*body=fn_ast[(int)fnv->j];V*rv=eval(body,ce);
         if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
         env_free(ce);return rv;

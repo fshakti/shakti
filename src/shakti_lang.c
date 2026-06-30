@@ -1291,6 +1291,7 @@ static Token lex_raw(Lexer *l) {
         else if(!strcmp(t.sval,"raise"))    t.type=T_RAISE_;
         else if(!strcmp(t.sval,"with"))     t.type=T_WITH_;
         else if(!strcmp(t.sval,"yield"))    t.type=T_YIELD_;
+        else if(!dynamic_has_sql) return t;
         else if(!strcmp(t.sval,"select"))   t.type=T_SELECT_;
         else if(!strcmp(t.sval,"update"))   t.type=T_UPDATE_;
         else if(!strcmp(t.sval,"delete"))   t.type=T_DELETE_;
@@ -1489,6 +1490,11 @@ static Node *parse_atom(Lexer *l) {
     }
     case T_NOT_: {
         n = node_new(N_UNOP); n->op = OP_NOT;
+        node_add(n, parse_atom(l));
+        return n;
+    }
+    case T_STAR_: {
+        n = node_new(N_UNOP); n->op = OP_MUL;
         node_add(n, parse_atom(l));
         return n;
     }
@@ -2060,11 +2066,11 @@ static Node *parse_def(Lexer *l) {
     Node *params = node_new(N_LIST);
     Node *defaults = node_new(N_LIST);
     if(lex_peek(l).type != T_RPAREN_) {
-        char b = 0;
+        char b = 0, wb;
         if(lex_peek(l).type == T_STAR_) { lex_next(l); b = 1; }
         if(lex_peek(l).type == T_DSTAR_) { lex_next(l); b = 2; }
         Token p = lex_next(l);
-        Node *pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = b;
+        Node *pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = wb = b;
         node_add(params, pn);
         if(lex_peek(l).type == T_COLON_) {
             if(b) expect(l, T_COMMA_);
@@ -2078,13 +2084,14 @@ static Node *parse_def(Lexer *l) {
             if(lex_peek(l).type == T_STAR_) { lex_next(l); b = 1; }
             else if(lex_peek(l).type == T_DSTAR_) { lex_next(l); b = 2; }
             else b=0;
-            p = lex_next(l);
+            p = lex_next(l);wb|=b;
             pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = b;
             node_add(params, pn);
             if(lex_peek(l).type == T_COLON_) {
                 if(b) expect(l, T_COMMA_);
                 lex_next(l); node_add(defaults, parse_expr(l));
             } else {
+                if(!b&&wb) expect(l, T_COLON_); // no positional arguments after keyword/ranges
                 node_add(defaults, node_new(N_NONE));
             }
         }
@@ -3894,19 +3901,18 @@ V *eval(Node *n, Env *e) {
             V *obj = eval(fn_node->ch[0], e);
             P(obj->t == T_ERR,obj)
             const char *method = fn_node->sval;
-            int nargs_total = n->nch - 1;
-            V **args = calloc(nargs_total+1, sizeof(V*));
-            V **kwnames = calloc(nargs_total+1, sizeof(V*));
-            V **kwvals = calloc(nargs_total+1, sizeof(V*));
 
-            int nargs = 0, nkw = 0;
+            V*args    = v_list(0);
+            V*kwnames = v_list(0);
+            V*kwvals  = v_list(0);
             for(int i=1; i<n->nch; i++) {
                 if(n->ch[i]->type == N_KWARG) {
-                    kwnames[nkw] = v_str(n->ch[i]->sval);
-                    kwvals[nkw] = eval(n->ch[i]->ch[0], e);
-                    nkw++;
+                    v_list_append(kwnames, v_str(n->ch[i]->sval));
+                    v_list_append(kwvals, eval(n->ch[i]->ch[0], e));
+                } else if(n->ch[i]->type == N_UNOP && n->ch[i]->op == OP_MUL) {
+                    V *rest = eval(n->ch[i]->ch[0], e); i(rest->n, v_list_append(args, rest->L[i])); v_free(rest);
                 } else {
-                    args[nargs++] = eval(n->ch[i], e);
+                    v_list_append(args, eval(n->ch[i], e));
                 }
             }
 
@@ -3932,20 +3938,18 @@ V *eval(Node *n, Env *e) {
                     V*p = params->L[i];
                     if(p->b == 1) {
                         V*rest = v_list(0);
-                        for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                        for(int j=i; j<args->n;++j) v_list_append(rest, args->L[j]);
                         env_set(call_env, p->s, rest);
                     } else if (p->b == 2) {
-                        V*kk = v_list(nkw),*kv = v_list(nkw);
-                        i(nkw,kk->L[i]=v_ref(kwnames[i]);kv->L[i]=v_ref(kwvals[i]));
-                        env_set(call_env, p->s, v_dict(kk, kv));
-                    } else if(i < nargs) {
-                        env_set(call_env, p->s, args[i]);
+                        env_set(call_env, p->s, v_dict(kwnames, kwvals));
+                    } else if(i < args->n) {
+                        env_set(call_env, p->s, args->L[i]);
                     } else if(attr->defaults && i < attr->defaults->n) {
                         env_set(call_env, p->s, attr->defaults->L[i]);
                     }
                 }
-                for(int i=0;i<nkw;i++)
-                    env_set(call_env, kwnames[i]->s, kwvals[i]);
+                for(int i=0;i<kwnames->n;i++)
+                    env_set(call_env, kwnames->L[i]->s, kwvals->L[i]);
                 env_set(call_env, "self", obj);
                 Node *body = fn_ast[(int)attr->j];
                 V *result = eval(body, call_env);
@@ -3956,23 +3960,15 @@ V *eval(Node *n, Env *e) {
                 }
                 env_free(call_env);
                 v_free(obj);
-                for(int i=0;i<nargs;i++) v_free(args[i]);
-                for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
-                free(args); free(kwnames); free(kwvals);
+                v_free(args); v_free(kwnames); v_free(kwvals);
                 return result;
             }
-            V *r = method_call(obj, method, args, nargs, e);
+            V *r = method_call(obj, method, args->L, args->n, e);
             v_free(obj);
-            for(int i=0;i<nargs;i++) v_free(args[i]);
-            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
-            free(args); free(kwnames); free(kwvals);
+            v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
         }
-        int nargs_total = n->nch - 1;
-        V **args = calloc(nargs_total+1, sizeof(V*));
-        V **kwnames = calloc(nargs_total+1, sizeof(V*));
-        V **kwvals = calloc(nargs_total+1, sizeof(V*));
-        int nargs = 0, nkw = 0;
+
         int positional_names = 0;
         if (fn_node->type == N_NAME &&
             (!strcmp(fn_node->sval, "dict") || !strcmp(fn_node->sval, "ktable")) &&
@@ -3982,24 +3978,27 @@ V *eval(Node *n, Env *e) {
                 if (n->ch[i]->type != N_NAME) { positional_names = 0; break; }
             }
         }
+
+        V*args    = v_list(0);
+        V*kwnames = v_list(0);
+        V*kwvals  = v_list(0);
         for(int i=1; i<n->nch; i++) {
             if(n->ch[i]->type == N_KWARG) {
-                kwnames[nkw] = v_str(n->ch[i]->sval);
-                kwvals[nkw] = eval(n->ch[i]->ch[0], e);
-                nkw++;
-            } else if (positional_names) {
-                kwnames[nkw] = v_str(n->ch[i]->sval);
-                kwvals[nkw] = eval(n->ch[i], e);
-                nkw++;
+                v_list_append(kwnames, v_str(n->ch[i]->sval));
+                v_list_append(kwvals, eval(n->ch[i]->ch[0], e));
+            } else if(positional_names) {
+                v_list_append(kwnames, v_str(n->ch[i]->sval));
+                v_list_append(kwvals, eval(n->ch[i], e));
+            } else if(n->ch[i]->type == N_UNOP && n->ch[i]->op == OP_MUL) {
+                V *rest = eval(n->ch[i]->ch[0], e); i(rest->n, v_list_append(args, rest->L[i])); v_free(rest);
             } else {
-                args[nargs++] = eval(n->ch[i], e);
+                v_list_append(args, eval(n->ch[i], e));
             }
         }
+
         if(fn_node->type == N_NAME && is_builtin(fn_node->sval)) {
-            V *r = builtin_call(fn_node->sval, args, nargs, kwnames, kwvals, nkw, e);
-            for(int i=0;i<nargs;i++) v_free(args[i]);
-            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
-            free(args); free(kwnames); free(kwvals);
+            V *r = builtin_call(fn_node->sval, args->L, args->n, kwnames->L, kwvals->L, kwnames->n, e);
+            v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
         }
         V *fn = NULL;
@@ -4019,20 +4018,18 @@ V *eval(Node *n, Env *e) {
                     V*p = params->L[i];
                     if(p->b == 1) {
                         V*rest = v_list(0);
-                        for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                        for(int j=i; j<args->n;++j) v_list_append(rest, args->L[j]);
                         env_set(call_env, p->s, rest);
                     } else if (p->b == 2) {
-                        V*kk = v_list(nkw),*kv = v_list(nkw);
-                        i(nkw,kk->L[i]=v_ref(kwnames[i]);kv->L[i]=v_ref(kwvals[i]));
-                        env_set(call_env, p->s, v_dict(kk, kv));
-                    } else if(i < nargs) {
-                        env_set(call_env, p->s, args[i]);
+                        env_set(call_env, p->s, v_dict(kwnames, kwvals));
+                    } else if(i < args->n) {
+                        env_set(call_env, p->s, args->L[i]);
                     } else if(fn->defaults && i < fn->defaults->n) {
                         env_set(call_env, p->s, fn->defaults->L[i]);
                     }
                 }
-                for(int i=0;i<nkw;i++)
-                    env_set(call_env, kwnames[i]->s, kwvals[i]);
+                for(int i=0;i<kwnames->n;i++)
+                    env_set(call_env, kwnames->L[i]->s, kwvals->L[i]);
                 env_set(call_env, "self", self);
 
                 Node *body = fn_ast[(int)fn->j];
@@ -4041,17 +4038,13 @@ V *eval(Node *n, Env *e) {
                 if(q != self) v_free(self), self = q;
             }
             v_free(fn);
-            for(int i=0;i<nargs;i++) v_free(args[i]);
-            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
-            free(args); free(kwnames); free(kwvals);
+            v_free(args); v_free(kwnames); v_free(kwvals);
             return self;
         }
 
         if(!fn || fn->t != T_FN) {
             if(fn) v_free(fn);
-            for(int i=0;i<nargs;i++) v_free(args[i]);
-            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
-            free(args); free(kwnames); free(kwvals);
+            v_free(args); v_free(kwnames); v_free(kwvals);
             return v_errf("'%s' is not callable", fn_node->sval ? fn_node->sval : "?");
         }
         Env *call_env = env_new(fn->closure);
@@ -4060,20 +4053,18 @@ V *eval(Node *n, Env *e) {
             V*p = params->L[i];
             if(p->b == 1) {
                 V*rest = v_list(0);
-                for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                for(int j=i; j<args->n;++j) v_list_append(rest, args->L[j]);
                 env_set(call_env, p->s, rest);
             } else if (p->b == 2) {
-                V*kk = v_list(nkw),*kv = v_list(nkw);
-                i(nkw,kk->L[i]=v_ref(kwnames[i]);kv->L[i]=v_ref(kwvals[i]));
-                env_set(call_env, p->s, v_dict(kk, kv));
-            } else if(i < nargs) {
-                env_set(call_env, params->L[i]->s, args[i]);
+                env_set(call_env, p->s, v_dict(kwnames, kwvals));
+            } else if(i < args->n) {
+                env_set(call_env, params->L[i]->s, args->L[i]);
             } else if(fn->defaults && i < fn->defaults->n) {
                 env_set(call_env, params->L[i]->s, fn->defaults->L[i]);
             }
         }
-        for(int i=0;i<nkw;i++)
-            env_set(call_env, kwnames[i]->s, kwvals[i]);
+        for(int i=0;i<kwnames->n;i++)
+            env_set(call_env, kwnames->L[i]->s, kwvals->L[i]);
         Node *body = fn_ast[(int)fn->j];
         V *result = eval(body, call_env);
         if(g_returning) {
@@ -4084,9 +4075,7 @@ V *eval(Node *n, Env *e) {
         }
         env_free(call_env);
         v_free(fn);
-        for(int i=0;i<nargs;i++) v_free(args[i]);
-        for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
-        free(args); free(kwnames); free(kwvals);
+        v_free(args); v_free(kwnames); v_free(kwvals);
         return result;
     }
     case N_IF: {
