@@ -78,6 +78,12 @@ static V *v_alloc(int t) {
     v->t = t; v->rc = 1;
     return v;
 }
+static V *v_super(int n) {
+    V*f = v_alloc(T_FN);
+    f->j = n;
+    f->n = -2;
+    return f;
+}
 #define ISL_INT_CACHE_MAX 1048576
 static V **isl_int_cache;
 
@@ -592,6 +598,15 @@ V *v_dict_get(V *d, const char *key) {
     for (int64_t i = 0; i < d->n; i++)
         if (d->keys->L[i]->t == T_STR && strcmp(d->keys->L[i]->s, key) == 0)
             return d->vals->L[i];
+    if(d->n && d->keys->L[0]->t == T_NIL && d->vals->L[0]->t != T_NIL) {
+        V*q = d->vals->L[0];
+        if(q->t == T_LIST) {
+            i(q->n, { V*r = v_dict_get(q->L[i], key); if(r != NULL) return r; })
+        } else if(q->t == T_DICT) {
+            return v_dict_get(q, key);
+        }
+    }
+
     return NULL;
 }
 Env *env_new(Env *parent) {
@@ -707,6 +722,7 @@ void v_serialize(V *v, FILE *fp) {
         break;
     }
     case T_DICT:
+        fputc(v->b, fp);
         v_serialize(v->keys, fp);
         v_serialize(v->vals, fp);
         break;
@@ -774,8 +790,9 @@ V *v_deserialize(FILE *fp) {
         return r;
     }
     case T_DICT: {
+        char b=fgetc(fp);
         V *k = v_deserialize(fp), *v = v_deserialize(fp);
-        V *r = v_dict(k,v); v_free(k); v_free(v); return r;
+        V *r = v_dict(k,v); r->b=b; v_free(k); v_free(v); return r;
     }
     case T_TABLE: {
         V *k = v_deserialize(fp), *v = v_deserialize(fp);
@@ -879,6 +896,10 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         for(int64_t i=0;i<v->n;i++) { if(i) fprintf(fp,", "); print_val(v->L[i],fp,1); }
         fprintf(fp, "]"); break;
     case T_DICT:
+        if(v->n && v->keys->L[0]->t == T_NIL) {
+            fprintf(fp,v->b?"<object>":"<class>");
+            break;
+        }
         fprintf(fp, "{");
         for(int64_t i=0;i<v->n;i++) {
             if(i) fprintf(fp,", ");
@@ -957,7 +978,10 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         if(nr>20) fprintf(fp,"... %lld more rows\n",(long long)(nr-20));
         free(widths); break;
     }
-    case T_FN: fprintf(fp, "<fn>"); break;
+    case T_FN:
+        if(v->n == -1)fprintf(fp,"%s",v->s);
+        else if(v->n == -2)fprintf(fp,"<super>");
+        else fprintf(fp, "<fn>");         break;
     case T_INPUT: fprintf(fp, "<input>"); break;
     }
 }
@@ -978,6 +1002,7 @@ char *v_to_str(V *v) {
 }
 static int is_id_start(char c) { return isalpha(c) || c=='_'; }
 static int is_id_char(char c)  { return isalnum(c) || c=='_'; }
+
 void lex_init(Lexer *l, const char *src) {
     memset(l, 0, sizeof(*l));
     l->src = src; l->len = strlen(src);
@@ -2084,10 +2109,29 @@ static Node *parse_try(Lexer *l) {
 }
 static Node *parse_class(Lexer *l) {
     Token name = lex_next(l);
+    Node *p;
     if(lex_peek(l).type == T_LPAREN_) {
         lex_next(l);
-        W(lex_peek(l).type != T_RPAREN_ && lex_peek(l).type != T_EOF_,lex_next(l))
+        if(lex_peek(l).type == T_RPAREN_) {
+            lex_next(l);
+            p = NULL;
+        } else {
+            p = parse_expr(l);
+
+            Node *tup = node_new(N_LIST);
+            node_add(tup, p);
+            if(lex_peek(l).type == T_COMMA_) {
+                W(lex_peek(l).type == T_COMMA_,{
+                    lex_next(l);
+                    if(lex_peek(l).type == T_RPAREN_) break;
+                    node_add(tup, parse_expr(l));
+                })
+            }
+            p = tup;
+        }
         expect(l, T_RPAREN_);
+    } else {
+        p = NULL;
     }
     expect(l, T_COLON_);
     expect(l, T_NEWLINE_);
@@ -2095,6 +2139,11 @@ static Node *parse_class(Lexer *l) {
     Node *n = node_new(N_CLASS);
     n->sval = strdup(name.sval);
     node_add(n, body);
+    if(p && p->type != T_NIL) {
+        node_add(n, p);
+    } else {
+        node_free(p);
+    }
     return n;
 }
 static Node *parse_stmt(Lexer *l) {
@@ -3825,6 +3874,9 @@ V *eval(Node *n, Env *e) {
             V *found = v_dict_get(obj, n->sval);
             if(found) { V *r = v_ref(found); v_free(obj); return r; }
         }
+        if(obj->t == T_FN && obj->n == -2) {
+            return obj;
+        }
         v_free(obj);
         return v_errf("attribute '%s' not found", n->sval);
     }
@@ -3853,8 +3905,19 @@ V *eval(Node *n, Env *e) {
             V *attr = NULL;
             if(obj->t == T_DICT) {
                 attr = v_dict_get(obj, method);
+            } else if (obj->t == T_FN && obj->n == -2) {
+                V *q = env_get(e, "self");
+                V *b = q->vals->L[0]->L[obj->j];
+                attr = v_ref(v_dict_get(b, method));
+                v_free(obj);
+                obj  = q;
             }
+
             if(attr && attr->t == T_FN) {
+                if(attr->n == -2) {
+                    attr = obj->vals->L[0]->L[attr->j];
+                }
+
                 Env *call_env = env_new(attr->closure);
                 V *params = attr->params;
                 for(int i=0; i<params->n; i++) {
@@ -3866,6 +3929,7 @@ V *eval(Node *n, Env *e) {
                 }
                 for(int i=0;i<nkw;i++)
                     env_set(call_env, kwnames[i]->s, kwvals[i]);
+                env_set(call_env, "self", obj);
                 Node *body = fn_ast[(int)attr->j];
                 V *result = eval(body, call_env);
                 if(g_returning) {
@@ -3928,6 +3992,35 @@ V *eval(Node *n, Env *e) {
         } else {
             fn = eval(fn_node, e);
         }
+        if(fn->t == T_DICT && fn->n && fn->keys->L[0]->t == T_NIL) {
+            V*self = v_copy(fn); self->b=1;
+            fn = v_dict_get(self, "__init__");
+            if(fn && fn->t == T_FN) {
+                Env *call_env = env_new(fn->closure);
+                V *params = fn->params;
+                for(int i=0; i<params->n; i++) {
+                    if(i < nargs) {
+                        env_set(call_env, params->L[i]->s, args[i]);
+                    } else if(fn->defaults && i < fn->defaults->n) {
+                        env_set(call_env, params->L[i]->s, fn->defaults->L[i]);
+                    }
+                }
+                for(int i=0;i<nkw;i++)
+                    env_set(call_env, kwnames[i]->s, kwvals[i]);
+                env_set(call_env, "self", self);
+
+                Node *body = fn_ast[(int)fn->j];
+                v_free(eval(body, call_env));
+                V *q = env_get(call_env, "self");
+                if(q != self) v_free(self), self = q;
+            }
+            v_free(fn);
+            for(int i=0;i<nargs;i++) v_free(args[i]);
+            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+            free(args); free(kwnames); free(kwvals);
+            return self;
+        }
+
         if(!fn || fn->t != T_FN) {
             if(fn) v_free(fn);
             for(int i=0;i<nargs;i++) v_free(args[i]);
@@ -4159,11 +4252,20 @@ V *eval(Node *n, Env *e) {
         Env *cls_env = env_new(e);
         V *r = eval(n->ch[0], cls_env);
         v_free(r);
-        V *keys = v_list(cls_env->len);
-        V *vals = v_list(cls_env->len);
+        int supers = 0;
+        if(n->nch > 1 && n->ch[1]->type == N_LIST) {
+            i(supers = n->ch[1]->nch, {
+                env_set(cls_env, n->ch[1]->ch[i]->sval, v_super(i));
+            })
+        }
+
+        V *keys = v_list(cls_env->len+1);
+        V *vals = v_list(cls_env->len+1);
+        keys->L[0] = v_nil();
+        vals->L[0] = n->nch > 1 ? eval(n->ch[1], e) : v_nil();
         i(cls_env->len,{
-            keys->L[i] = v_str(cls_env->names[i]);
-            vals->L[i] = v_ref(cls_env->vals[i]);
+            keys->L[i+1] = v_str(cls_env->names[i]);
+            vals->L[i+1] = v_ref(cls_env->vals[i]);
         })
         V *cls = v_dict(keys, vals);
         env_set(e, n->sval, cls);
