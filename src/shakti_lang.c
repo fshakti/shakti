@@ -1525,9 +1525,6 @@ static Node *parse_atom(Lexer *l) {
     }
     case T_PASS_:
         return node_new(N_PASS);
-    case T_SELECT_: case T_UPDATE_: case T_DELETE_:
-        l->has_peek = 1; l->peek = t;
-        return parse_query(l);
     default:
         fprintf(stderr, "parse error: unexpected token %d ('%s')\n", t.type, t.sval);
         return node_new(N_NONE);
