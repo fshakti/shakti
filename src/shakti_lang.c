@@ -2323,6 +2323,13 @@ Node *parse(const char *src) {
     })
     return prog;
 }
+Node *parse_sql(const char *src) {
+    int old_dynamic = dynamic_has_sql;
+    dynamic_has_sql = 1;
+    Node*body = parse(src);
+    dynamic_has_sql = old_dynamic;
+    return body;
+}
 
 static const char *node_op_name(int op) {
     switch (op) {
@@ -3363,8 +3370,11 @@ V *eval(Node *n, Env *e) {
         V *from;
         if (from0->t == T_STR) {
             V *proj = select_load_projection(n);
-            from = table_load(from0->s, proj);
-            if (proj) {
+            if(proj == NULL) {
+                from = builtin_call("load",(V*[]){from0},1,NULL,NULL,0,e);
+            } else {
+                V *pa[ proj->n + 1];i(proj->n,pa[i+1]=proj->L[i]); // how many columns are you loading at a time?
+                pa[0]=from0;from = builtin_call("load",pa,proj->n+1,NULL,NULL,0,e);
                 v_free(proj);
             }
             v_free(from0);
@@ -3869,7 +3879,7 @@ V *eval(Node *n, Env *e) {
                 if(idx->t==T_STR) {
                     V *found = v_dict_get(obj, idx->s);
                     if(found && found->t == T_FN && found->j == -3 && found->params == NULL && found->defaults) {
-                        V *data = table_load(found->defaults->s, NULL);
+                        V *data = builtin_call("load",&found->defaults,1,NULL,NULL,0,e);
                         v_free(found);
                         found=data;
                     }
@@ -3967,7 +3977,7 @@ V *eval(Node *n, Env *e) {
                     attr = obj->vals->L[0]->L[attr->j];
                 }
                 if(attr->j == -3 && attr->params == NULL && attr->defaults) {
-                    V *r = table_load(attr->defaults->s, NULL);
+                    V *r = builtin_call("load",&attr->defaults,1,kwnames->L,kwvals->L,kwnames->n,e);
                     v_free(obj);
                     return r;
                 }
@@ -4088,7 +4098,7 @@ V *eval(Node *n, Env *e) {
             return v_errf("'%s' is not callable", fn_node->sval ? fn_node->sval : "?");
         }
         if(fn->j == -3 && fn->params == NULL && fn->defaults) {
-            V *r = table_load(fn->defaults->s, NULL);
+            V *r = builtin_call("load",&fn->defaults,1,kwnames->L,kwvals->L,kwnames->n,e);
             v_free(fn); v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
         }
@@ -4846,7 +4856,7 @@ static void run_repl(Env *e) {
         v_free(result);
     }
 }
-static char *read_file(const char *path) {
+char *read_file(const char *path) {
     FILE *f = fopen(path, "r");
     if(!f) { fprintf(stderr, "cannot open %s\n", path); return NULL; }
     fseek(f, 0, SEEK_END);

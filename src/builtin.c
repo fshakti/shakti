@@ -2,6 +2,14 @@
 #include "vec_kernels.h"
 #include "input.h"
 #include <time.h>
+#include <dirent.h>
+#include <unistd.h>
+extern Node*parse_sql(const char*src);
+extern void v_serialize(V *v, FILE *fp);
+extern V *v_deserialize(FILE *fp);
+extern V*load_module(const char *name);
+extern char *read_file(const char *path);
+extern V*table_xml_load(const char*path,V*columns_opt);
 extern int is_host_builtin(const char *name);
 extern V *host_builtin_call(const char *name, V **args, int nargs);
 extern V *bi_fread(V**,in);
@@ -1180,18 +1188,172 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
     }
     if(!strcmp(name,"load")) {
         if(nargs < 1 || args[0]->t != T_STR) {
-            return v_err("load(path) or load(path, [column, ...])");
+            return v_err("load(path, ...)");
         }
-        V *cols = NULL;
-        if(nargs > 1) {
-            if(args[1]->t != T_LIST) {
-                return v_err("load(path, [columns]): columns must be a list of strings");
+        char*ext;
+        if(!chdir(args[0]->s)) {
+            V*result;FILE*f=fopen(".d","rb");
+            if(f) {
+                V*keys = v_deserialize(f);
+                V*vals = v_list(keys->n);
+                fclose(f);
+                i(keys->n,{
+                     f=fopen(keys->L[i]->s,"rb");
+                     vals->L[i] = v_deserialize(f);
+                     fclose(f);
+                });
+                return v_table(keys,vals);
+            } else if(nargs > 1) {
+                V*keys = v_list(nargs-1);
+                V*vals = v_list(nargs-1);
+                i(nargs-1,keys->L[i]=v_ref(v_ref(args[i]));vals->L[i]=builtin_call("load",args+i,1,kwn,kwv,nkw,e));
+                result=v_table(keys,vals);
+            } else {
+                V*keys = v_list(0);
+                V*vals = v_list(0);
+                DIR*dir=opendir(".");
+                struct dirent*d;
+                int pn = strlen(args[0]->s);
+                while((d=readdir(dir))) {
+                    if(*d->d_name == '.')continue;
+                    v_list_append(keys, v_str(d->d_name));
+                    int sn = pn+ strlen(d->d_name)+2;
+                    char *s = malloc(sn);
+                    snprintf(s,sn,"%s/%s",args[0]->s,d->d_name);
+                    V*fun = v_fn(NULL, v_str(s), NULL, NULL);
+                    v_list_append(vals, fun);free(s);
+                }
+                closedir(dir);
+                result=v_dict(keys,vals);
             }
-            cols = args[1];
+            extern int start_dir;
+            fchdir(start_dir);
+            return result;
         }
-        return table_load(args[0]->s, cols);
+        if((ext=strrchr(args[0]->s,'.'))&&strcmp(ext,".sql")) {
+            if(!strcmp(ext,".xml")) {
+                V*columns_opt = v_list(0);i(nargs-1,columns_opt->L[i]=args[i]);
+                return table_xml_load(args[0]->s,columns_opt);
+            }
+            V *mod_dict = v_ref(load_module(ext+1));
+            V *impl = mod_dict ? v_dict_get(mod_dict, "load") : NULL;
+            if(impl) {
+                if(impl->n == -1) return builtin_call(impl->s,args,nargs,kwn,kwv,nkw,e);
+                Env *call_env = env_new(impl->closure);
+                V *params = impl->params;
+                for(int i=0; i<params->n; i++) {
+                    V*p = params->L[i];
+                    if(p->b == 1) {
+                        V*rest = v_list(0);
+                        for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                        env_set(call_env, p->s, rest);
+                    } else if (p->b == 2) {
+                        V*keys=v_list(nkw),*vals=v_list(nkw);i(nkw,keys->L[i]=kwn[i];vals->L[i]=kwv[i]);
+                        env_set(call_env, p->s, v_dict(keys,vals));
+                    } else if(i < nargs) {
+                        env_set(call_env, p->s, args[i]);
+                    } else if(impl->defaults && i < impl->defaults->n) {
+                        env_set(call_env, p->s, impl->defaults->L[i]);
+                    }
+                }
+                i(nkw,env_set(call_env,kwn[i]->s,kwv[i]));
+                env_set(call_env, "self", mod_dict);
+                Node *body = fn_ast[(int)impl->j];
+                V *result = eval(body, call_env);
+                if(g_returning) {
+                    g_returning = 0; v_free(result);
+                    result = g_retval ? g_retval : v_nil();
+                    g_retval = NULL;
+                }
+                env_free(call_env);
+                return result;
+            }
+        }
+        FILE*f=fopen(args[0]->s,"rb");
+        fseek(f,0, SEEK_END);
+        off_t size = ftell(f);
+        fseek(f,0, SEEK_SET);
+        V*result = v_deserialize(f);
+        if((!result || result->t == T_NIL) && ftell(f) < size) {
+            if(result) v_free(result);
+            char *src=read_file(args[0]->s);
+            if(!src) return v_err("load failed");
+
+            Node *body = strcmp(ext,".sql")==0?parse_sql(src):parse(src);
+            i(nkw,env_set(e,kwn[i]->s,kwv[i]));
+            result = eval(body, e);
+            if(g_returning) {
+                g_returning = 0; v_free(result);
+                result = g_retval ? g_retval : v_nil();
+                g_retval = NULL;
+            }
+        }
+        fclose(f);
+        return result;
     }
-    P(!strcmp(name,"save"),nargs>1&&args[1]->t==T_STR?table_save(args[0],args[1]->s):v_err("save(table,path)"))
+    if(!strcmp(name,"save")) {
+        if(nargs < 2 || args[1]->t != T_STR) {
+            return v_err("save(object, path, ...)");
+        }
+        char*ext;
+        if(!chdir(args[1]->s)) {
+            V*result;
+            if(args[0]->t == T_TABLE) {
+                i(args[0]->keys->n,{
+                    FILE*f=fopen(args[0]->keys->L[i]->s,"wb");
+										v_serialize(args[0]->vals->L[i], f);
+										fclose(f);
+                });
+                FILE*f=fopen(".d","wb");
+                v_serialize(args[0]->keys,f);
+								fclose(f);
+								result = v_int(args[0]->n);
+            } else result = v_err("nyi");
+            extern int start_dir;
+            fchdir(start_dir);
+            return result;
+        }
+        if((ext=strrchr(args[1]->s,'.'))&&strcmp(ext,".sql")) {
+            V *mod_dict = v_ref(load_module(ext+1));
+            V *impl = mod_dict ? v_dict_get(mod_dict, "save") : NULL;
+            if(impl) {
+                if(impl->n == -1) return builtin_call(impl->s,args,nargs,kwn,kwv,nkw,e);
+                Env *call_env = env_new(impl->closure);
+                V *params = impl->params;
+                for(int i=0; i<params->n; i++) {
+                    V*p = params->L[i];
+                    if(p->b == 1) {
+                        V*rest = v_list(0);
+                        for(int j=i; j<nargs;++j) v_list_append(rest, args[j]);
+                        env_set(call_env, p->s, rest);
+                    } else if (p->b == 2) {
+                        V*keys=v_list(nkw),*vals=v_list(nkw);i(nkw,keys->L[i]=kwn[i];vals->L[i]=kwv[i]);
+                        env_set(call_env, p->s, v_dict(keys,vals));
+                    } else if(i < nargs) {
+                        env_set(call_env, p->s, args[i]);
+                    } else if(impl->defaults && i < impl->defaults->n) {
+                        env_set(call_env, p->s, impl->defaults->L[i]);
+                    }
+                }
+                i(nkw,env_set(call_env,kwn[i]->s,kwv[i]));
+                env_set(call_env, "self", mod_dict);
+                Node *body = fn_ast[(int)impl->j];
+                V *result = eval(body, call_env);
+                if(g_returning) {
+                    g_returning = 0; v_free(result);
+                    result = g_retval ? g_retval : v_nil();
+                    g_retval = NULL;
+                }
+                env_free(call_env);
+                return result;
+            }
+        }
+        FILE*f = fopen(args[1]->s,"wb");
+        v_serialize(args[0], f);
+        off_t n = ftell(f);
+        fclose(f);
+        return v_int(n);
+    }
     if(is_host_builtin(name)) return host_builtin_call(name, args, nargs);
     return v_errf("unknown builtin '%s'",name);
 }
