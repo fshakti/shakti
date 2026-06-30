@@ -126,12 +126,13 @@ k : ktable(a:1, b:2)
 
 ## I/O and JSON
 
-- `read(path)`, `write(path, text)`, `readlines(path)`
-- `listdir(path)`, `walk(path)`
-- `json_loads(s)`, `json_dumps(x)` — JSON subset (no comments or trailing commas)
-- `re_match`, `re_findall`, `re_sub`, `re_split` — POSIX regex on Unix/macOS
+- `load(file)` and `save(obj, file)` read/write "anything"
+- `read(path)`, `write(path, text)`, `readlines(path)` work on bytes, lines
+- `listdir(path)`, `walk(path)` scan directories
+- `json_loads(s)`, `json_dumps(x)` - limit to JSON subset (no comments or trailing commas)
+- `re_match`, `re_findall`, `re_sub`, `re_split` - POSIX regex on Unix/macOS
 
-## Tables from files
+### Tables from files
 
 ```ie
 t : load("file.csv")
@@ -141,9 +142,10 @@ save(t, "out.csv")
 
 - Extensible: **csv** files are handled by [`csv.ie`](../src/lib/csv.ie),
   json files are handled by [`json.ie`](../src/lib/json.ie) and so on
+- Directories have binary representation for faster load/save (directory must exist)
 
 
-## Input
+### Interactive Input
 
 Module: `import input` — see [INPUT.md](INPUT.md). Examples: [`input_demo.ie`](../examples/input_demo.ie), [`synth_input.ie`](../examples/synth_input.ie).
 
