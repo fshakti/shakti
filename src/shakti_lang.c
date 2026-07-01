@@ -4149,7 +4149,7 @@ static const char *HL_BIS[] = {
     "listdir","walk","stat",
     "path_join","path_exists","path_isdir","path_isfile",
     "path_basename","path_dirname","path_splitext",
-    "getcwd","mkdir","getenv","sh",
+    "getcwd","mkdir","getenv","machine","sh",
     "re_findall","re_sub","re_match","re_split",
     "json_loads","json_dumps","json_load","json_dump",
     "sorted","any","all","isinstance","hasattr","getattr",

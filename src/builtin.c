@@ -20,6 +20,7 @@ extern V *bi_path_splitext(V**,in);
 extern V *bi_getcwd(V**,in);
 extern V *bi_mkdir(V**,in);
 extern V *bi_getenv(V**,in);
+extern V *bi_machine(V**,in);
 extern V *bi_sh(V**,in);
 extern V *bi_re_findall(V**,in);
 extern V *bi_re_sub(V**,in);
@@ -125,6 +126,7 @@ static const char *BUILTINS[] = {
     "path_join","path_exists","path_isdir","path_isfile",
     "path_basename","path_dirname","path_splitext",
     "getcwd","mkdir","getenv",
+    "machine",
     "sh",
     "re_findall","re_sub","re_match","re_split",
     "json_loads","json_dumps","json_load","json_dump",
@@ -819,7 +821,7 @@ static MS V *bi_w_time_ms(V **a,in,V **k,V **v,int nk,Env *e){
 BI0(fread) BI0(fwrite) BI0(readlines) BI0(listdir) BI0(walk) BI0(stat)
 BI0(path_join) BI0(path_exists) BI0(path_isdir) BI0(path_isfile)
 BI0(path_basename) BI0(path_dirname) BI0(path_splitext)
-BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(sh)
+BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine) BI0(sh)
 BI0(re_findall) BI0(re_sub) BI0(re_match) BI0(re_split)
 BI0(json_loads) BI0(json_dumps) BI0(json_load) BI0(json_dump)
 BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(chr) BI0(ord) BI0(hex)
@@ -932,6 +934,7 @@ static const BiEntry bi_tab[] = {
     {"listdir", bi_w_listdir},
     {"log", bi_w_log},
     {"map", bi_w_map},
+    {"machine", bi_w_machine},
     {"max", bi_w_max},
     {"min", bi_w_min},
     {"mkdir", bi_w_mkdir},
