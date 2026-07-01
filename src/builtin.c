@@ -108,6 +108,16 @@ extern V *bi_lissen_get_api_base(V**,in);
 extern V *bi_lissen_app_url(V**,in);
 extern V *bi_lissen_web_url(V**,in);
 extern V *bi_lissen_open(V**,in);
+extern V *bi_rest_request(V**,in);
+extern V *bi_rest_get(V**,in);
+extern V *bi_rest_post(V**,in);
+extern V *bi_rest_put(V**,in);
+extern V *bi_rest_delete(V**,in);
+extern V *bi_rest_listen(V**,in);
+extern V *bi_rest_accept(V**,in);
+extern V *bi_rest_read(V**,in);
+extern V *bi_rest_write(V**,in);
+extern V *bi_rest_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
@@ -121,6 +131,8 @@ static const char *BUILTINS[] = {
     "ipc_rdma_available","ipc_send","ipc_set_nonblock","ipc_shm_close","ipc_shm_open",
     "lissen_trpc_query","lissen_trpc_mutation","lissen_set_token","lissen_get_token",
     "lissen_set_api_base","lissen_get_api_base","lissen_app_url","lissen_web_url","lissen_open",
+    "rest_request","rest_get","rest_post","rest_put","rest_delete",
+    "rest_listen","rest_accept","rest_read","rest_write","rest_close",
     "read","write","readlines",
     "listdir","walk","stat",
     "path_join","path_exists","path_isdir","path_isfile",
@@ -848,6 +860,8 @@ BI0(ipc_set_nonblock) BI0(ipc_shm_close) BI0(ipc_shm_open)
 #endif
 BI0(lissen_trpc_query) BI0(lissen_trpc_mutation) BI0(lissen_set_token) BI0(lissen_get_token)
 BI0(lissen_set_api_base) BI0(lissen_get_api_base) BI0(lissen_app_url) BI0(lissen_web_url) BI0(lissen_open)
+BI0(rest_request) BI0(rest_get) BI0(rest_post) BI0(rest_put) BI0(rest_delete)
+BI0(rest_listen) BI0(rest_accept) BI0(rest_read) BI0(rest_write) BI0(rest_close)
 #undef BI0
 #undef BIKW
 #undef BIE
@@ -957,6 +971,16 @@ static const BiEntry bi_tab[] = {
     {"read", bi_w_fread},
     {"readline", bi_w_readline},
     {"readlines", bi_w_readlines},
+    {"rest_accept", bi_w_rest_accept},
+    {"rest_close", bi_w_rest_close},
+    {"rest_delete", bi_w_rest_delete},
+    {"rest_get", bi_w_rest_get},
+    {"rest_listen", bi_w_rest_listen},
+    {"rest_post", bi_w_rest_post},
+    {"rest_put", bi_w_rest_put},
+    {"rest_read", bi_w_rest_read},
+    {"rest_request", bi_w_rest_request},
+    {"rest_write", bi_w_rest_write},
     {"repr", bi_w_repr},
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},

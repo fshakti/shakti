@@ -1,0 +1,30 @@
+# REST client + local server demo
+#
+#   ./shakti examples/rest_demo.ie
+#
+# Optional live API (needs network):
+#   resp : rest.get("https://httpbin.org/get")
+
+import rest
+
+sh("./shakti tests/fixtures/rest_demo_server.ie &")
+sh("sleep 0.5")
+
+print("GET /ping")
+resp : rest.get("http://127.0.0.1:19091/ping")
+if rest.ok(resp):
+    print("status:", rest.status(resp), "body:", rest.text(resp))
+else:
+    print("error status:", rest.status(resp))
+
+sh("./shakti tests/fixtures/rest_demo_server.ie &")
+sh("sleep 0.5")
+
+print("POST /echo")
+resp2 : rest.post_json("http://127.0.0.1:19091/echo", {"msg": "hello"})
+if rest.ok(resp2):
+    print("echo:", rest.json(resp2))
+else:
+    print("error status:", rest.status(resp2))
+
+print("rest demo done")

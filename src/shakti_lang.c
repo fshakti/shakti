@@ -7,7 +7,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.8.1"
+#define SHAKTI_PKG_VERSION "0.8.2"
 #endif
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>

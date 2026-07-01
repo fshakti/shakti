@@ -9,7 +9,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.8.1"
+#define SHAKTI_PKG_VERSION "0.8.2"
 #endif
 extern int shakti_lang_main(int argc, char **argv);
 static const char *shakti_banner_qr[] = {

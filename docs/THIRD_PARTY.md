@@ -17,6 +17,8 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 `import lissen` uses `curl` on `PATH` for HTTPS to the Lissen API (not linked at build time).
 
+`import rest` uses `curl` on `PATH` for HTTP client requests (not linked at build time). The in-process HTTP server uses BSD sockets.
+
 `import sonicpi` uses `oscsend` (liblo-tools) or `python3` + [`src/lib/osc_send.py`](../src/lib/osc_send.py) for UDP OSC (not linked at build time).
 
 Optional **`.so`** (set `` or place next to the  tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `host_*` builtins for native kernels. The standalone binary works without it.
