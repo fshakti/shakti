@@ -563,7 +563,7 @@ static V *bi_zip(V**a,in){
             else if(a[j]->t==T_LIST)u->L[j]=v_ref(a[j]->L[i]);else u->L[j]=v_nil();}
         r->L[i]=u;}return r;}
 static V *bi_enumerate(V**a,in){
-    P(n<1,v_list(0))V*v=a[0];int64_t cnt=v->t==T_STR?strlen(v->s):v->n;
+    P(n<1,v_list(0))V*v=a[0];int64_t cnt=v->t==T_STR?(int64_t)strlen(v->s):v->n;
     V*r=v_list(cnt);
     if(v->t==T_IVEC){
         for(int64_t i=0;i<cnt;i++){
@@ -574,11 +574,17 @@ static V *bi_enumerate(V**a,in){
         }
         return r;
     }
-    for(int64_t i=0;i<cnt;i++){V*u=v_list(2);u->L[0]=v_int(i);
+    for(int64_t i=0;i<cnt;i++){
+        V*u=v_list(2);
+        u->L[0]=v_int(i);
         if(v->t==T_FVEC)u->L[1]=v_float(v->F[i]);
         else if(v->t==T_LIST)u->L[1]=v_ref(v->L[i]);
         else if(v->t==T_STR){char b[2]={v->s[i],0};u->L[1]=v_str(b);}
-        else u->L[1]=v_nil();r->L[i]=u;}return r;}
+        else u->L[1]=v_nil();
+        r->L[i]=u;
+    }
+    return r;
+}
 static V *bi_map(V**a,in,Env*e){
     P(n<2||a[0]->t!=T_FN,v_err("map(fn,iter)"))
     V*fn=a[0],*iter=a[1];int64_t cnt=iter->t==T_STR?(int64_t)strlen(iter->s):iter->n;

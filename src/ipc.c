@@ -481,10 +481,10 @@ V *bi_ipc_accept(V **a, int n) {
     P(n < 1 || a[0]->t != T_INT, v_err("ipc_accept(listen_h)"))
     IpcHandle *ls = ipc_slot((int)a[0]->j);
     P(!ls, v_err("ipc_accept: bad handle"))
-    char err[512];
-    err[0] = 0;
 
 #ifdef SHAKTI_HAVE_RDMA
+    char err[512];
+    err[0] = 0;
     if (ls->kind == IPC_KIND_RDMA_LISTEN) {
         IpcRdmaConn *rdma = NULL;
         if (ipc_rdma_accept(ls->rdma, &rdma, err, sizeof err) != 0)

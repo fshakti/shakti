@@ -985,7 +985,7 @@ static int lex_peek_is_signed_literal(Lexer *l) {
 
 static Token lex_fstring(Lexer *l) {
     const char *s = l->src;
-    int p = l->pos;
+    size_t p = l->pos;
     char q = s[p]; p++;
     Token t = {T_FSTR_};
     int qi = 0;
@@ -1025,7 +1025,7 @@ static Token lex_fstring(Lexer *l) {
 }
 static Token lex_raw(Lexer *l) {
     const char *s = l->src;
-    int p = l->pos;
+    size_t p = l->pos;
     if(l->pending_dedents > 0) {
         l->pending_dedents--;
         return make_tok(T_DEDENT_);
@@ -1143,7 +1143,7 @@ static Token lex_raw(Lexer *l) {
         }
         if (isdigit((unsigned char)c) || (c == '.' && p + 1 < l->len && isdigit((unsigned char)s[p + 1]))) {
         Token t = {T_INT_};
-        int start = p;
+        size_t start = p;
         int is_float = 0;
         if(c=='0' && p+1<l->len && (s[p+1]=='x'||s[p+1]=='X')) {
             p += 2;
@@ -1189,9 +1189,9 @@ static Token lex_raw(Lexer *l) {
             p++;
         }
         Token t = {T_NAME_};
-        int start = p;
+        size_t start = p;
         W(p<l->len && is_id_char(s[p]),p++)
-        int n = p - start;
+        size_t n = p - start;
         if(n >= (int)sizeof(t.sval)) n = sizeof(t.sval)-1;
         memcpy(t.sval, s+start, n); t.sval[n]=0;
         l->pos = p;
@@ -4169,14 +4169,20 @@ static void hl_render(const char *s, int len) {
         if((c=='f'||c=='F'||c=='r'||c=='R'||c=='b'||c=='B')&&i+1<len&&(s[i+1]=='"'||s[i+1]=='\'')) {
             char q=s[i+1]; printf(HL_STR); putchar(s[i++]); putchar(s[i++]);
             while(i<len&&s[i]!=q){if(s[i]=='\\'&&i+1<len)putchar(s[i++]);putchar(s[i++]);}
-            if(i<len)putchar(s[i++]); printf(HL_RST); continue;
+            if(i<len) putchar(s[i++]);
+            printf(HL_RST); continue;
         }
         if(c=='"'||c=='\'') {
             char q=c; printf(HL_STR);
             if(i+2<len&&s[i+1]==q&&s[i+2]==q) {
                 putchar(s[i++]);putchar(s[i++]);putchar(s[i++]);
-                while(i<len){if(i+2<len&&s[i]==q&&s[i+1]==q&&s[i+2]==q){putchar(s[i++]);putchar(s[i++]);putchar(s[i++]);break;}
-                if(s[i]=='\\'&&i+1<len)putchar(s[i++]);putchar(s[i++]);}
+                while(i<len){
+                    if(i+2<len&&s[i]==q&&s[i+1]==q&&s[i+2]==q){
+                        putchar(s[i++]);putchar(s[i++]);putchar(s[i++]);break;
+                    }
+                    if(s[i]=='\\'&&i+1<len) putchar(s[i++]);
+                    putchar(s[i++]);
+                }
             } else {
                 putchar(s[i++]);
                 while(i<len&&s[i]!=q){if(s[i]=='\\'&&i+1<len)putchar(s[i++]);putchar(s[i++]);}
