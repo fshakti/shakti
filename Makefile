@@ -41,7 +41,7 @@ else
   LDFLAGS += -lexpat
 endif
 
-LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c
+LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c
 LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/host_bridge.c src/lissen.c
 
 SHAKTI_IPC ?= 1

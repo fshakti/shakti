@@ -1,4 +1,5 @@
 #include "shakti.h"
+#include "vec_kernels.h"
 #include "input.h"
 #include <time.h>
 extern int is_host_builtin(const char *name);
@@ -108,7 +109,7 @@ extern V *bi_lissen_web_url(V**,in);
 extern V *bi_lissen_open(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
-    "sum","avg","min","max","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
+    "sum","avg","min","max","dot","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
@@ -238,6 +239,8 @@ static V *vec_reduce_sum(V *v) {
         return v_int(s);
     }
     if (v->t == T_FVEC) {
+        if (v->n >= ISL_OMP_VEC_MIN)
+            return v_float(shakti_sum_f64(v->F, v->n));
         double s = 0;
         for (int64_t i = 0; i < v->n; i++) s += v->F[i];
         return v_float(s);
@@ -431,6 +434,29 @@ static V *bi_sum(V **a, in) {
         } else return v_err("sum: bad arg");
     }
     return all_int ? v_int((int64_t)s) : v_float(s);
+}
+static V *bi_dot(V **a, in) {
+    P(n < 2, v_err("dot(x, y)"))
+    if (is_host_builtin("host_dot"))
+        return host_builtin_call("host_dot", a, n);
+    if (a[0]->n != a[1]->n) return v_err("dot: length mismatch");
+    if (a[0]->t == T_FVEC && a[1]->t == T_FVEC)
+        return v_float(shakti_dot_f64(a[0]->F, a[1]->F, a[0]->n));
+    if ((a[0]->t == T_INT || a[0]->t == T_FLOAT) &&
+        (a[1]->t == T_INT || a[1]->t == T_FLOAT)) {
+        double x = a[0]->t == T_INT ? (double)a[0]->j : a[0]->f;
+        double y = a[1]->t == T_INT ? (double)a[1]->j : a[1]->f;
+        return v_float(x * y);
+    }
+    if ((a[0]->t == T_IVEC || a[0]->t == T_FVEC) &&
+        (a[1]->t == T_IVEC || a[1]->t == T_FVEC)) {
+        int a_f = a[0]->t == T_FVEC, b_f = a[1]->t == T_FVEC;
+        return v_float(shakti_dot_numeric(
+            a_f ? NULL : a[0]->J, a_f ? a[0]->F : NULL, a_f,
+            b_f ? NULL : a[1]->J, b_f ? a[1]->F : NULL, b_f,
+            a[0]->n));
+    }
+    return v_err("dot: need numeric vectors or scalars");
 }
 static V *bi_avg(V **a, in) {
     P(n < 1,v_float(0))
@@ -776,7 +802,7 @@ typedef V *(*BiCall)(V **a, in, V **kwn, V **kwv, int nkw, Env *e);
 BIKW(print)
 BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
-BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(abs)
+BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
@@ -842,6 +868,7 @@ static const BiEntry bi_tab[] = {
     {"date", bi_w_date},
     {"datetime", bi_w_datetime},
     {"dict", bi_w_dict},
+    {"dot", bi_w_dot},
     {"enumerate", bi_w_enumerate},
     {"exp", bi_w_exp},
     {"filter", bi_w_filter},

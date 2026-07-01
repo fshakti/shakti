@@ -11,7 +11,7 @@ export SHAKTI_LIB=$PWD/src/lib
 
 | Module | Example | Description |
 |--------|---------|-------------|
-| *(core)* | [`matrix.ie`](../examples/matrix.ie) | Native matrix types and `table` columns |
+| *(core)* | [`matrix.ie`](../examples/matrix.ie) | Matrices (`@`), `dot`, `sum` / `min` / `max` |
 | `import sql` | [`sql_demo.ie`](../examples/sql_demo.ie) | Select, insert, update, delete, join |
 | `import input` | [`input_demo.ie`](../examples/input_demo.ie) | `readline` + timed event poll |
 | `import input` + `synth` | [`synth_input.ie`](../examples/synth_input.ie) | QWERTY jam with synth window |
@@ -24,6 +24,7 @@ export SHAKTI_LIB=$PWD/src/lib
 | `import ipc` | [`ipc_rdma.ie`](../examples/ipc_rdma.ie) | RDMA/RoCE server (Linux + NIC) |
 | `import ipc` | [`ipc_rdma_client.ie`](../examples/ipc_rdma_client.ie) | Client for `ipc_rdma.ie` |
 | `import lissen` | [`lissen_demo.ie`](../examples/lissen_demo.ie) | Lissen platform API + app URLs |
+| `import sonicpi` | [`sonicpi_demo.ie`](../examples/sonicpi_demo.ie) | OSC cues to Sonic Pi |
 
 ## Other
 
@@ -41,4 +42,5 @@ export SHAKTI_LIB=$PWD/src/lib
 | `talk` | [TALK.md](TALK.md) |
 | `ipc` | [IPC.md](IPC.md) |
 | `lissen` | [LISSEN.md](LISSEN.md) |
+| `sonicpi` | [SONICPI.md](SONICPI.md) |
 | Language & builtins | [RUNTIME_API.md](RUNTIME_API.md) |

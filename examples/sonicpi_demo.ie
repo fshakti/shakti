@@ -1,0 +1,36 @@
+# Sonic Pi OSC demo — drive a running Sonic Pi from Shakti.
+#
+# Requires Sonic Pi running with this buffer (or similar):
+#
+#   live_loop :shakti do
+#     use_real_time
+#     n = sync "/osc*/trigger/prophet"
+#     synth :prophet, note: n[0], cutoff: n[1], sustain: n[2]
+#   end
+#
+#   live_loop :play_cue do
+#     use_real_time
+#     p = sync "/osc*/play"
+#     play p[0], amp: p[1] / 100.0, sustain: p[2]
+#   end
+#
+# For automated checks without Sonic Pi: tests/sonicpi_smoke.ie
+#
+#   export SHAKTI_LIB=$PWD/src/lib
+#   ./shakti examples/sonicpi_demo.ie
+
+import sonicpi
+
+print("Sonic Pi OSC target:", sonicpi.host() + ":" + str(sonicpi.port()))
+print("Sender backend:", sonicpi.sender())
+if sonicpi.sender() = "":
+    print("(auto-detect: oscsend or python3)")
+
+if not sonicpi.available():
+    print("Need oscsend or python3 on PATH")
+else:
+    sonicpi.trigger("/trigger/prophet", [70, 100, 8])
+    sonicpi.trigger("/trigger/prophet", [74, 110, 6])
+    sonicpi.play(72, 90, 0.5)
+    sonicpi.cue("hello", [1, 2, 3])
+    print("Sent OSC cues — check Sonic Pi cue log and audio")

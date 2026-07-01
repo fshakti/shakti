@@ -11,11 +11,15 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | Cocoa, Core Audio, Core Foundation | Synth UI | macOS |
 | Speech, AVFoundation | `import talk` | macOS |
 | librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
-| libgomp | OpenMP (matrix / reduce paths) | Linux (default with GCC) |
+| libgomp | OpenMP (matrix `@`, vector `dot` / large `sum`) | Linux (default with GCC) |
 | libomp | OpenMP (`brew install libomp`) | macOS |
 | libpthread, libm, librt, libdl | Runtime | Linux |
 
 `import lissen` uses `curl` on `PATH` for HTTPS to the Lissen API (not linked at build time).
+
+`import sonicpi` uses `oscsend` (liblo-tools) or `python3` + [`src/lib/osc_send.py`](../src/lib/osc_send.py) for UDP OSC (not linked at build time).
+
+Optional **`.so`** (set `` or place next to the  tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `host_*` builtins for native kernels. The standalone binary works without it.
 
 Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 

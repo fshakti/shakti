@@ -34,6 +34,28 @@ r : select id, amount by dept from t where amount > 15
 | `keys()`, `values()` | `dict`, `table` |
 | `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `matrix[int]`, `matrix[float]`, `matrix[bool]` |
 
+## Vectors
+
+`range(n)` builds an `ivec` `[0, 1, …, n - 1]`. Element-wise `+`, `-`, `*`, `/`, `//`, `%` work on matching-length `ivec` / `fvec` pairs (and scalar broadcast).
+
+| Builtin | Meaning |
+|---------|---------|
+| `dot(a, b)` | Inner product (fused; no intermediate vector) |
+| `sum(v)` | Sum of elements |
+| `min(v)`, `max(v)`, `avg(v)` | Reducers |
+| `abs(v)` | Element-wise absolute value |
+
+```ie
+a : range(1000000)
+b : range(1000000)
+print(dot(a, b))       # prefer this on large vectors
+print(sum(a * b))      # same math; allocates a * b first
+```
+
+**`.` is not dot product** — it is attribute / column access (`table.col`, `dict.key`). Matrix multiply is **`@`**. For a vector inner product use **`dot(a, b)`**.
+
+On large `fvec`, `sum` uses a SIMD path when built with `make prod-speed`. With `.so` loaded (``), `dot` / `sum` / `min` / `max` may delegate to faster `host_*` kernels.
+
 ## Matrices
 
 Rectangular nested literals promote to native matrix types. Ragged nested lists stay as `list`.
@@ -73,7 +95,15 @@ Mixed int/float operands promote to `matrix[float]` where needed.
 
 ### Builtins
 
-Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`, `abs`.
+Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`, `abs`. `dot` applies to vectors only, not matrices.
+
+### Performance
+
+On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `@`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
+
+Vector **`dot`** and large **`sum`** on `fvec` use the same SIMD/OpenMP stack (`src/vec_kernels.c`). There is no GPU backend in the standalone binary.
+
+Example: [`examples/matrix.ie`](../examples/matrix.ie).
 
 ### Printing
 
@@ -85,12 +115,6 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 A matrix column stores one matrix per table row (table height = matrix row count). SQL `where` filters copy matrix rows like other column types.
 
 CSV/XML load and CSV save do **not** round-trip matrix columns as typed matrices; use in-memory tables or nested lists.
-
-### Performance
-
-On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `@`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code. There is no GPU backend.
-
-Example: [`examples/matrix.ie`](../examples/matrix.ie).
 
 ## Data
 
@@ -171,5 +195,7 @@ delete from u where id = 2
 | `synth` | [SYNTH.md](SYNTH.md) | [`examples/synth_demo.ie`](../examples/synth_demo.ie) |
 | `talk` | [TALK.md](TALK.md) | [`examples/talk_demo.ie`](../examples/talk_demo.ie) |
 | `ipc` | [IPC.md](IPC.md) | [`examples/ipc_echo.ie`](../examples/ipc_echo.ie) |
+| `lissen` | [LISSEN.md](LISSEN.md) | [`examples/lissen_demo.ie`](../examples/lissen_demo.ie) |
+| `sonicpi` | [SONICPI.md](SONICPI.md) | [`examples/sonicpi_demo.ie`](../examples/sonicpi_demo.ie) |
 
 Index: [EXAMPLES.md](EXAMPLES.md).

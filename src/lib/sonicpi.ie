@@ -1,0 +1,157 @@
+# sonicpi — drive Sonic Pi via OSC-over-UDP (shell-out; no C/UDP in ipc).
+#
+# Requires oscsend (liblo-tools) or python3 on PATH. Sonic Pi listens on UDP 4560
+# by default. Messages appear in Sonic Pi as /osc*/<path> — sync with a wildcard:
+#
+#   live_loop :shakti do
+#     use_real_time
+#     n = sync "/osc*/trigger/prophet"
+#     synth :prophet, note: n[0], cutoff: n[1], sustain: n[2]
+#   end
+#
+# Remote senders: Preferences -> IO -> Networked OSC -> Allow OSC from other computers.
+#
+#   import sonicpi
+#   sonicpi.trigger("/trigger/prophet", [70, 100, 8])
+#   sonicpi.cue("hello", [1, 2, 3])
+
+_cfg : {"host": "127.0.0.1", "port": 4560, "sender": ""}
+
+def _python_script():
+    lib : getenv("SHAKTI_LIB")
+    if lib:
+        return lib + "/osc_send.py"
+    return "src/lib/osc_send.py"
+
+def _env_host():
+    h : getenv("SHAKTI_SONICPI_HOST")
+    if h:
+        return h
+    return ""
+
+def _env_port():
+    p : getenv("SHAKTI_SONICPI_PORT")
+    if p:
+        return int(p)
+    return 0
+
+def set_host(h):
+    _cfg["host"] : h
+
+def host():
+    eh : _env_host()
+    if eh:
+        return eh
+    return _cfg["host"]
+
+def set_port(p):
+    _cfg["port"] : p
+
+def port():
+    ep : _env_port()
+    if ep:
+        return ep
+    return _cfg["port"]
+
+def set_sender(cmd):
+    _cfg["sender"] : cmd
+
+def sender():
+    return _cfg["sender"]
+
+def _oscsend_ok():
+    return sh("command -v oscsend >/dev/null 2>&1") = 0
+
+def _python_ok():
+    return sh("command -v python3 >/dev/null 2>&1") = 0
+
+def available():
+    s : sender()
+    if s = "oscsend":
+        return _oscsend_ok()
+    if s = "python3":
+        return _python_ok()
+    if _oscsend_ok() or _python_ok():
+        return 1
+    return 0
+
+def _pick_backend():
+    s : sender()
+    if s = "oscsend" and _oscsend_ok():
+        return "oscsend"
+    if s = "python3" and _python_ok():
+        return "python3"
+    if _oscsend_ok():
+        return "oscsend"
+    if _python_ok():
+        return "python3"
+    return ""
+
+def shell_quote(s):
+    sq : chr(39)
+    out : sq
+    i : 0
+    while i < len(s):
+        ch : s[i]
+        if ch = sq:
+            out : out + sq + "\\" + sq + sq
+        else:
+            out : out + ch
+        i : i + 1
+    return out + sq
+
+def _norm_path(path):
+    if len(path) = 0:
+        return "/"
+    if path[0] = "/":
+        return path
+    return "/" + path
+
+def _infer_types(args):
+    types : ""
+    for a in args:
+        if isinstance(a, "int"):
+            types : types + "i"
+        elif isinstance(a, "float"):
+            types : types + "f"
+        elif isinstance(a, "str"):
+            types : types + "s"
+        else:
+            types : types + "s"
+    return types
+
+def osc(path, types, args):
+    if not available():
+        print("sonicpi: need oscsend or python3 on PATH")
+        return 1
+    p : _norm_path(path)
+    backend : _pick_backend()
+    cmd : ""
+    if backend = "oscsend":
+        cmd : "oscsend " + shell_quote(host()) + " " + str(port()) + " " + shell_quote(p) + " " + shell_quote(types)
+        for a in args:
+            if isinstance(a, "str"):
+                cmd : cmd + " " + shell_quote(a)
+            else:
+                cmd : cmd + " " + str(a)
+    else:
+        cmd : "python3 " + shell_quote(_python_script()) + " " + shell_quote(host()) + " " + str(port()) + " " + shell_quote(p) + " " + shell_quote(types)
+        for a in args:
+            if isinstance(a, "str"):
+                cmd : cmd + " " + shell_quote(a)
+            else:
+                cmd : cmd + " " + str(a)
+    return sh(cmd)
+
+def send(path, args):
+    types : _infer_types(args)
+    return osc(path, types, args)
+
+def cue(name, args:[]):
+    return send("/" + name, args)
+
+def trigger(path, args):
+    return send(path, args)
+
+def play(note, vel:100, dur:1):
+    return send("/play", [note, vel, dur])
