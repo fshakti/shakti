@@ -75,8 +75,6 @@ static int q_pop(InputEvent *ev) {
     return 1;
 }
 
-static void q_clear(void) { g_in.qh = g_in.qt = 0; }
-
 static int is_tty(void) {
 #if defined(_WIN32)
     return _isatty(_fileno(stdin));
