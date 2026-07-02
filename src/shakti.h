@@ -171,6 +171,7 @@ enum {
     T_DOT_ = 76,
     T_SEMI_ = 77,
     T_AT_ = 78,
+    T_CHARZ_ = 78,
 };
 
 enum {
@@ -178,22 +179,27 @@ enum {
     T_BOOL = 1,
     T_INT = 2,
     T_FLOAT = 3,
-    T_STR = 4,
-    T_DATE = 5,
-    T_ERR = 6,
-    T_IVEC = 7,
-    T_FVEC = 8,
-    T_BVEC = 9,
-    T_LIST = 10,
-    T_DICT = 11,
-    T_TABLE = 12,
-    T_FN = 13,
-    T_DATETIME = 14,
-    T_TIME = 15,
-    T_INPUT = 16,
-    T_IMAT = 17,
-    T_FMAT = 18,
-    T_BMAT = 19,
+    T_CHAR = 4,
+    T_STR = 5,
+    T_DATE = 6,
+    T_ERR = 7,
+/* vecs must be kept together; IVEC must be first, BVEC must be last in group */
+    T_IVEC = 8,
+    T_FVEC = 9,
+    T_CVEC = 10,
+    T_BVEC = 11,
+    T_LIST = 12,
+    T_DICT = 13,
+    T_TABLE = 14,
+    T_FN = 15,
+    T_DATETIME = 16,
+    T_TIME = 17,
+    T_INPUT = 18,
+/* mats must be together; IMAT must first, BMAT must be last... */
+    T_IMAT = 20,
+    T_FMAT = 21,
+    T_CMAT = 22,
+    T_BMAT = 23,
 };
 
 enum {
@@ -240,6 +246,7 @@ enum {
     N_UPDATE = 40,
     N_WHILE = 41,
     N_WITH = 42,
+    N_CHARS = 43,
 };
 
 enum {
@@ -273,6 +280,7 @@ void node_add(Node *n, Node *child);
 void node_free(Node *n);
 V *v_nil(void);
 V *v_bool(int b);
+V *v_char(unsigned char c);
 V *v_int(int64_t j);
 V *v_float(double f);
 V *v_str(const char *s);
@@ -284,9 +292,11 @@ V *v_errf(const char *fmt, ...);
 V *v_ivec(int64_t n);
 V *v_fvec(int64_t n);
 V *v_bvec(int64_t n);
+V *v_cvec(int64_t n);
 V *v_imat(int64_t rows, int64_t cols);
 V *v_fmat(int64_t rows, int64_t cols);
 V *v_bmat(int64_t rows, int64_t cols);
+V *v_cmat(int64_t rows, int64_t cols);
 static inline int64_t mat_cols(V *m) { return (int64_t)m->_ht_cap; }
 static inline int64_t mat_idx(V *m, int64_t r, int64_t c) { return r * mat_cols(m) + c; }
 V *v_mat_row(V *m, int64_t row);

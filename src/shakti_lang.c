@@ -93,6 +93,7 @@ static int shakti_sql_enabled(Env *e);
 
 V *v_nil(void)           { return v_alloc(T_NIL); }
 V *v_bool(int b)         { V *v=v_alloc(T_BOOL); v->b=b; return v; }
+V *v_char(unsigned char b) {  V *v=v_alloc(T_CHAR); v->j=b; return v; }
 V *v_int(int64_t j) {
     if (j >= 0 && j < ISL_INT_CACHE_MAX) {
         if (!isl_int_cache)
@@ -147,6 +148,7 @@ V *v_bvec(int64_t n) {
     v->B = calloc(n?n:1, 1);
     return v;
 }
+V *v_cvec(int64_t n) { V *v = v_bvec(n); v->t = T_CVEC; return v; }
 V *v_imat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_IMAT);
     v->n = rows;
@@ -171,10 +173,14 @@ V *v_bmat(int64_t rows, int64_t cols) {
     v->B = calloc((size_t)sz, 1);
     return v;
 }
-static int is_mat_t(int t) { return t == T_IMAT || t == T_FMAT || t == T_BMAT; }
+V *v_cmat(int64_t rows, int64_t cols) { V *v = v_bmat(rows,cols); v->t = T_CMAT; return v; }
+
+static int is_mat_t(int t) { return t == T_IMAT || t == T_FMAT || t == T_BMAT || t == T_CMAT; }
 static void mat_cell_format(V *v, int64_t r, int64_t c, char *buf, size_t cap) {
     if (v->t == T_IMAT)
         snprintf(buf, cap, "%lld", (long long)v->J[mat_idx(v, r, c)]);
+    else if (v->t == T_CMAT)
+        snprintf(buf, cap, "%02x", v->B[mat_idx(v, r, c)]);
     else if (v->t == T_FMAT) {
         double d = v->F[mat_idx(v, r, c)];
         if (d == (int64_t)d && d < 1e15 && d > -1e15)
@@ -258,39 +264,52 @@ V *v_mat_row(V *m, int64_t r) {
         memcpy(rv->F, m->F + mat_idx(m, r, 0), (size_t)cols * sizeof(double));
         return rv;
     }
-    V *rv = v_bvec(cols);
+    V *rv = m->t == T_CMAT ? v_cvec(cols) : v_bvec(cols);
     memcpy(rv->B, m->B + mat_idx(m, r, 0), (size_t)cols);
     return rv;
 }
 static V *try_promote_matrix(V **elems, int nch) {
     if (nch <= 0) return NULL;
     int64_t cols = -1;
-    int all_int = 1, all_num = 1, all_bool = 1;
+    int all_int = 1, all_u8 = 1, all_num = 1, all_bool = 1;
     for (int i = 0; i < nch; i++) {
         V *row = elems[i];
         int64_t row_len = 0;
         if (row->t == T_IVEC) {
+            row_len = row->n; all_u8 = 0;
+        } else if (row->t == T_CVEC) {
             row_len = row->n;
         } else if (row->t == T_FVEC) {
-            row_len = row->n; all_int = 0;
+            row_len = row->n; all_int = all_u8 = 0;
         } else if (row->t == T_BVEC) {
-            row_len = row->n; all_int = 0; all_num = 0;
+            row_len = row->n; all_int = all_u8 = 0; all_num = 0;
         } else if (row->t == T_LIST) {
             row_len = row->n;
             for (int64_t j = 0; j < row->n; j++) {
-                if (elems[i]->L[j]->t != T_INT) all_int = 0;
-                if (elems[i]->L[j]->t != T_INT && elems[i]->L[j]->t != T_FLOAT) all_num = 0;
+                if (elems[i]->L[j]->t != T_CHAR) all_u8 = 0;
+                if (elems[i]->L[j]->t != T_INT && elems[i]->L[j]->t != T_CHAR) all_int = 0;
+                if (elems[i]->L[j]->t != T_CHAR && elems[i]->L[j]->t != T_INT && elems[i]->L[j]->t != T_FLOAT) all_num = 0;
                 if (elems[i]->L[j]->t != T_BOOL) all_bool = 0;
             }
         } else return NULL;
         if (cols < 0) cols = row_len;
         else if (cols != row_len) return NULL;
     }
+    if (all_u8) {
+        V *r = v_imat(nch, cols);
+        for (int i = 0; i < nch; i++) {
+            V *row = elems[i];
+            if (row->t == T_CVEC) for (int64_t j = 0; j < cols; j++) r->J[mat_idx(r, i, j)] = row->B[j];
+            else for (int64_t j = 0; j < cols; j++) r->B[mat_idx(r, i, j)] = row->L[j]->j;
+        }
+        return r;
+    }
     if (all_int) {
         V *r = v_imat(nch, cols);
         for (int i = 0; i < nch; i++) {
             V *row = elems[i];
             if (row->t == T_IVEC) memcpy(r->J + mat_idx(r, i, 0), row->J, (size_t)cols * 8);
+            else if (row->t == T_CVEC) for (int64_t j = 0; j < cols; j++) r->J[mat_idx(r, i, j)] = row->B[j];
             else for (int64_t j = 0; j < cols; j++) r->J[mat_idx(r, i, j)] = row->L[j]->j;
         }
         return r;
@@ -300,10 +319,11 @@ static V *try_promote_matrix(V **elems, int nch) {
         for (int i = 0; i < nch; i++) {
             V *row = elems[i];
             if (row->t == T_IVEC) for (int64_t j = 0; j < cols; j++) r->F[mat_idx(r, i, j)] = (double)row->J[j];
+            if (row->t == T_CVEC) for (int64_t j = 0; j < cols; j++) r->F[mat_idx(r, i, j)] = (double)row->B[j];
             else if (row->t == T_FVEC) memcpy(r->F + mat_idx(r, i, 0), row->F, (size_t)cols * 8);
             else for (int64_t j = 0; j < cols; j++) {
                 V *e = row->L[j];
-                r->F[mat_idx(r, i, j)] = e->t == T_INT ? (double)e->j : e->f;
+                r->F[mat_idx(r, i, j)] = e->t == T_INT || e->t == T_CHAR ? (double)e->j : e->f;
             }
         }
         return r;
@@ -322,6 +342,7 @@ static V *try_promote_matrix(V **elems, int nch) {
 static V *mat_matmul(V *a, V *b) {
     P(!is_mat_t(a->t) || !is_mat_t(b->t), v_err("matmul requires numeric matrices"))
     P(a->t == T_BMAT || b->t == T_BMAT, v_err("matmul not supported for matrix[bool]"))
+    P(a->t == T_CMAT || b->t == T_CMAT, v_err("matmul not supported for matrix[char]"))
     P(mat_cols(a) != b->n, v_err("matmul shape mismatch"))
     int64_t m = a->n, k = mat_cols(a), n = mat_cols(b);
     int out_t = (a->t == T_FMAT || b->t == T_FMAT) ? T_FMAT : T_IMAT;
@@ -455,9 +476,11 @@ void v_free(V *v) {
     case T_IVEC: free(v->J); break;
     case T_FVEC: free(v->F); break;
     case T_BVEC: free(v->B); break;
+    case T_CVEC: free(v->B); break;
     case T_IMAT: free(v->J); break;
     case T_FMAT: free(v->F); break;
     case T_BMAT: free(v->B); break;
+    case T_CMAT: free(v->B); break;
     case T_LIST:
         for(int64_t i=0;i<v->n;i++) v_free(v->L[i]);
         free(v->L); break;
@@ -483,15 +506,15 @@ int fn_ast_store(Node *n) {
 }
 const char *type_name(int t) {
     const char *names[] = {
-        "NoneType", "bool", "int", "float", "str",
+        "NoneType", "bool", "int", "float", "char", "str",
         "date",
         "error",
-        "list[int]", "list[float]", "list[bool]",
+        "list[int]", "list[float]", "list[char]", "list[bool]",
         "list", "dict", "table", "function",
         "datetime",
         "time",
-        "input_stream",
-        "matrix[int]", "matrix[float]", "matrix[bool]"
+        "input_stream", 0,
+        "matrix[int]", "matrix[float]", "matrix[char]", "matrix[bool]",
     };
     P(t >= 0 && t <= T_BMAT, names[t])
     return "unknown";
@@ -502,6 +525,7 @@ V *v_copy(V *v) {
     case T_NIL:   return v_nil();
     case T_BOOL:  return v_bool(v->b);
     case T_INT:   return v_int(v->j);
+    case T_CHAR:  return v_char(v->j);
     case T_FLOAT: return v_float(v->f);
     case T_STR:   return v_str(v->s);
     case T_ERR:   return v_err(v->s);
@@ -510,9 +534,11 @@ V *v_copy(V *v) {
     case T_IVEC:  { V *r=v_ivec(v->n); memcpy(r->J,v->J,v->n*8); return r; }
     case T_FVEC:  { V *r=v_fvec(v->n); memcpy(r->F,v->F,v->n*8); return r; }
     case T_BVEC:  { V *r=v_bvec(v->n); memcpy(r->B,v->B,v->n); return r; }
+    case T_CVEC:  { V *r=v_cvec(v->n); memcpy(r->B,v->B,v->n); return r; }
     case T_IMAT:  { V *r=v_imat(v->n, mat_cols(v)); memcpy(r->J,v->J,(size_t)v->n*mat_cols(v)*8); return r; }
     case T_FMAT:  { V *r=v_fmat(v->n, mat_cols(v)); memcpy(r->F,v->F,(size_t)v->n*mat_cols(v)*8); return r; }
     case T_BMAT:  { V *r=v_bmat(v->n, mat_cols(v)); memcpy(r->B,v->B,(size_t)v->n*mat_cols(v)); return r; }
+    case T_CMAT:  { V *r=v_cmat(v->n, mat_cols(v)); memcpy(r->B,v->B,(size_t)v->n*mat_cols(v)); return r; }
     case T_LIST:  {
         V *r=v_list(v->n);
         for(int64_t i=0;i<v->n;i++) r->L[i]=v_copy(v->L[i]);
@@ -683,6 +709,7 @@ void v_serialize(V *v, FILE *fp) {
     switch(v->t) {
     case T_BOOL:  fputc(v->b, fp); break;
     case T_INT:   fwrite(&v->j, 8, 1, fp); break;
+    case T_CHAR:  fputc((unsigned char)v->j, fp); break;
     case T_FLOAT: fwrite(&v->f, 8, 1, fp); break;
     case T_STR: {
         int64_t len = strlen(v->s);
@@ -705,6 +732,7 @@ void v_serialize(V *v, FILE *fp) {
         fwrite(v->F, 8, v->n, fp);
         break;
     }
+    case T_CVEC:
     case T_BVEC: {
         fwrite(&v->n, 8, 1, fp);
         fwrite(v->B, 1, v->n, fp);
@@ -712,13 +740,14 @@ void v_serialize(V *v, FILE *fp) {
     }
     case T_IMAT:
     case T_FMAT:
+    case T_CMAT:
     case T_BMAT: {
         int64_t cols = mat_cols(v);
         fwrite(&v->n, 8, 1, fp);
         fwrite(&cols, 8, 1, fp);
         if (v->t == T_IMAT) fwrite(v->J, 8, (size_t)(v->n * cols), fp);
         else if (v->t == T_FMAT) fwrite(v->F, 8, (size_t)(v->n * cols), fp);
-        else fwrite(v->B, 1, (size_t)(v->n * cols), fp);
+        else fwrite(v->B, 1, (size_t)(v->n * cols), fp); // T_CMAT & T_BMAT
         break;
     }
     case T_LIST: {
@@ -742,6 +771,7 @@ V *v_deserialize(FILE *fp) {
     P(t == EOF || t == T_NIL,v_nil())
     switch(t) {
     case T_BOOL:  return v_bool(fgetc(fp));
+    case T_CHAR:  return v_char(fgetc(fp));
     case T_INT:   { int64_t j; fread(&j, 8, 1, fp); return v_int(j); }
     case T_FLOAT: { double f; fread(&f, 8, 1, fp); return v_float(f); }
     case T_STR: {
@@ -770,6 +800,10 @@ V *v_deserialize(FILE *fp) {
         int64_t n; fread(&n, 8, 1, fp);
         V *r = v_bvec(n); fread(r->B, 1, n, fp); return r;
     }
+    case T_CVEC: {
+        int64_t n; fread(&n, 8, 1, fp);
+        V *r = v_cvec(n); fread(r->B, 1, n, fp); return r;
+    }
     case T_IMAT: {
         int64_t rows, cols; fread(&rows, 8, 1, fp); fread(&cols, 8, 1, fp);
         V *r = v_imat(rows, cols);
@@ -785,6 +819,12 @@ V *v_deserialize(FILE *fp) {
     case T_BMAT: {
         int64_t rows, cols; fread(&rows, 8, 1, fp); fread(&cols, 8, 1, fp);
         V *r = v_bmat(rows, cols);
+        if (rows * cols > 0) fread(r->B, 1, (size_t)(rows * cols), fp);
+        return r;
+    }
+    case T_CMAT: {
+        int64_t rows, cols; fread(&rows, 8, 1, fp); fread(&cols, 8, 1, fp);
+        V *r = v_cmat(rows, cols);
         if (rows * cols > 0) fread(r->B, 1, (size_t)(rows * cols), fp);
         return r;
     }
@@ -842,6 +882,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
     case T_NIL:  fprintf(fp, "None"); break;
     case T_BOOL: fprintf(fp, "%s", v->b ? "True" : "False"); break;
     case T_INT:  fprintf(fp, "%lld", (long long)v->j); break;
+    case T_CHAR: fprintf(fp, "0x%02x", (int)(unsigned char)v->j); break;
     case T_DATETIME: {
         char buf[32];
         shakti_format_datetime_ms(v->j, buf, sizeof buf);
@@ -878,6 +919,11 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         fprintf(fp, "[");
         for(int64_t i=0;i<v->n;i++) { if(i) fprintf(fp,", "); fprintf(fp,"%lld",(long long)v->J[i]); }
         fprintf(fp, "]"); break;
+    case T_CVEC:
+        if(v->n==1){fprintf(fp,"[0x%02x]",v->B[0]);break;}
+        fprintf(fp, "0x");
+        for(int64_t i=0;i<v->n;i++) fprintf(fp,"%02x",(int)v->B[i]);
+        break;
     case T_FVEC:
         fprintf(fp, "[");
         for(int64_t i=0;i<v->n;i++) {
@@ -930,6 +976,8 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
                     fprintf(fp,": ");
                     if(col->t == T_IVEC) fprintf(fp, "%lld",(long long)col->J[i]);
                     else if(col->t == T_FVEC) fprintf(fp, "%g",col->F[i]);
+                    else if(col->t == T_CVEC) fprintf(fp, "0x%02x",col->B[i]);
+                    else if(col->t == T_BVEC) fprintf(fp, col->B[i]?"True":"False");
                     else if(col->t == T_LIST) print_val(col->L[i],fp,1);
                 }
                 fprintf(fp, "}");
@@ -945,6 +993,8 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
                 char buf[64];
                 if(col->t==T_IVEC) snprintf(buf,64,"%lld",(long long)col->J[r]);
                 else if(col->t==T_FVEC) snprintf(buf,64,"%g",col->F[r]);
+                else if(col->t==T_CVEC) snprintf(buf,64,"0x%02x",(int)col->B[r]);
+                else if(col->t==T_BVEC) snprintf(buf,64,col->B[r]?"True":"False");
                 else if(col->t==T_LIST) {
                     V *el=col->L[r];
                     if(el) {
@@ -967,6 +1017,8 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
                 V *col=data->L[c]; char buf[64];
                 if(col->t==T_IVEC) snprintf(buf,64,"%lld",(long long)col->J[r]);
                 else if(col->t==T_FVEC) snprintf(buf,64,"%g",col->F[r]);
+                else if(col->t==T_CVEC) snprintf(buf,64,"0x%02x",col->B[r]);
+                else if(col->t==T_BVEC) snprintf(buf,64,col->B[r]?"True":"False");
                 else if(col->t==T_LIST) {
                     V *el=col->L[r];
                     if(el) {
@@ -1024,7 +1076,7 @@ static Token make_tok(int type) { Token t = {0}; t.type = type; return t; }
 static void lex_note_token(Lexer *l, Token t) {
     switch (t.type) {
     case T_INT_: case T_FLOAT_: case T_STR_: case T_FSTR_: case T_DATETIME_:
-    case T_TRUE_: case T_FALSE_: case T_NONE_: case T_NAME_:
+    case T_TRUE_: case T_FALSE_: case T_NONE_: case T_NAME_: case T_CHARZ_:
     case T_RPAREN_: case T_RBRACKET_: case T_RBRACE_:
         l->noun_pos = 1;
         break;
@@ -1165,6 +1217,16 @@ static Token lex_raw(Lexer *l) {
         l->pos = p;
         return t;
     }
+    if(c=='0' && p+1<l->len && (s[p+1]=='x'||s[p+1]=='X')) {
+        Token t = {T_CHARZ_}; int qi = 0; t.sval[qi++]=s[p++]; t.sval[qi++]=s[p++];
+        while(p< l->len && ((s[p] >= '0' && s[p] <= '9') || (s[p] >= 'a' && s[p] <= 'f') || (s[p] >= 'A' && s[p] <= 'F'))) {
+            t.sval[qi++]=s[p++];
+        }
+        if(qi&1)t.sval[qi++] = '0';
+        t.sval[qi] = 0;
+        l->pos = p;
+        return t;
+    }
     if(c == '"' || c == '\'') {
         Token t = {T_STR_}; int qi = 0;
         char q = c; p++;
@@ -1211,15 +1273,9 @@ static Token lex_raw(Lexer *l) {
             c = s[p];
         }
         if (isdigit((unsigned char)c) || (c == '.' && p + 1 < l->len && isdigit((unsigned char)s[p + 1]))) {
-        Token t = {T_INT_};
-        size_t start = p;
-        int is_float = 0;
-        if(c=='0' && p+1<l->len && (s[p+1]=='x'||s[p+1]=='X')) {
-            p += 2;
-            W(p<l->len && isxdigit(s[p]),p++)
-            t.ival = strtoll(s+start, NULL, 16);
-            if (neg_lit) t.ival = -t.ival;
-        } else {
+            Token t = {T_INT_};
+            size_t start = p;
+            int is_float = 0;
             W(p<l->len && (isdigit(s[p])||s[p]=='_'),p++)
             if(p<l->len && s[p]=='.') { is_float=1; p++; W(p<l->len && isdigit(s[p]),p++) }
             if(p<l->len && (s[p]=='e'||s[p]=='E')) {
@@ -1235,11 +1291,10 @@ static Token lex_raw(Lexer *l) {
                 t.ival = strtoll(s+start, NULL, 10);
                 if (neg_lit) t.ival = -t.ival;
             }
+            l->pos = p;
+            return t;
         }
-        l->pos = p;
-        return t;
-        }
-    }
+    };
     if(is_id_start(c)) {
         if((c=='f'||c=='F') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
             l->pos = p+1;
@@ -1386,7 +1441,7 @@ static Node *parse_join(Lexer *l, Node *left);
 static Node *parse_atom(Lexer *l);
 
 static int is_jux_arg_token(int tt) {
-    return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_
+    return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_ || tt == T_CHARZ_
         || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_;
 }
 
@@ -1423,6 +1478,8 @@ static Node *parse_atom(Lexer *l) {
         n = node_new(N_DATETIME); n->ival = t.ival; return n;
     case T_FLOAT_:
         n = node_new(N_FLOAT); n->fval = t.fval; return n;
+    case T_CHARZ_:
+        n = node_new(N_CHARS); n->ival = strlen(t.sval); n->sval = strdup(t.sval); return n;
     case T_STR_:
         n = node_new(N_STR); n->sval = strdup(t.sval); return n;
     case T_FSTR_:
@@ -1556,6 +1613,7 @@ static Node *parse_postfix(Lexer *l) {
             n = vec;
         }
     }
+
     for(;;) {
         Token pk = lex_peek(l);
         if(pk.type == T_LPAREN_) {
@@ -2346,6 +2404,7 @@ static void node_sprint_rec(Node *n, FILE *fp) {
     case N_INT: fprintf(fp, "%lld", (long long)n->ival); return;
     case N_FLOAT: fprintf(fp, "%g", n->fval); return;
     case N_STR: fprintf(fp, "\"%s\"", n->sval ? n->sval : ""); return;
+    case N_CHARS: fprintf(fp, "%s", n->sval ? n->sval : "0x"); return;
     case N_BOOL: fputs(n->ival ? "True" : "False", fp); return;
     case N_NONE: fputs("None", fp); return;
     case N_NAME: fprintf(fp, "`%s", n->sval ? n->sval : ""); return;
@@ -2398,10 +2457,11 @@ static int is_truthy(V *v) {
     case T_NIL:  return 0;
     case T_BOOL: return v->b;
     case T_INT:  return v->j != 0;
+    case T_CHAR:  return v->j != 0;
     case T_FLOAT:return v->f != 0.0;
     case T_STR:  return v->s[0] != 0;
-    case T_IVEC: case T_FVEC: case T_BVEC: case T_LIST: return v->n > 0;
-    case T_IMAT: case T_FMAT: case T_BMAT: return v->n > 0 && mat_cols(v) > 0;
+    case T_IVEC: case T_FVEC: case T_BVEC: case T_CVEC: case T_LIST: return v->n > 0;
+    case T_IMAT: case T_FMAT: case T_BMAT: case T_CMAT: return v->n > 0 && mat_cols(v) > 0;
     case T_DATETIME: return v->j != 0;
     case T_DATE: return v->j != 0;
     case T_TIME: return v->j != 0;
@@ -2411,6 +2471,7 @@ static int is_truthy(V *v) {
 }
 static int v_elem_truthy(V *v, int64_t i) {
     switch (v->t) {
+    case T_CVEC:
     case T_BVEC: return v->B[i] != 0;
     case T_IVEC: return v->J[i] != 0;
     case T_FVEC: return v->F[i] != 0.0;
@@ -2422,8 +2483,8 @@ static int v_elem_truthy(V *v, int64_t i) {
  * other operand wholesale, so `mask_a and mask_b` must be combined per element
  * here instead — otherwise SQL `where A and B` silently ignores A. */
 static V *vec_logic(V *a, V *b, int is_and) {
-    int av = (a->t == T_BVEC || a->t == T_IVEC || a->t == T_FVEC);
-    int bv = (b->t == T_BVEC || b->t == T_IVEC || b->t == T_FVEC);
+    int av = (a->t == T_BVEC || a->t == T_IVEC || a->t == T_FVEC || b->t == T_CVEC);
+    int bv = (b->t == T_BVEC || b->t == T_IVEC || b->t == T_FVEC || b->t == T_CVEC);
     if (av && bv && a->n != b->n) return v_err("and/or: vector length mismatch");
     int64_t n = av ? a->n : b->n;
     V *r = v_bvec(n);
@@ -2438,7 +2499,8 @@ static V *vec_logic(V *a, V *b, int is_and) {
 }
 static double to_float(V *v) {
     P(!v,0)
-    P(v->t==T_INT,(double)v->j)
+    P(v->t==T_INT, (double)v->j)
+    P(v->t==T_CHAR,(double)v->j)
     P(v->t==T_FLOAT,v->f)
     P(v->t==T_BOOL,(double)v->b)
     return 0;
@@ -2447,6 +2509,8 @@ static V *mat_binop(V *a, V *b, int op) {
     if (!is_mat_t(a->t) && !is_mat_t(b->t)) return NULL;
     if (a->t == T_BMAT || b->t == T_BMAT)
         return v_err("arithmetic not supported on matrix[bool]");
+    if (a->t == T_CMAT || b->t == T_CMAT)
+        return v_err("arithmetic not supported on matrix[char]");
     if (is_mat_t(a->t) && (b->t == T_INT || b->t == T_FLOAT)) {
         int64_t rows = a->n, cols = mat_cols(a), ne = rows * cols;
         int out_t = (a->t == T_FMAT || b->t == T_FLOAT) ? T_FMAT : T_IMAT;
@@ -2566,6 +2630,31 @@ static V *vec_binop(V *a, V *b, int op) {
         }
         return r;
     }
+    if (a->t == T_CVEC && b->t == T_CVEC && op != OP_DIV && op != OP_POW) {
+        int64_t n = a->n < b->n ? a->n : b->n;
+        V *r = v_cvec(n);
+        const unsigned char *ac = a->B, *bc = b->B;
+        unsigned char *rc = r->B;
+        switch (op) {
+        case OP_ADD:
+            for (int64_t i = 0; i < n; i++) rc[i] = ac[i] + bc[i];
+            break;
+        case OP_SUB:
+            for (int64_t i = 0; i < n; i++) rc[i] = ac[i] - bc[i];
+            break;
+        case OP_MUL:
+            for (int64_t i = 0; i < n; i++) rc[i] = ac[i] * bc[i];
+            break;
+        case OP_FLOORDIV:
+            for (int64_t i = 0; i < n; i++) rc[i] = bc[i] ? ac[i] / bc[i] : 0;
+            break;
+        case OP_MOD:
+            for (int64_t i = 0; i < n; i++) rc[i] = bc[i] ? ac[i] % bc[i] : 0;
+            break;
+        default: break;
+        }
+        return r;
+    }
     if (a->t == T_IVEC && b->t == T_INT && op != OP_DIV && op != OP_POW) {
         int64_t n = a->n, y = b->j;
         V *r = v_ivec(n);
@@ -2586,6 +2675,31 @@ static V *vec_binop(V *a, V *b, int op) {
             break;
         case OP_MOD:
             for (int64_t i = 0; i < n; i++) rj[i] = y ? aj[i] % y : 0;
+            break;
+        default: break;
+        }
+        return r;
+    }
+    if (a->t == T_CVEC && b->t == T_INT && op != OP_DIV && op != OP_POW) {
+        int64_t n = a->n, y = b->j;
+        V *r = v_cvec(n);
+        const unsigned char *ac = a->B;
+        unsigned char *rc = r->B;
+        switch (op) {
+        case OP_ADD:
+            for (int64_t i = 0; i < n; i++) rc[i] = ac[i] + y;
+            break;
+        case OP_SUB:
+            for (int64_t i = 0; i < n; i++) rc[i] = ac[i] - y;
+            break;
+        case OP_MUL:
+            for (int64_t i = 0; i < n; i++) rc[i] = ac[i] * y;
+            break;
+        case OP_FLOORDIV:
+            for (int64_t i = 0; i < n; i++) rc[i] = y ? ac[i] / y : 0;
+            break;
+        case OP_MOD:
+            for (int64_t i = 0; i < n; i++) rc[i] = y ? ac[i] % y : 0;
             break;
         default: break;
         }
@@ -2616,8 +2730,33 @@ static V *vec_binop(V *a, V *b, int op) {
         }
         return r;
     }
-    if((a->t==T_INT||a->t==T_FLOAT) && (b->t==T_INT||b->t==T_FLOAT)) {
-        int use_int = (a->t==T_INT && b->t==T_INT && op!=OP_DIV && op!=OP_POW);
+    if (a->t == T_INT && b->t == T_CVEC && op != OP_DIV && op != OP_POW) {
+        int64_t n = b->n, x = a->j;
+        V *r = v_cvec(n);
+        const unsigned char *bc = b->B;
+        unsigned char *rc = r->B;
+        switch (op) {
+        case OP_ADD:
+            for (int64_t i = 0; i < n; i++) rc[i] = x + bc[i];
+            break;
+        case OP_SUB:
+            for (int64_t i = 0; i < n; i++) rc[i] = x - bc[i];
+            break;
+        case OP_MUL:
+            for (int64_t i = 0; i < n; i++) rc[i] = x * bc[i];
+            break;
+        case OP_FLOORDIV:
+            for (int64_t i = 0; i < n; i++) rc[i] = bc[i] ? x / bc[i] : 0;
+            break;
+        case OP_MOD:
+            for (int64_t i = 0; i < n; i++) rc[i] = bc[i] ? x % bc[i] : 0;
+            break;
+        default: break;
+        }
+        return r;
+    }
+    if((a->t==T_INT||a->t==T_FLOAT||a->t==T_CHAR) && (b->t==T_INT||b->t==T_CHAR||b->t==T_FLOAT)) {
+        int use_int = (a->t!=T_FLOAT && b->t!=T_FLOAT && op!=OP_DIV && op!=OP_POW);
         if(use_int) {
             int64_t x=a->j, y=b->j;
             switch(op) {
@@ -2662,30 +2801,40 @@ static V *vec_binop(V *a, V *b, int op) {
         return v;
     }
     P(a->t==T_INT && b->t==T_STR && op==OP_MUL,vec_binop(b, a, op))
-    #define VEC_BIN(AT,BT,AJ,BJ) \
+    #define VEC_BIN(AT,BT,AJ,BJ,AC,BC) \
     if(a->t==AT && b->t==BT) { \
         int64_t n=a->n<b->n?a->n:b->n; \
         int ui=(AT==T_IVEC&&BT==T_IVEC&&op!=OP_DIV&&op!=OP_POW); \
+        int uc=(AT==T_CVEC&&BT==T_CVEC&&op!=OP_DIV&&op!=OP_POW); \
         if(ui){ V*r=v_ivec(n); for(int64_t i=0;i<n;i++){int64_t x=AJ[i],y=BJ[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
             case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break; \
             case OP_MOD:r->J[i]=y?x%y:0;break;default:break;}} return r; } \
-        V*r=v_fvec(n); for(int64_t i=0;i<n;i++){double x=AT==T_IVEC?(double)a->J[i]:a->F[i], \
-            y=BT==T_IVEC?(double)b->J[i]:b->F[i]; \
+        if(uc){ V*r=v_cvec(n); for(int64_t i=0;i<n;i++){int64_t x=AC[i],y=BC[i]; \
+            switch(op){case OP_ADD:r->B[i]=x+y;break;case OP_SUB:r->B[i]=x-y;break; \
+            case OP_MUL:r->B[i]=x*y;break;case OP_FLOORDIV:r->B[i]=y?x/y:0;break; \
+            case OP_MOD:r->B[i]=y?x%y:0;break;default:break;}} return r; } \
+        V*r=v_fvec(n); for(int64_t i=0;i<n;i++){double x=AT==T_IVEC?(double)a->J[i]:AT==T_CVEC?(double)a->B[i]:a->F[i], \
+            y=BT==T_IVEC?(double)b->J[i]:BT==T_CVEC?(double)b->B[i]:b->F[i]; \
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break; \
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:r->F[i]=y!=0?x/y:0;break; \
             case OP_FLOORDIV:r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:r->F[i]=y!=0?fmod(x,y):0;break; \
             case OP_POW:r->F[i]=pow(x,y);break;default:break;}} return r; }
-    if((a->t==T_IVEC||a->t==T_FVEC) && (b->t==T_IVEC||b->t==T_FVEC)) {
-        VEC_BIN(a->t, b->t, a->J, b->J)
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC)) {
+        VEC_BIN(a->t, b->t, a->J, b->J,a->B,b->B)
     }
-    if((a->t==T_INT||a->t==T_FLOAT) && (b->t==T_IVEC||b->t==T_FVEC)) {
+    if((a->t==T_INT||a->t==T_FLOAT||a->t==T_CHAR) && (b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC)) {
         int64_t n=b->n;
         int ui=(a->t==T_INT&&b->t==T_IVEC&&op!=OP_DIV&&op!=OP_POW);
-        if(ui){ V*r=v_ivec(n); int64_t x=a->j; for(int64_t i=0;i<n;i++){int64_t y=b->J[i]; \
-            switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
-            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break; \
+        int uc=((a->t==T_CHAR||a->t==T_CHAR)&&b->t==T_CVEC&&op!=OP_DIV&&op!=OP_POW);
+        if(ui){ V*r=v_ivec(n); int64_t x=a->j; for(int64_t i=0;i<n;i++){int64_t y=b->J[i];
+            switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break;
+            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break;
             case OP_MOD:r->J[i]=y?x%y:0;break;default:break;}} return r; }
+        if(uc){ V*r=v_cvec(n); int64_t x=a->j; for(int64_t i=0;i<n;i++){int64_t y=b->B[i];
+            switch(op){case OP_ADD:r->B[i]=x+y;break;case OP_SUB:r->B[i]=x-y;break;
+            case OP_MUL:r->B[i]=x*y;break;case OP_FLOORDIV:r->B[i]=y?x/y:0;break;
+            case OP_MOD:r->B[i]=y?x%y:0;break;default:break;}} return r; }
         V*r=v_fvec(n); double x=to_float(a);
         for(int64_t i=0;i<n;i++){double y=b->t==T_IVEC?(double)b->J[i]:b->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
@@ -2693,13 +2842,18 @@ static V *vec_binop(V *a, V *b, int op) {
             case OP_FLOORDIV:r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:r->F[i]=y!=0?fmod(x,y):0;break;
             case OP_POW:r->F[i]=pow(x,y);break;default:break;}} return r;
     }
-    if((a->t==T_IVEC||a->t==T_FVEC) && (b->t==T_INT||b->t==T_FLOAT)) {
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_CHAR)) {
         int64_t n=a->n;
         int ui=(a->t==T_IVEC&&b->t==T_INT&&op!=OP_DIV&&op!=OP_POW);
+        int uc=(a->t==T_CVEC&&(b->t==T_CHAR||b->t==T_INT)&&op!=OP_DIV&&op!=OP_POW);
         if(ui){ V*r=v_ivec(n); int64_t y=b->j; for(int64_t i=0;i<n;i++){int64_t x=a->J[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
             case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break; \
             case OP_MOD:r->J[i]=y?x%y:0;break;default:break;}} return r; }
+        if(uc){ V*r=v_cvec(n); int64_t y=b->j; for(int64_t i=0;i<n;i++){int64_t x=a->B[i]; \
+            switch(op){case OP_ADD:r->B[i]=x+y;break;case OP_SUB:r->B[i]=x-y;break; \
+            case OP_MUL:r->B[i]=x*y;break;case OP_FLOORDIV:r->B[i]=y?x/y:0;break; \
+            case OP_MOD:r->B[i]=y?x%y:0;break;default:break;}} return r; }
         V*r=v_fvec(n); double y=to_float(b);
         for(int64_t i=0;i<n;i++){double x=a->t==T_IVEC?(double)a->J[i]:a->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
@@ -2717,7 +2871,7 @@ static V *vec_binop(V *a, V *b, int op) {
     #undef VEC_BIN
 }
 V *vec_cmp(V *a, V *b, int op) {
-    if((a->t==T_INT||a->t==T_FLOAT||a->t==T_BOOL) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_BOOL)) {
+    if((a->t==T_INT||a->t==T_FLOAT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_BOOL||b->t==T_CHAR)) {
         double x = a->t==T_BOOL?(double)a->b:to_float(a);
         double y = b->t==T_BOOL?(double)b->b:to_float(b);
         int r;
@@ -2789,6 +2943,24 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return r;
     }
+    if (a->t == T_CVEC && (b->t == T_CHAR || b->t == T_INT)) {
+        int64_t n = a->n, y = b->j;
+        V *r = v_bvec(n);
+        const unsigned char *ac = a->B;
+        for (int64_t i = 0; i < n; i++) {
+            int64_t x = ac[i];
+            switch (op) {
+            case OP_EQ: r->B[i] = (x == y); break;
+            case OP_NE: r->B[i] = (x != y); break;
+            case OP_LT: r->B[i] = (x < y); break;
+            case OP_GT: r->B[i] = (x > y); break;
+            case OP_LE: r->B[i] = (x <= y); break;
+            case OP_GE: r->B[i] = (x >= y); break;
+            default: break;
+            }
+        }
+        return r;
+    }
     if (a->t == T_INT && b->t == T_IVEC) {
         int64_t n = b->n, x = a->j;
         V *r = v_bvec(n);
@@ -2807,10 +2979,28 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return r;
     }
-    if((a->t==T_IVEC||a->t==T_FVEC) && (b->t==T_INT||b->t==T_FLOAT)) {
+    if ((a->t == T_INT || a->t == T_CHAR) && b->t == T_CVEC) {
+        int64_t n = b->n, x = a->j;
+        V *r = v_bvec(n);
+        const unsigned char *bc = b->B;
+        for (int64_t i = 0; i < n; i++) {
+            int64_t y = bc[i];
+            switch (op) {
+            case OP_EQ: r->B[i] = (x == y); break;
+            case OP_NE: r->B[i] = (x != y); break;
+            case OP_LT: r->B[i] = (x < y); break;
+            case OP_GT: r->B[i] = (x > y); break;
+            case OP_LE: r->B[i] = (x <= y); break;
+            case OP_GE: r->B[i] = (x >= y); break;
+            default: break;
+            }
+        }
+        return r;
+    }
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_CHAR)) {
         int64_t n=a->n; V *r=v_bvec(n); double y=to_float(b);
         for(int64_t i=0;i<n;i++) {
-            double x = a->t==T_IVEC?(double)a->J[i]:a->F[i];
+            double x = a->t==T_IVEC?(double)a->J[i]:a->t == T_CVEC?(double)a->B[i]:a->F[i];
             switch(op) {
             case OP_EQ: r->B[i]=(x==y); break; case OP_NE: r->B[i]=(x!=y); break;
             case OP_LT: r->B[i]=(x<y); break;  case OP_GT: r->B[i]=(x>y); break;
@@ -2820,10 +3010,10 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return r;
     }
-    if((a->t==T_INT||a->t==T_FLOAT) && (b->t==T_IVEC||b->t==T_FVEC)) {
+    if((a->t==T_INT||a->t==T_FLOAT||a->t == T_CHAR) && (b->t==T_IVEC||b->t==T_FVEC||b->t == T_CVEC)) {
         int64_t n=b->n; V *r=v_bvec(n); double x=to_float(a);
         for(int64_t i=0;i<n;i++) {
-            double y = b->t==T_IVEC?(double)b->J[i]:b->F[i];
+            double y = b->t==T_IVEC?(double)b->J[i]:b->t==T_CVEC?(double)b->B[i]:b->F[i];
             switch(op) {
             case OP_EQ: r->B[i]=(x==y); break; case OP_NE: r->B[i]=(x!=y); break;
             case OP_LT: r->B[i]=(x<y); break;  case OP_GT: r->B[i]=(x>y); break;
@@ -2833,21 +3023,22 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return r;
     }
-    if((a->t==T_IVEC||a->t==T_FVEC) && (b->t==T_IVEC||b->t==T_FVEC) && (op==OP_EQ||op==OP_NE)) {
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC) && (op==OP_EQ||op==OP_NE)) {
         P(a->n != b->n,v_bool(op==OP_NE))
         for(int64_t i=0;i<a->n;i++) {
-            double x = a->t==T_IVEC?(double)a->J[i]:a->F[i];
-            double y = b->t==T_IVEC?(double)b->J[i]:b->F[i];
+            double x = a->t==T_IVEC?(double)a->J[i]:T_CVEC?(double)a->B[i]:a->F[i];
+            double y = b->t==T_IVEC?(double)b->J[i]:T_CVEC?(double)b->B[i]:b->F[i];
             P(x != y,v_bool(op==OP_NE))
         }
         return v_bool(op==OP_EQ);
     }
-    if(a->t==T_LIST && (b->t==T_LIST||b->t==T_IVEC||b->t==T_FVEC) && (op==OP_EQ||op==OP_NE)) {
+    if(a->t==T_LIST && (b->t==T_LIST||b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC) && (op==OP_EQ||op==OP_NE)) {
         P(a->n != b->n,v_bool(op==OP_NE))
         for(int64_t i=0;i<a->n;i++) {
             V *belem;
             if(b->t==T_LIST) belem = b->L[i];
             else if(b->t==T_IVEC) belem = v_int(b->J[i]);
+            else if(b->t==T_CVEC) belem = v_char(b->B[i]);
             else belem = v_float(b->F[i]);
             V *c = vec_cmp(a->L[i], belem, OP_EQ);
             int eq = c->t==T_BOOL && c->b;
@@ -2856,7 +3047,7 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return v_bool(op==OP_EQ);
     }
-    if((a->t==T_IVEC||a->t==T_FVEC) && b->t==T_LIST && (op==OP_EQ||op==OP_NE)) {
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && b->t==T_LIST && (op==OP_EQ||op==OP_NE)) {
         return vec_cmp(b, a, op);
     }
     if(a->t==T_LIST && b->t==T_STR) {
@@ -2900,7 +3091,7 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return v_bool(op==OP_EQ);
     }
-    if (is_mat_t(a->t) && (b->t == T_INT || b->t == T_FLOAT || b->t == T_BOOL)) {
+    if (is_mat_t(a->t) && (b->t == T_INT || b->t == T_FLOAT || b->t == T_BOOL || b->t == T_CHAR)) {
         int64_t ne = a->n * mat_cols(a);
         V *r = v_bmat(a->n, mat_cols(a));
         double y = b->t == T_BOOL ? (double)b->b : to_float(b);
@@ -2926,14 +3117,14 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return r;
     }
-    if ((a->t == T_INT || a->t == T_FLOAT || a->t == T_BOOL) && is_mat_t(b->t))
+    if ((a->t == T_INT || a->t == T_FLOAT || a->t == T_BOOL || a->t == T_CHAR) && is_mat_t(b->t))
         return vec_cmp(b, a, op);
     if (is_mat_t(a->t) && is_mat_t(b->t) && (op == OP_EQ || op == OP_NE)) {
         P(a->n != b->n || mat_cols(a) != mat_cols(b), v_bool(op == OP_NE))
         int64_t ne = a->n * mat_cols(a);
         for (int64_t i = 0; i < ne; i++) {
-            double x = a->t == T_IMAT ? (double)a->J[i] : (a->t == T_FMAT ? a->F[i] : (double)a->B[i]);
-            double y = b->t == T_IMAT ? (double)b->J[i] : (b->t == T_FMAT ? b->F[i] : (double)b->B[i]);
+            double x = a->t == T_IMAT ? (double)a->J[i] : a->t == T_CMAT ? (double)a->B[i] : (a->t == T_FMAT ? a->F[i] : (double)a->B[i]);
+            double y = b->t == T_IMAT ? (double)b->J[i] : a->t == T_CMAT ? (double)a->B[i] : (b->t == T_FMAT ? b->F[i] : (double)b->B[i]);
             P(x != y, v_bool(op == OP_NE))
         }
         return v_bool(op == OP_EQ);
@@ -2947,8 +3138,8 @@ V *vec_cmp(V *a, V *b, int op) {
             mat_imat_cmp_bmat_mm(r->B, a->J, b->J, ne, op);
         else {
             for (int64_t i = 0; i < ne; i++) {
-                double x = a->t == T_IMAT ? (double)a->J[i] : (a->t == T_FMAT ? a->F[i] : (double)a->B[i]);
-                double y = b->t == T_IMAT ? (double)b->J[i] : (b->t == T_FMAT ? b->F[i] : (double)b->B[i]);
+                double x = a->t == T_IMAT ? (double)a->J[i] : a->t == T_CMAT ? (double)a->B[i] : (a->t == T_FMAT ? a->F[i] : (double)a->B[i]);
+                double y = b->t == T_IMAT ? (double)b->J[i] : b->t == T_CMAT ? (double)b->B[i] : (b->t == T_FMAT ? b->F[i] : (double)b->B[i]);
                 int cmp = 0;
                 switch (op) {
                 case OP_EQ: cmp = (x == y); break;
@@ -2978,6 +3169,10 @@ static V *table_filter(V *tbl, V *mask) {
             V *nc2 = v_ivec(count); int64_t j=0;
             for(int64_t i=0;i<nr&&i<mask->n;i++) if(mask->B[i]) nc2->J[j++]=col->J[i];
             new_data->L[c] = nc2;
+        } else if(col->t == T_CVEC) {
+            V *nc2 = v_cvec(count); int64_t j=0;
+            for(int64_t i=0;i<nr&&i<mask->n;i++) if(mask->B[i]) nc2->B[j++]=col->B[i];
+            new_data->L[c] = nc2;
         } else if(col->t == T_FVEC) {
             V *nc2 = v_fvec(count); int64_t j=0;
             for(int64_t i=0;i<nr&&i<mask->n;i++) if(mask->B[i]) nc2->F[j++]=col->F[i];
@@ -2986,7 +3181,7 @@ static V *table_filter(V *tbl, V *mask) {
             V *nc2 = v_list(count); int64_t j=0;
             for(int64_t i=0;i<nr&&i<mask->n;i++) if(mask->B[i]) nc2->L[j++]=v_ref(col->L[i]);
             new_data->L[c] = nc2;
-        } else if(col->t == T_IMAT || col->t == T_FMAT || col->t == T_BMAT) {
+        } else if(col->t == T_IMAT || col->t == T_FMAT || col->t == T_BMAT || col->t == T_CMAT) {
             int64_t cols = mat_cols(col);
             if(col->t == T_IMAT) {
                 V *nc2 = v_imat(count, cols);
@@ -2995,6 +3190,10 @@ static V *table_filter(V *tbl, V *mask) {
             } else if(col->t == T_FMAT) {
                 V *nc2 = v_fmat(count, cols);
                 mat_filter_fmat_rows(nc2->F, col->F, mask->B, nr, cols);
+                new_data->L[c] = nc2;
+            } else if(col->t == T_CMAT) {
+                V *nc2 = v_cmat(count, cols);
+                mat_filter_bmat_rows(nc2->B, col->B, mask->B, nr, cols);
                 new_data->L[c] = nc2;
             } else {
                 V *nc2 = v_bmat(count, cols);
@@ -3010,7 +3209,7 @@ static V *table_filter(V *tbl, V *mask) {
 static V *eval_slice(V *obj, V *start_v, V *stop_v, V *step_v) {
     int64_t len = 0;
     if(obj->t==T_STR) len = strlen(obj->s);
-    else if(obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_LIST) len = obj->n;
+    else if(obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_LIST||obj->t==T_CVEC) len = obj->n;
     else if(is_mat_t(obj->t)) len = obj->n;
     else return v_err("object is not sliceable");
     int64_t step  = step_v->t==T_NIL  ? 1 : step_v->j;
@@ -3040,6 +3239,12 @@ static V *eval_slice(V *obj, V *start_v, V *stop_v, V *step_v) {
         else { for(int64_t i=start;i>stop;i+=step) r->J[j++]=obj->J[i]; }
         return r;
     }
+    if(obj->t==T_CVEC) {
+        V *r=v_cvec(count); int64_t j=0;
+        if(step>0) { for(int64_t i=start;i<stop;i+=step) r->B[j++]=obj->J[i]; }
+        else { for(int64_t i=start;i>stop;i+=step) r->B[j++]=obj->J[i]; }
+        return r;
+    }
     if(obj->t==T_FVEC) {
         V *r=v_fvec(count); int64_t j=0;
         if(step>0) { for(int64_t i=start;i<stop;i+=step) r->F[j++]=obj->F[i]; }
@@ -3054,7 +3259,7 @@ static V *eval_slice(V *obj, V *start_v, V *stop_v, V *step_v) {
     }
     if(is_mat_t(obj->t)) {
         int64_t cols = mat_cols(obj);
-        V *r = obj->t == T_IMAT ? (V *)v_imat(count, cols)
+        V *r = obj->t == T_IMAT ? (V *)v_imat(count, cols) : obj->t == T_CMAT ? (V*)v_cmat(count,cols)
             : (obj->t == T_FMAT ? (V *)v_fmat(count, cols) : (V *)v_bmat(count, cols));
         int64_t j = 0;
         if (step > 0) {
@@ -3353,12 +3558,15 @@ static int shakti_sql_enabled(Env *e) {
     V *v = env_get(e, SHAKTI_SQL_FLAG);
     return v && v->t == T_BOOL && v->b;
 }
-
+static int uh(unsigned char c){return c < 'A' ? (c-'0') : c < 'a' ? (c - 'A')+10 : (c - 'f') + 10; }
 V *eval(Node *n, Env *e) {
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
     switch(n->type) {
     case N_INT:  return v_int(n->ival);
+    case N_CHARS:
+      if(n->ival == 4) return v_char((uh(n->sval[2])<<4)|uh(n->sval[3]));
+      else {V*r=v_cvec((n->ival-2)>>1);i(r->n,r->B[i]=(uh(n->sval[(i+1)<<1])<<4)|uh(n->sval[((i+1)<<1)+1]));return r;};
     case N_FLOAT:return v_float(n->fval);
     case N_STR:  return v_str(n->sval);
     case N_BOOL: return v_bool(n->ival);
@@ -3693,7 +3901,7 @@ V *eval(Node *n, Env *e) {
     case N_UNOP: {
         V *a = eval(n->ch[0], e);
         if(n->op == OP_NEG) {
-            if(a->t==T_INT)  { V *r=v_int(-a->j); v_free(a); return r; }
+            if(a->t==T_INT || a->t == T_CHAR)  { V *r=v_int(-a->j); v_free(a); return r; }
             if(a->t==T_FLOAT){ V *r=v_float(-a->f); v_free(a); return r; }
             if(a->t==T_IVEC) { V *r=v_ivec(a->n); for(int64_t i=0;i<a->n;i++) r->J[i]=-a->J[i]; v_free(a); return r; }
             if(a->t==T_FVEC) { V *r=v_fvec(a->n); for(int64_t i=0;i<a->n;i++) r->F[i]=-a->F[i]; v_free(a); return r; }
@@ -3708,12 +3916,13 @@ V *eval(Node *n, Env *e) {
         Node *target = n->ch[0];
         V *val = eval(n->ch[1], e);
         if(g_error) { v_free(val); return v_nil(); }
-        if(target->type == N_LIST && (val->t==T_LIST||val->t==T_IVEC||val->t==T_FVEC)) {
+        if(target->type == N_LIST && (val->t==T_LIST||val->t==T_IVEC||val->t==T_FVEC||val->t ==T_CVEC)) {
             for(int i=0; i<target->nch && i<val->n; i++) {
                 if(target->ch[i]->type == N_NAME) {
                     V *elem;
                     if(val->t==T_LIST) elem=val->L[i];
                     else if(val->t==T_IVEC) elem=v_int(val->J[i]);
+                    else if(val->t==T_CVEC) elem=v_char(val->B[i]);
                     else elem=v_float(val->F[i]);
                     env_set(e, target->ch[i]->sval, elem);
                     if(val->t!=T_LIST) v_free(elem);
@@ -3740,6 +3949,8 @@ V *eval(Node *n, Env *e) {
                             obj->J[mat_idx(obj, r, c)] = val->j;
                         else if (obj->t == T_FMAT && (val->t == T_FLOAT || val->t == T_INT))
                             obj->F[mat_idx(obj, r, c)] = to_float(val);
+                        else if (obj->t == T_CMAT && (val->t == T_CHAR || val->t == T_INT))
+                            obj->B[mat_idx(obj, r, c)] = (unsigned char)val->j;
                         else if (obj->t == T_BMAT && val->t == T_BOOL)
                             obj->B[mat_idx(obj, r, c)] = val->b ? 1 : 0;
                     }
@@ -3768,6 +3979,7 @@ V *eval(Node *n, Env *e) {
                 if(i >= 0 && i < obj->n) {
                     if(obj->t==T_LIST) { v_free(obj->L[i]); obj->L[i] = v_ref(val); }
                     else if(obj->t==T_IVEC && val->t==T_INT) obj->J[i] = val->j;
+                    else if(obj->t==T_CVEC && (val->t == T_CHAR|| val->t==T_INT)) obj->B[i] = val->j;
                     else if(obj->t==T_FVEC && (val->t==T_FLOAT||val->t==T_INT))
                         obj->F[i] = val->t==T_FLOAT ? val->f : (double)val->j;
                     else if(is_mat_t(obj->t) && target->nch == 2) {
@@ -3776,6 +3988,8 @@ V *eval(Node *n, Env *e) {
                             memcpy(obj->J + mat_idx(obj, i, 0), val->J, (size_t)cols * 8);
                         else if(obj->t==T_FMAT && val->t==T_FVEC && val->n==cols)
                             memcpy(obj->F + mat_idx(obj, i, 0), val->F, (size_t)cols * 8);
+                        else if(obj->t==T_CMAT && val->t==T_CVEC && val->n==cols)
+                            memcpy(obj->B + mat_idx(obj, i, 0), val->B, (size_t)cols);
                         else if(obj->t==T_BMAT && val->t==T_BVEC && val->n==cols)
                             memcpy(obj->B + mat_idx(obj, i, 0), val->B, (size_t)cols);
                     }
@@ -3867,11 +4081,12 @@ V *eval(Node *n, Env *e) {
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) next = v_mat_row(obj, j);
                 else next = v_err("index out of range");
-            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_LIST) && idx->t==T_INT) {
+            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_LIST||obj->t==T_CVEC) && idx->t==T_INT) {
                 int64_t j = idx->j;
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) {
                     if(obj->t==T_IVEC) next = v_int(obj->J[j]);
+                    else if(obj->t==T_CVEC) next = v_char(obj->J[j]);
                     else if(obj->t==T_FVEC) next = v_float(obj->F[j]);
                     else next = v_ref(obj->L[j]);
                 } else next = v_err("index out of range");
@@ -4164,6 +4379,16 @@ V *eval(Node *n, Env *e) {
         if(iter->t == T_IVEC) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_int(iter->J[i]);
+                for_set_vars(vars, item, e);
+                v_free(item); v_free(r);
+                r = eval(n->ch[2], e);
+                if(g_returning||g_error) { v_free(iter); return r; }
+                if(g_breaking) { g_breaking=0; break; }
+                if(g_continuing) { g_continuing=0; }
+            }
+        } else if(iter->t == T_CVEC) {
+            for(int64_t i=0;i<iter->n;i++) {
+                V *item = v_char(iter->B[i]);
                 for_set_vars(vars, item, e);
                 v_free(item); v_free(r);
                 r = eval(n->ch[2], e);

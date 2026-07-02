@@ -246,12 +246,12 @@ static V *bi_type(V**a,in){
 }
 static V *bi_int(V**a,in){
     P(n<1,v_int(0))V*v=a[0];
-    P(v->t==T_INT,v_int(v->j))P(v->t==T_FLOAT,v_int((int64_t)v->f))
+    P(v->t==T_INT||v->t==T_CHAR,v_int(v->j))P(v->t==T_FLOAT,v_int((int64_t)v->f))
     P(v->t==T_BOOL,v_int(v->b))P(v->t==T_STR,v_int(strtoll(v->s,NULL,0)))
     return v_err("cannot convert to int");}
 static V *bi_float(V**a,in){
     P(n<1,v_float(0))V*v=a[0];
-    P(v->t==T_FLOAT,v_float(v->f))P(v->t==T_INT,v_float((double)v->j))
+    P(v->t==T_FLOAT,v_float(v->f))P(v->t==T_INT||v->t==T_CHAR,v_float((double)v->j))
     P(v->t==T_BOOL,v_float(v->b))P(v->t==T_STR,v_float(strtod(v->s,NULL)))
     return v_err("cannot convert to float");}
 static V *bi_str(V**a,in){
@@ -260,6 +260,7 @@ static V *bi_str(V**a,in){
     char *s=v_to_str(a[0]);V*r=v_str(s);free(s);return r;}
 static V *bi_list(V**a,in){
     P(n<1,v_list(0))V*v=a[0];
+    if(v->t==T_CVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_char(v->B[i]);return r;}
     if(v->t==T_IVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_int(v->J[i]);return r;}
     if(v->t==T_FVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_float(v->F[i]);return r;}
     P(v->t==T_LIST,v_copy(v))
@@ -268,16 +269,22 @@ static V *bi_list(V**a,in){
     return v_err("cannot convert to list");}
 static V *bi_bool(V**a,in){
     P(n<1,v_bool(0))V*v=a[0];
-    P(v->t==T_BOOL,v_bool(v->b))P(v->t==T_INT,v_bool(v->j!=0))
+    P(v->t==T_BOOL,v_bool(v->b))P(v->t==T_INT||v->t==T_CHAR,v_bool(v->j!=0))
     P(v->t==T_FLOAT,v_bool(v->f!=0))P(v->t==T_STR,v_bool(v->s[0]!=0))
     P(v->t==T_NIL,v_bool(0))return v_bool(1);}
-static int bi_numvec(V *v) { return v->t == T_IVEC || v->t == T_FVEC || v->t == T_IMAT || v->t == T_FMAT; }
+static int bi_numvec(V *v) { return v->t == T_IVEC || v->t == T_FVEC || v->t == T_IMAT || v->t == T_FMAT || v->t == T_CVEC || v->t == T_CMAT; }
 static int64_t mat_nelem(V *v) { return v->n * mat_cols(v); }
 static V *vec_reduce_sum(V *v) {
     if (v->t == T_IMAT) {
         int64_t s = 0;
         int64_t ne = mat_nelem(v);
         for (int64_t i = 0; i < ne; i++) s += v->J[i];
+        return v_int(s);
+    }
+    if (v->t == T_CMAT) {
+        int64_t s = 0;
+        int64_t ne = mat_nelem(v);
+        for (int64_t i = 0; i < ne; i++) s += v->B[i];
         return v_int(s);
     }
     if (v->t == T_FMAT) {
@@ -289,6 +296,11 @@ static V *vec_reduce_sum(V *v) {
     if (v->t == T_IVEC) {
         int64_t s = 0;
         for (int64_t i = 0; i < v->n; i++) s += v->J[i];
+        return v_int(s);
+    }
+    if (v->t == T_CVEC) {
+        int64_t s = 0;
+        for (int64_t i = 0; i < v->n; i++) s += v->B[i];
         return v_int(s);
     }
     if (v->t == T_FVEC) {
@@ -327,6 +339,13 @@ static V *vec_reduce_min(V *v) {
         for (int64_t i = 1; i < ne; i++) if (v->J[i] < m) m = v->J[i];
         return v_int(m);
     }
+    if (v->t == T_CMAT) {
+        P(v->n == 0 || mat_cols(v) == 0,v_nil())
+        int64_t m = v->B[0];
+        int64_t ne = mat_nelem(v);
+        for (int64_t i = 1; i < ne; i++) if (v->B[i] < m) m = v->B[i];
+        return v_char(m);
+    }
     if (v->t == T_FMAT) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         double m = v->F[0];
@@ -339,6 +358,12 @@ static V *vec_reduce_min(V *v) {
         int64_t m = v->J[0];
         for (int64_t i = 1; i < v->n; i++) if (v->J[i] < m) m = v->J[i];
         return v_int(m);
+    }
+    if (v->t == T_CVEC) {
+        P(v->n == 0,v_nil())
+        int64_t m = v->B[0];
+        for (int64_t i = 1; i < v->n; i++) if (v->B[i] < m) m = v->B[i];
+        return v_char(m);
     }
     if (v->t == T_FVEC) {
         P(v->n == 0,v_nil())
@@ -367,6 +392,13 @@ static V *vec_reduce_max(V *v) {
         for (int64_t i = 1; i < ne; i++) if (v->J[i] > m) m = v->J[i];
         return v_int(m);
     }
+    if (v->t == T_CMAT) {
+        P(v->n == 0 || mat_cols(v) == 0,v_nil())
+        unsigned char m = v->B[0];
+        int64_t ne = mat_nelem(v);
+        for (int64_t i = 1; i < ne; i++) if (v->B[i] > m) m = v->J[i];
+        return v_char(m);
+    }
     if (v->t == T_FMAT) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         double m = v->F[0];
@@ -379,6 +411,12 @@ static V *vec_reduce_max(V *v) {
         int64_t m = v->J[0];
         for (int64_t i = 1; i < v->n; i++) if (v->J[i] > m) m = v->J[i];
         return v_int(m);
+    }
+    if (v->t == T_CVEC) {
+        P(v->n == 0,v_nil())
+        unsigned char m = v->B[0];
+        for (int64_t i = 1; i < v->n; i++) if (v->B[i] > m) m = v->B[i];
+        return v_char(m);
     }
     if (v->t == T_FVEC) {
         P(v->n == 0,v_nil())
@@ -542,6 +580,7 @@ static V *bi_max(V **a, in) {
 }
 static V *bi_abs(V **a, in) {
     P(n < 1,v_int(0))
+    P(a[0]->t == T_CVEC || a[0]->t == T_CMAT,a[0]);
     P(a[0]->t == T_IVEC || a[0]->t == T_IMAT,vec_unary_int(a[0], iabs64))
     P(a[0]->t == T_FVEC || a[0]->t == T_FMAT,vec_unary_double(a[0], fabs))
     V *v = a[0];
@@ -573,13 +612,16 @@ V_MAP_FUNC(tan, tan)
 #undef V_MAP_FUNC
 #undef V_SCALAR_FLOAT
 static int cmp_i64(const void*a,const void*b){int64_t x=*(int64_t*)a,y=*(int64_t*)b;return(x>y)-(x<y);}
+static int cmp_u8(const void*a,const void*b){unsigned char x=*(unsigned char*)a,y=*(unsigned char*)b;return(x>y)-(x<y);}
 static int cmp_f64(const void*a,const void*b){double x=*(double*)a,y=*(double*)b;return(x>y)-(x<y);}
 static V *bi_sort(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_copy(v);qsort(r->J,r->n,8,cmp_i64);return r;}
+    if(v->t==T_CVEC){V*r=v_copy(v);qsort(r->B,r->n,1,cmp_u8);return r;}
     if(v->t==T_FVEC){V*r=v_copy(v);qsort(r->F,r->n,8,cmp_f64);return r;}
     return v_copy(v);}
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
+    if(v->t==T_CVEC){V*r=v_cvec(v->n);for(int64_t i=0;i<v->n;i++)r->B[i]=v->B[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
     if(v->t==T_LIST){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_ref(v->L[v->n-1-i]);return r;}
     if(v->t==T_STR){int64_t sl=strlen(v->s);char*b=malloc(sl+1);for(int64_t i=0;i<sl;i++)b[i]=v->s[sl-1-i];b[sl]=0;V*r=v_str(b);free(b);return r;}
@@ -599,6 +641,7 @@ static V *bi_zip(V**a,in){
     V*r=v_list(ml);for(int64_t i=0;i<ml;i++){V*u=v_list(n);
         for(int j=0;j<n;j++){if(a[j]->t==T_IVEC)u->L[j]=v_int(a[j]->J[i]);
             else if(a[j]->t==T_FVEC)u->L[j]=v_float(a[j]->F[i]);
+            else if(a[j]->t==T_CVEC)u->L[j]=v_char(a[j]->F[i]);
             else if(a[j]->t==T_LIST)u->L[j]=v_ref(a[j]->L[i]);else u->L[j]=v_nil();}
         r->L[i]=u;}return r;}
 static V *bi_enumerate(V**a,in){
@@ -617,6 +660,7 @@ static V *bi_enumerate(V**a,in){
         V*u=v_list(2);
         u->L[0]=v_int(i);
         if(v->t==T_FVEC)u->L[1]=v_float(v->F[i]);
+        else if(v->t==T_CVEC)u->L[1]=v_char(v->B[i]);
         else if(v->t==T_LIST)u->L[1]=v_ref(v->L[i]);
         else if(v->t==T_STR){char b[2]={v->s[i],0};u->L[1]=v_str(b);}
         else u->L[1]=v_nil();
@@ -631,6 +675,7 @@ static V *bi_map(V**a,in,Env*e){
     if(fn->n==-1) {
         for(int64_t i=0;i<cnt;++i){
             V*item;if(iter->t==T_IVEC)item=v_int(iter->J[i]);else if(iter->t==T_FVEC)item=v_float(iter->F[i]);
+            else if(iter->t==T_CVEC)item=v_char(iter->B[i]);
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
             else item=v_nil();
             V*rv=builtin_call(fn->s,&item,1,NULL,NULL,0,e);
@@ -641,6 +686,7 @@ static V *bi_map(V**a,in,Env*e){
     } else {
         for(int64_t i=0;i<cnt;i++){
             V*item;if(iter->t==T_IVEC)item=v_int(iter->J[i]);else if(iter->t==T_FVEC)item=v_float(iter->F[i]);
+            else if(iter->t==T_CVEC)item=v_char(iter->B[i]);
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);v_free(item);
@@ -658,6 +704,7 @@ static V *bi_filter(V**a,in,Env*e){
         for(int64_t i=0;i<cnt;++i){
             V*item;if(iter->t==T_IVEC)item=v_int(iter->J[i]);else if(iter->t==T_FVEC)item=v_float(iter->F[i]);
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
+            else if(iter->t==T_CVEC)item=v_char(iter->B[i]);
             else item=v_nil();
             V*rv=builtin_call(fn->s,&item,1,NULL,NULL,0,e);
             if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
@@ -669,6 +716,7 @@ static V *bi_filter(V**a,in,Env*e){
         for(int64_t i=0;i<cnt;i++){
             V*item;if(iter->t==T_IVEC)item=v_int(iter->J[i]);else if(iter->t==T_FVEC)item=v_float(iter->F[i]);
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
+            else if(iter->t==T_CVEC)item=v_char(iter->B[i]);
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
             V*rv=eval(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
@@ -702,6 +750,7 @@ static V *bi_head(V**a,in){
     P(n<1,v_nil())int64_t cnt=n>=2&&a[1]->t==T_INT?a[1]->j:5;V*v=a[0];
     if(v->t==T_IVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_ivec(m);memcpy(r->J,v->J,m*8);return r;}
     if(v->t==T_FVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_fvec(m);memcpy(r->F,v->F,m*8);return r;}
+    if(v->t==T_CVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_cvec(m);memcpy(r->B,v->B,m);return r;}
     if(v->t==T_LIST){int64_t m=cnt<v->n?cnt:v->n;V*r=v_list(m);for(int64_t i=0;i<m;i++)r->L[i]=v_ref(v->L[i]);return r;}
     if(v->t==T_TABLE){int64_t m=cnt<v->n?cnt:v->n;int nc=v->keys->n;V*nd=v_list(nc);
         j(nc,{V*col=v->vals->L[j];
@@ -716,6 +765,7 @@ static V *bi_tail(V**a,in){
     int64_t start=v->n>cnt?v->n-cnt:0,m=v->n-start;
     if(v->t==T_IVEC){V*r=v_ivec(m);memcpy(r->J,v->J+start,m*8);return r;}
     if(v->t==T_FVEC){V*r=v_fvec(m);memcpy(r->F,v->F+start,m*8);return r;}
+    if(v->t==T_CVEC){V*r=v_cvec(m);memcpy(r->B,v->B+start,m);return r;}
     if(v->t==T_LIST){V*r=v_list(m);for(int64_t i=0;i<m;i++)r->L[i]=v_ref(v->L[start+i]);return r;}
     if(v->t==T_TABLE){
         int nc=v->keys->n;V*nd=v_list(nc);
@@ -740,7 +790,7 @@ static V *bi_group_sum(V**a,in){
     V*k=v_list(0),*v=v_list(0);V*res=v_dict(k,v);v_free(k);v_free(v);
     for(int64_t i=0;i<tbl->n;i++){
         const char*gs=(gc->t==T_STR)?gc->s:(gc->t==T_LIST?gc->L[i]->s:"?");
-        double gv=(sc->t==T_FVEC)?sc->F[i]:(sc->t==T_IVEC?(double)sc->J[i]:0);
+        double gv=(sc->t==T_FVEC)?sc->F[i]:sc->t==T_CVEC?(double)sc->B[i]:(sc->t==T_IVEC?(double)sc->J[i]:0);
         V*cur=v_dict_get(res,gs);
         if(!cur){V*cv=v_float(gv);v_dict_set(res,gs,cv);v_free(cv);}
         else{cur->f+=gv;}}

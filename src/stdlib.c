@@ -50,6 +50,10 @@
 #define WIN32_LEAN_AND_MEAN 1
 #endif
 #endif
+static int cmp_u8(const void *a, const void *b) {
+    unsigned char x = *(const unsigned char *)a, y = *(const unsigned char *)b;
+    return (x > y) - (x < y);
+}
 static int cmp_i64(const void *a, const void *b) {
     int64_t x = *(const int64_t *)a, y = *(const int64_t *)b;
     return (x > y) - (x < y);
@@ -66,7 +70,7 @@ extern V *g_retval;
 static int v_truthy(V *v) {
     P(!v || v->t == T_NIL,0)
     P(v->t == T_BOOL,v->b)
-    P(v->t == T_INT,v->j != 0)
+    P(v->t == T_INT||v->t == T_CHAR,v->j != 0)
     P(v->t == T_FLOAT,v->f != 0.0)
     P(v->t == T_STR,v->s[0] != 0)
     return 1;
@@ -76,27 +80,27 @@ V *bi_fread(V **a, in) {
     FILE *f = fopen(a[0]->s, "rb");
     P(!f,v_errf("read: %s", strerror(errno)))
     fseek(f, 0, SEEK_END);
-    long z = ftell(f);
+    off_t z = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (z < 0) {
         fclose(f);
         return v_err("read: size");
     }
-    char *b = malloc((size_t)z + 1);
-    if (!b) {
-        fclose(f);
-        return v_err("read: oom");
-    }
-    fread(b, 1, (size_t)z, f);
-    b[z] = 0;
+    V *r = v_cvec(z+1); r->n--;
+    fread(r->B, 1, (size_t)z, f);
+    r->B[z] = 0;
     fclose(f);
-    return v_str(b);
+    for(off_t i = 0; i < z; ++i) if(
+			/* ascii control codes */ r->B[i]<7 || (r->B[i]>=14 && r->B[i]<=26)
+			/* invalid utf8 sequences */ ||r->B[i]>=0xf5||r->B[i]==0xc0||r->B[i]==0xc1)return r;
+    r->t = T_STR;r->s = (char*)r->B;r->B=0; /* convert to string if utf8 safe */
+    return r;
 }
 V *bi_fwrite(V **a, in) {
-    P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("write(path, data)"))
+    P(n < 2 || a[0]->t != T_STR || (a[1]->t != T_STR && a[1]->t != T_CVEC),v_err("write(path, data)"))
     FILE *f = fopen(a[0]->s, "wb");
     P(!f,v_errf("write: %s", strerror(errno)))
-    size_t w = fwrite(a[1]->s, 1, strlen(a[1]->s), f);
+    size_t w = a[1]->t == T_STR ? fwrite(a[1]->s, 1, strlen(a[1]->s), f) : fwrite(a[1]->B, 1, a[1]->n, f);
     fclose(f);
     return v_int((int64_t)w);
 }
@@ -526,10 +530,12 @@ V *bi_sorted(V **a, in, V **kwn, V **kwv, int nkw, Env *e) {
     (void)nkw;
     (void)e;
     P(n < 1,v_list(0))
-    if (a[0]->t == T_IVEC || a[0]->t == T_FVEC) {
+    if (a[0]->t == T_IVEC || a[0]->t == T_FVEC || a[0]->t == T_CVEC) {
         V*x=v_copy(a[0]);
         if(x->t==T_IVEC)
             qsort(x->J, (size_t)x->n, sizeof(int64_t), cmp_i64);
+        else if(x->t==T_CVEC)
+            qsort(x->B, (size_t)x->n, sizeof(unsigned char), cmp_u8);
         else
             qsort(x->F, (size_t)x->n, sizeof(double), cmp_f64);
         return x;
@@ -577,7 +583,7 @@ V *bi_getattr(V **a, in) {
     return n > 2 ? v_ref(a[2]) : v_nil();
 }
 V *bi_chr(V **a, in) {
-    P(n < 1 || a[0]->t != T_INT,v_err("chr"))
+    P(n < 1||(a[0]->t != T_CHAR && a[0]->t != T_INT),v_err("chr"))
     char b[8];
     b[0] = (char)(a[0]->j & 255);
     b[1] = 0;
@@ -593,7 +599,7 @@ V *bi_hex(V **a, in) {
     snprintf(b, sizeof b, "%llx", (unsigned long long)a[0]->j);
     return v_str(b);
 }
-f(bi_is_listlike,x==T_LIST||x==T_IVEC||x==T_FVEC||x==T_BVEC)
+f(bi_is_listlike,x==T_LIST||x==T_IVEC||x==T_FVEC||x==T_CVEC||x==T_BVEC)
 static V *bi_list_from_column(V *col) {
     if (col->t == T_LIST)
         return v_copy(col);
@@ -601,6 +607,12 @@ static V *bi_list_from_column(V *col) {
         V *r = v_list(col->n);
         for (int64_t i = 0; i < col->n; i++)
             r->L[i] = v_int(col->J[i]);
+        return r;
+    }
+    if (col->t == T_CVEC) {
+        V *r = v_list(col->n);
+        for (int64_t i = 0; i < col->n; i++)
+            r->L[i] = v_char(col->B[i]);
         return r;
     }
     if (col->t == T_FVEC) {

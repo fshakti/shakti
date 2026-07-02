@@ -24,7 +24,7 @@ typedef struct {
 static int is_agg_kw(ss){static const char*kws[]={"count","sum","avg","min","max",0};int k;for(k=0;kws[k];k++)if(!strcmp(s,kws[k]))return 1;return 0;}
 static int tbl_col_idx(V*tbl,const g0*name){int64_t k;P(!tbl||tbl->t!=T_TABLE||!name,-1)for(k=0;k<tbl->keys->n;k++)if(!strcmp(tbl->keys->L[k]->s,name))return(int)k;return-1;}
 static inline V*tbl_col(V*tbl,int idx){return(!tbl||tbl->t!=T_TABLE||idx<0||idx>=tbl->keys->n)?NULL:tbl->vals->L[idx];}
-static inline double cell_float(V*col,int64_t row){return !col?0.:col->t==T_IVEC?row<col->n?(double)col->J[row]:0.:col->t==T_FVEC?row<col->n?col->F[row]:0.:col->t==T_BVEC?row<col->n?col->B[row]?1.:0.:0.:col->t==T_IMAT&&row<col->n?(double)col->J[mat_idx(col,row,0)]:col->t==T_FMAT&&row<col->n?col->F[mat_idx(col,row,0)]:0.;}
+static inline double cell_float(V*col,int64_t row){return !col?0.: col->t==T_CVEC?row<col->n?(double)col->B[row]:0.: col->t==T_IVEC?row<col->n?(double)col->J[row]:0.:col->t==T_FVEC?row<col->n?col->F[row]:0.:col->t==T_BVEC?row<col->n?col->B[row]?1.:0.:0.:col->t==T_CMAT&&row<col->n?(double)col->B[mat_idx(col,row,0)]:col->t==T_IMAT&&row<col->n?(double)col->J[mat_idx(col,row,0)]:col->t==T_FMAT&&row<col->n?col->F[mat_idx(col,row,0)]:0.;}
 static void cell_key(V*col,int64_t row,char*buf,size_t cap){
  if(!col||!buf||!cap)return;
  buf[0]=0;
@@ -33,6 +33,7 @@ static void cell_key(V*col,int64_t row,char*buf,size_t cap){
  else if(col->t==T_INT)snprintf(buf,cap,"%lld",(long long)col->j);
  else if(col->t==T_FLOAT)snprintf(buf,cap,"%g",col->f);
  else if(col->t==T_IVEC&&row<col->n)snprintf(buf,cap,"%lld",(long long)col->J[row]);
+ else if(col->t==T_CVEC&&row<col->n)snprintf(buf,cap,"%02x",(int)col->B[row]);
  else if(col->t==T_FVEC&&row<col->n)snprintf(buf,cap,"%g",col->F[row]);
  else if(col->t==T_IMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
  else if(col->t==T_FMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
@@ -75,6 +76,15 @@ static V*tbl_filter_mask(V*tbl,V*mask){
             const double *src = col->F;
             double *dst = nc2->F;
             j = mat_compress_f64_masked(dst, j, src, B, nr);
+            new_data->L[c] = nc2;
+        } else if (col->t == T_CVEC) {
+            V *nc2 = v_cvec(count);
+            int64_t j = 0;
+            const unsigned char *src = col->B;
+            unsigned char *dst = nc2->B;
+            for (int64_t k = 0; k < nr; k++) {
+                if (B[k]) dst[j++] = src[k];
+            }
             new_data->L[c] = nc2;
         } else if (col->t == T_BVEC) {
             V *nc2 = v_bvec(count);
@@ -212,6 +222,7 @@ static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
 static V*cell_as_v(V*col,int64_t row){
  P(!col,v_nil())
  P(col->t==T_IVEC&&row<col->n,v_int(col->J[row]))
+ P(col->t==T_CVEC&&row<col->n,v_char(col->B[row]))
  P(col->t==T_FVEC&&row<col->n,v_float(col->F[row]))
  P(col->t==T_BVEC&&row<col->n,v_bool(col->B[row]))
  P(col->t==T_IMAT&&row<col->n,v_mat_row(col,row))
@@ -531,6 +542,7 @@ static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by) {
                     if (col) {
                         int ct = col_t[sp];
                         if (ct == T_IVEC) x = (double)col->J[i];
+                        else if (ct == T_CVEC) x = col->B[i];
                         else if (ct == T_FVEC) x = col->F[i];
                         else x = cell_float(col, i);
                     }
@@ -737,12 +749,12 @@ V *table_sql_select(V *from, V *cols, V *by, V *where) {
 }
 static V *merge_update_col(V *old_col, V *new_col, V *mask) {
     int64_t n = mask->n;
-    if (new_col->t == T_INT || new_col->t == T_FLOAT || new_col->t == T_BOOL || new_col->t == T_STR) {
+    if (new_col->t == T_INT || new_col->t == T_FLOAT || new_col->t == T_BOOL || new_col->t == T_STR || new_col->t == T_CHAR) {
         if (old_col->t == T_IVEC) {
             V *out = v_copy(old_col);
             for (int64_t i = 0; i < n && i < out->n; i++) {
                 if (mask->B[i]) {
-                    out->J[i] = new_col->t == T_INT ? new_col->j :
+                    out->J[i] = new_col->t == T_INT || new_col->t == T_CHAR ? new_col->j :
                                 new_col->t == T_BOOL ? new_col->b :
                                 (int64_t)sql_to_float(new_col);
                 }
@@ -752,11 +764,23 @@ static V *merge_update_col(V *old_col, V *new_col, V *mask) {
         if (old_col->t == T_FVEC) {
             V *out = v_copy(old_col);
             double x = new_col->t == T_FLOAT ? new_col->f :
-                       new_col->t == T_INT ? (double)new_col->j :
+                       new_col->t == T_INT || new_col->t == T_CHAR ? (double)new_col->j :
                        new_col->t == T_BOOL ? (double)new_col->b : 0.0;
             for (int64_t i = 0; i < n && i < out->n; i++) {
                 if (mask->B[i]) {
                     out->F[i] = x;
+                }
+            }
+            return out;
+        }
+        if (old_col->t == T_CVEC) {
+            V *out = v_copy(old_col);
+            int64_t x = new_col->t == T_INT || new_col->t == T_CHAR ? new_col->j :
+                                new_col->t == T_BOOL ? new_col->b :
+                                (int64_t)sql_to_float(new_col);
+            for (int64_t i = 0; i < n && i < out->n; i++) {
+                if (mask->B[i]) {
+                    out->B[i] = x;
                 }
             }
             return out;
@@ -784,19 +808,11 @@ static V *merge_update_col(V *old_col, V *new_col, V *mask) {
         }
         return out;
     }
-    if ((old_col->t == T_IVEC || old_col->t == T_FVEC) && (new_col->t == T_IVEC || new_col->t == T_FVEC)) {
+    if (old_col->t == T_CVEC && new_col->t == T_CVEC) {
         V *out = v_copy(old_col);
-        if (out->t == T_IVEC) {
-            for (int64_t i = 0; i < n && i < out->n; i++) {
-                if (mask->B[i]) {
-                    out->J[i] = (int64_t)cell_float(new_col, i);
-                }
-            }
-        } else {
-            for (int64_t i = 0; i < n && i < out->n; i++) {
-                if (mask->B[i]) {
-                    out->F[i] = cell_float(new_col, i);
-                }
+        for (int64_t i = 0; i < n && i < out->n; i++) {
+            if (mask->B[i]) {
+                out->B[i] = new_col->B[i];
             }
         }
         return out;
@@ -806,6 +822,29 @@ static V *merge_update_col(V *old_col, V *new_col, V *mask) {
         for (int64_t i = 0; i < n && i < out->n; i++) {
             if (mask->B[i]) {
                 out->F[i] = new_col->F[i];
+            }
+        }
+        return out;
+    }
+    if ((old_col->t == T_IVEC || old_col->t == T_FVEC || old_col->t == T_CVEC) && (new_col->t == T_IVEC || new_col->t == T_FVEC || new_col->t == T_CVEC)) {
+        V *out = v_copy(old_col);
+        if (out->t == T_IVEC) {
+            for (int64_t i = 0; i < n && i < out->n; i++) {
+                if (mask->B[i]) {
+                    out->J[i] = (int64_t)cell_float(new_col, i);
+                }
+            }
+        } else if (out->t == T_CVEC) {
+            for (int64_t i = 0; i < n && i < out->n; i++) {
+                if (mask->B[i]) {
+                    out->B[i] = (unsigned char)(int64_t)cell_float(new_col, i);
+                }
+            }
+        } else {
+            for (int64_t i = 0; i < n && i < out->n; i++) {
+                if (mask->B[i]) {
+                    out->F[i] = cell_float(new_col, i);
+                }
             }
         }
         return out;
@@ -891,6 +930,8 @@ V *table_sql_delete(V *from, V *cols, V *where) {
             empty_data->L[c] = v_ivec(0);
         } else if (col->t == T_FVEC) {
             empty_data->L[c] = v_fvec(0);
+        } else if (col->t == T_CVEC) {
+            empty_data->L[c] = v_cvec(0);
         } else if (col->t == T_BVEC) {
             empty_data->L[c] = v_bvec(0);
         } else if (col->t == T_IMAT) {
@@ -912,9 +953,11 @@ static inline V*empty_column_like(V*sample){
     if(sample->t==T_IVEC)return v_ivec(0);
     if(sample->t==T_FVEC)return v_fvec(0);
     if(sample->t==T_BVEC)return v_bvec(0);
+    if(sample->t==T_CVEC)return v_cvec(0);
     if(sample->t==T_IMAT)return v_imat(0, mat_cols(sample));
     if(sample->t==T_FMAT)return v_fmat(0, mat_cols(sample));
     if(sample->t==T_BMAT)return v_bmat(0, mat_cols(sample));
+    if(sample->t==T_CMAT)return v_cmat(0, mat_cols(sample));
     return v_list(0);}
 static int mat_append_row(V *out, V *col, V *cell) {
     int64_t cols = mat_cols(col);
@@ -935,6 +978,15 @@ static int mat_append_row(V *out, V *col, V *cell) {
         if (cell->t == T_LIST && cell->n == cols) {
             for (int64_t j = 0; j < cols; j++)
                 out->F[mat_idx(out, col->n, j)] = cell->L[j]->t == T_INT ? (double)cell->L[j]->j : cell->L[j]->f;
+            return 1;
+        }
+    } else if (col->t == T_CMAT) {
+        if (cell->t == T_CVEC && cell->n == cols) {
+            memcpy(out->B + mat_idx(out, col->n, 0), cell->B, (size_t)cols);
+            return 1;
+        }
+        if (cell->t == T_LIST && cell->n == cols) {
+            for (int64_t j = 0; j < cols; j++) out->B[mat_idx(out, col->n, j)] = cell->L[j]->b ? 1 : 0;
             return 1;
         }
     } else if (col->t == T_BMAT) {
@@ -973,6 +1025,12 @@ static V *append_cell(V *col, V *cell) {
         out->F[col->n] = cell_float(cell, 0);
         return out;
     }
+    if (col->t == T_CVEC) {
+        V *out = v_cvec(col->n + 1);
+        memcpy(out->B, col->B, (size_t)col->n);
+        out->B[col->n] = (cell->t == T_BOOL && cell->b) || ((cell->t == T_INT || cell->t == T_CHAR) && cell->j);
+        return out;
+    }
     if (col->t == T_BVEC) {
         V *out = v_bvec(col->n + 1);
         memcpy(out->B, col->B, (size_t)col->n);
@@ -990,6 +1048,13 @@ static V *append_cell(V *col, V *cell) {
         int64_t cols = mat_cols(col);
         V *out = v_fmat(col->n + 1, cols);
         if (col->n > 0) memcpy(out->F, col->F, (size_t)col->n * cols * 8);
+        if (!mat_append_row(out, col, cell)) return col;
+        return out;
+    }
+    if (col->t == T_CMAT) {
+        int64_t cols = mat_cols(col);
+        V *out = v_cmat(col->n + 1, cols);
+        if (col->n > 0) memcpy(out->B, col->B, (size_t)col->n * cols);
         if (!mat_append_row(out, col, cell)) return col;
         return out;
     }
