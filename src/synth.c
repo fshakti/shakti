@@ -36,6 +36,8 @@
 #define SYNTH_METRO_VOICE (SYNTH_VOICES - 1)
 #define SYNTH_TONE_DEFAULT 0
 #define SYNTH_TONE_BASS 1
+#define SYNTH_TUNING_12TET 0
+#define SYNTH_TUNING_JUST 1
 #define SYNTH_PI 3.14159265358979323846
 typedef struct SynthVoice {
     int on;
@@ -150,6 +152,7 @@ typedef struct SynthState {
     int mouse_down;
     int synth_keys;
     int base_note;
+    int tuning;
     int key_down[SYNTH_MAX_KEYS];
     int pad_down[SYNTH_PADS];
     int want_maximize;
@@ -1017,6 +1020,16 @@ static int synth_pad_note(int pad) {
     P(pad<0||pad>=SYNTH_PADS,36)return map[pad];
 }
 static float note_freq(int n) {
+    if (g.tuning == SYNTH_TUNING_JUST) {
+        static const float just_ratios[12] = {
+            1.f, 16.f / 15.f, 9.f / 8.f, 6.f / 5.f, 5.f / 4.f, 4.f / 3.f,
+            45.f / 32.f, 3.f / 2.f, 8.f / 5.f, 5.f / 3.f, 9.f / 5.f, 15.f / 8.f
+        };
+        int rel = n - 69;
+        int oct = (rel >= 0) ? rel / 12 : (rel - 11) / 12;
+        int sem = ((rel % 12) + 12) % 12;
+        return 440.f * just_ratios[sem] * powf(2.f, (float)oct);
+    }
     return 440.f * powf(2.f, (n - 69) / 12.f);
 }
 static SynthVoice *synth_voice_alloc(int note, float vel) {
@@ -1751,6 +1764,27 @@ float synth_get_bpm(void) {
     P(!g.open,120.f)
     return synth_bpm();
 }
+int synth_set_tuning(const char *mode, char *err, size_t err_cap) {
+    if (!g.open || !g.alive) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_set_tuning: synth not open");
+        return -1;
+    }
+    if (!mode || !mode[0]) mode = "12tet";
+    if (!strcmp(mode, "12tet") || !strcmp(mode, "equal")) {
+        g.tuning = SYNTH_TUNING_12TET;
+        return 0;
+    }
+    if (!strcmp(mode, "just") || !strcmp(mode, "ji")) {
+        g.tuning = SYNTH_TUNING_JUST;
+        return 0;
+    }
+    if (err && err_cap) snprintf(err, err_cap, "synth_set_tuning: mode must be 12tet or just");
+    return -1;
+}
+const char *synth_get_tuning(void) {
+    P(!g.open, "12tet")
+    return g.tuning == SYNTH_TUNING_JUST ? "just" : "12tet";
+}
 int synth_set_level(float level, char *err, size_t err_cap) {
     if (!g.open || !g.alive) {
         if (err && err_cap) snprintf(err, err_cap, "synth_set_level: synth not open");
@@ -2120,6 +2154,18 @@ int synth_looper_overdub(int on, char *err, size_t err_cap) { (void)on; (void)er
 int synth_looper_rec_on(void) { return 0; }
 int synth_looper_play_on(void) { return 0; }
 int synth_looper_has_loop(void) { return 0; }
+int synth_set_tuning(const char *mode, char *err, size_t err_cap) {
+    (void)mode;
+    if (err && err_cap)
+#if defined(__linux__) && defined(SHAKTI_HAVE_SYNTH)
+        snprintf(err, err_cap,
+                 "synth: install libasound2-dev and libx11-dev, rebuild with SHAKTI_SYNTH=1");
+#else
+        snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+#endif
+    return -1;
+}
+const char *synth_get_tuning(void) { return "12tet"; }
 const char *synth_row_label(int row) {
     static const char *lbls[] = {"KICK", "SNAR", "HAT", "PERC", "BASS", "SYNTH", "SAMP", "LEAD"};
     P(row < 0 || row >= 8, "")
@@ -2252,6 +2298,18 @@ V *bi_synth_bpm(V **a, int n) {
     (void)a;
     (void)n;
     return v_float((double)synth_get_bpm());
+}
+V *bi_synth_set_tuning(V **a, int n) {
+    char err[512];
+    err[0] = 0;
+    P(n < 1 || a[0]->t != T_STR, v_err("synth_set_tuning(mode)"))
+    P(synth_set_tuning(a[0]->s, err, sizeof err) != 0, synth_err(err))
+    return v_nil();
+}
+V *bi_synth_tuning(V **a, int n) {
+    (void)a;
+    (void)n;
+    return v_str(synth_get_tuning());
 }
 V *bi_synth_set_level(V **a, int n) {
     char err[512];

@@ -13,10 +13,12 @@ export SHAKTI_LIB=$PWD/src/lib
 |--------|---------|-------------|
 | *(core)* | [`matrix.ie`](../examples/matrix.ie) | Matrices (`@`), `dot`, `sum` / `min` / `max` |
 | `import sql` | [`sql_demo.ie`](../examples/sql_demo.ie) | Select, insert, update, delete, join |
+| `import graph` | [`graph_demo.ie`](../examples/graph_demo.ie) | Knowledge graph triples, query, path |
 | `import input` | [`input_demo.ie`](../examples/input_demo.ie) | `readline` + timed event poll |
 | `import input` + `synth` | [`synth_input.ie`](../examples/synth_input.ie) | QWERTY jam with synth window |
 | `import synth` | [`synth_demo.ie`](../examples/synth_demo.ie) | Synth window + event loop |
 | `import synth` | [`synth_song.ie`](../examples/synth_song.ie) | Twinkle + drum sequencer |
+| `import synth` | [`synth_just_intonation.ie`](../examples/synth_just_intonation.ie) | Just-intonation major chord |
 | `import synth` | [`synth_bsr_sample.ie`](../examples/synth_bsr_sample.ie) | Load BSR kick into SAMP row |
 | `import talk` | [`talk_demo.ie`](../examples/talk_demo.ie) | Speech-to-text (macOS) |
 | `import ipc` | [`ipc_echo.ie`](../examples/ipc_echo.ie) | UDS echo server |
@@ -38,6 +40,7 @@ export SHAKTI_LIB=$PWD/src/lib
 | Module | Doc |
 |--------|-----|
 | `sql` | [SQL.md](SQL.md) |
+| `graph` | [GRAPH.md](GRAPH.md) |
 | `input` | [INPUT.md](INPUT.md) |
 | `synth` | [SYNTH.md](SYNTH.md) |
 | `talk` | [TALK.md](TALK.md) |

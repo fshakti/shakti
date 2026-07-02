@@ -1,0 +1,72 @@
+import rest
+import http_helpers
+
+def env_or(key, default:""):
+    v : getenv(key)
+    if v:
+        return v
+    return default
+
+def redirect_uri():
+    return env_or("GOOGLE_REDIRECT_URI", "http://localhost:3847/auth/google/callback")
+
+def client_id():
+    return env_or("GOOGLE_CLIENT_ID", "")
+
+def client_secret():
+    return env_or("GOOGLE_CLIENT_SECRET", "")
+
+def auth_url(state):
+    cid : client_id()
+    if not cid:
+        return ""
+    scope : http_helpers.urlencode("openid email profile")
+    redir : http_helpers.urlencode(redirect_uri())
+    st : http_helpers.urlencode(state)
+    return "https://accounts.google.com/o/oauth2/v2/auth?client_id=" + cid + "&redirect_uri=" + redir + "&response_type=code&scope=" + scope + "&access_type=offline&prompt=consent&state=" + st
+
+def exchange_code(code):
+    cid : client_id()
+    secret : client_secret()
+    if not cid or not secret:
+        return dict(error:"missing_google_credentials")
+    body : "code=" + http_helpers.urlencode(code) + "&client_id=" + http_helpers.urlencode(cid) + "&client_secret=" + http_helpers.urlencode(secret) + "&redirect_uri=" + http_helpers.urlencode(redirect_uri()) + "&grant_type=authorization_code"
+    resp : rest.post("https://oauth2.googleapis.com/token", body, "application/x-www-form-urlencoded")
+    if not rest.ok(resp):
+        return dict(error:"google_token_exchange_failed", status:rest.status(resp), body:rest.text(resp))
+    data : rest.json(resp)
+    return data
+
+def b64url_decode_chunk(s):
+    cmd : "python3 -c \"import base64,sys; s=sys.argv[1]; s+=('='*((4-len(s)%4)%4)); print(base64.urlsafe_b64decode(s).decode('utf-8'))\" " + http_helpers.shell_quote(s)
+    out : sh(cmd)
+    return re_sub("\\s+$", "", out)
+
+def decode_id_token(id_token):
+    parts : re_split("\\.", id_token, 3)
+    if len(parts) < 2:
+        return dict(error:"invalid_id_token")
+    payload_raw : b64url_decode_chunk(parts[1])
+    return json_loads(payload_raw)
+
+def allowed_email(email):
+    allowed : env_or("ALLOWED_GOOGLE_EMAIL", "")
+    if not allowed:
+        return 1
+    return email = allowed
+
+def profile_from_id_token(id_token):
+    payload : decode_id_token(id_token)
+    if hasattr(payload, "error"):
+        return payload
+    email : ""
+    if hasattr(payload, "email"):
+        email : payload["email"]
+    if not allowed_email(email):
+        return dict(error:"email_not_allowed", email:email)
+    return dict(
+        sub:payload["sub"],
+        email:email,
+        name:payload["name"] if hasattr(payload, "name") else email,
+        picture:payload["picture"] if hasattr(payload, "picture") else ""
+    )

@@ -1,0 +1,57 @@
+# Mock dashboard snapshot for LINKEDIN_MOCK=true
+
+def mock_snapshot():
+    views_days : []
+    imp_days : []
+    i : 0
+    while i < 30:
+        views_days.append(dict(date:"2026-06-" + str(i + 1), views:120 + i * 3))
+        imp_days.append(dict(date:"2026-06-" + str(i + 1), impressions:450 + i * 8))
+        i : i + 1
+    return dict(
+        mock:1,
+        generated_at:str(clock()),
+        personal:dict(
+            connections:504,
+            followers:1240,
+            followers_trend:[dict(date:"2026-06-01", count:1210), dict(date:"2026-06-15", count:1225), dict(date:"2026-06-30", count:1240)],
+            profile_views_aggregate:dict(
+                total:318,
+                note:"Individual profile viewers are not available via the LinkedIn API. This is an aggregate count only.",
+                trend:[dict(date:"2026-06-01", views:8), dict(date:"2026-06-15", views:12), dict(date:"2026-06-30", views:15)]
+            )
+        ),
+        organizations:[
+            dict(
+                id:"2414183",
+                urn:"urn:li:organization:2414183",
+                name:"Acme Corp",
+                followers:12400,
+                followers_trend:[dict(date:"2026-06-01", count:12200), dict(date:"2026-06-30", count:12400)],
+                page_views:views_days,
+                impressions:imp_days,
+                posts:[
+                    dict(id:"1", text:"Excited to share our Q2 update.", created_at:"2026-06-28", impressions:1240, reactions:42, comments:7),
+                    dict(id:"2", text:"We're hiring across engineering.", created_at:"2026-06-20", impressions:980, reactions:31, comments:12)
+                ]
+            ),
+            dict(
+                id:"998877",
+                urn:"urn:li:organization:998877",
+                name:"Shakti Labs",
+                followers:820,
+                followers_trend:[dict(date:"2026-06-01", count:790), dict(date:"2026-06-30", count:820)],
+                page_views:views_days,
+                impressions:imp_days,
+                posts:[
+                    dict(id:"3", text:"Introducing our interpreted runtime.", created_at:"2026-06-25", impressions:560, reactions:18, comments:4)
+                ]
+            )
+        ]
+    )
+
+def mock_mode():
+    v : getenv("LINKEDIN_MOCK")
+    if not v:
+        return 0
+    return v = "1" or v = "true" or v = "TRUE"

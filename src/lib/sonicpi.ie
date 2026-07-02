@@ -20,7 +20,13 @@ _cfg : {"host": "127.0.0.1", "port": 4560, "sender": ""}
 def _python_script():
     lib : getenv("SHAKTI_LIB")
     if lib:
-        return lib + "/osc_send.py"
+        p : path_join(lib, "osc_send.py")
+        if path_exists(p):
+            return p
+    if path_exists("src/lib/osc_send.py"):
+        return "src/lib/osc_send.py"
+    if path_exists("../src/lib/osc_send.py"):
+        return "../src/lib/osc_send.py"
     return "src/lib/osc_send.py"
 
 def _env_host():

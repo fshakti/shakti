@@ -1,0 +1,61 @@
+import mock_data
+import linkedin_oauth
+import endpoints
+
+def build_dashboard_snapshot(sub):
+    if mock_data.mock_mode():
+        return mock_data.mock_snapshot()
+    tok : linkedin_oauth.ensure_access_token(sub)
+    if hasattr(tok, "error"):
+        return dict(error:tok["error"])
+    token : tok["access_token"]
+
+    personal : dict(connections:0, followers:0, followers_trend:[], profile_views_aggregate:dict(total:0, note:"Individual profile viewers are not available via the LinkedIn API. This is an aggregate count only.", trend:[]))
+
+    conn : endpoints.connections_count(token)
+    if hasattr(conn, "connections"):
+        personal["connections"] : conn["connections"]
+
+    fol : endpoints.member_followers_lifetime(token)
+    personal["followers"] : endpoints.parse_follower_total(fol)
+
+    fol_range : endpoints.member_followers_range(token, 30)
+    if hasattr(fol_range, "elements"):
+        trend : []
+        for el in fol_range["elements"]:
+            c : el["memberFollowersCount"] if hasattr(el, "memberFollowersCount") else 0
+            trend.append(dict(date:"", count:c))
+        personal["followers_trend"] : trend
+
+    pv : endpoints.profile_views_proxy(token)
+    if hasattr(pv, "elements") and len(pv["elements"]) > 0:
+        total : 0
+        for el in pv["elements"]:
+            if hasattr(el, "count"):
+                total : total + el["count"]
+        personal["profile_views_aggregate"]["total"] : total
+
+    orgs_out : []
+    orgs : endpoints.list_organizations(token)
+    if hasattr(orgs, "elements"):
+        for el in orgs["elements"]:
+            urn : el["organization"] if hasattr(el, "organization") else ""
+            name : endpoints.extract_org_name(el)
+            oid : urn
+            m : re_match("urn:li:organization:(\\d+)", urn)
+            if m:
+                found : re_findall("urn:li:organization:(\\d+)", urn)
+                if len(found) > 0:
+                    oid : found[0]
+            followers : endpoints.parse_follower_total(endpoints.org_followers(urn, token))
+            views : endpoints.parse_page_views_series(endpoints.org_page_views(urn, token, 30))
+            imps : endpoints.parse_impressions_series(endpoints.org_share_stats(urn, token, 30))
+            posts : endpoints.parse_posts(endpoints.org_posts(urn, token, 10))
+            orgs_out.append(dict(id:oid, urn:urn, name:name, followers:followers, followers_trend:[], page_views:views, impressions:imps, posts:posts))
+
+    return dict(
+        mock:0,
+        generated_at:str(clock()),
+        personal:personal,
+        organizations:orgs_out
+    )

@@ -1,0 +1,11 @@
+import rest
+import lib.http_helpers
+
+port : 3857
+srv : rest.listen(port)
+while True:
+    conn : rest.accept(srv)
+    req : rest.read(conn)
+    pq : lib.http_helpers.split_path_query(req["path"])
+    rest.respond_json(conn, 200, pq)
+    rest.close(conn)

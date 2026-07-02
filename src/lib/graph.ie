@@ -1,0 +1,39 @@
+# graph — in-memory knowledge graph (subject–predicate–object triples)
+#
+#   import graph
+#   graph.create()
+#   graph.add("Ada", "knows", "Bob")
+#   graph.query("Ada", "knows", "*")
+
+_g : 0
+
+def create():
+    _g : graph_create()
+    return _g
+
+def use(g):
+    _g : g
+
+def add(s, p, o):
+    return graph_add(_g, s, p, o)
+
+def query(s:"*", p:"*", o:"*"):
+    return graph_query(_g, s, p, o)
+
+def neighbors(node, direction:"out"):
+    return graph_neighbors(_g, node, direction)
+
+def path(from_node, to_node, max_depth:8):
+    return graph_path(_g, from_node, to_node, max_depth)
+
+def from_table(t, subj_col, pred, obj_col):
+    return graph_from_table(_g, t, subj_col, pred, obj_col)
+
+def to_table(s:"*", p:"*", o:"*"):
+    return graph_to_table(_g, s, p, o)
+
+def count():
+    return graph_count(_g)
+
+def clear():
+    return graph_clear(_g)

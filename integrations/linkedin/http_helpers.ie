@@ -1,0 +1,62 @@
+# HTTP parsing helpers (no rest import — rest is not visible inside imported module functions)
+
+def split_path_query(path):
+    parts : re_split("\\?", path, 2)
+    p : parts[0]
+    q : ""
+    if len(parts) > 1:
+        q : parts[1]
+    return dict(path:p, query:q)
+
+def parse_query(qs):
+    out : dict()
+    if not qs:
+        return out
+    pairs : re_split("&", qs)
+    for pair in pairs:
+        kv : re_split("=", pair, 2)
+        k : kv[0]
+        v : ""
+        if len(kv) > 1:
+            v : kv[1]
+        out[k] : v
+    return out
+
+def header_get(req, name):
+    hdrs : req["headers"]
+    if not hdrs:
+        return ""
+    for k in hdrs.keys():
+        if k = name:
+            return hdrs[k]
+        if name = "Authorization" and k = "authorization":
+            return hdrs[k]
+    return ""
+
+def bearer_token(req):
+    auth : header_get(req, "Authorization")
+    if not auth:
+        return ""
+    if len(auth) >= 7 and auth[0:7] = "Bearer ":
+        return auth[7:]
+    return ""
+
+def html_redirect(url):
+    return "<!DOCTYPE html><html><head><meta http-equiv=\"refresh\" content=\"0;url=" + url + "\"></head><body>Redirecting...</body></html>"
+
+def content_type_for(path):
+    if re_match(".*\\.css$", path):
+        return "text/css; charset=utf-8"
+    if re_match(".*\\.js$", path):
+        return "application/javascript; charset=utf-8"
+    if re_match(".*\\.html$", path):
+        return "text/html; charset=utf-8"
+    return "text/plain; charset=utf-8"
+
+def urlencode(s):
+    cmd : "python3 -c \"import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))\" " + shell_quote(s)
+    out : sh(cmd)
+    return re_sub("\\s+", "", out)
+
+def shell_quote(s):
+    return "'" + re_sub("'", "'\\''", s) + "'"

@@ -1,0 +1,232 @@
+# LinkedIn analytics dashboard server
+#
+# Run from repo root:
+#   export SHAKTI_LIB=$PWD/src/lib
+#   export LINKEDIN_MOCK=true
+#   ./shakti integrations/linkedin/dashboard_server.ie
+#
+# Or:
+#   integrations/linkedin/run.sh
+
+import rest
+import http_helpers
+import token_store
+import google_auth
+import linkedin_oauth
+import mock_data
+import snapshot
+
+ROOT : "integrations/linkedin"
+DASH : ROOT + "/dashboard"
+
+def json_error(conn, status, message):
+    rest.respond_json(conn, status, dict(error:message))
+
+def redirect_response(conn, url):
+    rest.write(conn, 200, http_helpers.html_redirect(url), "text/html; charset=utf-8")
+
+def serve_file(conn, filepath, content_type):
+    if not path_exists(filepath):
+        rest.write(conn, 404, "not found", "text/plain")
+        return 0
+    rest.write(conn, 200, read(filepath), content_type)
+    return 1
+
+def server_port():
+    p : getenv("LINKEDIN_SERVER_PORT")
+    if p:
+        return int(p)
+    return 3847
+
+def session_from_request(req):
+    tok : http_helpers.bearer_token(req)
+    if not tok:
+        return 0
+    return token_store.load_session(tok)
+
+def handle_mock_google_auth(conn):
+    session_tok : token_store.new_session_token()
+    token_store.save_session(session_tok, dict(
+        sub:"mock-user",
+        email:"mock@local.dev",
+        name:"Mock User",
+        linkedin_connected:0,
+        created:clock()
+    ))
+    redirect_response(conn, "/#session=" + session_tok)
+
+def handle_google_auth(conn):
+    if mock_data.mock_mode():
+        handle_mock_google_auth(conn)
+        return
+    state : linkedin_oauth.random_hex(16)
+    token_store.write_json_file(token_store.oauth_state_path(state), dict(kind:"google", created:clock()))
+    url : google_auth.auth_url(state)
+    if not url:
+        json_error(conn, 500, "GOOGLE_CLIENT_ID not configured")
+        return
+    redirect_response(conn, url)
+
+def handle_google_callback(conn, query):
+    q : http_helpers.parse_query(query)
+    code : q["code"] if hasattr(q, "code") else ""
+    state : q["state"] if hasattr(q, "state") else ""
+    if not code:
+        json_error(conn, 400, "missing code")
+        return
+    st_path : token_store.oauth_state_path(state)
+    st : token_store.read_json_file(st_path)
+    if not st:
+        json_error(conn, 400, "invalid state")
+        return
+    tokens : google_auth.exchange_code(code)
+    if hasattr(tokens, "error"):
+        json_error(conn, 500, tokens["error"])
+        return
+    id_token : tokens["id_token"] if hasattr(tokens, "id_token") else ""
+    profile : google_auth.profile_from_id_token(id_token)
+    if hasattr(profile, "error"):
+        json_error(conn, 403, profile["error"])
+        return
+    session_tok : token_store.new_session_token()
+    token_store.save_session(session_tok, dict(
+        sub:profile["sub"],
+        email:profile["email"],
+        name:profile["name"],
+        picture:profile["picture"],
+        linkedin_connected:0,
+        created:clock()
+    ))
+    redirect_response(conn, "/#session=" + session_tok)
+
+def handle_linkedin_connect(conn, session):
+    if mock_data.mock_mode():
+        if not session:
+            handle_mock_google_auth(conn)
+            return
+        redirect_response(conn, "/")
+        return
+    if not session:
+        json_error(conn, 401, "sign in with google first")
+        return
+    state : linkedin_oauth.random_hex(16)
+    verifier : linkedin_oauth.random_hex(32)
+    token_store.write_json_file(token_store.oauth_state_path(state), dict(
+        kind:"linkedin",
+        verifier:verifier,
+        sub:session["sub"],
+        email:session["email"] if hasattr(session, "email") else "",
+        name:session["name"] if hasattr(session, "name") else "",
+        created:clock()
+    ))
+    url : linkedin_oauth.auth_url(state, verifier)
+    if not url:
+        json_error(conn, 500, "LINKEDIN_CLIENT_ID not configured")
+        return
+    redirect_response(conn, url)
+
+def handle_linkedin_callback(conn, query):
+    q : http_helpers.parse_query(query)
+    code : q["code"] if hasattr(q, "code") else ""
+    state : q["state"] if hasattr(q, "state") else ""
+    if not code:
+        json_error(conn, 400, "missing code")
+        return
+    st : token_store.read_json_file(token_store.oauth_state_path(state))
+    if not st or st["kind"] != "linkedin":
+        json_error(conn, 400, "invalid state")
+        return
+    tokens : linkedin_oauth.exchange_code(code, st["verifier"])
+    if hasattr(tokens, "error"):
+        json_error(conn, 500, tokens["error"])
+        return
+    token_store.save_linkedin_tokens(st["sub"], tokens)
+    sess_tok : token_store.new_session_token()
+    token_store.save_session(sess_tok, dict(
+        sub:st["sub"],
+        email:st["email"] if hasattr(st, "email") else "",
+        name:st["name"] if hasattr(st, "name") else "",
+        linkedin_connected:1,
+        created:clock()
+    ))
+    redirect_response(conn, "/#session=" + sess_tok)
+
+def handle_auth_status(conn, session):
+    linkedin : "not_connected"
+    if mock_data.mock_mode():
+        linkedin : "mock"
+    elif session and token_store.load_linkedin_tokens(session["sub"]):
+        linkedin : "connected"
+    google : dict(signed_in:0)
+    if session:
+        google : dict(
+            signed_in:1,
+            email:session["email"] if hasattr(session, "email") else "",
+            name:session["name"] if hasattr(session, "name") else "",
+            sub:session["sub"] if hasattr(session, "sub") else ""
+        )
+    payload : dict(google:google, linkedin:linkedin)
+    if mock_data.mock_mode():
+        payload["mock"] : 1
+        payload["google_configured"] : 0
+        if google_auth.client_id():
+            payload["google_configured"] : 1
+    rest.respond_json(conn, 200, payload)
+
+def handle_dashboard(conn, session):
+    if mock_data.mock_mode() and not session:
+        rest.respond_json(conn, 200, mock_data.mock_snapshot())
+        return
+    if not session:
+        json_error(conn, 401, "unauthorized")
+        return
+    snap : snapshot.build_dashboard_snapshot(session["sub"])
+    if hasattr(snap, "error") and snap["error"] = "linkedin_not_connected":
+        rest.respond_json(conn, 200, dict(error:"linkedin_not_connected", auth:dict(google:1, linkedin:0)))
+        return
+    rest.respond_json(conn, 200, snap)
+
+def handle_request(conn, req):
+    pq : http_helpers.split_path_query(req["path"])
+    path : pq["path"]
+    query : pq["query"]
+    method : req["method"]
+    session : session_from_request(req)
+
+    if method = "GET" and path = "/":
+        serve_file(conn, DASH + "/index.html", "text/html; charset=utf-8")
+        return
+    if method = "GET" and path[0:8] = "/static/":
+        rel : path[8:]
+        serve_file(conn, DASH + "/" + rel, http_helpers.content_type_for(rel))
+        return
+    if method = "GET" and path = "/auth/google":
+        handle_google_auth(conn)
+        return
+    if method = "GET" and path = "/auth/google/callback":
+        handle_google_callback(conn, query)
+        return
+    if method = "GET" and path = "/auth/linkedin/connect":
+        handle_linkedin_connect(conn, session)
+        return
+    if method = "GET" and path = "/auth/linkedin/callback":
+        handle_linkedin_callback(conn, query)
+        return
+    if method = "GET" and path = "/api/auth/status":
+        handle_auth_status(conn, session)
+        return
+    if method = "GET" and path = "/api/dashboard":
+        handle_dashboard(conn, session)
+        return
+    json_error(conn, 404, "not found")
+
+port : server_port()
+srv : rest.listen(port)
+print("LinkedIn dashboard listening on http://127.0.0.1:" + str(port))
+print("Set LINKEDIN_MOCK=true for sample data without API credentials.")
+
+while True:
+    conn : rest.accept(srv)
+    req : rest.read(conn)
+    handle_request(conn, req)
+    rest.close(conn)

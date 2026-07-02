@@ -1,0 +1,12 @@
+import rest
+import lib.http_helpers
+
+port : 3849
+srv : rest.listen(port)
+conn : rest.accept(srv)
+req : rest.read(conn)
+pq : lib.http_helpers.split_path_query(req["path"])
+lib.http_helpers.json_error(conn, 401, "ok")
+rest.close(conn)
+rest.close(srv)
+print("route ok")

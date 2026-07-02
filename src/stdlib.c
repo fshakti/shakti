@@ -134,7 +134,14 @@ V *bi_listdir(V **a, in) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
         if (nent >= cap) {
             cap *= 2;
-            names = realloc(names, (size_t)cap * sizeof(char*));
+            char **tmp = realloc(names, (size_t)cap * sizeof(char *));
+            if (!tmp) {
+                for (int j = 0; j < nent; j++) free(names[j]);
+                free(names);
+                closedir(d);
+                return v_err("out of memory");
+            }
+            names = tmp;
         }
         names[nent++] = strdup(e->d_name);
     }

@@ -27,14 +27,30 @@ FILE *win_open_memstream(char **ptr, size_t *sizeloc) {
 }
 void win_close_memstream(FILE *fp, char **ptr, size_t *sizeloc) {
     Pv(!fp)
+    if (ptr) *ptr = NULL;
+    if (sizeloc) *sizeloc = 0;
     long sz = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    char *buf = malloc(sz+1);
-    fread(buf, 1, sz, fp);
-    buf[sz] = '\0';
-    if(ptr) *ptr = buf;
-    if(sizeloc) *sizeloc = sz;
+    if (sz < 0) {
+        fclose(fp);
+        return;
+    }
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return;
+    }
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf) {
+        fclose(fp);
+        return;
+    }
+    size_t got = fread(buf, 1, (size_t)sz, fp);
+    buf[got] = '\0';
     fclose(fp);
+    if (ptr)
+        *ptr = buf;
+    else
+        free(buf);
+    if (sizeloc) *sizeloc = got;
 }
 #endif
 #ifdef _WIN32
@@ -2521,12 +2537,20 @@ static V *vec_binop(V *a, V *b, int op) {
         V *v = v_str(r); free(r); return v;
     }
     if(a->t==T_STR && b->t==T_INT && op==OP_MUL) {
-        int64_t n = b->j; if(n<0) n=0;
+        int64_t n = b->j;
+        if (n <= 0) return v_str("");
         size_t slen = strlen(a->s);
-        char *r = malloc(slen*n+1); r[0]=0;
-        for(int64_t i=0;i<n;i++) memcpy(r+i*slen, a->s, slen);
-        r[slen*n]=0;
-        V *v = v_str(r); free(r); return v;
+        if (slen > 0 && (uint64_t)n > (SIZE_MAX - 1) / slen)
+            return v_err("string repeat too large");
+        size_t total = slen * (size_t)n;
+        char *r = malloc(total + 1);
+        if (!r) return v_err("out of memory");
+        for (size_t i = 0; i < (size_t)n; i++)
+            memcpy(r + i * slen, a->s, slen);
+        r[total] = 0;
+        V *v = v_str(r);
+        free(r);
+        return v;
     }
     P(a->t==T_INT && b->t==T_STR && op==OP_MUL,vec_binop(b, a, op))
     #define VEC_BIN(AT,BT,AJ,BJ) \
@@ -3313,48 +3337,99 @@ V *eval(Node *n, Env *e) {
     case N_FSTRING: {
         const char *s = n->sval;
         char *result = malloc(8192);
-        int rlen = 0; result[0] = 0;
-        int i = 0, slen = strlen(s);
-        while(i < slen) {
-            if(s[i] == '{' && i+1 < slen && s[i+1] != '{') {
+        if (!result) return v_err("out of memory");
+        int rlen = 0;
+        result[0] = 0;
+        int i = 0, slen = (int)strlen(s);
+        while (i < slen) {
+            if (s[i] == '{' && i + 1 < slen && s[i + 1] != '{') {
+                char *raw = NULL, *expr = NULL, *vs = NULL;
                 i++;
                 int start = i, depth = 1;
-                while(i < slen && depth > 0) {
-                    if(s[i]=='{') depth++;
-                    else if(s[i]=='}') { depth--; if(depth==0) break; }
+                while (i < slen && depth > 0) {
+                    if (s[i] == '{') depth++;
+                    else if (s[i] == '}') {
+                        depth--;
+                        if (depth == 0) break;
+                    }
                     i++;
                 }
                 int elen = i - start;
-                char *raw = malloc(elen+1);
-                memcpy(raw, s+start, elen); raw[elen]=0;
+                raw = malloc((size_t)elen + 1);
+                if (!raw) goto fstr_oom;
+                memcpy(raw, s + start, (size_t)elen);
+                raw[elen] = 0;
                 char *fmt_spec = NULL;
-                int bd=0;
-                for(int k=elen-1;k>=0;k--){
-                    if(raw[k]==']'||raw[k]==')'||raw[k]=='}')bd++;
-                    else if(raw[k]=='['||raw[k]=='('||raw[k]=='{')bd--;
-                    else if(raw[k]==':'&&bd==0){fmt_spec=raw+k+1;raw[k]=0;break;}
+                int bd = 0;
+                for (int k = elen - 1; k >= 0; k--) {
+                    if (raw[k] == ']' || raw[k] == ')' || raw[k] == '}') bd++;
+                    else if (raw[k] == '[' || raw[k] == '(' || raw[k] == '{') bd--;
+                    else if (raw[k] == ':' && bd == 0) {
+                        fmt_spec = raw + k + 1;
+                        raw[k] = 0;
+                        break;
+                    }
                 }
-                char *expr = malloc(strlen(raw)+2);
-                sprintf(expr,"%s\n",raw);
+                expr = malloc(strlen(raw) + 2);
+                if (!expr) {
+                    free(raw);
+                    goto fstr_oom;
+                }
+                sprintf(expr, "%s\n", raw);
                 Node *ast = parse(expr);
                 V *val = eval(ast, e);
-                char *vs;
-                if(fmt_spec && *fmt_spec) {
-                    char fmt[64]; snprintf(fmt,sizeof(fmt),"%%%s",fmt_spec);
+                node_free(ast);
+                if (g_error || !val || val->t == T_ERR) {
+                    if (val) v_free(val);
+                    free(expr);
+                    free(raw);
+                    free(result);
+                    return v_nil();
+                }
+                if (fmt_spec && *fmt_spec) {
+                    char fmt[64];
+                    snprintf(fmt, sizeof fmt, "%%%s", fmt_spec);
                     char buf[256];
-                    if(val->t==T_FLOAT) snprintf(buf,sizeof(buf),fmt,val->f);
-                    else if(val->t==T_INT) snprintf(buf,sizeof(buf),fmt,(double)val->j);
-                    else { vs=v_to_str(val); snprintf(buf,sizeof(buf),"%s",vs); free(vs); }
-                    vs=strdup(buf);
-                } else vs = v_to_str(val);
-                int vslen = strlen(vs);
-                result = realloc(result, rlen+vslen+256);
-                memcpy(result+rlen, vs, vslen);
+                    if (val->t == T_FLOAT) snprintf(buf, sizeof buf, fmt, val->f);
+                    else if (val->t == T_INT) snprintf(buf, sizeof buf, fmt, (double)val->j);
+                    else {
+                        char *tmp = v_to_str(val);
+                        snprintf(buf, sizeof buf, "%s", tmp ? tmp : "");
+                        free(tmp);
+                    }
+                    vs = strdup(buf);
+                } else {
+                    vs = v_to_str(val);
+                }
+                if (!vs) {
+                    v_free(val);
+                    free(expr);
+                    free(raw);
+                    goto fstr_oom;
+                }
+                int vslen = (int)strlen(vs);
+                {
+                    char *tmp = realloc(result, (size_t)rlen + (size_t)vslen + 256);
+                    if (!tmp) {
+                        free(vs);
+                        v_free(val);
+                        free(expr);
+                        free(raw);
+                        goto fstr_oom;
+                    }
+                    result = tmp;
+                }
+                memcpy(result + rlen, vs, (size_t)vslen);
                 rlen += vslen;
-                free(vs); v_free(val); free(expr); free(raw);
-                if(i < slen) i++;
+                free(vs);
+                v_free(val);
+                free(expr);
+                free(raw);
+                if (i < slen) i++;
             } else {
-                result = realloc(result, rlen+2);
+                char *tmp = realloc(result, (size_t)rlen + 2);
+                if (!tmp) goto fstr_oom;
+                result = tmp;
                 result[rlen++] = s[i++];
             }
         }
@@ -3362,6 +3437,9 @@ V *eval(Node *n, Env *e) {
         V *r = v_str(result);
         free(result);
         return r;
+    fstr_oom:
+        free(result);
+        return v_err("out of memory");
     }
     case N_LIST: {
         int nch = n->nch;
@@ -4480,18 +4558,25 @@ static void run_repl(Env *e) {
 #if SHAKTI_HL
     atexit(hl_raw_off);
 #endif
-    char input[262144];
-    for(;;) {
+    enum { REPL_INPUT_CAP = 262144 };
+    char input[REPL_INPUT_CAP];
+    for (;;) {
 #if SHAKTI_HL
         char *line = hl_readline("> ");
 #else
         char *line = read_line("> ");
 #endif
-        if(!line) break;
-        if(strcmp(line, "quit")==0 || strcmp(line, "exit")==0) break;
-        if(line[0]==0) continue;
-        strcpy(input, line);
-        strcat(input, "\n");
+        if (!line) break;
+        if (strcmp(line, "quit") == 0 || strcmp(line, "exit") == 0) break;
+        if (line[0] == 0) continue;
+        size_t inlen = strlen(line);
+        if (inlen + 1 >= REPL_INPUT_CAP) {
+            fprintf(stderr, "REPL input too long (max %d bytes)\n", REPL_INPUT_CAP - 1);
+            continue;
+        }
+        memcpy(input, line, inlen);
+        input[inlen++] = '\n';
+        input[inlen] = 0;
         if (strcmp(line, "\\v") == 0) {
             for(int i=0; i<e->len; i++) {
                 printf("%-15s", e->names[i]);
@@ -4514,16 +4599,25 @@ static void run_repl(Env *e) {
             fprintf(stderr, "Unknown REPL command: %s (try \\d for help)\n", line);
             continue;
         }
-        while(needs_more(line)) {
+        while (needs_more(line)) {
 #if SHAKTI_HL
             line = hl_readline("| ");
 #else
             line = read_line("| ");
 #endif
-            if(!line) break;
-            if(line[0]==0) break;
-            strcat(input, line);
-            strcat(input, "\n");
+            if (!line) break;
+            if (line[0] == 0) break;
+            size_t ll = strlen(line);
+            if (inlen + ll + 1 >= REPL_INPUT_CAP) {
+                fprintf(stderr, "REPL input too long (max %d bytes)\n", REPL_INPUT_CAP - 1);
+                inlen = 0;
+                input[0] = 0;
+                break;
+            }
+            memcpy(input + inlen, line, ll);
+            inlen += ll;
+            input[inlen++] = '\n';
+            input[inlen] = 0;
         }
         Node *prog = parse(input);
         if(!prog) continue;

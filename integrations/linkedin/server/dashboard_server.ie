@@ -1,0 +1,2 @@
+# Entry shim — use integrations/linkedin/run.sh or dashboard_server.ie at parent level.
+print("Run: integrations/linkedin/run.sh")

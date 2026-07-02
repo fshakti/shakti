@@ -1,0 +1,50 @@
+import http_helpers
+
+def api_version():
+    return "202507"
+
+def check_linkedin_error(data):
+    if not type(data) = "dict":
+        return data
+    if hasattr(data, "status") and data["status"] >= 400:
+        return dict(error:"linkedin_api_error", detail:data)
+    if hasattr(data, "code") and data["code"] = "EXPIRED_ACCESS_TOKEN":
+        return dict(error:"expired_access_token", detail:data)
+    return data
+
+def linkedin_get(url, token):
+    qurl : http_helpers.shell_quote(url)
+    cmd : "curl -sS -H 'Authorization: Bearer " + token + "' -H 'X-Restli-Protocol-Version: 2.0.0' -H 'Linkedin-Version: " + api_version() + "' " + qurl
+    raw : sh(cmd)
+    if not raw:
+        return dict(error:"empty_response")
+    data : json_loads(raw)
+    if type(data) = "error":
+        return dict(error:"json_parse_failed", raw:raw)
+    return check_linkedin_error(data)
+
+def linkedin_get_v2(path, token):
+    return linkedin_get("https://api.linkedin.com/v2" + path, token)
+
+def linkedin_get_rest(path, token):
+    return linkedin_get("https://api.linkedin.com/rest" + path, token)
+
+def today_parts():
+    cmd : "date -u +%Y-%m-%d"
+    out : re_sub("\\s+", "", sh(cmd))
+    parts : re_split("-", out)
+    return dict(year:int(parts[0]), month:int(parts[1]), day:int(parts[2]))
+
+def date_range_last_days(days):
+    end : today_parts()
+    cmd : "date -u -d '" + str(end["year"]) + "-" + str(end["month"]) + "-" + str(end["day"]) + " -" + str(days) + " days' +%Y-%m-%d"
+    out : re_sub("\\s+", "", sh(cmd))
+    sp : re_split("-", out)
+    start : dict(year:int(sp[0]), month:int(sp[1]), day:int(sp[2]))
+    dr : "(start:(year:" + str(start["year"]) + ",month:" + str(start["month"]) + ",day:" + str(start["day"]) + "),end:(year:" + str(end["year"]) + ",month:" + str(end["month"]) + ",day:" + str(end["day"]) + "))"
+    return dr
+
+def ms_days_ago(days):
+    cmd : "python3 -c \"import time; print(int((time.time()-" + str(days * 86400) + ")*1000))\""
+    out : re_sub("\\s+", "", sh(cmd))
+    return int(out)

@@ -1,0 +1,74 @@
+import rest
+import http_helpers
+import token_store
+
+def env_or(key, default:""):
+    v : getenv(key)
+    if v:
+        return v
+    return default
+
+def client_id():
+    return env_or("LINKEDIN_CLIENT_ID", "")
+
+def client_secret():
+    return env_or("LINKEDIN_CLIENT_SECRET", "")
+
+def redirect_uri():
+    return env_or("LINKEDIN_REDIRECT_URI", "http://localhost:3847/auth/linkedin/callback")
+
+def scopes():
+    return "r_1st_connections_size r_member_profileAnalytics rw_organization_admin r_organization_social"
+
+def random_hex(nbytes):
+    out : sh("openssl rand -hex " + str(nbytes))
+    return re_sub("\\s+", "", out)
+
+def pkce_challenge(verifier):
+    cmd : "python3 -c \"import hashlib,base64,sys; v=sys.argv[1].encode(); d=base64.urlsafe_b64encode(hashlib.sha256(v).digest()).decode().rstrip('='); print(d)\" " + http_helpers.shell_quote(verifier)
+    out : sh(cmd)
+    return re_sub("\\s+", "", out)
+
+def auth_url(state, verifier):
+    cid : client_id()
+    if not cid:
+        return ""
+    challenge : pkce_challenge(verifier)
+    scope_enc : http_helpers.urlencode(scopes())
+    redir : http_helpers.urlencode(redirect_uri())
+    st : http_helpers.urlencode(state)
+    return "https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=" + cid + "&redirect_uri=" + redir + "&state=" + st + "&scope=" + scope_enc + "&code_challenge=" + challenge + "&code_challenge_method=S256"
+
+def exchange_code(code, verifier):
+    cid : client_id()
+    secret : client_secret()
+    if not cid or not secret:
+        return dict(error:"missing_linkedin_credentials")
+    body : "grant_type=authorization_code&code=" + http_helpers.urlencode(code) + "&redirect_uri=" + http_helpers.urlencode(redirect_uri()) + "&client_id=" + http_helpers.urlencode(cid) + "&client_secret=" + http_helpers.urlencode(secret) + "&code_verifier=" + http_helpers.urlencode(verifier)
+    resp : rest.post("https://www.linkedin.com/oauth/v2/accessToken", body, "application/x-www-form-urlencoded")
+    if not rest.ok(resp):
+        return dict(error:"linkedin_token_exchange_failed", status:rest.status(resp), body:rest.text(resp))
+    data : rest.json(resp)
+    if type(data) = "dict" and hasattr(data, "status") and data["status"] >= 400:
+        return dict(error:"linkedin_token_exchange_failed", detail:data)
+    return data
+
+def refresh_access_token(refresh_token):
+    cid : client_id()
+    secret : client_secret()
+    if not cid or not secret or not refresh_token:
+        return dict(error:"missing_refresh_inputs")
+    body : "grant_type=refresh_token&refresh_token=" + http_helpers.urlencode(refresh_token) + "&client_id=" + http_helpers.urlencode(cid) + "&client_secret=" + http_helpers.urlencode(secret)
+    resp : rest.post("https://www.linkedin.com/oauth/v2/accessToken", body, "application/x-www-form-urlencoded")
+    if not rest.ok(resp):
+        return dict(error:"linkedin_refresh_failed", status:rest.status(resp), body:rest.text(resp))
+    return rest.json(resp)
+
+def ensure_access_token(sub):
+    tokens : token_store.load_linkedin_tokens(sub)
+    if not tokens:
+        return dict(error:"linkedin_not_connected")
+    access : tokens["access_token"] if hasattr(tokens, "access_token") else ""
+    if not access:
+        return dict(error:"linkedin_not_connected")
+    return dict(access_token:access, tokens:tokens)

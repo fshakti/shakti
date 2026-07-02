@@ -59,6 +59,7 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the full index.
 |--------|------|----------------|
 | *(core)* | [`examples/matrix.ie`](examples/matrix.ie) | matrices, `@`, `dot`, reducers |
 | `sql` | [`examples/sql_demo.ie`](examples/sql_demo.ie) | in-memory table SQL |
+| `graph` | [`examples/graph_demo.ie`](examples/graph_demo.ie) | knowledge graph triples |
 | `input` | [`examples/input_demo.ie`](examples/input_demo.ie) | readline + event poll |
 | `synth` | [`examples/synth_demo.ie`](examples/synth_demo.ie) | synth window + event loop |
 | `synth` | [`examples/synth_song.ie`](examples/synth_song.ie) | Twinkle + drum loop with live UI |
@@ -77,6 +78,7 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the full index.
 - [docs/EXAMPLES.md](docs/EXAMPLES.md) — examples by module
 - [docs/RUNTIME_API.md](docs/RUNTIME_API.md) — syntax, builtins, matrices, I/O
 - [docs/SQL.md](docs/SQL.md) — `import sql`
+- [docs/GRAPH.md](docs/GRAPH.md) — `import graph`
 - [docs/INPUT.md](docs/INPUT.md) — `import input`
 - [docs/IPC.md](docs/IPC.md) — `import ipc` (TCP, UDS, RDMA)
 - [docs/LISSEN.md](docs/LISSEN.md) — `import lissen` ([Lissen](https://www.lissen.com/))

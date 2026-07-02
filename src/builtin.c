@@ -62,6 +62,8 @@ extern V *bi_synth_note_on(V**,in);
 extern V *bi_synth_note_off(V**,in);
 extern V *bi_synth_set_bpm(V**,in);
 extern V *bi_synth_bpm(V**,in);
+extern V *bi_synth_set_tuning(V**,in);
+extern V *bi_synth_tuning(V**,in);
 extern V *bi_synth_set_level(V**,in);
 extern V *bi_synth_level(V**,in);
 extern V *bi_synth_set_cutoff(V**,in);
@@ -108,6 +110,25 @@ extern V *bi_lissen_get_api_base(V**,in);
 extern V *bi_lissen_app_url(V**,in);
 extern V *bi_lissen_web_url(V**,in);
 extern V *bi_lissen_open(V**,in);
+extern V *bi_govee_lan_scan(V**,in);
+extern V *bi_govee_lan_probe(V**,in);
+extern V *bi_govee_lan_send(V**,in);
+extern V *bi_govee_lan_status(V**,in);
+extern V *bi_govee_cmd_turn(V**,in);
+extern V *bi_govee_cmd_brightness(V**,in);
+extern V *bi_govee_cmd_color(V**,in);
+extern V *bi_govee_get_model(V**,in);
+extern V *bi_govee_get_ip(V**,in);
+extern V *bi_govee_set_ip(V**,in);
+extern V *bi_graph_create(V**,in);
+extern V *bi_graph_add(V**,in);
+extern V *bi_graph_query(V**,in);
+extern V *bi_graph_neighbors(V**,in);
+extern V *bi_graph_path(V**,in);
+extern V *bi_graph_from_table(V**,in);
+extern V *bi_graph_to_table(V**,in);
+extern V *bi_graph_count(V**,in);
+extern V *bi_graph_clear(V**,in);
 extern V *bi_rest_request(V**,in);
 extern V *bi_rest_get(V**,in);
 extern V *bi_rest_post(V**,in);
@@ -131,6 +152,11 @@ static const char *BUILTINS[] = {
     "ipc_rdma_available","ipc_send","ipc_set_nonblock","ipc_shm_close","ipc_shm_open",
     "lissen_trpc_query","lissen_trpc_mutation","lissen_set_token","lissen_get_token",
     "lissen_set_api_base","lissen_get_api_base","lissen_app_url","lissen_web_url","lissen_open",
+    "govee_lan_scan","govee_lan_probe","govee_lan_send","govee_lan_status",
+    "govee_cmd_turn","govee_cmd_brightness","govee_cmd_color",
+    "govee_get_model","govee_get_ip","govee_set_ip",
+    "graph_create","graph_add","graph_query","graph_neighbors","graph_path",
+    "graph_from_table","graph_to_table","graph_count","graph_clear",
     "rest_request","rest_get","rest_post","rest_put","rest_delete",
     "rest_listen","rest_accept","rest_read","rest_write","rest_close",
     "read","write","readlines",
@@ -153,6 +179,7 @@ static const char *BUILTINS[] = {
     "synth_set_metro","synth_metro_on","synth_set_metro_sound","synth_metro_sound",
     "synth_set_mute","synth_mute_on",
     "synth_note_on","synth_note_off","synth_set_bpm","synth_bpm",
+    "synth_set_tuning","synth_tuning",
     "synth_set_level","synth_level","synth_set_cutoff","synth_cutoff",
     "synth_set_reso","synth_reso","synth_set_seq_row","synth_play","synth_playing",
     "synth_mouse_press","synth_mouse_release","synth_set_viz","synth_viz_mode",
@@ -851,6 +878,7 @@ BI0(synth_open) BI0(synth_close) BI0(synth_alive) BI0(synth_tick)
 BI0(synth_set_steps) BI0(synth_steps) BI0(synth_set_metro) BI0(synth_metro_on)
 BI0(synth_set_metro_sound) BI0(synth_metro_sound) BI0(synth_set_mute) BI0(synth_mute_on)
 BI0(synth_note_on) BI0(synth_note_off) BI0(synth_set_bpm) BI0(synth_bpm)
+BI0(synth_set_tuning) BI0(synth_tuning)
 BI0(synth_set_level) BI0(synth_level) BI0(synth_set_cutoff) BI0(synth_cutoff)
 BI0(synth_set_reso) BI0(synth_reso) BI0(synth_set_seq_row) BI0(synth_play) BI0(synth_playing)
 BI0(synth_mouse_press) BI0(synth_mouse_release) BI0(synth_set_viz) BI0(synth_viz_mode)
@@ -866,6 +894,11 @@ BI0(ipc_set_nonblock) BI0(ipc_shm_close) BI0(ipc_shm_open)
 #endif
 BI0(lissen_trpc_query) BI0(lissen_trpc_mutation) BI0(lissen_set_token) BI0(lissen_get_token)
 BI0(lissen_set_api_base) BI0(lissen_get_api_base) BI0(lissen_app_url) BI0(lissen_web_url) BI0(lissen_open)
+BI0(govee_lan_scan) BI0(govee_lan_probe) BI0(govee_lan_send) BI0(govee_lan_status)
+BI0(govee_cmd_turn) BI0(govee_cmd_brightness) BI0(govee_cmd_color)
+BI0(govee_get_model) BI0(govee_get_ip) BI0(govee_set_ip)
+BI0(graph_create) BI0(graph_add) BI0(graph_query) BI0(graph_neighbors) BI0(graph_path)
+BI0(graph_from_table) BI0(graph_to_table) BI0(graph_count) BI0(graph_clear)
 BI0(rest_request) BI0(rest_get) BI0(rest_post) BI0(rest_put) BI0(rest_delete)
 BI0(rest_listen) BI0(rest_accept) BI0(rest_read) BI0(rest_write) BI0(rest_close)
 #undef BI0
@@ -902,6 +935,25 @@ static const BiEntry bi_tab[] = {
     {"getattr", bi_w_getattr},
     {"getcwd", bi_w_getcwd},
     {"getenv", bi_w_getenv},
+    {"govee_cmd_brightness", bi_w_govee_cmd_brightness},
+    {"govee_cmd_color", bi_w_govee_cmd_color},
+    {"govee_cmd_turn", bi_w_govee_cmd_turn},
+    {"govee_get_ip", bi_w_govee_get_ip},
+    {"govee_get_model", bi_w_govee_get_model},
+    {"govee_lan_probe", bi_w_govee_lan_probe},
+    {"govee_lan_scan", bi_w_govee_lan_scan},
+    {"govee_lan_send", bi_w_govee_lan_send},
+    {"govee_lan_status", bi_w_govee_lan_status},
+    {"govee_set_ip", bi_w_govee_set_ip},
+    {"graph_add", bi_w_graph_add},
+    {"graph_clear", bi_w_graph_clear},
+    {"graph_count", bi_w_graph_count},
+    {"graph_create", bi_w_graph_create},
+    {"graph_from_table", bi_w_graph_from_table},
+    {"graph_neighbors", bi_w_graph_neighbors},
+    {"graph_path", bi_w_graph_path},
+    {"graph_query", bi_w_graph_query},
+    {"graph_to_table", bi_w_graph_to_table},
     {"group_sum", bi_w_group_sum},
     {"hasattr", bi_w_hasattr},
     {"head", bi_w_head},
@@ -1037,9 +1089,11 @@ static const BiEntry bi_tab[] = {
     {"synth_set_row_note", bi_w_synth_set_row_note},
     {"synth_set_seq_row", bi_w_synth_set_seq_row},
     {"synth_set_steps", bi_w_synth_set_steps},
+    {"synth_set_tuning", bi_w_synth_set_tuning},
     {"synth_set_viz", bi_w_synth_set_viz},
     {"synth_steps", bi_w_synth_steps},
     {"synth_tick", bi_w_synth_tick},
+    {"synth_tuning", bi_w_synth_tuning},
     {"synth_viz_mode", bi_w_synth_viz_mode},
 #endif
     {"table", bi_w_table},

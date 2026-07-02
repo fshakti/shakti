@@ -1,0 +1,33 @@
+# Knowledge graph demo — subject/predicate/object triples.
+#   export SHAKTI_LIB=$PWD/src/lib
+#   ./shakti examples/graph_demo.ie
+
+import graph
+
+graph.create()
+
+graph.add("Ada", "knows", "Bob")
+graph.add("Bob", "knows", "Carol")
+graph.add("Carol", "knows", "Dave")
+graph.add("Ada", "worksAt", "Acme")
+graph.add("Bob", "worksAt", "Acme")
+
+print("triples:", graph.count())
+
+print("\nwho Ada knows:")
+print(graph.query("Ada", "knows", "*"))
+
+print("\noutgoing from Bob:")
+print(graph.neighbors("Bob", "out"))
+
+print("\npath Ada -> Dave:")
+path : graph.path("Ada", "Dave", 6)
+print(path)
+
+people : table(
+    name: ["Eve", "Frank"],
+    friend: ["Frank", "Grace"]
+)
+graph.from_table(people, "name", "knows", "friend")
+print("\nafter table load, count:", graph.count())
+print(graph.query("*", "knows", "Grace"))

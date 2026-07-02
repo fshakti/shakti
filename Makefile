@@ -26,7 +26,7 @@ else
   OMP_LDFLAGS = -lgomp
 endif
 
-CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-function -std=gnu11 -D_GNU_SOURCE -DSHAKTI_HAVE_LISSEN=1 \
+CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-function -std=gnu11 -D_GNU_SOURCE -DSHAKTI_HAVE_LISSEN=1 -DSHAKTI_HAVE_GOVEE=1 \
 	-I$(BUILD) -Isrc \
 	$(OMP_CFLAGS)
 
@@ -42,7 +42,7 @@ else
 endif
 
 LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c
-LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/host_bridge.c src/lissen.c src/rest.c src/machine.c
+LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/host_bridge.c src/lissen.c src/govee.c src/rest.c src/graph.c src/machine.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1

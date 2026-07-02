@@ -45,7 +45,18 @@ for ev in input(2):
 
 ## API
 
-Module [`src/lib/synth.ie`](../src/lib/synth.ie): `open`, `close`, `alive`, `tick`, `set_steps`, `steps`, `set_metro`, `metro_on`, `set_metro_sound`, `metro_sound`, `set_mute`, `note_on`, `note_off`.
+Module [`src/lib/synth.ie`](../src/lib/synth.ie): `open`, `close`, `alive`, `tick`, `set_steps`, `steps`, `set_metro`, `metro_on`, `set_metro_sound`, `metro_sound`, `set_mute`, `note_on`, `note_off`, `set_tuning`, `tuning`.
+
+## Tuning
+
+Default pitch uses **12-TET** (equal temperament). Switch to **just intonation** for pure frequency ratios (3:2 fifth, 5:4 major third) so chord partials align:
+
+```ie
+synth.set_tuning("just")   # or "ji"
+synth.set_tuning("12tet")  # default; aliases: "equal"
+```
+
+Example: [`examples/synth_just_intonation.ie`](../examples/synth_just_intonation.ie) plays a just-intonation C major chord.
 
 | Builtin | Returns |
 |---------|---------|

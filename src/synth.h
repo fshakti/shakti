@@ -57,6 +57,8 @@ int synth_looper_overdub(int on, char *err, size_t err_cap);
 int synth_looper_rec_on(void);
 int synth_looper_play_on(void);
 int synth_looper_has_loop(void);
+int synth_set_tuning(const char *mode, char *err, size_t err_cap);
+const char *synth_get_tuning(void);
 
 #ifdef __cplusplus
 }

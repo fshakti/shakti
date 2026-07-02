@@ -1,0 +1,172 @@
+# govee — Govee LAN API (H70B1 Curtain Lights and compatible models)
+#
+# Requires LAN Control enabled in the Govee Home app.
+# Optional: export SHAKTI_GOVEE_IP=192.168.x.x
+#           export SHAKTI_GOVEE_SKU=H70B1
+#           export SHAKTI_GOVEE_SKIP_LAN=1  (offline tests)
+#
+#   import govee
+#   devs : govee.scan()
+#   govee.turn(True)
+
+def model():
+    return govee_get_model()
+
+def ip():
+    return govee_get_ip()
+
+def set_ip(addr):
+    govee_set_ip(addr)
+
+def scan(timeout_ms:3000):
+    return govee_lan_scan(timeout_ms)
+
+def probe(addr):
+    return govee_lan_probe(addr)
+
+def connect(timeout_ms:8000):
+    ip_cfg : ip()
+    if ip_cfg:
+        devs : probe(ip_cfg)
+        if len(devs) > 0:
+            d : devs[0]
+            set_ip(d["ip"])
+            return d
+        return dict(ip:ip_cfg, sku:model())
+    devs : scan(timeout_ms)
+    hits : find_h70b1(devs)
+    if len(hits) > 0:
+        d : hits[0]
+        if hasattr(d, "ip"):
+            set_ip(d["ip"])
+        return d
+    if len(devs) > 0:
+        d : devs[0]
+        if hasattr(d, "ip"):
+            set_ip(d["ip"])
+        return d
+    arp_out : sh("arp -a 2>/dev/null | grep '192.168.' | grep -v incomplete >/tmp/govee_arp.txt || true; cat /tmp/govee_arp.txt")
+    for line in arp_out.split("\n"):
+        if len(line) < 8:
+            continue
+        p1 : line.find("(")
+        p2 : line.find(")")
+        if p1 < 0 or p2 < 0:
+            continue
+        addr : line[p1 + 1:p2]
+        found : probe(addr)
+        if len(found) > 0:
+            d : found[0]
+            if hasattr(d, "ip"):
+                set_ip(d["ip"])
+            return d
+    return 0
+
+def lan_send(addr, json):
+    return govee_lan_send(addr, json)
+
+def cmd_turn(enabled):
+    return govee_cmd_turn(enabled)
+
+def cmd_brightness(level):
+    return govee_cmd_brightness(level)
+
+def cmd_color(r, g, b, kelvin:0):
+    return govee_cmd_color(r, g, b, kelvin)
+
+def matches_sku(dev, prefix:""):
+    if not prefix:
+        prefix : model()
+    if hasattr(dev, "sku"):
+        sku : dev["sku"]
+        return sku[0:len(prefix)] = prefix
+    return 0
+
+def find_h70b1(devs):
+    out : []
+    m : model()
+    for d in devs:
+        if matches_sku(d, m):
+            out : out + [d]
+    return out
+
+def device():
+    addr : ip()
+    if addr:
+        return dict(ip:addr, sku:model())
+    devs : scan(3000)
+    hits : find_h70b1(devs)
+    if len(hits) > 0:
+        d : hits[0]
+        if hasattr(d, "ip"):
+            set_ip(d["ip"])
+        return d
+    if len(devs) > 0:
+        d : devs[0]
+        if hasattr(d, "ip"):
+            set_ip(d["ip"])
+        return d
+    return 0
+
+def target_ip():
+    d : device()
+    if not d:
+        return 0
+    if hasattr(d, "ip"):
+        return d["ip"]
+    return ip()
+
+def turn(enabled):
+    addr : target_ip()
+    if not addr:
+        return dict(error:"govee_no_device")
+    json : cmd_turn(enabled)
+    ok : lan_send(addr, json)
+    if not ok:
+        return dict(error:"govee_send_failed")
+    return dict(ok:1, ip:addr)
+
+def brightness(level):
+    addr : target_ip()
+    if not addr:
+        return dict(error:"govee_no_device")
+    json : cmd_brightness(level)
+    ok : lan_send(addr, json)
+    if not ok:
+        return dict(error:"govee_send_failed")
+    return dict(ok:1, ip:addr)
+
+def color(r, g, b):
+    addr : target_ip()
+    if not addr:
+        return dict(error:"govee_no_device")
+    json : cmd_color(r, g, b, 0)
+    ok : lan_send(addr, json)
+    if not ok:
+        return dict(error:"govee_send_failed")
+    return dict(ok:1, ip:addr)
+
+def color_temp(kelvin):
+    addr : target_ip()
+    if not addr:
+        return dict(error:"govee_no_device")
+    json : cmd_color(0, 0, 0, kelvin)
+    ok : lan_send(addr, json)
+    if not ok:
+        return dict(error:"govee_send_failed")
+    return dict(ok:1, ip:addr)
+
+def status():
+    addr : target_ip()
+    if not addr:
+        return dict(error:"govee_no_device")
+    st : govee_lan_status(addr)
+    if hasattr(st, "error"):
+        return st
+    return st
+
+def api_error(resp):
+    out : 0
+    if hasattr(resp, "error"):
+        out : resp["error"]
+    return out

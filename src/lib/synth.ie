@@ -60,6 +60,12 @@ def set_bpm(bpm):
 def bpm():
     return synth_bpm()
 
+def set_tuning(mode):
+    synth_set_tuning(mode)
+
+def tuning():
+    return synth_tuning()
+
 def set_level(level):
     synth_set_level(level)
 

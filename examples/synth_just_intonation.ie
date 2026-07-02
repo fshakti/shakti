@@ -1,0 +1,29 @@
+# Just-intonation major chord — pure ratios, no beating partials.
+# Compare with 12-TET by toggling tuning while holding notes.
+#
+#   export SHAKTI_LIB=$PWD/src/lib
+#   SHAKTI_SYNTH_HEADLESS=1 ./shakti examples/synth_just_intonation.ie
+
+import synth
+
+synth.open()
+synth.set_tuning("just")
+
+# C major: C4=60, E4=64, G4=67
+synth.note_on(60, 0.9)
+synth.note_on(64, 0.85)
+synth.note_on(67, 0.85)
+
+print("just-intonation C major — partials align (5:4 third, 3:2 fifth)")
+print("tuning:", synth.tuning())
+
+i : 0
+while synth.alive() and i < 240:
+    synth.tick()
+    i : i + 1
+
+synth.note_off(60)
+synth.note_off(64)
+synth.note_off(67)
+synth.close()
+print("done")

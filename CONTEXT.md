@@ -25,6 +25,7 @@ Interpreted language (v0.8.2): standalone C CLI, GNU Make build, Apache-2.0.
 | Module | Doc | Example |
 |--------|-----|---------|
 | `import sql` | [docs/SQL.md](docs/SQL.md) | [examples/sql_demo.ie](examples/sql_demo.ie) |
+| `import graph` | [docs/GRAPH.md](docs/GRAPH.md) | [examples/graph_demo.ie](examples/graph_demo.ie) |
 | `import input` | [docs/INPUT.md](docs/INPUT.md) | [examples/input_demo.ie](examples/input_demo.ie) |
 | `import synth` | [docs/SYNTH.md](docs/SYNTH.md) | [examples/synth_demo.ie](examples/synth_demo.ie) |
 | `import talk` | [docs/TALK.md](docs/TALK.md) | [examples/talk_demo.ie](examples/talk_demo.ie) |
@@ -32,6 +33,7 @@ Interpreted language (v0.8.2): standalone C CLI, GNU Make build, Apache-2.0.
 | `import lissen` | [docs/LISSEN.md](docs/LISSEN.md) | [examples/lissen_demo.ie](examples/lissen_demo.ie) |
 | `import rest` | [docs/REST.md](docs/REST.md) | [examples/rest_demo.ie](examples/rest_demo.ie) |
 | `import sonicpi` | [docs/SONICPI.md](docs/SONICPI.md) | [examples/sonicpi_demo.ie](examples/sonicpi_demo.ie) |
+| LinkedIn integration | [docs/LINKEDIN.md](docs/LINKEDIN.md) | [integrations/linkedin/run.sh](integrations/linkedin/run.sh) |
 
 Full list: [docs/EXAMPLES.md](docs/EXAMPLES.md).
 

@@ -1,0 +1,63 @@
+# Token and session persistence under ~/.shakti/linkedin/
+
+def base_dir():
+    home : getenv("HOME")
+    if not home:
+        home : "/tmp"
+    return path_join(home, ".shakti/linkedin")
+
+def ensure_dirs():
+    root : base_dir()
+    mkdir(path_join(root, "tokens"))
+    mkdir(path_join(root, "sessions"))
+    mkdir(path_join(root, "oauth_state"))
+    return root
+
+def token_path(sub):
+    ensure_dirs()
+    safe : re_sub("[^a-zA-Z0-9._-]", "_", sub)
+    return path_join(base_dir(), "tokens/" + safe + ".json")
+
+def session_path(token):
+    ensure_dirs()
+    safe : re_sub("[^a-zA-Z0-9._-]", "_", token)
+    return path_join(base_dir(), "sessions/" + safe + ".json")
+
+def oauth_state_path(state):
+    ensure_dirs()
+    safe : re_sub("[^a-zA-Z0-9._-]", "_", state)
+    return path_join(base_dir(), "oauth_state/" + safe + ".json")
+
+def read_json_file(path):
+    if not path_exists(path):
+        return 0
+    raw : read(path)
+    if not raw:
+        return 0
+    return json_loads(raw)
+
+def write_json_file(path, obj):
+    json_dump(obj, path)
+    return 1
+
+def load_linkedin_tokens(sub):
+    return read_json_file(token_path(sub))
+
+def save_linkedin_tokens(sub, obj):
+    return write_json_file(token_path(sub), obj)
+
+def load_session(token):
+    return read_json_file(session_path(token))
+
+def save_session(token, obj):
+    return write_json_file(session_path(token), obj)
+
+def delete_session(token):
+    p : session_path(token)
+    if path_exists(p):
+        sh("rm -f '" + p + "'")
+    return 1
+
+def new_session_token():
+    out : sh("openssl rand -hex 32")
+    return re_sub("\\s+", "", out)

@@ -1,0 +1,12 @@
+import rest
+import lib.http_helpers
+
+port : 3854
+srv : rest.listen(port)
+conn : rest.accept(srv)
+req : rest.read(conn)
+print("calling json_error")
+lib.http_helpers.json_error(conn, 401, "test")
+print("after json_error")
+rest.close(conn)
+rest.close(srv)

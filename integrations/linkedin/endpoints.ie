@@ -1,0 +1,104 @@
+import linkedin_client
+import http_helpers
+
+def connections_count(token):
+    data : linkedin_client.linkedin_get_v2("/connections?q=viewer&projection=(paging)", token)
+    if hasattr(data, "error"):
+        return data
+    if hasattr(data, "paging") and hasattr(data["paging"], "total"):
+        return dict(connections:data["paging"]["total"])
+    return dict(connections:0)
+
+def member_followers_lifetime(token):
+    return linkedin_client.linkedin_get_rest("/memberFollowersCount?q=me", token)
+
+def member_followers_range(token, days):
+    dr : linkedin_client.date_range_last_days(days)
+    return linkedin_client.linkedin_get_rest("/memberFollowersCount?q=dateRange&dateRange=" + dr, token)
+
+def profile_views_proxy(token):
+    url : "https://api.linkedin.com/rest/memberCreatorPostAnalytics?q=me&queryType=PROFILE_VIEW_FROM_CONTENT&aggregation=TOTAL"
+    return linkedin_client.linkedin_get(url, token)
+
+def list_organizations(token):
+    path : "/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&state=APPROVED&projection=(elements*(organization~(localizedName),role,organization))"
+    return linkedin_client.linkedin_get_v2(path, token)
+
+def org_followers(org_urn, token):
+    enc : http_helpers.urlencode(org_urn)
+    return linkedin_client.linkedin_get_rest("/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity=" + enc, token)
+
+def org_page_views(org_urn, token, days):
+    start_ms : linkedin_client.ms_days_ago(days)
+    end_ms : linkedin_client.ms_days_ago(0)
+    enc : http_helpers.urlencode(org_urn)
+    ti : "(timeRange:(start:" + str(start_ms) + ",end:" + str(end_ms) + "),timeGranularityType:DAY)"
+    return linkedin_client.linkedin_get_rest("/organizationPageStatistics?q=organization&organization=" + enc + "&timeIntervals=" + ti, token)
+
+def org_share_stats(org_urn, token, days):
+    start_ms : linkedin_client.ms_days_ago(days)
+    end_ms : linkedin_client.ms_days_ago(0)
+    enc : http_helpers.urlencode(org_urn)
+    ti : "(timeRange:(start:" + str(start_ms) + ",end:" + str(end_ms) + "),timeGranularityType:DAY)"
+    return linkedin_client.linkedin_get_rest("/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=" + enc + "&timeIntervals=" + ti, token)
+
+def org_posts(org_urn, token, count):
+    enc : http_helpers.urlencode(org_urn)
+    return linkedin_client.linkedin_get_rest("/posts?q=author&author=" + enc + "&count=" + str(count), token)
+
+def extract_org_name(el):
+    org_key : "organization~"
+    if hasattr(el, org_key):
+        org_obj : el[org_key]
+        if hasattr(org_obj, "localizedName"):
+            return org_obj["localizedName"]
+    if hasattr(el, "organization"):
+        return el["organization"]
+    return "Organization"
+
+def parse_follower_total(data):
+    if hasattr(data, "error"):
+        return 0
+    if hasattr(data, "elements") and len(data["elements"]) > 0:
+        el : data["elements"][0]
+        if hasattr(el, "followerCounts") and hasattr(el["followerCounts"], "organicFollowerCount"):
+            return el["followerCounts"]["organicFollowerCount"]
+        if hasattr(el, "memberFollowersCount"):
+            return el["memberFollowersCount"]
+    if hasattr(data, "memberFollowersCount"):
+        return data["memberFollowersCount"]
+    return 0
+
+def parse_page_views_series(data):
+    out : []
+    if hasattr(data, "error") or not hasattr(data, "elements"):
+        return out
+    for el in data["elements"]:
+        if hasattr(el, "totalPageStatistics") and hasattr(el["totalPageStatistics"], "views"):
+            views : el["totalPageStatistics"]["views"]
+            if hasattr(views, "allPageViews"):
+                cnt : views["allPageViews"]["pageViews"] if hasattr(views["allPageViews"], "pageViews") else views["allPageViews"]
+                out.append(dict(date:"", views:cnt))
+    return out
+
+def parse_impressions_series(data):
+    out : []
+    if hasattr(data, "error") or not hasattr(data, "elements"):
+        return out
+    for el in data["elements"]:
+        if hasattr(el, "totalShareStatistics"):
+            stats : el["totalShareStatistics"]
+            imp : stats["impressionCount"] if hasattr(stats, "impressionCount") else 0
+            out.append(dict(date:"", impressions:imp))
+    return out
+
+def parse_posts(data):
+    out : []
+    if hasattr(data, "error") or not hasattr(data, "elements"):
+        return out
+    for el in data["elements"]:
+        text : el["commentary"] if hasattr(el, "commentary") else ""
+        created : str(el["createdAt"]) if hasattr(el, "createdAt") else ""
+        pid : el["id"] if hasattr(el, "id") else ""
+        out.append(dict(id:pid, text:text, created_at:created, impressions:0, reactions:0, comments:0))
+    return out

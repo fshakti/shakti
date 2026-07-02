@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LinkedIn Analytics</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>LinkedIn Analytics</h1>
+    <div class="auth-bar" id="auth-bar"></div>
+  </header>
+
+  <main id="app">
+    <section id="login-panel" class="panel hidden">
+      <p>Sign in with Google to access your dashboard.</p>
+      <p class="note hidden" id="mock-login-note">Mock mode: sign-in creates a local demo session (no Google credentials required).</p>
+      <a class="btn" href="/auth/google">Sign in with Google</a>
+    </section>
+
+    <section id="connect-panel" class="panel hidden">
+      <p>Google account connected. Connect LinkedIn to load analytics.</p>
+      <button class="btn" id="connect-linkedin">Connect LinkedIn</button>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="note" id="profile-note">
+        Individual profile viewers are not available via the LinkedIn API. Profile views shown are aggregate metrics only.
+        <span id="mock-banner" class="hidden"> You are viewing sample data — not your live LinkedIn account.</span>
+      </div>
+
+      <h2>Personal</h2>
+      <div class="metrics" id="personal-metrics"></div>
+
+      <h2>Company Pages</h2>
+      <div id="orgs"></div>
+    </section>
+
+    <p class="status" id="status"></p>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

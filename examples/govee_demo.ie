@@ -1,0 +1,38 @@
+# Govee LAN demo — H70B1 Curtain Lights
+#
+# Enable LAN Control in the Govee Home app, then:
+#   export SHAKTI_LIB=$PWD/src/lib
+#   ./shakti examples/govee_demo.ie
+#
+# Optional: export SHAKTI_GOVEE_IP=192.168.x.x
+
+import govee
+
+print("Govee model:", govee.model())
+
+skip : getenv("SHAKTI_GOVEE_SKIP_LAN")
+if skip = "1":
+    print("SHAKTI_GOVEE_SKIP_LAN=1 — offline command demo only")
+    print(govee.cmd_turn(True))
+    print(govee.cmd_brightness(50))
+    print(govee.cmd_color(255, 0, 0))
+else:
+    devs : govee.scan(3000)
+    print("Discovered", len(devs), "device(s)")
+    hits : govee.find_h70b1(devs)
+    if len(hits) > 0:
+        print("H70B1 match:", hits[0])
+    d : govee.device()
+    if not d:
+        print("No Govee device found on LAN")
+    else:
+        print("Using device:", d)
+        st : govee.status()
+        if govee.api_error(st):
+            print("status error:", st["error"])
+        else:
+            print("status:", st)
+        govee.turn(True)
+        govee.brightness(40)
+        govee.color(0, 128, 255)
+        print("Sent turn on, brightness 40, blue tint")
