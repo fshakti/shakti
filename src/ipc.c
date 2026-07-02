@@ -87,10 +87,19 @@ static int ipc_is_localhost(const char *host) {
     return !strcmp(host, "127.0.0.1") || !strcmp(host, "localhost") || !strcmp(host, "::1");
 }
 
-static void ipc_uds_path(int port, char *out, size_t cap) {
+static int ipc_uds_path(int port, char *out, size_t cap) {
     const char *dir = getenv("SHAKTI_IPC_DIR");
+    int n;
     if (!dir || !dir[0]) dir = "/tmp";
-    snprintf(out, cap, "%s/shakti-%d.sock", dir, port);
+    n = snprintf(out, cap, "%s/shakti-%d.sock", dir, port);
+    return (n < 0 || (size_t)n >= cap) ? -1 : 0;
+}
+
+static int ipc_copy_cstr(char *dst, size_t cap, const char *src) {
+    int n;
+    if (!dst || cap == 0) return -1;
+    n = snprintf(dst, cap, "%s", src ? src : "");
+    return (n < 0 || (size_t)n >= cap) ? -1 : 0;
 }
 
 static IpcHandle *ipc_slot(int h) {
@@ -177,6 +186,7 @@ static int sock_read_some(int fd, void *buf, size_t n, int block, size_t *got) {
     return 0;
 }
 
+#ifdef _WIN32
 static int sock_write_full(int fd, const void *buf, size_t n) {
     size_t off = 0;
     while (off < n) {
@@ -186,6 +196,7 @@ static int sock_write_full(int fd, const void *buf, size_t n) {
     }
     return 0;
 }
+#endif
 
 static int sock_write_frame(int fd, const void *hdr, size_t hdr_len, const void *data, size_t data_len) {
 #if !defined(_WIN32)
@@ -255,7 +266,10 @@ static int sock_listen_uds(int port, char *path_out, char *err, size_t err_cap) 
     snprintf(err, err_cap, "ipc: uds not supported on this platform");
     return -1;
 #else
-    ipc_uds_path(port, path_out, 108);
+    if (ipc_uds_path(port, path_out, 108) != 0) {
+        snprintf(err, err_cap, "ipc: uds path too long");
+        return -1;
+    }
     unlink(path_out);
     int s = socket(AF_UNIX, SOCK_STREAM, 0);
     if (s < 0) {
@@ -265,7 +279,11 @@ static int sock_listen_uds(int port, char *path_out, char *err, size_t err_cap) 
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof addr);
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path_out, sizeof addr.sun_path - 1);
+    if (ipc_copy_cstr(addr.sun_path, sizeof addr.sun_path, path_out) != 0) {
+        snprintf(err, err_cap, "ipc: uds path too long");
+        close(s);
+        return -1;
+    }
     if (bind(s, (struct sockaddr *)&addr, sizeof addr) < 0) {
         snprintf(err, err_cap, "ipc: uds bind: %s", strerror(errno));
         close(s);
@@ -313,7 +331,10 @@ static int sock_connect_uds(int port, char *err, size_t err_cap) {
     return -1;
 #else
     char path[108];
-    ipc_uds_path(port, path, sizeof path);
+    if (ipc_uds_path(port, path, sizeof path) != 0) {
+        snprintf(err, err_cap, "ipc: uds path too long");
+        return -1;
+    }
     int s = socket(AF_UNIX, SOCK_STREAM, 0);
     if (s < 0) {
         snprintf(err, err_cap, "ipc: uds socket: %s", strerror(errno));
@@ -322,7 +343,11 @@ static int sock_connect_uds(int port, char *err, size_t err_cap) {
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof addr);
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof addr.sun_path - 1);
+    if (ipc_copy_cstr(addr.sun_path, sizeof addr.sun_path, path) != 0) {
+        snprintf(err, err_cap, "ipc: uds path too long");
+        close(s);
+        return -1;
+    }
     if (connect(s, (struct sockaddr *)&addr, sizeof addr) < 0) {
         snprintf(err, err_cap, "ipc: uds connect: %s", strerror(errno));
         close(s);
@@ -473,7 +498,11 @@ V *bi_ipc_listen(V **a, int n) {
     }
     g_handles[h].kind = IPC_KIND_SOCK_LISTEN;
     g_handles[h].fd = fd;
-    if (uds_path[0]) strncpy(g_handles[h].uds_path, uds_path, sizeof g_handles[h].uds_path - 1);
+    if (uds_path[0] && ipc_copy_cstr(g_handles[h].uds_path, sizeof g_handles[h].uds_path, uds_path) != 0) {
+        ipc_free_handle(h);
+        unlink(uds_path);
+        return v_err("ipc_listen: uds path too long");
+    }
     return v_int(h);
 }
 
@@ -776,7 +805,12 @@ V *bi_ipc_shm_open(V **a, int n) {
     g_shm[slot].in_use = 1;
     g_shm[slot].ptr = ptr;
     g_shm[slot].size = size;
-    strncpy(g_shm[slot].name, name, sizeof g_shm[slot].name - 1);
+    if (ipc_copy_cstr(g_shm[slot].name, sizeof g_shm[slot].name, name) != 0) {
+        munmap(ptr, size);
+        shm_unlink(name);
+        memset(&g_shm[slot], 0, sizeof g_shm[slot]);
+        return v_err("ipc_shm_open: name too long");
+    }
     return v_int(slot);
 #endif
 }

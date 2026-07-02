@@ -117,6 +117,9 @@ extern V *bi_govee_lan_status(V**,in);
 extern V *bi_govee_cmd_turn(V**,in);
 extern V *bi_govee_cmd_brightness(V**,in);
 extern V *bi_govee_cmd_color(V**,in);
+extern V *bi_govee_ble_segment(V**,in);
+extern V *bi_govee_ble_segment_kelvin(V**,in);
+extern V *bi_govee_cmd_ptreal(V**,in);
 extern V *bi_govee_get_model(V**,in);
 extern V *bi_govee_get_ip(V**,in);
 extern V *bi_govee_set_ip(V**,in);
@@ -154,6 +157,7 @@ static const char *BUILTINS[] = {
     "lissen_set_api_base","lissen_get_api_base","lissen_app_url","lissen_web_url","lissen_open",
     "govee_lan_scan","govee_lan_probe","govee_lan_send","govee_lan_status",
     "govee_cmd_turn","govee_cmd_brightness","govee_cmd_color",
+    "govee_ble_segment","govee_ble_segment_kelvin","govee_cmd_ptreal",
     "govee_get_model","govee_get_ip","govee_set_ip",
     "graph_create","graph_add","graph_query","graph_neighbors","graph_path",
     "graph_from_table","graph_to_table","graph_count","graph_clear",
@@ -896,6 +900,7 @@ BI0(lissen_trpc_query) BI0(lissen_trpc_mutation) BI0(lissen_set_token) BI0(lisse
 BI0(lissen_set_api_base) BI0(lissen_get_api_base) BI0(lissen_app_url) BI0(lissen_web_url) BI0(lissen_open)
 BI0(govee_lan_scan) BI0(govee_lan_probe) BI0(govee_lan_send) BI0(govee_lan_status)
 BI0(govee_cmd_turn) BI0(govee_cmd_brightness) BI0(govee_cmd_color)
+BI0(govee_ble_segment) BI0(govee_ble_segment_kelvin) BI0(govee_cmd_ptreal)
 BI0(govee_get_model) BI0(govee_get_ip) BI0(govee_set_ip)
 BI0(graph_create) BI0(graph_add) BI0(graph_query) BI0(graph_neighbors) BI0(graph_path)
 BI0(graph_from_table) BI0(graph_to_table) BI0(graph_count) BI0(graph_clear)
@@ -935,8 +940,11 @@ static const BiEntry bi_tab[] = {
     {"getattr", bi_w_getattr},
     {"getcwd", bi_w_getcwd},
     {"getenv", bi_w_getenv},
+    {"govee_ble_segment", bi_w_govee_ble_segment},
+    {"govee_ble_segment_kelvin", bi_w_govee_ble_segment_kelvin},
     {"govee_cmd_brightness", bi_w_govee_cmd_brightness},
     {"govee_cmd_color", bi_w_govee_cmd_color},
+    {"govee_cmd_ptreal", bi_w_govee_cmd_ptreal},
     {"govee_cmd_turn", bi_w_govee_cmd_turn},
     {"govee_get_ip", bi_w_govee_get_ip},
     {"govee_get_model", bi_w_govee_get_model},

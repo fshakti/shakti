@@ -38,6 +38,8 @@ struct IpcRdmaConn {
 static struct rdma_event_channel *g_ec;
 static int g_ec_fd = -1;
 static int g_rdma_devs;
+static int g_rdma_inited;
+static int g_rdma_atexit_registered;
 
 static int ipc_rdma_ensure_ec(void) {
     if (g_ec) return 0;
@@ -48,8 +50,14 @@ static int ipc_rdma_ensure_ec(void) {
 }
 
 int ipc_rdma_init(void) {
+    if (g_rdma_inited) return g_ec ? 0 : -1;
+    g_rdma_inited = 1;
     struct ibv_device **list = ibv_get_device_list(&g_rdma_devs);
     if (list) ibv_free_device_list(list);
+    if (!g_rdma_atexit_registered) {
+        g_rdma_atexit_registered = 1;
+        atexit(ipc_rdma_shutdown);
+    }
     return ipc_rdma_ensure_ec();
 }
 
@@ -66,11 +74,12 @@ int ipc_rdma_available(void) {
     if (!list) return 0;
     int ok = list[0] != NULL;
     ibv_free_device_list(list);
+    if (ok) ipc_rdma_init();
     return ok;
 }
 
 int ipc_rdma_poll_fd(void) {
-    if (ipc_rdma_ensure_ec() != 0) return -1;
+    if (ipc_rdma_init() != 0) return -1;
     return g_ec_fd;
 }
 
@@ -159,7 +168,7 @@ static int ipc_rdma_port_str(int port, char *out, size_t cap) {
 }
 
 int ipc_rdma_listen(const char *host, int port, IpcRdmaConn **out, char *err, size_t err_cap) {
-    if (ipc_rdma_ensure_ec() != 0) {
+    if (ipc_rdma_init() != 0) {
         snprintf(err, err_cap, "ipc rdma: event channel");
         return -1;
     }

@@ -74,6 +74,45 @@ def cmd_brightness(level):
 def cmd_color(r, g, b, kelvin:0):
     return govee_cmd_color(r, g, b, kelvin)
 
+def ble_segment(r, g, b, left_mask, right_mask):
+    return govee_ble_segment(r, g, b, left_mask, right_mask)
+
+def ble_segment_kelvin(r, g, b, kelvin, left_mask, right_mask):
+    return govee_ble_segment_kelvin(r, g, b, kelvin, left_mask, right_mask)
+
+def cmd_ptreal(packets):
+    return govee_cmd_ptreal(packets)
+
+def ptreal(packets):
+    addr : target_ip()
+    if not addr:
+        return dict(error:"govee_no_device")
+    json : cmd_ptreal(packets)
+    ok : lan_send(addr, json)
+    if not ok:
+        return dict(error:"govee_send_failed")
+    return dict(ok:1, ip:addr)
+
+def segment_mask(segments):
+    left_masks : [1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0]
+    right_masks : [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 4, 8, 16, 32, 64, 128]
+    left : 0
+    right : 0
+    for seg in segments:
+        left : left + left_masks[seg]
+        right : right + right_masks[seg]
+    return dict(left:left, right:right)
+
+def irish_flag():
+    green : segment_mask([0, 1, 2, 3, 4])
+    white : segment_mask([5, 6, 7, 8, 9])
+    orange : segment_mask([10, 11, 12, 13, 14, 15])
+    color_temp(0)
+    pkt_g : ble_segment(22, 155, 98, green["left"], green["right"])
+    pkt_w : ble_segment(255, 255, 255, white["left"], white["right"])
+    pkt_o : ble_segment(255, 136, 62, orange["left"], orange["right"])
+    return ptreal([pkt_g, pkt_w, pkt_o])
+
 def matches_sku(dev, prefix:""):
     if not prefix:
         prefix : model()

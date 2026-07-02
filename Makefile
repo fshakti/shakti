@@ -26,7 +26,7 @@ else
   OMP_LDFLAGS = -lgomp
 endif
 
-CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-function -std=gnu11 -D_GNU_SOURCE -DSHAKTI_HAVE_LISSEN=1 -DSHAKTI_HAVE_GOVEE=1 \
+CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE -DSHAKTI_HAVE_LISSEN=1 -DSHAKTI_HAVE_GOVEE=1 \
 	-I$(BUILD) -Isrc \
 	$(OMP_CFLAGS)
 

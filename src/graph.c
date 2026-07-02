@@ -85,6 +85,12 @@ static IdxEntry *idx_find(IdxEntry *head, const char *key) {
     return NULL;
 }
 
+static void idx_undo_append(IdxEntry **head, const char *key, int64_t triple_idx) {
+    IdxEntry *e = idx_find(*head, key);
+    if (!e || e->n == 0) return;
+    if (e->idx[e->n - 1] == triple_idx) e->n--;
+}
+
 static int idx_append(IdxEntry **head, const char *key, int64_t triple_idx) {
     IdxEntry *e = idx_find(*head, key);
     if (!e) {
@@ -106,14 +112,22 @@ static int idx_append(IdxEntry **head, const char *key, int64_t triple_idx) {
     return 0;
 }
 
-static void graph_index_triple(Graph *g, int64_t idx) {
+static int graph_index_triple(Graph *g, int64_t idx) {
     Triple *t = &g->triples[idx];
     unsigned hs = graph_hash(t->s);
     unsigned hp = graph_hash(t->p);
     unsigned ho = graph_hash(t->o);
-    idx_append(&g->subj_idx[hs], t->s, idx);
-    idx_append(&g->pred_idx[hp], t->p, idx);
-    idx_append(&g->obj_idx[ho], t->o, idx);
+    if (idx_append(&g->subj_idx[hs], t->s, idx) < 0) return -1;
+    if (idx_append(&g->pred_idx[hp], t->p, idx) < 0) {
+        idx_undo_append(&g->subj_idx[hs], t->s, idx);
+        return -1;
+    }
+    if (idx_append(&g->obj_idx[ho], t->o, idx) < 0) {
+        idx_undo_append(&g->pred_idx[hp], t->p, idx);
+        idx_undo_append(&g->subj_idx[hs], t->s, idx);
+        return -1;
+    }
+    return 0;
 }
 
 static Graph *graph_new(void) {
@@ -151,8 +165,20 @@ static int graph_add_triple(Graph *g, const char *s, const char *p, const char *
     t->s = graph_dup(s);
     t->p = graph_dup(p);
     t->o = graph_dup(o);
-    P(!t->s || !t->p || !t->o, -1)
-    graph_index_triple(g, g->count);
+    if (!t->s || !t->p || !t->o) {
+        free(t->s);
+        free(t->p);
+        free(t->o);
+        t->s = t->p = t->o = NULL;
+        return -1;
+    }
+    if (graph_index_triple(g, g->count) < 0) {
+        free(t->s);
+        free(t->p);
+        free(t->o);
+        t->s = t->p = t->o = NULL;
+        return -1;
+    }
     g->count++;
     return 0;
 }
@@ -532,8 +558,9 @@ V *bi_graph_clear(V **a, int n) {
     int pos = 0;
     int64_t gid = graph_id_arg(a, n, &pos);
     P(gid < 0 || gid >= g_graph_count, v_err("graph_clear: bad graph id"))
+    Graph *fresh = graph_new();
+    P(!fresh, v_err("graph_clear: out of memory"))
     graph_free(g_graphs[gid]);
-    g_graphs[gid] = graph_new();
-    P(!g_graphs[gid], v_err("graph_clear: out of memory"))
+    g_graphs[gid] = fresh;
     return v_int(0);
 }

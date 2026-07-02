@@ -320,7 +320,8 @@ static void synth_layout_compute(SynthLayout *L) {
         for (k = 0; k < g.synth_keys; k++) {
             if (!synth_key_is_black(k)) continue;
             wi = 0;
-            j(k, if (!synth_key_is_black(j)) wi++)
+            for (j = 0; j < k; j++)
+                if (!synth_key_is_black(j)) wi++;
             bx = kx0 + wi * ww - bw / 2;
             if (bx < kx0) bx = kx0;
             L->keys[k] = (UiRect){bx, ky0, bw, black_h};
@@ -410,7 +411,7 @@ void synth_core_ui_draw(void) {
     float spec[SYNTH_UI_SPECTRUM_BINS];
     float wave[SYNTH_UI_WAVEFORM_LEN];
     int spec_n = 0, wave_n = 0;
-    int row, step, pad, k, on, playhead;
+    int row, step, k, on, playhead;
     int ncmds;
     const UiCmd *cmds;
     uint32_t col_play = rgb(48, 180, 82);
@@ -1423,7 +1424,6 @@ static int synth_x11_init(char *err, size_t cap) {
 static int synth_alsa_init(char *err, size_t cap) {
     int rc;
     const char *env = getenv("SHAKTI_SYNTH_DEVICE");
-    const char *dev = NULL;
     const char *fallbacks[] = {"pulse", "default", NULL};
     int fi;
     rc = -1;
@@ -1433,14 +1433,10 @@ static int synth_alsa_init(char *err, size_t cap) {
             snprintf(err, cap, "synth_open: ALSA %s (%s)", snd_strerror(rc), env);
             return -1;
         }
-        dev = env;
     } else {
         for (fi = 0; fallbacks[fi]; fi++) {
             rc = snd_pcm_open(&g.pcm, fallbacks[fi], SND_PCM_STREAM_PLAYBACK, 0);
-            if (rc >= 0) {
-                dev = fallbacks[fi];
-                break;
-            }
+            if (rc >= 0) break;
         }
         if (rc < 0) {
             snprintf(err, cap, "synth_open: ALSA %s", snd_strerror(rc));
@@ -1925,9 +1921,10 @@ int synth_looper_rec(int on, char *err, size_t err_cap) {
     return 0;
 }
 int synth_looper_play(int on, char *err, size_t err_cap) {
-    (void)err;
-    (void)err_cap;
-    if (on && g.loop_len <= 0) return -1;
+    if (on && g.loop_len <= 0) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_looper_play: no loop recorded");
+        return -1;
+    }
     g.loop_playing = on ? 1 : 0;
     g.dirty = 1;
     return 0;
@@ -2129,9 +2126,21 @@ int synth_play(int on, char *err, size_t err_cap) {
     return -1;
 }
 int synth_playing(void) { return 0; }
-int synth_mouse_press(int x, int y, char *err, size_t err_cap) { (void)x; (void)y; (void)err; (void)err_cap; return -1; }
-int synth_mouse_release(int x, int y, char *err, size_t err_cap) { (void)x; (void)y; (void)err; (void)err_cap; return -1; }
-int synth_set_viz(int mode, char *err, size_t err_cap) { (void)mode; (void)err; (void)err_cap; return -1; }
+int synth_mouse_press(int x, int y, char *err, size_t err_cap) {
+    (void)x; (void)y;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+int synth_mouse_release(int x, int y, char *err, size_t err_cap) {
+    (void)x; (void)y;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+int synth_set_viz(int mode, char *err, size_t err_cap) {
+    (void)mode;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
 int synth_viz_mode(void) { return 0; }
 int synth_load_sample(const char *path, char *err, size_t err_cap) {
     (void)path;
@@ -2147,10 +2156,25 @@ int synth_set_row_note(int row, int midi, char *err, size_t err_cap) {
     return -1;
 }
 int synth_row_note_get(int row) { (void)row; return 60; }
-int synth_looper_rec(int on, char *err, size_t err_cap) { (void)on; (void)err; (void)err_cap; return -1; }
-int synth_looper_play(int on, char *err, size_t err_cap) { (void)on; (void)err; (void)err_cap; return -1; }
-int synth_looper_clear(char *err, size_t err_cap) { (void)err; (void)err_cap; return -1; }
-int synth_looper_overdub(int on, char *err, size_t err_cap) { (void)on; (void)err; (void)err_cap; return -1; }
+int synth_looper_rec(int on, char *err, size_t err_cap) {
+    (void)on;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+int synth_looper_play(int on, char *err, size_t err_cap) {
+    (void)on;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+int synth_looper_clear(char *err, size_t err_cap) {
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+int synth_looper_overdub(int on, char *err, size_t err_cap) {
+    (void)on;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
 int synth_looper_rec_on(void) { return 0; }
 int synth_looper_play_on(void) { return 0; }
 int synth_looper_has_loop(void) { return 0; }
@@ -2386,31 +2410,42 @@ V *bi_synth_playing(V **a, int n) {
     return v_int(synth_playing());
 }
 int synth_mouse_press(int x, int y, char *err, size_t err_cap) {
-    (void)err; (void)err_cap;
-    P(!g.open || !g.alive,-1)
+    (void)x;
+    (void)y;
+    if (!g.open || !g.alive) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_mouse_press: synth not open");
+        return -1;
+    }
     synth_core_handle_click(x, y, 1);
     return 0;
 }
 int synth_mouse_release(int x, int y, char *err, size_t err_cap) {
-    (void)err; (void)err_cap;
-    P(!g.open || !g.alive,-1)
+    (void)x;
+    (void)y;
+    if (!g.open || !g.alive) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_mouse_release: synth not open");
+        return -1;
+    }
     synth_core_handle_release(x, y, 0);
     return 0;
 }
 V *bi_synth_mouse_press(V **a, int n) {
     char err[256];
+    err[0] = 0;
     P(n != 2,v_err("synth_mouse_press: expected x, y"))
     P(synth_mouse_press(synth_arg_int(a, n, 0, 0), synth_arg_int(a, n, 1, 0), err, sizeof err) != 0,synth_err(err))
     return v_nil();
 }
 V *bi_synth_mouse_release(V **a, int n) {
     char err[256];
+    err[0] = 0;
     P(n != 2,v_err("synth_mouse_release: expected x, y"))
     P(synth_mouse_release(synth_arg_int(a, n, 0, 0), synth_arg_int(a, n, 1, 0), err, sizeof err) != 0,synth_err(err))
     return v_nil();
 }
 V *bi_synth_set_viz(V **a, int n) {
     char err[256];
+    err[0] = 0;
     P(n < 1,v_err("synth_set_viz(mode)"))
     P(synth_set_viz(synth_arg_int(a, n, 0, 0), err, sizeof err) != 0,synth_err(err))
     return v_nil();
@@ -2422,6 +2457,7 @@ V *bi_synth_viz_mode(V **a, int n) {
 }
 V *bi_synth_load_sample(V **a, int n) {
     char err[512];
+    err[0] = 0;
     P(n < 1 || a[0]->t != T_STR, v_err("synth_load_sample(path)"))
     P(synth_load_sample(a[0]->s, err, sizeof err) != 0, synth_err(err))
     return v_nil();
@@ -2438,6 +2474,7 @@ V *bi_synth_sample_name(V **a, int n) {
 }
 V *bi_synth_set_row_note(V **a, int n) {
     char err[512];
+    err[0] = 0;
     P(n < 2, v_err("synth_set_row_note(row, midi)"))
     P(synth_set_row_note(synth_arg_int(a, n, 0, 0), synth_arg_int(a, n, 1, 60), err, sizeof err) != 0,
       synth_err(err))
@@ -2449,18 +2486,21 @@ V *bi_synth_row_note(V **a, int n) {
 }
 V *bi_synth_looper_rec(V **a, int n) {
     char err[256];
+    err[0] = 0;
     P(n < 1, v_err("synth_looper_rec(on)"))
     P(synth_looper_rec(synth_arg_int(a, n, 0, 0), err, sizeof err) != 0, synth_err(err))
     return v_nil();
 }
 V *bi_synth_looper_play(V **a, int n) {
     char err[256];
+    err[0] = 0;
     P(n < 1, v_err("synth_looper_play(on)"))
     P(synth_looper_play(synth_arg_int(a, n, 0, 0), err, sizeof err) != 0, synth_err(err))
     return v_nil();
 }
 V *bi_synth_looper_clear(V **a, int n) {
     char err[256];
+    err[0] = 0;
     (void)a;
     (void)n;
     P(synth_looper_clear(err, sizeof err) != 0, synth_err(err))
@@ -2468,6 +2508,7 @@ V *bi_synth_looper_clear(V **a, int n) {
 }
 V *bi_synth_looper_overdub(V **a, int n) {
     char err[256];
+    err[0] = 0;
     P(n < 1, v_err("synth_looper_overdub(on)"))
     P(synth_looper_overdub(synth_arg_int(a, n, 0, 0), err, sizeof err) != 0, synth_err(err))
     return v_nil();

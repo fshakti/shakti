@@ -393,6 +393,124 @@ V *bi_govee_cmd_color(V **a, int n) {
     return v_str(buf);
 }
 
+static const char g_b64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static V *govee_b64_encode(const unsigned char *data, size_t len) {
+    if (!data || len == 0) return v_str("");
+    size_t out_len = 4 * ((len + 2) / 3);
+    char *out = malloc(out_len + 1);
+    if (!out) return v_err("govee: out of memory");
+    size_t i = 0, j = 0;
+    while (i < len) {
+        unsigned int octet_a = i < len ? data[i++] : 0;
+        unsigned int octet_b = i < len ? data[i++] : 0;
+        unsigned int octet_c = i < len ? data[i++] : 0;
+        unsigned int triple = (octet_a << 16) + (octet_b << 8) + octet_c;
+        out[j++] = g_b64[(triple >> 18) & 0x3F];
+        out[j++] = g_b64[(triple >> 12) & 0x3F];
+        out[j++] = g_b64[(triple >> 6) & 0x3F];
+        out[j++] = g_b64[triple & 0x3F];
+    }
+    if (len % 3 == 1) {
+        out[out_len - 2] = '=';
+        out[out_len - 1] = '=';
+    } else if (len % 3 == 2) {
+        out[out_len - 1] = '=';
+    }
+    out[out_len] = 0;
+    V *ret = v_str(out);
+    free(out);
+    return ret;
+}
+
+static unsigned char govee_ble_xor(const unsigned char *pkt, size_t n) {
+    unsigned char x = 0;
+    for (size_t i = 0; i < n; i++) x ^= pkt[i];
+    return x;
+}
+
+V *bi_govee_ble_segment(V **a, int n) {
+    P(n < 5 || a[0]->t != T_INT || a[1]->t != T_INT || a[2]->t != T_INT ||
+      a[3]->t != T_INT || a[4]->t != T_INT,
+      v_err("govee_ble_segment(r, g, b, left_mask, right_mask)"))
+    int r = (int)a[0]->j, g = (int)a[1]->j, b = (int)a[2]->j;
+    int left = (int)a[3]->j, right = (int)a[4]->j;
+    if (r < 0) r = 0; if (r > 255) r = 255;
+    if (g < 0) g = 0; if (g > 255) g = 255;
+    if (b < 0) b = 0; if (b > 255) b = 255;
+    if (left < 0) left = 0; if (left > 255) left = 255;
+    if (right < 0) right = 0; if (right > 255) right = 255;
+    unsigned char pkt[20];
+    pkt[0] = 0x33; pkt[1] = 0x05; pkt[2] = 0x0b;
+    pkt[3] = (unsigned char)r; pkt[4] = (unsigned char)g; pkt[5] = (unsigned char)b;
+    pkt[6] = 0x00; pkt[7] = 0x00;
+    pkt[8] = (unsigned char)left; pkt[9] = (unsigned char)right;
+    for (int i = 10; i < 19; i++) pkt[i] = 0x00;
+    pkt[19] = govee_ble_xor(pkt, 19);
+    return govee_b64_encode(pkt, sizeof pkt);
+}
+
+V *bi_govee_ble_segment_kelvin(V **a, int n) {
+    P(n < 6 || a[0]->t != T_INT || a[1]->t != T_INT || a[2]->t != T_INT ||
+      a[3]->t != T_INT || a[4]->t != T_INT || a[5]->t != T_INT,
+      v_err("govee_ble_segment_kelvin(r, g, b, kelvin, left_mask, right_mask)"))
+    int r = (int)a[0]->j, g = (int)a[1]->j, b = (int)a[2]->j;
+    int kelvin = (int)a[3]->j;
+    int left = (int)a[4]->j, right = (int)a[5]->j;
+    if (r < 0) r = 0; if (r > 255) r = 255;
+    if (g < 0) g = 0; if (g > 255) g = 255;
+    if (b < 0) b = 0; if (b > 255) b = 255;
+    if (kelvin < 2000) kelvin = 2000;
+    if (kelvin > 9000) kelvin = 9000;
+    if (left < 0) left = 0; if (left > 255) left = 255;
+    if (right < 0) right = 0; if (right > 255) right = 255;
+    unsigned char pkt[20];
+    pkt[0] = 0x33; pkt[1] = 0x05; pkt[2] = 0x15; pkt[3] = 0x01;
+    pkt[4] = (unsigned char)r; pkt[5] = (unsigned char)g; pkt[6] = (unsigned char)b;
+    if (kelvin <= 2500) {
+        pkt[7] = 0x08; pkt[8] = 0x34; pkt[9] = 0xff; pkt[10] = 0x92; pkt[11] = 0x1d;
+    } else if (kelvin >= 8000) {
+        pkt[7] = 0x22; pkt[8] = 0x60; pkt[9] = 0xdb; pkt[10] = 0xe2; pkt[11] = 0xff;
+    } else {
+        pkt[7] = (unsigned char)((kelvin >> 8) & 0xff);
+        pkt[8] = (unsigned char)(kelvin & 0xff);
+        pkt[9] = 0x00; pkt[10] = 0x00; pkt[11] = 0x00;
+    }
+    pkt[12] = (unsigned char)left; pkt[13] = (unsigned char)right;
+    for (int i = 14; i < 19; i++) pkt[i] = 0x00;
+    pkt[19] = govee_ble_xor(pkt, 19);
+    return govee_b64_encode(pkt, sizeof pkt);
+}
+
+V *bi_govee_cmd_ptreal(V **a, int n) {
+    P(n < 1 || a[0]->t != T_LIST, v_err("govee_cmd_ptreal([base64_packets])"))
+    V *cmds = a[0];
+    char *buf = malloc(4096);
+    if (!buf) return v_err("govee: out of memory");
+    size_t pos = 0, cap = 4096;
+    pos += snprintf(buf + pos, cap - pos,
+                    "{\"msg\":{\"cmd\":\"ptReal\",\"data\":{\"command\":[");
+    for (int64_t i = 0; i < cmds->n; i++) {
+        V *item = cmds->L[i];
+        if (!item || item->t != T_STR) {
+            free(buf);
+            return v_err("govee_cmd_ptreal: expected list of strings");
+        }
+        if (i > 0) {
+            if (pos + 1 >= cap) { free(buf); return v_err("govee: ptReal JSON too large"); }
+            buf[pos++] = ',';
+        }
+        size_t need = strlen(item->s) + 4;
+        if (pos + need >= cap) { free(buf); return v_err("govee: ptReal JSON too large"); }
+        pos += snprintf(buf + pos, cap - pos, "\"%s\"", item->s);
+    }
+    pos += snprintf(buf + pos, cap - pos, "]}}}");
+    V *out = v_str(buf);
+    free(buf);
+    return out;
+}
+
 V *bi_govee_get_model(V **a, int n) {
     (void)a; (void)n;
     govee_init();

@@ -10,7 +10,6 @@ extern void kd_synth_rasterize(const UiCmd *cmds, int n, uint32_t *fb, int w, in
 
 static UiCmd g_cmds[SYNTH_UI_MAX_CMDS];
 static int g_ncmds;
-static int g_fb_w, g_fb_h;
 static SynthVizMode g_viz_mode = SYNTH_VIZ_SPECTRUM;
 static float g_waveform[SYNTH_UI_WAVEFORM_LEN];
 static int g_wave_pos;
@@ -58,16 +57,6 @@ typedef struct UiCtx {
 
 static void pix(UiCtx *c, int x, int y, uint32_t col) {
     if (x >= 0 && x < c->w && y >= 0 && y < c->h) c->fb[y * c->w + x] = col;
-}
-static void pix_blend(UiCtx *c, int x, int y, uint32_t col, float a) {
-    uint32_t dst;
-    if (x < 0 || x >= c->w || y < 0 || y >= c->h || a <= 0.f) return;
-    if (a >= 1.f) {
-        pix(c, x, y, col);
-        return;
-    }
-    dst = c->fb[y * c->w + x];
-    pix(c, x, y, rgb_lerp(dst, col, a));
 }
 static void drect_fill(UiCtx *c, UiRect r, uint32_t col) {
     int x, y;
