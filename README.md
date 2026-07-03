@@ -1,6 +1,8 @@
+https://partiful.com/e/SZxV8oRmOvW0vC1ST3Fk
+
 # shakti
 
-Small interpreted language (0.8.2).
+Small interpreted language (0.9.0).
 
 ## build
 

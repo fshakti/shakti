@@ -1,6 +1,6 @@
 # Shakti — project context
 
-Interpreted language (v0.8.2): standalone C CLI, GNU Make build, Apache-2.0.
+Interpreted language (v0.9.0): standalone C CLI, GNU Make build, Apache-2.0.
 
 - **Remote:** https://github.com/quillquant/shakti.git (`master`)
 - **Published tree:** `src/`, `examples/`, `docs/`, `README.md`, `Makefile`, `LICENSE`, `NOTICE`, `CONTEXT.md`
