@@ -2414,6 +2414,10 @@ Node *parse(const char *src) {
     W(lex_peek(&l).type != T_EOF_,{
         Node *s = parse_stmt(&l);
         if(s) node_add(prog, s);
+        else if(lex_peek(&l).type == T_DEDENT_){
+            if(lex_next(&l).type == T_EOF_)break;
+            printf("parse_stmt returned null? next token is %d\n", lex_peek(&l).type);
+        }
     })
     return prog;
 }

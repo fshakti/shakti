@@ -171,7 +171,7 @@ enum {
     T_DOT_ = 76,
     T_SEMI_ = 77,
     T_AT_ = 78,
-    T_CHARZ_ = 78,
+    T_CHARZ_ = 79,
 };
 
 enum {

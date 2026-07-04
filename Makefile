@@ -252,4 +252,4 @@ else
 endif
 
 .PHONY: test test-macros test-parse test-mac bench bench-update bench-report clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps update-whitelist-h
-update-whitelist-h:;find . -name '*.ie' -exec ./shakti --hash {} \; | sort -n -k 2 > src/whitelist.h
+update-whitelist-h:;find . -name '*.ie' -exec ./shakti --hash {} \; | grep '^{' | sort -n -k 2 > src/whitelist.h
