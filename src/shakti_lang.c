@@ -3484,7 +3484,7 @@ static V *do_import(const char *name, Env *e) {
         Sha256 ctx;sha256_init(&ctx);module_id(&ctx,prog,e);sha256_flush(&ctx);
         if(!bsearch(ctx.state,shakti_core_dist,sizeof(shakti_core_dist)/sizeof(*shakti_core_dist),sizeof(ctx.state),cmp_j8)){
             if(module_loc==2||module_loc==6) {
-                fprintf(stderr, "can't load %s (possibly from a different version of shakti?)\n",name);
+                fprintf(stderr, "%s possibly from a different version of shakti?\n",name);
             }
             if(shakti_import_depth<0) {
                 if(module_loc&~2){
