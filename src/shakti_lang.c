@@ -87,6 +87,10 @@ static V *v_super(int n) {
 #define ISL_INT_CACHE_MAX 1048576
 static V **isl_int_cache;
 
+static __thread int dynamic_has_sql=0;
+static const char *SHAKTI_SQL_FLAG = "__shakti_sql__";
+static int shakti_sql_enabled(Env *e);
+
 V *v_nil(void)           { return v_alloc(T_NIL); }
 V *v_bool(int b)         { V *v=v_alloc(T_BOOL); v->b=b; return v; }
 V *v_int(int64_t j) {
@@ -1422,6 +1426,12 @@ static Node *parse_atom(Lexer *l) {
         n = node_new(N_BOOL); n->ival = 0; return n;
     case T_NONE_:
         return node_new(N_NONE);
+    case T_SELECT_: case T_UPDATE_: case T_DELETE_:
+        if(dynamic_has_sql) {
+            l->has_peek = 1; l->peek = t;
+            return parse_query(l);
+        }
+        /* fall through */
     case T_NAME_:
         n = node_new(N_NAME); n->sval = strdup(t.sval); return n;
     case T_LPAREN_: {
@@ -2231,6 +2241,7 @@ static Node *parse_stmt(Lexer *l) {
             n->sval = strdup(buf);
         })
         W(lex_peek(l).type == T_NEWLINE_,lex_next(l))
+        if(!strcmp(n->sval,"sql")) dynamic_has_sql = 1;
         return n;
     }
     Node *expr = parse_expr(l);
@@ -3050,21 +3061,6 @@ static void for_set_vars(Node *vars, V *item, Env *e) {
         env_set(e, vars->sval, item);
     }
 }
-static const char *SHAKTI_SQL_FLAG = "__shakti_sql__";
-static int is_sql_import(const char *name) {
-    P(!name || !name[0],0)
-    if (!strcmp(name, "sql")) return 1;
-    const char *dot = strrchr(name, '.');
-    return dot && !strcmp(dot + 1, "sql");
-}
-static int shakti_sql_enabled(Env *e) {
-    V *v = env_get(e, SHAKTI_SQL_FLAG);
-    return v && v->t == T_BOOL && v->b;
-}
-static V *require_sql(Env *e) {
-    P(!shakti_sql_enabled(e),v_err("SQL requires: import sql"))
-    return NULL;
-}
 static V *do_import(const char *name, Env *e) {
     P(!name || !name[0],v_err("import requires a module name"))
     char path[8192];
@@ -3095,7 +3091,11 @@ static V *do_import(const char *name, Env *e) {
     fread(buf, 1, sz, f); buf[sz]='\n'; buf[sz+1]=0;
     fclose(f);
     Env *mod_env = env_new(e);
+    int old_dynamic = dynamic_has_sql;
+    dynamic_has_sql = shakti_sql_enabled(e);
     Node *prog = parse(buf);
+    if(dynamic_has_sql) env_set(e, SHAKTI_SQL_FLAG, v_bool(1));
+    dynamic_has_sql = old_dynamic;
     V *r = eval(prog, mod_env);
     v_free(r);
     free(buf);
@@ -3126,8 +3126,6 @@ static V *do_import(const char *name, Env *e) {
     } else {
         env_set(e, name, mod_dict);
     }
-    if (is_sql_import(name))
-        env_set(e, SHAKTI_SQL_FLAG, v_bool(1));
     v_free(mod_dict);
     env_free(mod_env);
     return v_nil();
@@ -3294,6 +3292,12 @@ static V *select_load_projection(Node *sel) {
     }
     return acc;
 }
+
+static int shakti_sql_enabled(Env *e) {
+    V *v = env_get(e, SHAKTI_SQL_FLAG);
+    return v && v->t == T_BOOL && v->b;
+}
+
 V *eval(Node *n, Env *e) {
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
@@ -3306,8 +3310,6 @@ V *eval(Node *n, Env *e) {
     case N_PASS: return v_nil();
     case N_DATETIME: return v_datetime(n->ival);
     case N_SELECT: {
-        V *sql_err = require_sql(e);
-        P(sql_err,sql_err)
         V *from0 = eval(n->ch[0], e);
         V *from;
         if (from0->t == T_STR) {
@@ -3332,8 +3334,6 @@ V *eval(Node *n, Env *e) {
         return r;
     }
     case N_UPDATE: {
-        V *sql_err = require_sql(e);
-        P(sql_err,sql_err)
         V *from = eval(n->ch[0], e);
         P(from->t == T_ERR,from)
         V *assignments = eval_update_cols(n->ch[1], from, e);
@@ -3346,8 +3346,6 @@ V *eval(Node *n, Env *e) {
         return r;
     }
     case N_DELETE: {
-        V *sql_err = require_sql(e);
-        P(sql_err,sql_err)
         V *from = eval(n->ch[0], e);
         P(from->t == T_ERR,from)
         V *cols = eval_select_cols(n->ch[1], e);
@@ -3359,8 +3357,6 @@ V *eval(Node *n, Env *e) {
         return r;
     }
     case N_CREATE_TABLE: {
-        V *sql_err = require_sql(e);
-        P(sql_err,sql_err)
         V *schema = eval_create_schema(n->ch[0], e);
         P(schema->t == T_ERR,schema)
         V *name_v = v_str(n->sval);
@@ -3370,8 +3366,6 @@ V *eval(Node *n, Env *e) {
         return r;
     }
     case N_INSERT: {
-        V *sql_err = require_sql(e);
-        P(sql_err,sql_err)
         V *existing = env_get(e, n->sval);
         P(!existing,v_errf("insert: table '%s' not found", n->sval))
         V *cols = eval_name_list(n->ch[0]);
@@ -3383,8 +3377,6 @@ V *eval(Node *n, Env *e) {
         return r;
     }
     case N_JOIN: {
-        V *sql_err = require_sql(e);
-        P(sql_err,sql_err)
         V *left = eval(n->ch[0], e);
         V *right = eval(n->ch[1], e);
         V *on_col = v_str(n->sval);
@@ -3445,7 +3437,10 @@ V *eval(Node *n, Env *e) {
                     goto fstr_oom;
                 }
                 sprintf(expr, "%s\n", raw);
+                int old_dynamic = dynamic_has_sql;
+                dynamic_has_sql = shakti_sql_enabled(e);
                 Node *ast = parse(expr);
+                dynamic_has_sql = old_dynamic;
                 V *val = eval(ast, e);
                 node_free(ast);
                 if (g_error || !val || val->t == T_ERR) {
