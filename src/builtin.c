@@ -972,6 +972,7 @@ typedef struct { const char *name; BiCall fn; } BiEntry;
 static int bi_name_cmp(const void *va, const void *vb) {
     return strcmp(((const BiEntry *)va)->name, ((const BiEntry *)vb)->name);
 }
+
 static const BiEntry bi_tab[] = {
     {"abs", bi_w_abs},
     {"all", bi_w_all},
@@ -1181,6 +1182,18 @@ static const BiEntry bi_tab[] = {
 static BiCall bi_find(const char *name) {
     BiEntry key = {name, NULL};
     const BiEntry *hit = bsearch(&key, bi_tab, sizeof bi_tab / sizeof bi_tab[0], sizeof *hit, bi_name_cmp);
+#ifdef __APPLE__
+    if(!hit) {
+          static int order_report = 0;
+          if(!order_report)for(int i=1;i<sizeof(bi_tab)/sizeof(*bi_tab);++i,order_report=1){
+              int g=strcmp(bi_tab[i].name,bi_tab[i-1].name);
+              if(g<1){
+                  printf("%d is out of order (near %s <=> %s)\n",i,bi_tab[i].name,bi_tab[i-1].name);
+              }
+              __builtin_abort();
+          }
+    }
+#endif
     return hit ? hit->fn : NULL;
 }
 V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env *e){
