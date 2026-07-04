@@ -3482,7 +3482,9 @@ static V *do_import(const char *name, Env *e) {
     Node*prog = module_code(name);
     if(shakti_import_depth<1) {
         Sha256 ctx;sha256_init(&ctx);module_id(&ctx,prog,e);sha256_flush(&ctx);
-        if(!bsearch(ctx.state,shakti_core_dist,sizeof(shakti_core_dist)/sizeof(*shakti_core_dist),sizeof(ctx.state),cmp_j8)){
+        char sign[69],*s=sign;*s++=7;unsigned char *q=(void*)ctx.state;i(32,*s++='c'+(*q>>4);*s++='c'+(*q++));*s=0;
+        if(!env_get(e,sign)&&
+        !bsearch(ctx.state,shakti_core_dist,sizeof(shakti_core_dist)/sizeof(*shakti_core_dist),sizeof(ctx.state),cmp_j8)){
             if(module_loc==2||module_loc==6) {
                 fprintf(stderr, "%s possibly from a different version of shakti?\n",name);
             }
