@@ -18,11 +18,16 @@
 #include <mach/mach.h>
 #include <sys/mount.h>
 #include <sys/sysctl.h>
+#elif defined(_WIN32)
+#include <sysinfoapi.h>
 #endif
 
 #define MACHINE_BENCH_BYTES (4 * 1024 * 1024)
 
+static const char *use_bench_dir = "/tmp";
+
 static void mput(V *d, const char *k, V *v);
+static char*rtrim(char*a){char *e=a+strlen(a),oa=*a;if(!*a)return a;*a='*';while(e[-1]==' ')*--e=0;*a=oa;return a;}
 
 static void fmt_bytes(char *out, size_t outsz, int64_t bytes) {
     static const char *u[] = {"B", "KB", "MB", "GB", "TB", "PB"};
@@ -64,46 +69,6 @@ static void mput(V *d, const char *k, V *v) {
 }
 
 static V *mdict(void) { return v_dict(v_list(0), v_list(0)); }
-
-static void mput_out(V *d, const char *k, const char *label, const char *value) {
-    char buf[384];
-    snprintf(buf, sizeof buf, "%s: %s", label, value);
-    mput(d, k, v_str(buf));
-}
-
-static void mput_out_int(V *d, const char *k, const char *label, int64_t n) {
-    char val[48];
-    snprintf(val, sizeof val, "%lld", (long long)n);
-    mput_out(d, k, label, val);
-}
-
-static void mput_out_bytes(V *d, const char *k, const char *label, int64_t bytes) {
-    char val[48];
-    fmt_bytes(val, sizeof val, bytes);
-    mput_out(d, k, label, val);
-}
-
-static void mput_out_kb(V *d, const char *k, const char *label, int64_t kb) {
-    char val[48];
-    fmt_kb(val, sizeof val, kb);
-    mput_out(d, k, label, val);
-}
-
-static void mput_out_mhz(V *d, const char *k, const char *label, double mhz) {
-    char val[32];
-    fmt_freq_mhz(val, sizeof val, mhz);
-    mput_out(d, k, label, val);
-}
-
-static void mput_out_throughput(V *d, const char *k, const char *label, double mbps) {
-    char val[32];
-    fmt_throughput(val, sizeof val, mbps);
-    mput_out(d, k, label, val);
-}
-
-static void mput_out_bool(V *d, const char *k, const char *label, int b) {
-    mput_out(d, k, label, b ? "yes" : "no");
-}
 
 static int read_text(const char *path, char *buf, size_t bufsz) {
     FILE *f = fopen(path, "r");
@@ -198,22 +163,57 @@ static int bench_rw(const char *dir, double *read_mbps, double *write_mbps) {
     unlink(tmpl);
     return 0;
 }
+static void fill_id(V *root) {
+#if defined(_Win32)
+    HANDLE h=CreateFile("C:\\", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL));
+    STORAGE_PROPERTY_QUERY q={};
+    q.PropertyId = StorageDeviceProperty;q.QueryType = PropertyStandardQuery;
+    DWORD br;
+    STORAGE_DESCRIPTOR_HEADER hdr={};
+    if(!DeviceIoControl(h,IOCTL_STORAGE_QUERY_PROPERTY,&q,sizeof(q),&hdr,sizeof(hdr),&br,NULL))return;
+    union{ char buf[hdr.Size];STORAGE_DEVICE_DESCRIPTOR p; }a;
+    if(!DeviceIoControl(h,IOCTL_STORAGE_QUERY_PROPERTY,&q,sizeof(q),a.buf,sizeof(a),&br,NULL))return;
+    if(a.p->SerialNumberOffset >= sizeof(a))return;
+    for(int i=p->SerialNumberOffset;i<sizeof(a);++i)if(!a.buf[i])mput(root,"id",v_str(a.buf+a.p->SerialNumberOffset));
+#elif defined(__linux__)
+    char buffer[128];if(!read_text("/etc/machine-id",buffer,sizeof(buffer)-1))mput(root,"id",v_str(buffer));
+#elif defined(__APPLE__)
+    FILE*p=popen("ioreg -c IOPlatformExpertDevice -d 2 | awk -F \\\" '/IOPlatformSerialNumber/{print $(NF-1)}'","r");
+    char buffer[128];buffer[sizeof(buffer)-1]=0;*buffer=0;
+    if(fgets(buffer,sizeof(buffer)-1,p)&&*buffer)mput(root,"id",v_str(buffer));pclose(p);
+#endif
+}
 
 static void fill_os(V *root) {
     V *os = mdict();
+#if defined(_WIN32)
+    const char *e=getenv("COMPUTERNAME");
+    if(e)mput(os,"host",v_str(e));
+#else
+    const char *e=getenv("HOSTNAME");
+    if(e)mput(os,"host",v_str(e));
+#endif
+
 #if defined(__linux__) || defined(__APPLE__)
     struct utsname uts;
     if (uname(&uts) == 0) {
-        mput_out(os, "name", "Operating system", uts.sysname);
-        mput_out(os, "release", "Kernel release", uts.release);
-        mput_out(os, "version", "Kernel version", uts.version);
-        mput_out(os, "arch", "Architecture", uts.machine);
+        mput(os, "name", v_str(uts.sysname));
+        mput(os, "release", v_str(uts.release));
+        mput(os, "version", v_str(uts.version));
+        mput(os, "arch", v_str(uts.machine));
     }
     char host[256];
     if (gethostname(host, sizeof host) == 0)
-        mput_out(os, "hostname", "Hostname", host);
+        mput(os, "hostname", v_str(host));
+#elif defined(_WIN32)
+    mput(os, "name", v_str("Windows"));
+    OSVERSIONINFOA k={0};k.dwOSVersionInfoSize=sizeof(k);GetVersionExA(&k);
+    char version[16];snprintf(version,sizeof(version),"%d.%d (%d)",k.dwMajorVersion,k.dwMinorVersion,k.dwBuildNumber);
+    mput(os, "version", v_str(version));if(*k.szCSDVersion)mput(os,"release",v_str(k.szCSDVersion));
+    char host[256];DWORD hn=sizeof(host)-1;
+    if(GetComputerNameA(host,&hn))host[hn]=0,mput(os,"hostname",v_str(host));
 #else
-    mput_out(os, "name", "Operating system", "unknown");
+    mput(os, "name", "unknown");
 #endif
     mput(root, "os", os);
 }
@@ -361,10 +361,10 @@ static void linux_cpu_cache(V *cpu) {
             l3 += kb;
     }
     closedir(d);
-    mput_out_kb(cpu, "l1d", "L1 data cache", l1d);
-    mput_out_kb(cpu, "l1i", "L1 instruction cache", l1i);
-    mput_out_kb(cpu, "l2", "L2 cache", l2);
-    mput_out_kb(cpu, "l3", "L3 cache", l3);
+    mput(cpu, "l1d", v_int(l1d));
+    mput(cpu, "l1i", v_int(l1i));
+    mput(cpu, "l2", v_int(l2));
+    mput(cpu, "l3", v_int(l3));
 }
 
 static void linux_cpu_clock(V *cpu) {
@@ -373,9 +373,9 @@ static void linux_cpu_clock(V *cpu) {
     int64_t max_khz = read_int_file(
         "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq");
     if (cur_khz > 0)
-        mput_out_mhz(cpu, "clock", "Clock speed", (double)cur_khz / 1000.0);
+        mput(cpu, "clock", v_float( (double)cur_khz / 1000.0) );
     if (max_khz > 0)
-        mput_out_mhz(cpu, "clock_max", "Max clock speed", (double)max_khz / 1000.0);
+        mput(cpu, "clock_max", v_float( (double)max_khz / 1000.0) );
     if (cur_khz > 0 || max_khz > 0)
         return;
     FILE *f = fopen("/proc/cpuinfo", "r");
@@ -393,7 +393,7 @@ static void linux_cpu_clock(V *cpu) {
     }
     fclose(f);
     if (mhz > 0)
-        mput_out_mhz(cpu, "clock", "Clock speed", mhz);
+        mput(cpu, "clock", v_float(mhz));
 }
 
 static void fill_cpu(V *root) {
@@ -401,7 +401,7 @@ static void fill_cpu(V *root) {
     char model[256];
     linux_cpu_model(model, sizeof model);
     if (model[0])
-        mput_out(cpu, "model", "Model", model);
+        mput(cpu, "model", v_str(rtrim(model)));
     int threads = linux_count_cpuinfo_key("processor");
     int cores = linux_count_cpuinfo_key("cpu cores");
     int sockets = linux_count_cpuinfo_key("physical id");
@@ -411,10 +411,10 @@ static void fill_cpu(V *root) {
         cores = threads;
     if (sockets <= 0)
         sockets = 1;
-    mput_out_int(cpu, "threads", "Logical threads", threads);
-    mput_out_int(cpu, "cores", "Physical cores", cores);
-    mput_out_int(cpu, "sockets", "Sockets", sockets);
-    mput_out_int(cpu, "ccd", "CCD count", linux_ccd_count());
+    mput(cpu, "threads", v_int(threads));
+    mput(cpu, "cores", v_int(cores));
+    mput(cpu, "sockets", v_int(sockets));
+    mput(cpu, "ccd", v_int(linux_ccd_count()));
     linux_cpu_cache(cpu);
     linux_cpu_clock(cpu);
     mput(root, "cpu", cpu);
@@ -424,14 +424,10 @@ static void fill_ram(V *root) {
     struct sysinfo si;
     V *ram = mdict();
     if (sysinfo(&si) == 0) {
-        mput_out_bytes(ram, "total", "Total",
-                       (int64_t)si.totalram * (int64_t)si.mem_unit);
-        mput_out_bytes(ram, "free", "Free",
-                       (int64_t)si.freeram * (int64_t)si.mem_unit);
-        mput_out_bytes(ram, "available", "Available",
-                       (int64_t)(si.freeram + si.bufferram) * (int64_t)si.mem_unit);
-        mput_out_bytes(ram, "swap", "Swap",
-                       (int64_t)si.totalswap * (int64_t)si.mem_unit);
+        mput(ram, "total", v_int( (int64_t)si.totalram * (int64_t)si.mem_unit) );
+        mput(ram, "free", v_int( (int64_t)si.freeram * (int64_t)si.mem_unit) );
+        mput(ram, "available", v_int( (int64_t)(si.freeram + si.bufferram) * (int64_t)si.mem_unit) );
+        mput(ram, "swap", v_int( (int64_t)si.totalswap * (int64_t)si.mem_unit ));
     }
     mput(root, "ram", ram);
 }
@@ -449,7 +445,7 @@ static const char *linux_disk_type(const char *dev, int rotational) {
 static void linux_disks(V *root) {
     V *disks = v_list(0);
     double bench_rd = 0, bench_wr = 0;
-    int have_bench = bench_rw("/tmp", &bench_rd, &bench_wr);
+    int have_bench = bench_rw(use_bench_dir, &bench_rd, &bench_wr);
     DIR *d = opendir("/sys/block");
     if (!d) {
         mput(root, "disks", disks);
@@ -475,25 +471,25 @@ static void linux_disks(V *root) {
             rotational = 0;
 
         V *disk = mdict();
-        mput_out(disk, "device", "Device", name);
-        mput_out_bytes(disk, "size", "Capacity", sectors * 512);
-        mput_out(disk, "type", "Type", linux_disk_type(name, rotational));
-        mput_out_bool(disk, "rotational", "Rotational (HDD)", rotational != 0);
+        mput(disk, "device", v_str(name));
+        mput(disk, "size", v_int(sectors * 512));
+        mput(disk, "type", v_str(linux_disk_type(name, rotational)));
+        mput(disk, "rotational", v_bool(rotational != 0));
 
         snprintf(path, sizeof path, "/sys/block/%s/device/model", name);
         char model[128];
         if (read_text(path, model, sizeof model) == 0)
-            mput_out(disk, "model", "Model", model);
+            mput(disk, "model", v_str(rtrim(model)));
         else {
             snprintf(path, sizeof path, "/sys/block/%s/device/name", name);
             if (read_text(path, model, sizeof model) == 0)
-                mput_out(disk, "model", "Model", model);
+                mput(disk, "model", v_str(rtrim(model)));
         }
 
         if (have_bench == 0 && first) {
-            mput_out_throughput(disk, "read", "Sequential read", bench_rd);
-            mput_out_throughput(disk, "write", "Sequential write", bench_wr);
-            mput_out(disk, "bench_path", "Benchmark path", "/tmp");
+            mput(disk, "read", v_float(bench_rd));
+            mput(disk, "write", v_float(bench_wr));
+            mput(disk, "bench_path", v_str(use_bench_dir));
             first = 0;
         }
         v_list_append(disks, disk);
@@ -510,16 +506,16 @@ static void linux_gpu_clock(const char *card, V *gpu) {
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/gt_max_freq_mhz", card);
     int64_t max = read_int_file(path);
     if (cur > 0)
-        mput_out_mhz(gpu, "clock", "Clock speed", (double)cur);
+        mput(gpu, "clock", v_float( (double)cur) );
     if (max > 0)
-        mput_out_mhz(gpu, "clock_max", "Max clock speed", (double)max);
+        mput(gpu, "clock_max", v_float( (double)max) );
     if (cur > 0 || max > 0)
         return;
 
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/current_gpu_freq_mhz", card);
     cur = read_int_file(path);
     if (cur > 0) {
-        mput_out_mhz(gpu, "clock", "Clock speed", (double)cur);
+        mput(gpu, "clock", v_float( (double)cur) );
         return;
     }
 
@@ -546,9 +542,9 @@ static void linux_gpu_clock(const char *card, V *gpu) {
     }
     fclose(f);
     if (active > 0)
-        mput_out_mhz(gpu, "clock", "Clock speed", active);
+        mput(gpu, "clock", v_float( active) );
     if (peak > 0)
-        mput_out_mhz(gpu, "clock_max", "Max clock speed", peak);
+        mput(gpu, "clock_max", v_float(peak));
 }
 
 static void linux_gpu_one(const char *card, V *gpus) {
@@ -570,13 +566,13 @@ static void linux_gpu_one(const char *card, V *gpus) {
 
     V *gpu = mdict();
     if (has_product)
-        mput_out(gpu, "name", "Name", product);
+        mput(gpu, "name", product);
     else
-        mput_out(gpu, "name", "Name", card);
+        mput(gpu, "name", card);
     if (vendor[0])
-        mput_out(gpu, "vendor_id", "Vendor ID", vendor);
+        mput(gpu, "vendor_id", vendor);
     if (device[0])
-        mput_out(gpu, "device_id", "Device ID", device);
+        mput(gpu, "device_id", device);
 
     int64_t vram = -1;
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/mem_info_vram_total", card);
@@ -586,17 +582,14 @@ static void linux_gpu_one(const char *card, V *gpus) {
         vram = read_int_file(path);
     }
     if (vram >= 0)
-        mput_out_bytes(gpu, "vram", "Video memory", vram);
+        mput(gpu, "vram", v_int(vram));
 
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/gpu_busy_percent", card);
     (void)path;
 
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/gfx_cu_count", card);
     int64_t cu = read_int_file(path);
-    if (cu >= 0)
-        mput_out_int(gpu, "cores", "Shader cores", cu);
-    else
-        mput_out_int(gpu, "cores", "Shader cores", 0);
+    mput(gpu, "cores", v_int(cu >= 0 ? cu : 0));
 
     linux_gpu_clock(card, gpu);
 
@@ -644,7 +637,7 @@ static void fill_gpus(V *root) {
             if (!f)
                 continue;
             V *gpu = mdict();
-            mput_out(gpu, "name", "Name", "NVIDIA GPU");
+            mput(gpu, "name", v_str("NVIDIA GPU"));
             char line[256];
             while (fgets(line, sizeof line, f)) {
                 if (!strncmp(line, "Model:", 6)) {
@@ -656,7 +649,7 @@ static void fill_gpus(V *root) {
                         size_t n = strlen(v);
                         while (n && (v[n - 1] == '\n' || v[n - 1] == '\r'))
                             v[--n] = 0;
-                        mput_out(gpu, "name", "Name", v);
+                        mput(gpu, "name", v_str(v));
                     }
                 } else if (!strncmp(line, "Total Memory:", 13)) {
                     char *v = strchr(line, ':');
@@ -665,12 +658,12 @@ static void fill_gpus(V *root) {
                         while (*v == ' ')
                             v++;
                         int64_t mib = (int64_t)strtoll(v, NULL, 10);
-                        mput_out_bytes(gpu, "vram", "Video memory", mib * 1024 * 1024);
+                        mput(gpu, "vram", v_int(mib * 1024 * 1024));
                     }
                 }
             }
             fclose(f);
-            mput_out_int(gpu, "cores", "Shader cores", 0);
+            mput(gpu, "cores", v_int(0));
             v_list_append(gpus, gpu);
             v_free(gpu);
         }
@@ -696,13 +689,12 @@ static int64_t sysctl_i64(const char *name) {
         return -1;
     return v;
 }
-
 static void fill_cpu(V *root) {
     V *cpu = mdict();
     char buf[256];
     sysctl_str("machdep.cpu.brand_string", buf, sizeof buf);
     if (buf[0])
-        mput_out(cpu, "model", "Model", buf);
+        mput(cpu, "model", v_str(rtrim(buf)));
     int64_t threads = sysctl_i64("hw.logicalcpu");
     int64_t cores = sysctl_i64("hw.physicalcpu");
     int64_t packages = sysctl_i64("hw.packages");
@@ -712,28 +704,28 @@ static void fill_cpu(V *root) {
         cores = threads;
     if (packages < 0)
         packages = 1;
-    mput_out_int(cpu, "threads", "Logical threads", threads);
-    mput_out_int(cpu, "cores", "Physical cores", cores);
-    mput_out_int(cpu, "sockets", "Sockets", packages);
-    mput_out_int(cpu, "ccd", "CCD count", packages > 0 ? packages : 1);
+    mput(cpu, "threads", v_int(threads));
+    mput(cpu, "cores", v_int(cores));
+    mput(cpu, "sockets", v_int(packages));
+    mput(cpu, "ccd", v_int(packages > 0 ? packages : 1));
     int64_t l1d = sysctl_i64("hw.l1dcachesize");
     int64_t l1i = sysctl_i64("hw.l1icachesize");
     int64_t l2 = sysctl_i64("hw.l2cachesize");
     int64_t l3 = sysctl_i64("hw.l3cachesize");
     if (l1d >= 0)
-        mput_out_bytes(cpu, "l1d", "L1 data cache", l1d);
+        mput(cpu, "l1d", v_int(l1d));
     if (l1i >= 0)
-        mput_out_bytes(cpu, "l1i", "L1 instruction cache", l1i);
+        mput(cpu, "l1i", v_int(l1i));
     if (l2 >= 0)
-        mput_out_bytes(cpu, "l2", "L2 cache", l2);
+        mput(cpu, "l2", v_int(l2));
     if (l3 >= 0)
-        mput_out_bytes(cpu, "l3", "L3 cache", l3);
+        mput(cpu, "l3", v_int(l3));
     int64_t freq = sysctl_i64("hw.cpufrequency");
     if (freq > 0)
-        mput_out_mhz(cpu, "clock", "Clock speed", (double)freq / 1000000.0);
+        mput(cpu, "clock", v_float( (double)freq / 1000000.0) );
     freq = sysctl_i64("hw.cpufrequency_max");
     if (freq > 0)
-        mput_out_mhz(cpu, "clock_max", "Max clock speed", (double)freq / 1000000.0);
+        mput(cpu, "clock_max", v_float( (double)freq / 1000000.0) );
     mput(root, "cpu", cpu);
 }
 
@@ -741,15 +733,14 @@ static void fill_ram(V *root) {
     V *ram = mdict();
     int64_t mem = sysctl_i64("hw.memsize");
     if (mem >= 0)
-        mput_out_bytes(ram, "total", "Total", mem);
+        mput(ram, "total", v_int(mem));
     vm_size_t page_free = 0;
     mach_port_t port = mach_host_self();
     vm_statistics64_data_t vmstat;
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
     if (host_statistics64(port, HOST_VM_INFO64, (host_info64_t)&vmstat, &count) == KERN_SUCCESS) {
         page_free = vmstat.free_count;
-        mput_out_bytes(ram, "free", "Free",
-                       (int64_t)page_free * (int64_t)vm_page_size);
+        mput(ram, "free", v_int( (int64_t)page_free * (int64_t)vm_page_size) );
     }
     mput(root, "ram", ram);
 }
@@ -761,19 +752,19 @@ static void fill_gpus(V *root) {
     sysctl_str("machdep.gpu.model", model, sizeof model);
     if (!model[0])
         snprintf(model, sizeof model, "Apple GPU");
-    mput_out(gpu, "name", "Name", model);
+    mput(gpu, "name", v_str(model));
     int64_t mem = sysctl_i64("hw.memsize");
     if (mem >= 0) {
-        mput_out_bool(gpu, "unified_memory", "Unified memory", 1);
-        mput_out_bytes(gpu, "system_ram", "Shared system memory", mem);
+        mput(gpu, "unified_memory", v_bool(1));
+        mput(gpu, "system_ram", v_int(mem));
     }
     int64_t cu = sysctl_i64("machdep.gpu.core_count");
     if (cu < 0)
         cu = 0;
-    mput_out_int(gpu, "cores", "Shader cores", cu);
+    mput(gpu, "cores", v_int(cu));
     int64_t ghz = sysctl_i64("machdep.gpu.core_clock_mhz");
     if (ghz > 0)
-        mput_out_mhz(gpu, "clock", "Clock speed", (double)ghz);
+        mput(gpu, "clock", v_float((double)ghz));
     v_list_append(gpus, gpu);
     v_free(gpu);
     mput(root, "gpu", gpus);
@@ -784,21 +775,20 @@ static void darwin_disks(V *root) {
     struct statfs *mnt = NULL;
     int n = getmntinfo(&mnt, MNT_NOWAIT);
     double rd = 0, wr = 0;
-    int benched = bench_rw("/tmp", &rd, &wr);
+    int benched = bench_rw(use_bench_dir, &rd, &wr);
     for (int i = 0; i < n; i++) {
         if (strncmp(mnt[i].f_mntfromname, "devfs", 5) == 0)
             continue;
         V *disk = mdict();
-        mput_out(disk, "device", "Device", mnt[i].f_mntfromname);
-        mput_out(disk, "mount", "Mount point", mnt[i].f_mntonname);
-        mput_out(disk, "fstype", "Filesystem", mnt[i].f_fstypename);
-        mput_out_bytes(disk, "size", "Capacity",
-                       (int64_t)mnt[i].f_blocks * mnt[i].f_bsize);
-        mput_out(disk, "type", "Type", "apfs");
+        mput(disk, "device", v_str(mnt[i].f_mntfromname));
+        mput(disk, "mount", v_str(mnt[i].f_mntonname));
+        mput(disk, "fstype", v_str(mnt[i].f_fstypename));
+        mput(disk, "size", v_int( (int64_t)mnt[i].f_blocks * mnt[i].f_bsize) );
+        mput(disk, "type", v_str("apfs"));//?
         if (benched == 0 && !strcmp(mnt[i].f_mntonname, "/")) {
-            mput_out_throughput(disk, "read", "Sequential read", rd);
-            mput_out_throughput(disk, "write", "Sequential write", wr);
-            mput_out(disk, "bench_path", "Benchmark path", "/tmp");
+            mput(disk, "read", v_float(rd));
+            mput(disk, "write", v_float(wr));
+            mput(disk, "bench_path", v_str(use_bench_dir));
         }
         v_list_append(disks, disk);
         v_free(disk);
@@ -812,7 +802,7 @@ static void darwin_disks(V *root) {
 
 static void fill_cpu(V *root) {
     V *cpu = mdict();
-    mput_out_int(cpu, "threads", "Logical threads", sysconf(_SC_NPROCESSORS_ONLN));
+    mput(cpu, "threads", v_int( sysconf(_SC_NPROCESSORS_ONLN)) );
     mput(root, "cpu", cpu);
 }
 
@@ -838,7 +828,9 @@ V *bi_machine(V **a, in) {
 }
 
 V *shakti_machine_info(void) {
+    const char *e=getenv("TMPDIR");if(e)use_bench_dir=e;
     V *root = mdict();
+    fill_id(root);
     fill_os(root);
     fill_cpu(root);
     fill_ram(root);
