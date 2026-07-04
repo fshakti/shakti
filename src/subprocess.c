@@ -14,12 +14,20 @@ V*subprocess(V**a,in){
 }
 #else // linux, apple, etc
 V*subprocess(V**a,in){
+  extern char **environ;
+#if defined(__linux__)
 	int t;
   do t=open("/dev/ptmx", O_RDWR|O_NOCTTY); while (t<0&&(errno==ENOSPC||errno==EAGAIN));
   if(t<0)return v_err("/dev/ptmx");
-	
+
   int p = 0; ioctl(t,TIOCSPTLCK,&p); if(ioctl(t,TIOCGPTN,&p)) return close(t),v_err("TIOCGPTN");
 	char pts[20]; snprintf(pts,sizeof(pts)-1,"/dev/pts/%d",p);
+#else // apple, etc
+  int t = posix_openpt(O_RDWR|O_NOCTTY);
+  grantpt(t);unlockpt(t);
+  char pts[1024];
+  if(ptsname_r(t,pts,sizeof(pts)-1)!=0)return close(t),v_err("ptsname_r");
+#endif
 
  // todo cgroups etc
   pid_t pid;
@@ -36,7 +44,7 @@ V*subprocess(V**a,in){
 	return v_subprocess(t, pid);
 }
 V *subprocess_next(V*p) {
-	char buffer[16536];
+	unsigned char buffer[16536];
 	int r = read(p->j, buffer, sizeof(buffer)-1);
   if(r >= 0) {
     for(int i = 0; i < r; ++i) if(
