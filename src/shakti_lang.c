@@ -4290,7 +4290,7 @@ V *eval(Node *n, Env *e) {
         } else {
             fn = eval(fn_node, e);
         }
-        if(fn->t == T_DICT && fn->n && fn->keys->L[0]->t == T_NIL) {
+        if(fn && fn->t == T_DICT && fn->n && fn->keys->L[0]->t == T_NIL) {
             V*self = v_copy(fn); self->b=1;
             fn = v_dict_get(self, "__init__");
             if(fn && fn->t == T_FN) {
