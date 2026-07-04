@@ -564,6 +564,12 @@ V *bi_all(V **a, in) {
 }
 V *bi_isinstance(V **a, in) {
     P(n < 2,v_bool(0))
+    if(a[0]->t == T_DICT && a[1]->t == T_DICT) {
+        P(!a[0]->b||a[1]->b||!a[0]->keys->n||a[0]->keys->L[0]->t!=T_NIL,v_bool(0));
+        for(V*x = a[1]; x && x->t == T_DICT && x->n && x->keys->L[0]->t == T_NIL;x = x->vals->L[0])P(a[0]->j==x->j,v_bool(1));
+        return v_bool(0);
+    }
+
     const char *want = a[1]->t == T_STR ? a[1]->s : "";
     const char *got = type_name(a[0]->t);
     return v_bool(!strcmp(want, got));

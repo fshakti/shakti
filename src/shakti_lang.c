@@ -554,7 +554,7 @@ V *v_copy(V *v) {
     }
     case T_DICT: {
         V *k=v_copy(v->keys), *vl=v_copy(v->vals);
-        V *r=v_dict(k,vl); v_free(k); v_free(vl); return r;
+        V *r=v_dict(k,vl); r->j = v->j, r->b = v->b; v_free(k); v_free(vl); return r;
     }
     case T_DATETIME: return v_datetime(v->j);
     case T_SUBPROCESS: return v_ref(v); // can't _actually_ copy procs... { V*r = v_subprocess(dup(v->j), v->n); return r; }
@@ -3082,7 +3082,7 @@ V *vec_cmp(V *a, V *b, int op) {
         return r;
     }
     if(a->t==T_DICT && b->t==T_DICT && (op==OP_EQ||op==OP_NE)) {
-        P(a->n != b->n,v_bool(op==OP_NE))
+        P(a->n != b->n || a->j != b->j || a->b != b->b,v_bool(op==OP_NE))
         for(int64_t i=0;i<a->n;i++) {
             V *ak = a->keys->L[i], *av = a->vals->L[i];
             int found = 0;
@@ -3565,6 +3565,7 @@ static V *select_load_projection(Node *sel) {
     return acc;
 }
 
+int shakti_num_class = 0;
 static int shakti_sql_enabled(Env *e) {
     V *v = env_get(e, SHAKTI_SQL_FLAG);
     return v && v->t == T_BOOL && v->b;
@@ -4609,6 +4610,7 @@ V *eval(Node *n, Env *e) {
             vals->L[i+1] = v_ref(cls_env->vals[i]);
         })
         V *cls = v_dict(keys, vals);
+        cls->j = ++shakti_num_class;
         env_set(e, n->sval, cls);
         v_free(keys); v_free(vals);
         env_free(cls_env);
