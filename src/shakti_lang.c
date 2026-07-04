@@ -16,6 +16,7 @@
 #endif
 #else
 #include <unistd.h>
+#include <sys/utsname.h>
 #endif
 #include <time.h>
 
@@ -60,6 +61,7 @@ void win_close_memstream(FILE *fp, char **ptr, size_t *sizeloc) {
 #endif
 Node *fn_ast[MAX_FN];
 int   fn_ast_n = 0;
+int shakti_import_depth = 0;
 int   g_returning  = 0;
 int   g_breaking   = 0;
 int   g_continuing = 0;
@@ -2268,6 +2270,30 @@ static Node *parse_stmt(Lexer *l) {
         W(lex_peek(l).type == T_NEWLINE_ || lex_peek(l).type == T_SEMI_,lex_next(l))
         return n;
     }
+    if(pk.type == T_AT_) {
+        lex_next(l);pk = lex_peek(l);
+        if(pk.type != T_NAME_){expect(l, T_NAME_);return NULL;}
+
+        Node *n = parse_atom(l);
+        if(!n || (n->type != N_CALL && n->type != N_NAME)) {
+            fprintf(stderr, "parse error: expected @%s or @%s(...)\n", pk.sval, pk.sval);
+            if(n)node_free(n);return NULL;
+        }
+        Node *k = parse_stmt(l);
+        if(!k || (k->type != N_CLASS && k->type != N_DEF)) {
+            fprintf(stderr, "parse error: expected def or class after @%s\n", pk.sval);
+            node_free(n);if(k)node_free(k);return NULL;
+        }
+        Node *a = node_new(N_NAME);a->sval = strdup(pk.sval);
+        Node *q = node_new(N_ASSIGN);
+        node_add(q,a);
+        a=node_new(N_CALL);node_add(a,n);
+        n=node_new(N_NAME);n->sval = strdup(pk.sval);node_add(a,n);
+        node_add(q,a);
+
+        n=node_new(N_BLOCK);node_add(n,k);node_add(n,q);
+        return n;
+    };
     if(pk.type == T_BREAK_) {
         lex_next(l);
         W(lex_peek(l).type == T_NEWLINE_ || lex_peek(l).type == T_SEMI_,lex_next(l))
@@ -3307,19 +3333,20 @@ static void for_set_vars(Node *vars, V *item, Env *e) {
     }
 }
 
+static int module_loc = 0; // cwd,scriptdir,distlib,$SHAKTI_LIB,scriptsub,distlibsub
 static Node*module_code(const char*name) {
     char path[8192];
     FILE *f = NULL;
     P(!name,NULL);
-    f = fopen(name, "r");
+    f = fopen(name, "r");module_loc = 0;
     if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen(path,"r"); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); f=fopen(path,"r"); }
+    if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); module_loc=1; f=fopen(path,"r"); }
     if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,name); f=fopen(path,"r"); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); f=fopen(path,"r"); }
+    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); module_loc=2; f=fopen(path,"r"); }
     if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,name); f=fopen(path,"r"); }
     if(!f) {
         const char *env = getenv("SHAKTI_LIB");
-        if(env) {
+        if(env) { module_loc=3;
             snprintf(path,sizeof(path),"%s/%s",env,name); f=fopen(path,"r");
             if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",env,name); f=fopen(path,"r"); }
         }
@@ -3328,8 +3355,8 @@ static Node*module_code(const char*name) {
         char dotpath[8192];
         strncpy(dotpath, name, sizeof(dotpath)-1);
         for(char *p=dotpath; *p; p++) if(*p=='.') *p='/';
-        if(g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,dotpath); f=fopen(path,"r"); }
-        if(!f) { snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen(path,"r"); }
+        if(g_lib_path[0]) { module_loc=4; snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,dotpath); f=fopen(path,"r"); }
+        if(!f) { module_loc=6;snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen(path,"r"); }
     }
     P(!f,NULL);
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
@@ -3362,21 +3389,114 @@ V*load_module(const char *name) {
     Node *prog = module_code(name);
     dynamic_has_sql = old_dynamic;
     P(!prog,v_errf("cannot import '%s'", name))
-    return module_dict(prog, NULL);
+    shakti_import_depth++;
+    V*r = module_dict(prog, NULL);
+    shakti_import_depth--;
+    return r;
 }
 
+static uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
+static uint32_t ch(uint32_t x, uint32_t y, uint32_t z) { return (x & y) ^ (~x & z); }
+static uint32_t maj(uint32_t x, uint32_t y, uint32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
+static uint32_t ep0(uint32_t x) { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22); }
+static uint32_t ep1(uint32_t x) { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25); }
+static uint32_t sig0(uint32_t x) { return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3); }
+static uint32_t sig1(uint32_t x) { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10); }
+typedef struct {
+    uint32_t state[8];
+    uint8_t data[64];
+    size_t datalen;
+} Sha256;
+static const uint32_t k256[64] = {
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+};
+
+static void sha256_transform(Sha256 *ctx, const uint8_t data[64]) {
+    uint32_t m[64], a, b, c, d, e, f, g, h;
+    for (int i = 0, j = 0; i < 16; i++, j += 4)
+        m[i] = ((uint32_t)data[j] << 24) | ((uint32_t)data[j + 1] << 16) | ((uint32_t)data[j + 2] << 8) | data[j + 3];
+    for (int i = 16; i < 64; i++) m[i] = sig1(m[i - 2]) + m[i - 7] + sig0(m[i - 15]) + m[i - 16];
+    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
+    for (int i = 0; i < 64; i++) {
+        uint32_t t1 = h + ep1(e) + ch(e, f, g) + k256[i] + m[i];
+        uint32_t t2 = ep0(a) + maj(a, b, c);
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+}
+
+static void sha256_init(Sha256 *ctx) {
+    ctx->datalen = 0;
+    ctx->state[0] = 0x6a09e667; ctx->state[1] = 0xbb67ae85; ctx->state[2] = 0x3c6ef372; ctx->state[3] = 0xa54ff53a;
+    ctx->state[4] = 0x510e527f; ctx->state[5] = 0x9b05688c; ctx->state[6] = 0x1f83d9ab; ctx->state[7] = 0x5be0cd19;
+}
+static void sha256_add(Sha256*ctx, const void*p, int pn) {
+    const uint8_t*u=p;while(pn>0){
+      ctx->data[ctx->datalen++]=*u++;--pn;
+      if(ctx->datalen==sizeof(ctx->data))sha256_transform(ctx,ctx->data),ctx->datalen=0;
+    }
+}
+static void sha256_flush(Sha256*ctx) {
+    unsigned int n = ctx->datalen;
+    sha256_add(ctx,&n,sizeof(n));
+    while(ctx->datalen)sha256_add(ctx,"",1);
+}
+
+static void module_id(Sha256*ctx, Node*p, Env*e) {
+    sha256_add(ctx,&p->type,sizeof(p->type));
+    if(p->sval)sha256_add(ctx,p->sval,strlen(p->sval)+1);
+    sha256_add(ctx,&p->ival,sizeof(p->ival));
+    sha256_add(ctx,&p->j,sizeof(p->j));
+    sha256_add(ctx,&p->fval,sizeof(p->fval));
+    sha256_add(ctx,&p->op,sizeof(p->op));
+    if(p->nch&&p->ch){
+        sha256_add(ctx,&p->nch,sizeof(p->nch));
+        for(int i=0;i<p->nch;++i)module_id(ctx,p->ch[i],e);
+    }
+}
+
+static uint32_t shakti_core_dist[][8]={
+#include "whitelist.h"
+{0}};
+
+static int cmp_j8(const void*a,const void*b){const uint32_t*x=a,*y=b;int z;i(8,if((z=*x++-*y++))return z);return 0;}
 static V *do_import(const char *name, Env *e) {
     P(!name || !name[0],v_err("import requires a module name"))
-
     int old_dynamic = dynamic_has_sql;
     dynamic_has_sql = shakti_sql_enabled(e);
+    int saved_import_depth = shakti_import_depth;
 
     Node*prog = module_code(name);
+    if(shakti_import_depth<1) {
+        Sha256 ctx;sha256_init(&ctx);module_id(&ctx,prog,e);sha256_flush(&ctx);
+        if(!bsearch(ctx.state,shakti_core_dist,sizeof(shakti_core_dist)/sizeof(*shakti_core_dist),sizeof(ctx.state),cmp_j8)){
+            if(module_loc==2||module_loc==6) {
+                fprintf(stderr, "can't load %s (possibly from a different version of shakti?)\n",name);
+            }
+            if(shakti_import_depth<0) {
+                if(module_loc&~2){
+                    fprintf(stderr, "module %s%s is unsigned and doesn't have developer id at top of file\n",name,
+                        module_loc == 3 ? " (found in $SHAKTI_LIB)" : "");
+                }
+                while(1)(void)__builtin_abort();
+            }
+        }
+    }
 
     if(dynamic_has_sql) env_set(e, SHAKTI_SQL_FLAG, v_bool(1));
     dynamic_has_sql = old_dynamic;
 
     P(!prog,v_errf("cannot import '%s'", name))
+    shakti_import_depth++;
     V *mod_dict = module_dict(prog, e);
 
     char *dot = strchr(name, '.');
@@ -3400,6 +3520,7 @@ static V *do_import(const char *name, Env *e) {
         env_set(e, name, mod_dict);
     }
     v_free(mod_dict);
+    shakti_import_depth = saved_import_depth;
     return v_nil();
 }
 static V *eval_select_name(Node *n, Env *e) {
@@ -5135,14 +5256,51 @@ int shakti_lang_main(int argc, char **argv) {
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     {
         char exe[4096];
+        struct utsname uts;
         ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe)-1);
         if(len > 0) {
             exe[len] = 0;
             char *slash = strrchr(exe, '/');
             if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/src/lib", exe); }
         }
-    }
+#if defined(__linux__)
+        uname(&uts);
+        if(strstr(uts.version,".el"))shakti_import_depth--;
 #endif
+    }
+#elif defined(__APPLE__)
+    {
+        char exe[4096];
+        extern int _NSGetExecutablePath(char* buf, unsigned int* bufsize);
+        int len = sizeof(exe)-1, r = _NSGetExecutablePath(exe, &len);  exe[len]=0;
+        char *slash = strrchr(exe, '/');
+        if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/src/lib", exe); }
+
+        FILE*f=popen("/usr/bin/profiles status -type enrollment","r");
+        if(f) {
+						int r = fread(exe, 1, sizeof(exe)-1, f);
+            pclose(f);
+            if(r != 40) shakti_import_depth--;
+        }
+    };
+#elif defined(_WIN32)
+    {
+        char exe[4096];
+        BOOL b=1;IsDeviceRegisteredWithManagement(&b,NULL,NULL);if(b)shakti_import_depth--;
+        int r = GetModuleFileNameW(NULL, path, sizeof(exe)-1);
+        if(r>0) {
+            exe[r] = 0;
+            char *slash = exe+strlen(exe);
+            while(slash>exe && slash[-1] != '/' && slash[-1] != '\\') *--slash=0;
+            if(slash > exe) {
+                char quote = slash[-1];
+                while(slash>exe && slash[-1] == quote) *--slash=0;
+                snprintf(g_lib_path, sizeof(g_lib_path), "%s/src/lib", exe);
+            }
+        }
+    };
+#endif
+    
     Env *global = env_new(NULL);
     builtin_register(global);
     int i = 1;
@@ -5156,6 +5314,8 @@ int shakti_lang_main(int argc, char **argv) {
             cmd = argv[++i];
         } else if(!strcmp(argv[i], "-i")) {
             interactive = 1;
+        } else if(!strcmp(argv[i], "--hash")) {
+            parse_dump = 2;
         } else if(!strcmp(argv[i], "--parse-dump")) {
             parse_dump = 1;
         } else if(!strcmp(argv[i], "--parse-profile")) {
@@ -5198,12 +5358,19 @@ int shakti_lang_main(int argc, char **argv) {
             src = file_buf;
         }
         if (!src) {
-            fprintf(stderr, "usage: shakti --parse-dump -c 'expr' | script.ie\n");
+            if(parse_dump == 2) {
+                fprintf(stderr, "usage: find . -name '*.ie' -exec %s --hash {} \\; |sort > src/whitelist.h\n", *argv);
+            } else {
+                fprintf(stderr, "usage: shakti --parse-dump -c 'expr' | script.ie\n");
+            }
             env_free(global);
             return 1;
         }
         Node *prog = parse(src);
-        if (prog && prog->nch > 0)
+        if(parse_dump == 2) {
+            Sha256 ctx;sha256_init(&ctx);module_id(&ctx,prog,NULL);sha256_flush(&ctx);
+            for(int i=0;i<8;++i)printf("%s %d ",i?",":"{",ctx.state[i]);printf("},");
+        } else if (prog && prog->nch > 0)
             node_sprint(prog->ch[prog->nch - 1], stdout);
         else
             node_sprint(prog, stdout);

@@ -1254,6 +1254,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
             return v_err("load(path, ...)");
         }
         char*ext;
+        extern int shakti_import_depth;
         if(!chdir(args[0]->s)) {
             V*result;FILE*f=fopen(".d","rb");
             if(f) {
@@ -1266,8 +1267,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
                      fclose(f);
                 });
                 return v_table(keys,vals);
-            } else if((result=subprocess(args+1,nargs-1))) {
-                0;
+            } else if(shakti_import_depth&&(result=subprocess(args+1,nargs-1))) {
             } else if(nargs > 1) {
                 V*keys = v_list(nargs-1);
                 V*vals = v_list(nargs-1);
