@@ -1253,6 +1253,8 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
                      fclose(f);
                 });
                 return v_table(keys,vals);
+            } else if((result=subprocess(args+1,nargs-1))) {
+                0;
             } else if(nargs > 1) {
                 V*keys = v_list(nargs-1);
                 V*vals = v_list(nargs-1);

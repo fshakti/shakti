@@ -94,6 +94,7 @@ static int shakti_sql_enabled(Env *e);
 V *v_nil(void)           { return v_alloc(T_NIL); }
 V *v_bool(int b)         { V *v=v_alloc(T_BOOL); v->b=b; return v; }
 V *v_char(unsigned char b) {  V *v=v_alloc(T_CHAR); v->j=b; return v; }
+V *v_subprocess(int fd, pid_t p) { V*v=v_alloc(T_SUBPROCESS); v->j = fd; v->n = p; return v; }
 V *v_int(int64_t j) {
     if (j >= 0 && j < ISL_INT_CACHE_MAX) {
         if (!isl_int_cache)
@@ -494,6 +495,13 @@ void v_free(V *v) {
     case T_INPUT:
         free(v->s);
         break;
+    case T_SUBPROCESS:
+#ifdef _WIN32
+        /* nyi; subprocess.c */
+#else
+        close(v->j);
+#endif
+        break;
     default: break;
     }
     free(v);
@@ -513,7 +521,7 @@ const char *type_name(int t) {
         "list", "dict", "table", "function",
         "datetime",
         "time",
-        "input_stream", 0,
+        "input_stream", "subprocess",
         "matrix[int]", "matrix[float]", "matrix[char]", "matrix[bool]",
     };
     P(t >= 0 && t <= T_BMAT, names[t])
@@ -549,13 +557,14 @@ V *v_copy(V *v) {
         V *r=v_dict(k,vl); v_free(k); v_free(vl); return r;
     }
     case T_DATETIME: return v_datetime(v->j);
+    case T_SUBPROCESS: return v_ref(v); // can't _actually_ copy procs... { V*r = v_subprocess(dup(v->j), v->n); return r; }
     case T_TABLE: {
         V *kc = v_copy(v->keys);
         V *vl = v_copy(v->vals);
         return v_table(kc, vl);
     }
     default: return v_ref(v);
-    }
+    };
 }
 #define DICT_HT_EMPTY 0xFFFFFFFFu
 #define DICT_HT_MIN   8
@@ -1041,6 +1050,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         else if(v->j == -3)fprintf(fp,"<file>");
         else fprintf(fp, "<fn>");         break;
     case T_INPUT: fprintf(fp, "<input>"); break;
+    case T_SUBPROCESS: fprintf(fp, "<proc>"); break;
     }
 }
 void v_print(V *v, int nl) { print_val(v, stdout, 0); if(nl) putchar('\n'); }
@@ -2466,6 +2476,7 @@ static int is_truthy(V *v) {
     case T_DATE: return v->j != 0;
     case T_TIME: return v->j != 0;
     case T_ERR:  return 0;
+    case T_SUBPROCESS: return v->j >= 0;
     default: return 1;
     }
 }
@@ -4149,6 +4160,10 @@ V *eval(Node *n, Env *e) {
             V *found = v_dict_get(obj, n->sval);
             if(found) { V *r = v_ref(found); v_free(obj); return r; }
         }
+        if(obj->t == T_SUBPROCESS) {
+            if(strcmp(n->sval, "pid") == 0) return v_int(obj->n);
+            if(strcmp(n->sval, "status") == 0) return subprocess_status(obj);
+        }
         if(obj->t == T_FN && obj->n == -2) {
             return obj;
         }
@@ -4228,7 +4243,8 @@ V *eval(Node *n, Env *e) {
                 v_free(args); v_free(kwnames); v_free(kwvals);
                 return result;
             }
-            V *r = method_call(obj, method, args->L, args->n, e);
+            V*r = (attr && attr->t == T_SUBPROCESS) ?
+                v_int(subprocess_send(attr, args->L, args->n)) : method_call(obj, method, args->L, args->n, e);
             v_free(obj);
             v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
@@ -4305,6 +4321,12 @@ V *eval(Node *n, Env *e) {
             v_free(fn);
             v_free(args); v_free(kwnames); v_free(kwvals);
             return self;
+        }
+
+        if (fn && fn->t == T_SUBPROCESS) {
+            V*r = v_int(subprocess_send(fn, args->L, args->n));
+            v_free(fn); v_free(args); v_free(kwnames); v_free(kwvals);
+            return r;
         }
 
         if(!fn || fn->t != T_FN) {
@@ -4437,6 +4459,19 @@ V *eval(Node *n, Env *e) {
                 if(g_breaking) { g_breaking=0; break; }
                 if(g_continuing) { g_continuing=0; }
             }
+        } else if(iter->t == T_SUBPROCESS) {
+            for(;;) {
+                V *item = subprocess_next(iter);
+                if(g_error) { v_free(iter); return item; }
+                if(!item || item->t == T_NIL) { v_free(item); break; }
+                for_set_vars(vars, item, e);
+                v_free(item); v_free(r);
+                r = eval(n->ch[2], e);
+                if(g_returning||g_error) { v_free(iter); return r; }
+                if(g_breaking) { g_breaking=0; break; }
+                if(g_continuing) { g_continuing=0; }
+            }
+
         } else if(iter->t == T_INPUT) {
             for(;;) {
                 V *item = input_stream_next(iter);

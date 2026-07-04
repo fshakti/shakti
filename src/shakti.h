@@ -195,6 +195,7 @@ enum {
     T_DATETIME = 16,
     T_TIME = 17,
     T_INPUT = 18,
+    T_SUBPROCESS = 19,
 /* mats must be together; IMAT must first, BMAT must be last... */
     T_IMAT = 20,
     T_FMAT = 21,
@@ -285,6 +286,7 @@ V *v_int(int64_t j);
 V *v_float(double f);
 V *v_str(const char *s);
 V *v_str_take(char *s);
+V *v_subprocess(int fd,pid_t p);
 V *v_date(int64_t utc_midnight_ms);
 V *v_time(int64_t ms_since_midnight);
 V *v_err(const char *s);
@@ -352,6 +354,11 @@ V *table_sql_insert(V *table, V *cols, V *vals);
 V *table_sql_join(V *left, V *right, V *on_col);
 int is_builtin(const char *name);
 void builtin_register(Env *e);
+
+V*subprocess(V**a,int n);
+int64_t subprocess_send(V*p,V**args,int n);
+V *subprocess_status(V*p);
+V *subprocess_next(V*p);
 
 #ifdef _WIN32
 FILE *win_open_memstream(char **ptr, size_t *sizeloc);
