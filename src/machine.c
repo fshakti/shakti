@@ -27,7 +27,7 @@
 static const char *use_bench_dir = "/tmp";
 
 static void mput(V *d, const char *k, V *v);
-static char*rtrim(char*a){char *e=a+strlen(a),oa=*a;if(!*a)return a;*a='*';while(e[-1]==' ')*--e=0;*a=oa;return a;}
+static char*rtrim(char*a){char *e=a+strlen(a),oa=*a;if(!*a)return a;*a='*';while(e[-1]<=' ')*--e=0;*a=oa;return a;}
 
 static void fmt_bytes(char *out, size_t outsz, int64_t bytes) {
     static const char *u[] = {"B", "KB", "MB", "GB", "TB", "PB"};
