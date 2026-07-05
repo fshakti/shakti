@@ -1,0 +1,3 @@
+#!/bin/sh
+exec docker run --rm -e TERM=dumb -i \
+  -v "`pwd`:/shakti:ro" -w /shakti alpine:latest

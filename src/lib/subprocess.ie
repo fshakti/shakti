@@ -1,0 +1,81 @@
+def flatten(a):
+	def flat2(a,b):
+		if type(b)='list':
+			for x in b:
+				flat2(a,x)
+		else:
+			a.append(b)
+	b:[]
+	flat2(b,a)
+	return b
+
+def quote(x):
+	a:""
+	for c in x:
+		if(c in "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_"):
+			a:a+c
+		else:
+			a:a+"\\"+c
+	return a
+
+class Popen:
+	def __init__(*args, executable:None, stdin:None, stdout:None, shell:False, cwd:None, env:None):
+		args: flatten(args)
+		input_hub:input
+		if not env: env: {}
+		if shell and executable=None: executable:"/bin/sh"
+		if shell and len(args)<>1: raise "Popen(shell:True) requires a single arg"
+		if shell:
+			args:[executable, "-c", args[0]]
+			shell:False
+		if len(args)=0: raise "Popen(args...)"
+		comm: load(__dir__ + "/subspace/")
+		if(type(comm)="dict"):raise "Failed to open subspace"
+		for k,v in env:
+			comm(f"export {quote(k)}={quote(string(v))};")
+		if cwd:
+			comm(f"cd {quote(k)};")
+		shell:"exec"
+		for x in args:
+			shell:shell+" " + quote(x)
+		comm(shell)
+		comm("\r")
+		buffer:["",False]
+		if stdout=None: stdout: lambda x:print(x)
+		if stdin<>None: comm(stdin)
+		self.status: None
+		def communicate(a,b,input:None,timeout:None):
+			if input=None:input:a
+			if timeout=None:timeout:b
+			if input<>None: comm(input)
+			if type(timeout)='str' or type(timeout)='int':timeout:float(timeout)
+			if self.status=None:
+				self.status:comm.status
+				for x in comm(timeout):
+					if type(x)='str':
+						buffer[0]:buffer[0]+x
+			parts: re_split("\n",buffer[0])
+			if self.status=None:
+				buffer[0]: parts.pop()
+			else:
+				buffer[0]: ""
+			for x in parts:
+				if x[-1]="\r": x: x[:-1]
+				if buffer[1]:
+					stdout(x)
+				elif len(x) < len(shell):
+					pass
+				else:
+					i:-(len(shell))
+					t:x[i:]
+					if t=shell:
+						buffer[1]: True
+		self.communicate: communicate
+	def wait(b,timeout:None):
+		if timeout=None:timeout:b
+		if timeout=None:
+			while self.status=None:
+				self.communicate()
+		elif self.status=None:
+			self.communicate(timeout:timeout)
+		return self.status
