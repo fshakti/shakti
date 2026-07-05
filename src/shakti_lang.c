@@ -3513,7 +3513,7 @@ static V *do_import(const char *name, Env *e) {
     dynamic_has_sql = old_dynamic;
 
     P(!prog,v_errf("cannot import '%s'", name))
-    shakti_import_depth++;
+    if(module_loc&2&&shakti_import_depth<1)shakti_import_depth=1;else shakti_import_depth++;
     V *mod_dict = module_dict(prog, e);
 
     char *dot = strchr(name, '.');
