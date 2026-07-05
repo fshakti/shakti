@@ -3338,29 +3338,28 @@ static void for_set_vars(Node *vars, V *item, Env *e) {
 }
 
 static int module_loc = 0; // cwd,scriptdir,distlib,$SHAKTI_LIB,scriptsub,distlibsub
-static Node*module_code(const char*name) {
-    char path[8192];
+static Node*module_code(const char*name,char*path,int npath) {
     FILE *f = NULL;
     P(!name,NULL);
     f = fopen(name, "r");module_loc = 0;
-    if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen(path,"r"); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); module_loc=1; f=fopen(path,"r"); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,name); f=fopen(path,"r"); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); module_loc=2; f=fopen(path,"r"); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,name); f=fopen(path,"r"); }
+    if(!f) { snprintf(path,npath,"%s.ie",name); f=fopen(path,"r"); }
+    if(!f) { snprintf(path,npath,"%s/%s",g_script_dir,name); module_loc=1; f=fopen(path,"r"); }
+    if(!f) { snprintf(path,npath,"%s/%s.ie",g_script_dir,name); f=fopen(path,"r"); }
+    if(!f && g_lib_path[0]) { snprintf(path,npath,"%s/%s",g_lib_path,name); module_loc=2; f=fopen(path,"r"); }
+    if(!f && g_lib_path[0]) { snprintf(path,npath,"%s/%s.ie",g_lib_path,name); f=fopen(path,"r"); }
     if(!f) {
         const char *env = getenv("SHAKTI_LIB");
         if(env) { module_loc=3;
-            snprintf(path,sizeof(path),"%s/%s",env,name); f=fopen(path,"r");
-            if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",env,name); f=fopen(path,"r"); }
+            snprintf(path,npath,"%s/%s",env,name); f=fopen(path,"r");
+            if(!f) { snprintf(path,npath,"%s/%s.ie",env,name); f=fopen(path,"r"); }
         }
     }
     if(!f) {
         char dotpath[8192];
         strncpy(dotpath, name, sizeof(dotpath)-1);
         for(char *p=dotpath; *p; p++) if(*p=='.') *p='/';
-        if(g_lib_path[0]) { module_loc=4; snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,dotpath); f=fopen(path,"r"); }
-        if(!f) { module_loc=6;snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen(path,"r"); }
+        if(g_lib_path[0]) { module_loc=4; snprintf(path,npath,"%s/%s.ie",g_lib_path,dotpath); f=fopen(path,"r"); }
+        if(!f) { module_loc=6;snprintf(path,npath,"%s.ie",dotpath); f=fopen(path,"r"); }
     }
     P(!f,NULL);
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
@@ -3371,9 +3370,19 @@ static Node*module_code(const char*name) {
     free(buf);
     return prog;
 }
+static char module_path[8192];
 static V*module_dict(Node*prog,Env*e) {
     Env *mod_env = env_new(e);
+    env_set(mod_env,"__file__",v_str(module_path));
+    int i;for(i = strlen(module_path)-1;i>1&&module_path[i]!='/'
+#ifdef _WIN32
+&&module_path[i]!='\\'
+#endif
+    ;--i);
+    char save = module_path[i]; module_path[i]=0; env_set(mod_env,"__dir__",v_str(module_path)); module_path[i] = save;
     V *r = eval(prog, mod_env);
+    env_set(mod_env,"__file__",v_str(module_path));
+    module_path[i]=0; env_set(mod_env,"__dir__",v_str(module_path)); module_path[i] = save;
     v_free(r);
     V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
     i(mod_env->len,{
@@ -3383,6 +3392,7 @@ static V*module_dict(Node*prog,Env*e) {
     V *mod_dict = v_dict(mk, mv);
     v_free(mk); v_free(mv);
     env_free(mod_env);
+    mod_dict->j=1;
     return mod_dict;
 }
 
@@ -3390,7 +3400,8 @@ V*load_module(const char *name) {
     P(!name || !name[0],v_err("import requires a module name"))
     int old_dynamic = dynamic_has_sql;
     dynamic_has_sql = 0;
-    Node *prog = module_code(name);
+    char _[8192];
+    Node *prog = module_code(name, _, sizeof(_));
     dynamic_has_sql = old_dynamic;
     P(!prog,v_errf("cannot import '%s'", name))
     shakti_import_depth++;
@@ -3478,8 +3489,8 @@ static V *do_import(const char *name, Env *e) {
     int old_dynamic = dynamic_has_sql;
     dynamic_has_sql = shakti_sql_enabled(e);
     int saved_import_depth = shakti_import_depth;
+    Node*prog = module_code(name, module_path, sizeof(module_path));
 
-    Node*prog = module_code(name);
     if(shakti_import_depth<1) {
         Sha256 ctx;sha256_init(&ctx);module_id(&ctx,prog,e);sha256_flush(&ctx);
         char sign[69],*s=sign;*s++=7;unsigned char *q=(void*)ctx.state;i(32,*s++='c'+(*q>>4);*s++='c'+(*q++));*s=0;
@@ -4100,13 +4111,22 @@ V *eval(Node *n, Env *e) {
             V *idx = eval(target->ch[1], e);
             if(obj->t==T_DICT) {
                 if(idx->t==T_STR) {
-                    v_dict_set(obj, idx->s, val);
+                    if((obj->j|obj->b)&&*idx->s =='_') {
+                        printf("can't redefine %s on environment\n", idx->s);
+                    } else {
+                        v_dict_set(obj, idx->s, val);
+                    }
                 } else if(idx->t==T_INT) {
                     int64_t i = idx->j;
                     if(i<0) i+=obj->n;
                     if(i>=0 && i<obj->n) {
-                        v_free(obj->vals->L[i]);
-                        obj->vals->L[i] = v_ref(val);
+                        if((obj->j|obj->b)&&
+                                (obj->keys->L[i] && obj->keys->L[i]->t == T_STR && *obj->keys->L[i]->s == '_')) {
+                            printf("can't redefine %s on environment\n", obj->keys->L[i]->s);
+                        } else {
+                            v_free(obj->vals->L[i]);
+                            obj->vals->L[i] = v_ref(val);
+                        }
                     }
                 }
                 v_free(obj); v_free(idx); v_free(val);
@@ -4178,11 +4198,15 @@ V *eval(Node *n, Env *e) {
             V *idx = eval(target->ch[1], e);
             V *delta = eval(n->ch[1], e);
             if(obj->t==T_DICT && idx->t==T_STR) {
-                V *cur = v_dict_get(obj, idx->s);
-                if(cur) {
-                    V *newval = vec_binop(cur, delta, n->op);
-                    v_dict_set(obj, idx->s, newval);
-                    v_free(newval);
+                if((obj->j|obj->b)&&*idx->s =='_') {
+                    printf("can't redefine %s on environment\n", idx->s);
+                } else {
+                    V *cur = v_dict_get(obj, idx->s);
+                    if(cur) {
+                        V *newval = vec_binop(cur, delta, n->op);
+                        v_dict_set(obj, idx->s, newval);
+                        v_free(newval);
+                    }
                 }
             }
             v_free(obj); v_free(idx); v_free(delta);
@@ -5315,6 +5339,7 @@ int shakti_lang_main(int argc, char **argv) {
     int parse_dump = 0;
     int parse_profile = 0;
     int parse_profile_iters = 100000;
+    *module_path = 0;
     while(i < argc && argv[i][0] == '-') {
         if(!strcmp(argv[i], "-c") && i+1 < argc) {
             cmd = argv[++i];

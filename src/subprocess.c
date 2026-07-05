@@ -15,6 +15,9 @@ V*subprocess(V**a,in){
 #else // linux, apple, etc
 V*subprocess(V**a,in){
   extern char **environ;
+  struct stat sb;
+	if(stat("run",&sb))return NULL;
+
 #if defined(__linux__)
 	int t;
   do t=open("/dev/ptmx", O_RDWR|O_NOCTTY); while (t<0&&(errno==ENOSPC||errno==EAGAIN));
