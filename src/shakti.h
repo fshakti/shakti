@@ -358,7 +358,7 @@ void builtin_register(Env *e);
 V*subprocess(V**a,int n);
 int64_t subprocess_send(V*p,V**args,int n);
 V *subprocess_status(V*p);
-V *subprocess_next(V*p);
+V *subprocess_next(V*p,double timeout);
 
 #ifdef _WIN32
 FILE *win_open_memstream(char **ptr, size_t *sizeloc);

@@ -2063,12 +2063,12 @@ static Node *parse_progn(Lexer *l) {
         Node *s=parse_stmt(l); if(s)node_add(block,s);
         return block;
 		}
-    expect(l, T_LBRACE_);
+    expect(l, T_LBRACE_);if(pk.type != T_LBRACE_) return NULL;
 
     Node *block = node_new(N_BLOCK);
     for(;;) {
         pk=lex_peek(l);
-        if(pk.type == T_RBRACE_) break; else if(pk.type == T_EOF_)expect(l, T_RBRACE_);
+        if(pk.type == T_RBRACE_) break; else if(pk.type == T_EOF_){expect(l, T_RBRACE_);node_free(block);return NULL;}
         else if(pk.type == T_INDENT_ || pk.type == T_NEWLINE_ || pk.type == T_SEMI_ || pk.type == T_DEDENT_) lex_next(l);
         else if(pk.type == T_LBRACE_){Node*s = parse_progn(l);if(s)node_add(block,s);}
         else {Node*s = parse_stmt(l);if(s)node_add(block,s);}
@@ -4476,9 +4476,14 @@ V *eval(Node *n, Env *e) {
         }
 
         if (fn && fn->t == T_SUBPROCESS) {
-            V*r = v_int(subprocess_send(fn, args->L, args->n));
+            V * result;
+            if (args->n && args->L[0]->t == T_FLOAT) {
+                result = subprocess_next(fn, args->L[0]->f);
+            } else {
+                result = v_int(subprocess_send(fn, args->L, args->n));
+            }
             v_free(fn); v_free(args); v_free(kwnames); v_free(kwvals);
-            return r;
+            return result;
         }
 
         if(!fn || fn->t != T_FN) {
@@ -4613,7 +4618,7 @@ V *eval(Node *n, Env *e) {
             }
         } else if(iter->t == T_SUBPROCESS) {
             for(;;) {
-                V *item = subprocess_next(iter);
+                V *item = subprocess_next(iter, 0.0);
                 if(g_error) { v_free(iter); return item; }
                 if(!item || item->t == T_NIL) { v_free(item); break; }
                 for_set_vars(vars, item, e);

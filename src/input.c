@@ -580,7 +580,7 @@ static int stream_wait_event(InputEvent *ev) {
 
 V *input_stream_next(V *stream) {
     if (!stream) return v_err("input_stream_next: bad stream");
-    if (stream->t == T_SUBPROCESS) return subprocess_next(stream);
+    if (stream->t == T_SUBPROCESS) return subprocess_next(stream, 0.0);
     if (stream->t != T_INPUT) return v_err("input_stream_next: bad stream");
 
     input_hub_init();

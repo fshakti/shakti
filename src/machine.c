@@ -28,46 +28,7 @@ static const char *use_bench_dir = "/tmp";
 
 static void mput(V *d, const char *k, V *v);
 static char*rtrim(char*a){char *e=a+strlen(a),oa=*a;if(!*a)return a;*a='*';while(e[-1]<=' ')*--e=0;*a=oa;return a;}
-
-static void fmt_bytes(char *out, size_t outsz, int64_t bytes) {
-    static const char *u[] = {"B", "KB", "MB", "GB", "TB", "PB"};
-    double v = (double)bytes;
-    int ui = 0;
-    while (v >= 1024.0 && ui < 5) {
-        v /= 1024.0;
-        ui++;
-    }
-    if (ui == 0)
-        snprintf(out, outsz, "%lld B", (long long)bytes);
-    else
-        snprintf(out, outsz, "%.2f %s", v, u[ui]);
-}
-
-static void fmt_kb(char *out, size_t outsz, int64_t kb) {
-    fmt_bytes(out, outsz, kb * 1024);
-}
-
-static void fmt_freq_mhz(char *out, size_t outsz, double mhz) {
-    if (mhz >= 1000.0)
-        snprintf(out, outsz, "%.2f GHz", mhz / 1000.0);
-    else if (mhz > 0.0)
-        snprintf(out, outsz, "%.0f MHz", mhz);
-    else
-        snprintf(out, outsz, "unknown");
-}
-
-static void fmt_throughput(char *out, size_t outsz, double mbps) {
-    if (mbps >= 1024.0)
-        snprintf(out, outsz, "%.2f GB/s", mbps / 1024.0);
-    else
-        snprintf(out, outsz, "%.2f MB/s", mbps);
-}
-
-static void mput(V *d, const char *k, V *v) {
-    v_dict_set(d, k, v);
-    v_free(v);
-}
-
+static void mput(V *d, const char *k, V *v) { v_dict_set(d, k, v); v_free(v); }
 static V *mdict(void) { return v_dict(v_list(0), v_list(0)); }
 
 static int read_text(const char *path, char *buf, size_t bufsz) {
@@ -566,13 +527,13 @@ static void linux_gpu_one(const char *card, V *gpus) {
 
     V *gpu = mdict();
     if (has_product)
-        mput(gpu, "name", product);
+        mput(gpu, "name", v_str(rtrim(product)));
     else
-        mput(gpu, "name", card);
+        mput(gpu, "name", v_str(card));
     if (vendor[0])
-        mput(gpu, "vendor_id", vendor);
+        mput(gpu, "vendor_id", v_str(rtrim(vendor)));
     if (device[0])
-        mput(gpu, "device_id", device);
+        mput(gpu, "device_id", v_str(rtrim(device)));
 
     int64_t vram = -1;
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/mem_info_vram_total", card);

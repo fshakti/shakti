@@ -4,6 +4,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/select.h>
+#include <sys/wait.h>
 #include <sys/uio.h>
 #include <errno.h>
 #include <string.h>
@@ -46,8 +49,14 @@ V*subprocess(V**a,in){
   fcntl(t, F_SETFL, fcntl(t, F_GETFL, 0) | O_NONBLOCK);
 	return v_subprocess(t, pid);
 }
-V *subprocess_next(V*p) {
+V *subprocess_next(V*p, double to) {
 	unsigned char buffer[16536];
+	fd_set rfds;
+	FD_ZERO(&rfds);
+	FD_SET(p->j,&rfds);
+	struct timeval tv={.tv_sec=to/1000.0};
+	tv.tv_usec = ((int64_t)((to-(double)(int64_t)to/1000)*1000.0))%1000000;
+	while(select(p->j+1, &rfds,NULL,NULL,&tv)==-1&&errno==EINTR);
 	int r = read(p->j, buffer, sizeof(buffer)-1);
   if(r >= 0) {
     for(int i = 0; i < r; ++i) if(
@@ -58,7 +67,7 @@ V *subprocess_next(V*p) {
       return x;
     }
     buffer[r]=0;
-    return v_str(buffer);
+    return v_str((char*)buffer);
   }
 	return v_nil();
 }

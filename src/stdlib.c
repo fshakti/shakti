@@ -77,7 +77,7 @@ static int v_truthy(V *v) {
 }
 V *bi_fread(V **a, in) {
     P(n < 1,v_err("read(path)"))
-    if(a[0]->t == T_SUBPROCESS)return subprocess_next(*a);
+    if(a[0]->t == T_SUBPROCESS)return subprocess_next(*a,-1.0);
 
     P(a[0]->t != T_STR,v_err("read(path)"))
     FILE *f = fopen(a[0]->s, "rb");
