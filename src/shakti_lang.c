@@ -4395,8 +4395,47 @@ V *eval(Node *n, Env *e) {
                 v_free(args); v_free(kwnames); v_free(kwvals);
                 return result;
             }
-            V*r = (attr && attr->t == T_SUBPROCESS) ?
-                v_int(subprocess_send(attr, args->L, args->n)) : method_call(obj, method, args->L, args->n, e);
+            if(attr && attr->t == T_DICT && attr->n && attr->keys->L[0]->t == T_NIL) {
+                V*self = v_copy(attr); self->b=1;
+                attr = v_dict_get(self, "__init__");
+                if(attr && attr->t == T_FN) {
+                    Env *call_env = env_new(attr->closure);
+                    V *params = attr->params;
+                    for(int i=0; i<params->n; i++) {
+                        V*p = params->L[i];
+                        if(p->b == 1) {
+                            V*rest = v_list(0);
+                            for(int j=i; j<args->n;++j) v_list_append(rest, args->L[j]);
+                            env_set(call_env, p->s, rest);
+                        } else if (p->b == 2) {
+                            env_set(call_env, p->s, v_dict(kwnames, kwvals));
+                        } else if(i < args->n) {
+                            env_set(call_env, p->s, args->L[i]);
+                        } else if(attr->defaults && i < attr->defaults->n) {
+                            env_set(call_env, p->s, attr->defaults->L[i]);
+                        }
+                    }
+                    for(int i=0;i<kwnames->n;i++)
+                        env_set(call_env, kwnames->L[i]->s, kwvals->L[i]);
+                    env_set(call_env, "self", self);
+
+                    Node *body = fn_ast[(int)attr->j];
+                    v_free(eval(body, call_env));
+                    V *q = env_get(call_env, "self");
+                    if(q != self) v_free(self), self = q;
+                }
+                v_free(obj);
+                v_free(args); v_free(kwnames); v_free(kwvals);
+                return self;
+            }
+
+            V*r;
+            if(attr && attr->t == T_SUBPROCESS) {
+                if(!args->n) r=subprocess_next(attr, -1);
+                else if(args->n==1 && args->L[0]->t == T_FLOAT)  r=subprocess_next(attr, args->L[0]->f);
+                else if(args->n==1 && args->L[0]->t == T_NIL)  r=subprocess_next(attr, -1.0);
+                else { r = v_int(subprocess_send(attr, args->L, args->n)); }
+						} else r = method_call(obj, method, args->L, args->n, e);
             v_free(obj);
             v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
@@ -4478,6 +4517,8 @@ V *eval(Node *n, Env *e) {
         if (fn && fn->t == T_SUBPROCESS) {
             V * result;
             if (args->n && args->L[0]->t == T_FLOAT) {
+                result = subprocess_next(fn, args->L[0]->f);
+            } else if ((!args->n) || args->L[0]->t == T_NIL) {
                 result = subprocess_next(fn, args->L[0]->f);
             } else {
                 result = v_int(subprocess_send(fn, args->L, args->n));
