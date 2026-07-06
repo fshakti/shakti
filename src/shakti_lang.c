@@ -959,7 +959,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         fprintf(fp, "]"); break;
     case T_DICT:
         if(v->n && v->keys->L[0]->t == T_NIL) {
-            if(!v->b){fprintf(fp,"<class#%lld>",v->j);break;}
+            if(!v->b){fprintf(fp,"<class#%ld>",v->j);break;}
             if(!repr_mode) {
                 V*r = v_dict_get(v, "__str__");
                 if(r && r->t == T_FN && r->j > -1) {
@@ -979,7 +979,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
                     }
                 }
             }
-            fprintf(fp,"<instanceof(class#%lld)>",v->j);
+            fprintf(fp,"<instanceof(class#%ld)>",v->j);
             break;
         }
         fprintf(fp, "{");

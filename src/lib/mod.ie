@@ -1,13 +1,15 @@
-ntt:["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"]
+notes:["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"]
 hu:"0123456789ABCDEF"
 
-def av(n): return map(lambda _:None, range(n))
+def av(n):
+	a:[]
+	for x in range(n): append(a,None)
+	return a
 def d2(n):
 	if n<1: return ".."
 	if n<10: return "0"+str(n)
 	if n<100: return str(n)
 
-# period to note
 def pn(p):
 	if p>13696 or p < 14: return -1
 	return int(1.5 + 12.0 * log(13696.0/p))
@@ -50,10 +52,10 @@ class Note:
 	def __str__():
 		nt:"..."
 		if self.period > 0:
-			nt:ntt[self.note%12]+str(self.note//12)
+			nt:notes[self.note%12]+str(self.note//12)
 		sn:d2(self.sample)
 		fx:"..."
-		if self.fx > 0:
+		if self.fx > 0 or self.param<>0x0000:
 			fx:hu[self.fx]+hu[self.param[0]]+hu[self.param[1]]
 		return nt+" "+sn+" "+fx
 
@@ -68,7 +70,7 @@ def load(filename):
 	tracks:map(int,m[p+2:p+m[p]])
 	patterns:[]
 	p+:134
-	for i in range(max(tracks)):
+	for j in range(max(tracks)):
 		rows:[av(64),av(64),av(64),av(64)]
 		for i in range(256):
 			c:i%4
@@ -78,6 +80,7 @@ def load(filename):
 			rows[c][i//4]:g
 			p+:4
 		append(patterns,rows)
+		rows:None
 	for s in samples:
 		n:s.length
 		s.patch: m[p:p+n]
