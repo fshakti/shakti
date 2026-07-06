@@ -1,0 +1,85 @@
+ntt:["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"]
+hu:"0123456789ABCDEF"
+
+def av(n): return map(lambda _:None, range(n))
+def d2(n):
+	if n<1: return ".."
+	if n<10: return "0"+str(n)
+	if n<100: return str(n)
+
+# period to note
+def pn(p):
+	if p>13696 or p < 14: return -1
+	return int(1.5 + 12.0 * log(13696.0/p))
+
+def asciiz(a):
+	if type(a)="str":return a
+	s:"";
+	for c in a:
+		if not c: break
+		if type(c)="str":s+:c
+		else: s+:chr(c)
+	return s
+
+u16:lambda x:x[1]+x[0]*256
+
+class Sample:
+	def __init__(name:"",length:0,loop:None,finetine:0x00,volume:64,restart:None,repeatlength:None,patch:None):
+		self.name:asciiz(name)
+		self.length:length
+		self.finetune:int(finetune)
+		if volume < 1:  volume: 0
+		if volume > 64: volume: 64
+		self.volume:volume
+		if loop<>None:
+			if restart<>None or repeatlength<>None:
+				raise("Can't mix Sample(loop:) with Sample(restart:repeatlength:)")
+		elif restart<>None and repeatlength>0: loop:[restart,restart+repeatlength]
+		self.loop:loop
+		self.patch:patch
+	def __str__():
+		return self.name
+
+class Note:
+	def __init__(w,period,fx,param):
+		self.sample:w
+		self.period:period
+		self.note:pn(period)
+		self.fx:fx
+		self.param:param
+	def __str__():
+		nt:"..."
+		if self.period > 0:
+			nt:ntt[self.note%12]+str(self.note//12)
+		sn:d2(self.sample)
+		fx:"..."
+		if self.fx > 0:
+			fx:hu[self.fx]+hu[self.param[0]]+hu[self.param[1]]
+		return nt+" "+sn+" "+fx
+
+def load(filename):
+	m:read(filename)
+	samples:[]
+	p:20
+	for i in range(31):
+		s:Sample(name:m[p:p+22],length:u16(m[p+22:p+24]),finetune:m[24],volume:int(m[25]),restart:u16(m[p+26:p+28]),repeatlength:u16(m[p+28:p+30]))
+		samples.push(s)
+		p+:30
+	tracks:map(int,m[p+2:p+m[p]])
+	patterns:[]
+	p+:134
+	for i in range(max(tracks)):
+		rows:[av(64),av(64),av(64),av(64)]
+		for i in range(256):
+			c:i%4
+			w:((m[p]//16)*16)+(m[p+2]//16)
+			period:(256*(m[p]%16))+m[p+1]
+			g:Note(w:w,period:period,fx:m[p+2]%16,param:[m[p+3]//16,m[p+3]%16])
+			rows[c][i//4]:g
+			p+:4
+		append(patterns,rows)
+	for s in samples:
+		n:s.length
+		s.patch: m[p:p+n]
+		p+:n
+	return {"title":asciiz(m[0:20]),"samples":samples,"patterns":patterns,"order":tracks}
