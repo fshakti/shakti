@@ -216,7 +216,8 @@ static V *bi_len(V**a,in){
     P(n<1,v_err("len()"))V*v=a[0];
     P(v->t==T_STR,v_int(strlen(v->s)))
     P((v->t>=T_IVEC&&v->t<=T_LIST)||(v->t>=T_IMAT&&v->t<=T_BMAT),v_int(v->n))
-    P(v->t==T_DICT||v->t==T_TABLE,v_int(v->n))
+    P(v->t==T_TABLE,v_int(v->n))
+    if(v->t==T_DICT){if(v->n&&v->keys->L[0]->t==T_NIL)return v_int(1);return v_int(v->n);}
     return v_err("no len()");}
 static V *bi_range(V**a,in){
     int64_t start=0,stop=0,step=1;
