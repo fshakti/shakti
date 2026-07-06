@@ -560,7 +560,7 @@ V *input_readline(const char *prompt) {
         fflush(stdout);
     }
     if (!is_tty()) {
-        char buf[4096];
+        char buf[4096];*buf=0;
         if (!fgets(buf, sizeof buf, stdin)) return v_str("");
         size_t l = strlen(buf);
         if (l > 0 && buf[l - 1] == '\n') buf[l - 1] = 0;

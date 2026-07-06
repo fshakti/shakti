@@ -19,7 +19,8 @@ V*subprocess(V**a,in){
 V*subprocess(V**a,in){
   extern char **environ;
   struct stat sb;
-  if(stat("run",&sb))return NULL;
+  if(n||stat("run",&sb))return NULL;
+	(void)a;
 
 #if defined(__linux__)
   int t;
@@ -43,7 +44,7 @@ V*subprocess(V**a,in){
   posix_spawn_file_actions_addopen(&file_actions, 1, pts, O_WRONLY, 0666);
   posix_spawn_file_actions_addopen(&file_actions, 2, pts, O_WRONLY, 0666);
   const char *argv[] = { "./run", 0 };
-  int r = posix_spawn(&pid, *argv, &file_actions, NULL, argv, environ);
+  int r = posix_spawn(&pid, *argv, &file_actions, NULL, (char*const*)argv, environ);
   posix_spawn_file_actions_destroy(&file_actions);
   if(r) return close(t),v_err("subprocess");
   return v_subprocess(t, pid);
@@ -105,7 +106,7 @@ int64_t subprocess_send(V*p,V**a,in) {
   unsigned int flags = fcntl(t, F_GETFL, 0);
   fcntl(t, F_SETFL, flags & ~O_NONBLOCK);
   while(n > 0) {
-    ssize_t i,r = writev(t,iovp,n);
+    ssize_t r = writev(t,iovp,n);
     if(r > 0)for(s+=r;iovp<&iovp[n];){if(r >= iovp->iov_len){r -= iovp->iov_len;n--;iovp++;}
       else if(r > 0){iovp->iov_base += r;iovp->iov_len -= r;break;}}
   }
