@@ -3280,10 +3280,16 @@ static V *eval_slice(V *obj, V *start_v, V *stop_v, V *step_v) {
         else { for(int64_t i=start;i>stop;i+=step) r->J[j++]=obj->J[i]; }
         return r;
     }
+    if(obj->t==T_BVEC) {
+        V *r=v_bvec(count); int64_t j=0;
+        if(step>0) { for(int64_t i=start;i<stop;i+=step) r->B[j++]=obj->B[i]; }
+        else { for(int64_t i=start;i>stop;i+=step) r->B[j++]=obj->B[i]; }
+        return r;
+    }
     if(obj->t==T_CVEC) {
         V *r=v_cvec(count); int64_t j=0;
-        if(step>0) { for(int64_t i=start;i<stop;i+=step) r->B[j++]=obj->J[i]; }
-        else { for(int64_t i=start;i>stop;i+=step) r->B[j++]=obj->J[i]; }
+        if(step>0) { for(int64_t i=start;i<stop;i+=step) r->B[j++]=obj->B[i]; }
+        else { for(int64_t i=start;i>stop;i+=step) r->B[j++]=obj->B[i]; }
         return r;
     }
     if(obj->t==T_FVEC) {
@@ -4248,12 +4254,13 @@ V *eval(Node *n, Env *e) {
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) next = v_mat_row(obj, j);
                 else next = v_err("index out of range");
-            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_LIST||obj->t==T_CVEC) && idx->t==T_INT) {
+            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_LIST||obj->t==T_CVEC) && idx->t==T_INT) {
                 int64_t j = idx->j;
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) {
                     if(obj->t==T_IVEC) next = v_int(obj->J[j]);
-                    else if(obj->t==T_CVEC) next = v_char(obj->J[j]);
+                    else if(obj->t==T_BVEC) next = v_bool(obj->B[j]);
+                    else if(obj->t==T_CVEC) next = v_char(obj->B[j]);
                     else if(obj->t==T_FVEC) next = v_float(obj->F[j]);
                     else next = v_ref(obj->L[j]);
                 } else next = v_err("index out of range");
