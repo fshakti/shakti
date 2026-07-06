@@ -959,7 +959,27 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         fprintf(fp, "]"); break;
     case T_DICT:
         if(v->n && v->keys->L[0]->t == T_NIL) {
-            fprintf(fp,v->b?"<object>":"<class>");
+            if(!v->b){fprintf(fp,"<class#%lld>",v->j);break;}
+            if(!repr_mode) {
+                V*r = v_dict_get(v, "__str__");
+                if(r && r->t == T_FN && r->j > -1) {
+                    Env*call_env=env_new(r->closure);
+                    env_set(call_env,"self",v_ref(v));
+                    Node *body = fn_ast[(int)r->j];
+                    V *result = eval(body, call_env);
+                    if(g_returning) {
+                        g_returning = 0; v_free(result);
+                        result = g_retval ? g_retval : v_nil();
+                        g_retval = NULL;
+                    }
+                    env_free(call_env);
+                    if(result->t == T_STR) {
+                        print_val(result,fp,0);
+                        break;
+                    }
+                }
+            }
+            fprintf(fp,"<instanceof(class#%lld)>",v->j);
             break;
         }
         fprintf(fp, "{");
