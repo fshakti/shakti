@@ -375,7 +375,7 @@ static V *vec_reduce_min(V *v) {
         P(v->n == 0,v_nil())
         V *m = v_ref(v->L[0]);
         for (int64_t i = 1; i < v->n; i++) {
-            V *c = vec_cmp(m, v->L[i], OP_LT);
+            V *c = vec_cmp(m, v->L[i], OP_GT);
             int lt = c->t == T_BOOL && c->b;
             v_free(c);
             if (lt) { v_free(m); m = v_ref(v->L[i]); }
@@ -396,7 +396,7 @@ static V *vec_reduce_max(V *v) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         unsigned char m = v->B[0];
         int64_t ne = mat_nelem(v);
-        for (int64_t i = 1; i < ne; i++) if (v->B[i] > m) m = v->J[i];
+        for (int64_t i = 1; i < ne; i++) if (v->B[i] > m) m = v->B[i];
         return v_char(m);
     }
     if (v->t == T_FMAT) {
@@ -428,7 +428,7 @@ static V *vec_reduce_max(V *v) {
         P(v->n == 0,v_nil())
         V *m = v_ref(v->L[0]);
         for (int64_t i = 1; i < v->n; i++) {
-            V *c = vec_cmp(m, v->L[i], OP_GT);
+            V *c = vec_cmp(m, v->L[i], OP_LE);
             int gt = c->t == T_BOOL && c->b;
             v_free(c);
             if (gt) { v_free(m); m = v_ref(v->L[i]); }
@@ -560,8 +560,8 @@ static V *bi_min(V **a, in) {
         return host_builtin_call("host_min", a, n);
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_min(a[0]))
     if (n == 2) {
-        double x = a[0]->t == T_INT ? (double)a[0]->j : a[0]->f;
-        double y = a[1]->t == T_INT ? (double)a[1]->j : a[1]->f;
+        double x = a[0]->t == T_FLOAT ? a[0]->f : (double)a[0]->j;
+        double y = a[1]->t == T_FLOAT ? a[1]->f : (double)a[1]->j;
         return x < y ? v_float(x) : v_float(y);
     }
     return v_nil();
@@ -572,8 +572,8 @@ static V *bi_max(V **a, in) {
         return host_builtin_call("host_max", a, n);
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_max(a[0]))
     if (n == 2) {
-        double x = a[0]->t == T_INT ? (double)a[0]->j : a[0]->f;
-        double y = a[1]->t == T_INT ? (double)a[1]->j : a[1]->f;
+        double x = a[0]->t == T_FLOAT ? a[0]->f : (double)a[0]->j;
+        double y = a[1]->t == T_FLOAT ? a[1]->f : (double)a[1]->j;
         return x > y ? v_float(x) : v_float(y);
     }
     return v_nil();

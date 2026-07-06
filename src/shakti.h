@@ -183,7 +183,7 @@ enum {
     T_STR = 5,
     T_DATE = 6,
     T_ERR = 7,
-/* vecs must be kept together; IVEC must be first, BVEC must be last in group */
+/* vecs+lists must be kept together; IVEC must be first, LIST must be last in group */
     T_IVEC = 8,
     T_FVEC = 9,
     T_CVEC = 10,
