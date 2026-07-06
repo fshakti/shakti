@@ -4016,12 +4016,14 @@ V *eval(Node *n, Env *e) {
         V *b = eval(n->ch[1], e);
         P(a->t==T_ERR,(v_free(b),a))
         P(b->t==T_ERR,(v_free(a),b))
-        if (n->op == OP_MATMUL) {
-            V *r = mat_matmul(a, b);
-            v_free(a); v_free(b);
-            return r;
+        V * r;
+        if (n->op == OP_EQ || n->op == OP_GE || n->op == OP_GT || n->op == OP_LE || n->op == OP_LT || n->op == OP_NE) {
+            r = vec_cmp(a,b,n->op);
+        } else if (n->op == OP_MATMUL) {
+            r = mat_matmul(a, b);
+        } else {
+            r = vec_binop(a, b, n->op);
         }
-        V *r = vec_binop(a, b, n->op);
         v_free(a); v_free(b);
         return r;
     }
