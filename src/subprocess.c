@@ -19,8 +19,7 @@ V*subprocess(V**a,in){
 V*subprocess(V**a,in){
   extern char **environ;
   struct stat sb;
-  if(n||stat("run",&sb))return NULL;
-	(void)a;
+  if(n>9||stat("run",&sb))return NULL;
 
 #if defined(__linux__)
   int t;
@@ -42,8 +41,8 @@ V*subprocess(V**a,in){
   posix_spawn_file_actions_init(&file_actions);
   posix_spawn_file_actions_addopen(&file_actions, 0, pts, O_RDWR, 0666);
   posix_spawn_file_actions_addopen(&file_actions, 1, pts, O_WRONLY, 0666);
-  posix_spawn_file_actions_addopen(&file_actions, 2, pts, O_WRONLY, 0666);
-  const char *argv[] = { "./run", 0 };
+  posix_spawn_file_actions_adddup2(&file_actions, 2, 2);
+  const char *argv[n+2]; argv[0] = "./run"; i(n,argv[i+1]=(!a[i]||a[i]->t!=T_STR)?0:a[i]->s); argv[n+1] = 0;
   int r = posix_spawn(&pid, *argv, &file_actions, NULL, (char*const*)argv, environ);
   posix_spawn_file_actions_destroy(&file_actions);
   if(r) return close(t),v_err("subprocess");

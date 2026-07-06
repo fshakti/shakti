@@ -1,3 +1,4 @@
 #!/bin/sh
-exec docker run --rm -e TERM=dumb -i \
-  -v "`pwd`:/shakti:ro" -w /shakti alpine:latest
+docker run --rm -e TERM=dumb -i \
+	-v "$__dir__:/shakti:ro"      \
+	-w /shakti shakti "$@"

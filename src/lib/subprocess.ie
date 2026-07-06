@@ -18,18 +18,26 @@ def quote(x):
 			a:a+"\\"+c
 	return a
 
+def insert(a,b):
+	a:reverse(a)
+	a.append(b)
+	return reverse(a)
+
+default_cwd:__parent__
+
 class Popen:
 	def __init__(*args, executable:None, stdin:None, stdout:None, shell:False, cwd:None, env:None):
 		args: flatten(args)
 		input_hub:input
 		if not env: env: {}
-		if shell and executable=None: executable:"/bin/sh"
-		if shell and len(args)<>1: raise "Popen(shell:True) requires a single arg"
+		if shell and executable=None:
+			executable:"/bin/sh"
+			args:insert(args,"-c")
 		if shell:
-			args:[executable, "-c", args[0]]
-			shell:False
-		if len(args)=0: raise "Popen(args...)"
-		comm: load(__dir__ + "/subspace/")
+			if len(args)>2: raise "Popen(shell:True) requires a single arg"
+		if not executable=None: args:insert(args,executable)
+		if cwd=None:cwd:default_cwd
+		comm: load(__dir__ + "/subspace/",*args,__dir__:cwd)
 		if(type(comm)="dict"):raise "Failed to open subspace"
 		for k,v in env:
 			comm(f"export {quote(k)}={quote(string(v))};")

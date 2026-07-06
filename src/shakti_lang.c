@@ -3379,10 +3379,14 @@ static V*module_dict(Node*prog,Env*e) {
 &&module_path[i]!='\\'
 #endif
     ;--i);
-    char save = module_path[i]; module_path[i]=0; env_set(mod_env,"__dir__",v_str(module_path)); module_path[i] = save;
+    V *parent = env_get(e,"__dir__");
+    if(parent&&parent->t==T_STR) env_set(mod_env,"__parent__",parent=v_ref(parent));else parent=NULL;
+    char save = module_path[i]; module_path[i]=0;
+    env_set(mod_env,"__dir__",v_str(module_path)); module_path[i] = save;
     V *r = eval(prog, mod_env);
     env_set(mod_env,"__file__",v_str(module_path));
     module_path[i]=0; env_set(mod_env,"__dir__",v_str(module_path)); module_path[i] = save;
+    if(parent) env_set(mod_env,"__parent__",parent); // should be same refcount
     v_free(r);
     V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
     i(mod_env->len,{
@@ -5378,6 +5382,8 @@ int shakti_lang_main(int argc, char **argv) {
 #endif
     
     Env *global = env_new(NULL);
+    env_set(global, "__dir__", v_str(getcwd(module_path, sizeof(module_path)-1)));*module_path=0;
+
     builtin_register(global);
     int i = 1;
     char *cmd = NULL;
@@ -5385,7 +5391,6 @@ int shakti_lang_main(int argc, char **argv) {
     int parse_dump = 0;
     int parse_profile = 0;
     int parse_profile_iters = 100000;
-    *module_path = 0;
     while(i < argc && argv[i][0] == '-') {
         if(!strcmp(argv[i], "-c") && i+1 < argc) {
             cmd = argv[++i];

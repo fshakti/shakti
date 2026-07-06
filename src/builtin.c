@@ -1255,7 +1255,10 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         }
         char*ext;
         if(!chdir(args[0]->s)) {
-            V*result;FILE*f=fopen(".d","rb");
+            V*result=NULL;FILE*f=fopen(".d","rb");
+            i(nkw,if(kwn[i]&&kwn[i]->t==T_STR&&!strcmp(kwn[i]->s,"__dir__")){result=kwv[i];break;})
+            if(!result) result = env_get(e,"__dir__");
+            if(result && result->t == T_STR) setenv("__dir__", result->s, 1);else result=NULL;
             if(f) {
                 V*keys = v_deserialize(f);
                 V*vals = v_list(keys->n);
@@ -1266,7 +1269,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
                      fclose(f);
                 });
                 return v_table(keys,vals);
-            } else if((result=subprocess(args+1,nargs-1))) {
+            } else if(result && (result=subprocess(args+1,nargs-1))) {
             } else if(nargs > 1) {
                 V*keys = v_list(nargs-1);
                 V*vals = v_list(nargs-1);
