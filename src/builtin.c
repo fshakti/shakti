@@ -527,6 +527,28 @@ static V *bi_max(V **a, in) {
     }
     return v_nil();
 }
+static V *bi_sleep(V**a,in) {
+    struct timeval tv={0},*tvp=NULL;
+    if(n>0) {
+        if(a[0]->t == T_FLOAT) {
+            tv.tv_sec = (long long)a[0]->f;
+            tv.tv_usec = (long long)((a[0]->f*1e6) - (tv.tv_sec*1e6));
+            tvp=&tv;
+        } else if(a[0]->t == T_INT) {
+            tv.tv_sec = (long long)a[0]->j;
+            tvp=&tv;
+        } else if(a[0]->t == T_CHAR) {
+            tv.tv_sec = 0;
+            tv.tv_usec = a[0]->j * 5000;
+            tvp=&tv;
+        } else if(a[0]->t == T_NIL) {
+        } else {
+            return v_err("sleep(time)");
+        }
+    }
+    select(0,NULL,NULL,NULL,tvp);
+    return v_nil();
+}
 static V *bi_abs(V **a, in) {
     P(n < 1,v_int(0))
     P(a[0]->t == T_CVEC || a[0]->t == T_CMAT,a[0]);
@@ -866,7 +888,7 @@ typedef V *(*BiCall)(V **a, in, V **kwn, V **kwv, int nkw, Env *e);
 #define BIE(nm) static MS V *bi_w_##nm(V **a,in,V **k,V **v,int nk,Env *e){(void)k;(void)v;(void)nk;return bi_##nm(a,n,e);}
 #define BIKWE(nm) static MS V *bi_w_##nm(V **a,in,V **k,V **v,int nk,Env *e){return bi_##nm(a,n,k,v,nk,e);}
 BIKW(print)
-BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
+BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool) BI0(sleep)
 BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
@@ -1069,6 +1091,7 @@ static const BiEntry bi_tab[] = {
     {"sh", bi_w_sh},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
+    {"sleep", bi_w_sleep},
     {"sort", bi_w_sort},
     {"sorted", bi_w_sorted},
     {"sqrt", bi_w_sqrt},
@@ -1158,7 +1181,17 @@ static BiCall bi_find(const char *name) {
 #endif
     return hit ? hit->fn : NULL;
 }
-int is_builtin(const char *name){if(is_host_builtin(name))return 1;if(bi_find(name)==NULL)return 0;return 1;}
+int is_builtin(const char *name){
+  if(bi_find(name)!=NULL)return 1;
+  if(strcmp(name,"clock")==0)return 1;if(strcmp(name,"timer")==0)return 1;
+  if(strcmp(name,"assert")==0)return 1;
+  if(strcmp(name,"save_context")==0)return 1;
+  if(strcmp(name,"load_context")==0)return 1;
+  if(strcmp(name,"load")==0)return 1;
+  if(strcmp(name,"__apply__")==0)return 1;
+  if(strcmp(name,"__invoke__")==0)return 1;
+  return is_host_builtin(name);
+}
 V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env *e){
     BiCall fn;
     if(!strcmp(name,"clock") || !strcmp(name,"timer")){
