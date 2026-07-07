@@ -1461,9 +1461,13 @@ void node_add(Node *n, Node *child) {
 }
 void node_free(Node *n) {
     Pv(!n)
-    free(n->sval);
-    i(n->nch,node_free(n->ch[i]))
-    free(n->ch);
+    if(n->sval)free(n->sval),n->sval=NULL;
+    if(n->nch&&!n->ch)__builtin_abort();
+    if(n->ch){
+        Node**v=n->ch;n->ch=NULL;
+        i(n->nch,{Node*q=v[i];v[i]=NULL;node_free(q);})
+        free(v);n->ch=0;
+    }
     free(n);
 }
 static Node *parse_expr(Lexer *l);
