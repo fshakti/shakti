@@ -62,6 +62,26 @@ static int cmp_f64(const void *a, const void *b) {
     double x = *(const double *)a, y = *(const double *)b;
     return (x > y) - (x < y);
 }
+static int cmp_v(const void *a, const void *b) {
+    V*x=(V*)a,*y=(V*)b;
+    if(x && y && x->t==y->t) {
+        V*r=vec_cmp(x,y,OP_GT);
+        if(r&&r->b)return 1;
+        v_free(r);
+
+        r=vec_cmp(x,y,OP_LT);
+        if(r&&r->b)return -1;
+        v_free(r);
+
+        return 0;
+    } else {
+        char *ra = v_repr(x), *rb = v_repr(y);
+        int c = strcmp(ra, rb);
+        free(ra);
+        free(rb);
+        return c;
+    }
+}
 extern const char *type_name(int t);
 extern Node *fn_ast[];
 extern V *eval(Node *n, Env *e);
@@ -520,13 +540,6 @@ V *bi_json_dump(V **a, in) {
     v_free(s);
     return r;
 }
-static int v_cmp_repr(V *a, V *b) {
-    char *ra = v_repr(a), *rb = v_repr(b);
-    int c = strcmp(ra, rb);
-    free(ra);
-    free(rb);
-    return c;
-}
 V *bi_sorted(V **a, in, V **kwn, V **kwv, int nkw, Env *e) {
     (void)kwn;
     (void)kwv;
@@ -544,15 +557,9 @@ V *bi_sorted(V **a, in, V **kwn, V **kwv, int nkw, Env *e) {
         return x;
     }
     P(a[0]->t != T_LIST,v_err("sorted(list)"))
-    V *r = v_copy(a[0]);
-    for (int64_t i = 0; i + 1 < r->n; i++)
-        for (int64_t j = 0; j + 1 < r->n; j++)
-            if (v_cmp_repr(r->L[j], r->L[j + 1]) > 0) {
-                V *tmp = r->L[j];
-                r->L[j] = r->L[j + 1];
-                r->L[j + 1] = tmp;
-            }
-    return r;
+    V *x = v_copy(a[0]);
+    qsort(x->L, (size_t)x->n, sizeof(V*), cmp_v);
+    return x;
 }
 V *bi_any(V **a, in) {
     i(n,{P(v_truthy(a[i]),v_bool(1))})
