@@ -956,6 +956,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
     case T_IMAT:
     case T_FMAT:
     case T_BMAT:
+    case T_CMAT:
         print_mat_val(v, fp, repr_mode);
         break;
     case T_LIST:
