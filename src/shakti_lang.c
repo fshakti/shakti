@@ -1412,7 +1412,7 @@ static Token lex_raw(Lexer *l) {
         if(p+1<l->len && s[p+1]=='/') { l->pos=p+2; return make_tok(T_DSLASH_); }
         if(p+1<l->len && s[p+1]==':') { l->pos=p+2; return make_tok(T_SLASHEQ_); }
         return make_tok(T_SLASH_);
-    case '%': return make_tok(T_PERCENT_);
+    case '%': if(p+1<l->len && s[p+1]==':') { l->pos=p+2; return make_tok(T_PERCENTEQ_); } return make_tok(T_PERCENT_);
     case '=': return make_tok(T_EQ_);
     case '!': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_NE_); } break;
     case '<': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_LE_); }
@@ -2440,9 +2440,9 @@ static Node *parse_stmt(Lexer *l) {
         W(lex_peek(l).type == T_NEWLINE_ || lex_peek(l).type == T_SEMI_,lex_next(l))
         return n;
     }
-    if(pk.type == T_PLUSEQ_ || pk.type == T_MINUSEQ_ || pk.type == T_STAREQ_ || pk.type == T_SLASHEQ_) {
+    if(pk.type == T_PLUSEQ_ || pk.type == T_MINUSEQ_ || pk.type == T_STAREQ_ || pk.type == T_SLASHEQ_ || pk.type == T_PERCENTEQ_) {
         Token op=pk;lex_next(l);pk=lex_peek(l);
-        int o = op.type==T_PLUSEQ_?OP_ADD : op.type==T_MINUSEQ_?OP_SUB : op.type==T_STAREQ_?OP_MUL : OP_DIV;
+        int o = op.type==T_PLUSEQ_?OP_ADD : op.type==T_MINUSEQ_?OP_SUB : op.type==T_PERCENTEQ_?OP_MOD: op.type==T_STAREQ_?OP_MUL : OP_DIV;
         Node *val = parse_expr(l);
         pk=lex_peek(l);
         Node *n = node_new(N_AUGASSIGN); n->op = o;

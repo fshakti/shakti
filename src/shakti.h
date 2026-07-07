@@ -172,6 +172,7 @@ enum {
     T_SEMI_ = 77,
     T_AT_ = 78,
     T_CHARZ_ = 79,
+    T_PERCENTEQ_ = 80,
 };
 
 enum {
