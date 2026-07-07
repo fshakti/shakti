@@ -733,11 +733,19 @@ static V *bi_pop(V**a,in){P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
     return a[0]->L[--a[0]->n];}
 static V *bi_keys(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->keys):v_list(0);}
 static V *bi_values(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->vals):v_list(0);}
+static V*check_table(V*r) {
+    i(r->keys->n,if(r->vals->L[i]->n < r->n){
+        printf("table column %s has wrong length (%lld != %lld)\n", r->keys->L[i]->s, (long long)r->vals->L[i]->n,
+                (long long)r->n);
+        r->n=r->vals->L[i]->n;
+    })
+    return r;
+}
 static V *bi_table(V**a,in,V**kwn,V**kwv,int nkw){
-    P(n==1&&a[0]->t==T_DICT,v_table(a[0]->keys,a[0]->vals))
+    P(n==1&&a[0]->t==T_DICT,check_table(v_table(a[0]->keys,a[0]->vals)))
     if(nkw>0){V*p=v_list(nkw),*d=v_list(nkw);
         for(int i=0;i<nkw;i++){p->L[i]=v_ref(kwn[i]);d->L[i]=v_ref(kwv[i]);}
-        V*r=v_table(p,d);v_free(p);v_free(d);return r;}
+        V*r=v_table(p,d);v_free(p);v_free(d); return check_table(r);}
     return v_err("table()");}
 static V *bi_columns(V**a,in){return n>0&&a[0]->t==T_TABLE?v_copy(a[0]->keys):v_err("columns()");}
 static V *bi_shape(V**a,in){
@@ -1269,13 +1277,13 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
                      vals->L[i] = v_deserialize(f);
                      fclose(f);
                 });
-                return v_table(keys,vals);
+                return check_table(v_table(keys,vals));
             } else if(result && (result=subprocess(args+1,nargs-1))) {
             } else if(nargs > 1) {
                 V*keys = v_list(nargs-1);
                 V*vals = v_list(nargs-1);
                 i(nargs-1,keys->L[i]=v_ref(v_ref(args[i]));vals->L[i]=builtin_call("load",args+i,1,kwn,kwv,nkw,e));
-                result=v_table(keys,vals);
+                result=check_table(v_table(keys,vals));
             } else {
                 V*keys = v_list(0);
                 V*vals = v_list(0);
