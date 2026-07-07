@@ -1,0 +1,568 @@
+# Merged Shakti examples — sections below are not meant to run as one script.
+# Copy a section or run a single demo from doc.md instructions.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie
+
+# =============================================================================
+# matrix.ie
+# =============================================================================
+# Native matrix types demo
+
+m : [[1, 2], [3, 4]]
+print("int matrix:", m)
+print("type:", type(m))
+print("shape:", shape(m))
+print("row 0:", m[0])
+print("cell [1,0]:", m[1, 0])
+
+a : [[1, 2], [3, 4]]
+b : [[5, 6], [7, 8]]
+print("element-wise *:", a * b)
+print("matmul a @ b:", a @ b)
+
+f : [[1.0, 2.0], [3.0, 4.0]]
+print("sum(f):", sum(f))
+
+flags : [[True, False], [False, True]]
+print("bool matrix:", flags)
+print("flags > 0:", flags > 0)
+
+t : table(data: [[10, 20], [30, 40]])
+print("table column as matrix:", t["data"])
+
+u : range(5)
+v : range(5)
+print("dot(range(5), range(5)):", dot(u, v))
+print("sum(u * v):", sum(u * v))
+
+# =============================================================================
+# sql_demo.ie
+# =============================================================================
+# In-memory table SQL — requires `import sql` before statement syntax.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti sql_demo.ie
+
+import sql
+
+sales : table(
+    id:[1, 2, 3, 4],
+    dept:["sales", "eng", "sales", "eng"],
+    amount:[10, 25, 30, 40]
+)
+
+print("rows:", shape(sales)[0])
+
+by_dept : select amount by dept from sales where amount > 15
+print("sum amount by dept (amount > 15):")
+print(by_dept)
+
+totals : select sum amount by dept from sales
+print("sum amount by dept (all rows):")
+print(totals)
+
+create table roster (id: 0, name: "")
+insert into roster (id, name) values (1, "ada")
+insert into roster (id, name) values (2, "bob")
+update name : "ADA" from roster where id = 1
+print("roster after update:")
+print(roster)
+
+delete from roster where id = 2
+print("roster after delete:")
+print(roster)
+
+# =============================================================================
+# graph_demo.ie
+# =============================================================================
+# Knowledge graph demo — subject/predicate/object triples.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti graph_demo.ie
+
+import graph
+
+graph.create()
+
+graph.add("Ada", "knows", "Bob")
+graph.add("Bob", "knows", "Carol")
+graph.add("Carol", "knows", "Dave")
+graph.add("Ada", "worksAt", "Acme")
+graph.add("Bob", "worksAt", "Acme")
+
+print("triples:", graph.count())
+
+print("\nwho Ada knows:")
+print(graph.query("Ada", "knows", "*"))
+
+print("\noutgoing from Bob:")
+print(graph.neighbors("Bob", "out"))
+
+print("\npath Ada -> Dave:")
+path : graph.path("Ada", "Dave", 6)
+print(path)
+
+people : table(
+    name: ["Eve", "Frank"],
+    friend: ["Frank", "Grace"]
+)
+graph.from_table(people, "name", "knows", "friend")
+print("\nafter table load, count:", graph.count())
+print(graph.query("*", "knows", "Grace"))
+
+# =============================================================================
+# input_demo.ie
+# =============================================================================
+# Terminal + event-hub input demo (no synth window).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti input_demo.ie
+#   echo hello | ./shakti input_demo.ie   # readline path
+
+import input
+
+print("input demo — readline + 3s of key/mouse polling (input(50))")
+print("type a line at the prompt, then press keys in this terminal")
+
+line : readline("line? ")
+if len(line) > 0:
+    print("readline:", line)
+
+input.hz : 120
+t_end : clock() + 3.0
+n : 0
+while clock() < t_end:
+    for ev in input(50):
+        n : n + 1
+        print("event", n, ev["kind"], ev["code"], ev["utf8"])
+
+print("polled", n, "events; mouse", input.x, input.y, "wheel", input.wheel)
+
+# =============================================================================
+# synth_demo.ie
+# =============================================================================
+# Shakti synth demo — async window + event loop
+# See synth_input.ie for unified input(2) key events + synth jam.
+import synth
+
+synth.open()
+synth.set_steps(16)
+print("synth open — MUTE / METRO in header; close window or Ctrl+C to exit")
+
+while synth.alive():
+    synth.tick()
+
+print("steps:", synth.steps())
+
+# =============================================================================
+# synth_song.ie
+# =============================================================================
+# Plays "Twinkle Twinkle Little Star" with live key highlights, filter sweeps,
+# and a simple 16-step drum loop on the built-in sequencer.
+#
+# Usage (from repo root, with X11 + ALSA):
+#   SHAKTI_SYNTH:1 make shakti
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti synth_song.ie
+
+import synth
+
+last_note : 0
+t_start : 0.0
+
+def play_note(note, beats):
+    global last_note
+    sec : beats * 60.0 / synth.bpm()
+    if last_note and last_note != note:
+        synth.note_off(last_note)
+        last_note : 0
+    if note:
+        synth.note_on(note, 1.0)
+        last_note : note
+    t0 : clock()
+    while synth.alive() and clock() - t0 < sec:
+        filter_sweep()
+        synth.tick()
+    if note:
+        synth.note_off(note)
+        last_note : 0
+
+def filter_sweep():
+    t : clock() - t_start
+    synth.set_cutoff(0.42 + 0.28 * (0.5 + 0.5 * sin(t * 0.85)))
+    synth.set_reso(0.22 + 0.28 * (0.5 + 0.5 * sin(t * 1.35 + 0.7)))
+
+def setup_drums():
+    # 16-step patterns (bit mask): kick four-on-floor, backbeat snare, off-beat hats.
+    synth.set_row(0, 4369)   # steps 0,4,8,12 — kick (row note 36)
+    synth.set_row(1, 4112)   # steps 4,12 — snare (row note 42)
+    synth.set_row(2, 21845)  # steps 1,3,5,... — hi-hat (row note 44)
+    synth.play(1)
+
+synth.open()
+synth.set_mute(0)
+synth.set_level(0.88)
+synth.set_bpm(100)
+synth.set_cutoff(0.45)
+synth.set_reso(0.32)
+synth.set_steps(16)
+setup_drums()
+
+t_start : clock()
+print("Playing Twinkle Twinkle + drum loop — close the window when done")
+
+song : [
+    [60, 0.75], [60, 0.75], [67, 0.75], [67, 0.75], [69, 0.75], [69, 0.75], [67, 1.5],
+    [0, 0.35],
+    [65, 0.75], [65, 0.75], [64, 0.75], [64, 0.75], [62, 0.75], [62, 0.75], [60, 1.5],
+]
+
+for pair in song:
+    play_note(pair[0], pair[1])
+
+synth.play(0)
+synth.set_cutoff(0.45)
+synth.set_reso(0.28)
+print("Done — try the pads and sequencer, or close the window")
+while synth.alive():
+    synth.tick()
+
+# =============================================================================
+# synth_input.ie
+# =============================================================================
+# Synth + unified input jam demo (Linux/macOS with synth build).
+#
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti synth_input.ie
+#
+# Maps QWERTY keys to synth notes via input(2) key up/down stream.
+# Close the synth window or press Ctrl+C to exit.
+
+import synth
+import input
+
+synth.open()
+input_set_own_gui(1)
+input.hz : 120
+
+print("Jam mode — key down/up from terminal or synth window; close window to exit")
+
+for ev in input(2):
+    synth.tick()
+    if not synth.alive():
+        break
+    kind : ev["kind"]
+    code : ev["code"]
+    idx : input.qwerty[str(code)]
+    if idx < 0:
+        continue
+    note : 60 + idx
+    if kind = "down":
+        synth.note_on(note, 0.88)
+    elif kind = "up":
+        synth.note_off(note)
+
+print("Done")
+
+# =============================================================================
+# synth_just_intonation.ie
+# =============================================================================
+# Just-intonation major chord — pure ratios, no beating partials.
+# Compare with 12-TET by toggling tuning while holding notes.
+#
+#   export SHAKTI_LIB=$PWD/lib
+#   SHAKTI_SYNTH_HEADLESS=1 ./shakti synth_just_intonation.ie
+
+import synth
+
+synth.open()
+synth.set_tuning("just")
+
+# C major: C4=60, E4=64, G4=67
+synth.note_on(60, 0.9)
+synth.note_on(64, 0.85)
+synth.note_on(67, 0.85)
+
+print("just-intonation C major — partials align (5:4 third, 3:2 fifth)")
+print("tuning:", synth.tuning())
+
+i : 0
+while synth.alive() and i < 240:
+    synth.tick()
+    i : i + 1
+
+synth.note_off(60)
+synth.note_off(64)
+synth.note_off(67)
+synth.close()
+print("done")
+
+
+# =============================================================================
+# talk_demo.ie
+# =============================================================================
+# Speech-to-text demo (macOS only; requires microphone + Speech Recognition permission).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti talk_demo.ie
+
+import talk
+
+talk.set_locale("en-US")
+print("talk — speak, then pause ~2s, press Enter, or click to finish")
+
+text : talk.listen(2)
+print("transcript:", text)
+
+# =============================================================================
+# ipc_echo.ie
+# =============================================================================
+# Local IPC echo server — Unix domain socket on localhost (default port 19090).
+# Run in one terminal:  ./shakti ipc_echo.ie
+# Run in another:       ./shakti ipc_echo_client.ie
+
+import ipc
+
+port : 19090
+srv : ipc.listen(port)
+print("ipc echo listening on port", port, "(uds on localhost)")
+
+conn : ipc.accept(srv)
+msg : ipc.recv(conn)
+print("recv:", msg)
+ipc.send(conn, msg)
+ipc.close(conn)
+ipc.close(srv)
+print("done")
+
+# =============================================================================
+# ipc_echo_client.ie
+# =============================================================================
+# Client for ipc_echo.ie — connects via UDS (localhost default).
+import ipc
+
+port : 19090
+c : ipc.connect("127.0.0.1", port)
+ipc.send(c, "hello from client")
+msg : ipc.recv(c)
+print("reply:", msg)
+ipc.close(c)
+
+# =============================================================================
+# ipc_rdma.ie
+# =============================================================================
+# RDMA/RoCE IPC example — requires RDMA-capable NIC and rdma-core dev libraries.
+# Server:  ./shakti ipc_rdma.ie
+# Client:  ./shakti ipc_rdma_client.ie  (set host/port to match)
+
+import ipc
+
+if ipc.rdma_available() = 0:
+    print("no RDMA device — install rdma-core and configure RoCE NIC")
+else:
+    port : 19100
+    srv : ipc.listen(port, "0.0.0.0", "rdma")
+    print("rdma server on port", port)
+    conn : ipc.accept(srv)
+    msg : ipc.recv(conn)
+    print("recv:", msg)
+    ipc.send(conn, "rdma-ok")
+    ipc.close(conn)
+    ipc.close(srv)
+
+# =============================================================================
+# ipc_rdma_client.ie
+# =============================================================================
+# RDMA client for ipc_rdma.ie — set host to server address.
+import ipc
+
+host : "127.0.0.1"
+port : 19100
+
+if ipc.rdma_available() = 0:
+    print("no RDMA device")
+else:
+    c : ipc.connect(host, port, "rdma")
+    ipc.send(c, "ping")
+    print("reply:", ipc.recv(c))
+    ipc.close(c)
+
+# =============================================================================
+# rest_demo.ie
+# =============================================================================
+# REST client + local server demo
+#
+#   ./shakti rest_demo.ie
+#
+# Optional live API (needs network):
+#   resp : rest.get("https://httpbin.org/get")
+
+import rest
+
+sh("./shakti tests/fixtures/rest_demo_server.ie &")
+sh("sleep 0.5")
+
+print("GET /ping")
+resp : rest.get("http://127.0.0.1:19091/ping")
+if rest.ok(resp):
+    print("status:", rest.status(resp), "body:", rest.text(resp))
+else:
+    print("error status:", rest.status(resp))
+
+sh("./shakti tests/fixtures/rest_demo_server.ie &")
+sh("sleep 0.5")
+
+print("POST /echo")
+resp2 : rest.post_json("http://127.0.0.1:19091/echo", {"msg": "hello"})
+if rest.ok(resp2):
+    print("echo:", rest.json(resp2))
+else:
+    print("error status:", rest.status(resp2))
+
+print("rest demo done")
+
+# =============================================================================
+# bridge.ie
+# =============================================================================
+# Bridge hand dealer — solves the bridge challenge at http://www.lescasse.com/Content/Quiz.aspx
+# Copyright (c) 2026 Daniel Martin
+#
+# Usage (from repo root):
+#   make prod
+#   ./shakti bridge.ie
+
+pips : "SHDC"
+crds : "AKQJX98765432"
+
+def index_of(s, ch):
+    i : 0
+    while i < len(s):
+        if s[i] = ch:
+            return i
+        i : i + 1
+    return -1
+
+def pad2(n):
+    s : str(n)
+    if len(s) < 2:
+        s : "0" + s
+    return s
+
+def Dist():
+    deck : []
+    for s in pips:
+        for c in crds:
+            deck.append(s + c)
+    lcg_a : 1664525
+    lcg_c : 1013904223
+    lcg_m : 4294967296
+    rng : int(clock() * 1000) % lcg_m
+    i : 51
+    while i > 0:
+        rng : (lcg_a * rng + lcg_c) % lcg_m
+        j : rng % (i + 1)
+        tmp : deck[i]
+        deck[i] : deck[j]
+        deck[j] : tmp
+        i : i + (-1)
+    hands : []
+    p : 0
+    while p < 4:
+        hands.append(deck[p * 13 : p * 13 + 13])
+        p : p + 1
+    return hands
+
+def SortDist(hands):
+    out : []
+    for hand in hands:
+        keyed : []
+        for card in hand:
+            pip_rank : index_of(pips, card[0])
+            crd_rank : index_of(crds, card[1])
+            key : pad2(pip_rank) + pad2(crd_rank)
+            keyed.append([key, card])
+        keyed : sorted(keyed)
+        sorted_hand : []
+        for pair in keyed:
+            sorted_hand.append(pair[1])
+        out.append(sorted_hand)
+    return out
+
+def Eval(sorted_hands):
+    scores : []
+    for hand in sorted_hands:
+        total : 0
+        for card in hand:
+            c : card[1]
+            if c = "A":
+                total : total + 4
+            elif c = "K":
+                total : total + 3
+            elif c = "Q":
+                total : total + 2
+            elif c = "J":
+                total : total + 1
+        scores.append(total)
+    return scores
+
+def hand_to_matrix(hand):
+    rows : {"S": ["S"], "H": ["H"], "D": ["D"], "C": ["C"]}
+    for card in hand:
+        rows[card[0]].append(card[1])
+    return [rows["S"], rows["H"], rows["D"], rows["C"]]
+
+def row_to_str(row, width):
+    s : ""
+    for item in row:
+        s : s + item + " "
+    while len(s) < width:
+        s : s + " "
+    return s
+
+def Split(sorted_hands):
+    matrices : []
+    for hand in sorted_hands:
+        matrices.append(hand_to_matrix(hand))
+    return matrices
+
+def pad_left(n):
+    s : ""
+    i : 0
+    while i < n:
+        s : s + " "
+        i : i + 1
+    return s
+
+def Display(matrices):
+    west_col : 2
+    col_width : 28
+    gap : 3
+    east_col : west_col + col_width + gap
+    north_col : (west_col + east_col) // 2
+    north : matrices[0]
+    west : matrices[1]
+    east : matrices[2]
+    south : matrices[3]
+    r : 0
+    while r < 4:
+        print(pad_left(north_col) + row_to_str(north[r], col_width))
+        r : r + 1
+    print("")
+    r : 0
+    while r < 4:
+        west_str : pad_left(west_col) + row_to_str(west[r], col_width)
+        while len(west_str) < east_col:
+            west_str : west_str + " "
+        print(west_str + row_to_str(east[r], col_width))
+        r : r + 1
+    print("")
+    r : 0
+    while r < 4:
+        print(pad_left(north_col) + row_to_str(south[r], col_width))
+        r : r + 1
+
+def Find(n):
+    sd : SortDist(Dist())
+    while Eval(sd)[0] < n:
+        sd : SortDist(Dist())
+    Display(Split(sd))
+    return sd
+
+# Deal until North holds at least 10 high-card points, then print the layout.
+Find(10)

@@ -1,0 +1,69 @@
+# Published repo: src/, lib/, doc.md, example.ie, README.md, Makefile, LICENSE, NOTICE, .gitignore
+# Everything below is local workspace (kept on disk, not in git).
+
+.DS_Store
+Thumbs.db
+
+# build outputs
+**/build/
+**/.build/
+**/dist/
+**/node_modules/
+**/out/
+**/cmake-build-*/
+
+# editors
+.vscode/
+.idea/
+.cursor/
+
+# local Ollama + Cursor hooks (machine-specific)
+.cursor/hooks.json
+.cursor/hooks/
+.cursor/
+.cursor/
+.cursor/
+//
+
+# logs / caches
+*.log
+**/__pycache__/
+
+# binaries / objects
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
+*.dSYM/
+*.zip
+*.tmp
+
+shakti
+shakti-standalone
+**/build-static-test/
+
+# local-only trees
+/android/
+/benchmarks/
+/cmake/
+/editors/
+/internal-bench/
+/scripts/
+/tests/
+/.github/
+/CMakeLists.txt
+/CMakePresets.json
+
+# local env / notes
+.env
+.env.*
+docs/MACROS.md
+docs/results/
+
+/
+/

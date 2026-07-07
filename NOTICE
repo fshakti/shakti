@@ -1,0 +1,12 @@
+shakti
+Copyright 2026 Shakti / shakti contributors
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+---
+
+Third-party notices
+
+Linked system libraries (libexpat, X11, ALSA, Cocoa, Core Audio, OpenMP,
+optional RDMA stacks, etc.) are provided by the host OS or toolchain.
+See doc.md.

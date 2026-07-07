@@ -1,0 +1,22 @@
+# talk — microphone speech-to-text (macOS, homemade C module in src/talk.c)
+# Requires shakti built with SHAKTI_TALK:1. Optional: SHAKTI_TALK_LOCALE:en-US
+#
+#   import talk
+#   talk(2)              # listen; stop on 2s silence, Enter, or left-click
+#   talk.listen(2)       # same
+#   talk.set_locale("en-US")
+
+def __call__(silence_sec:1.5):
+    text : talk_listen(silence_sec)
+    print(text)
+    return text
+
+def listen(silence_sec:1.5):
+    return __call__(silence_sec)
+
+def set_locale(locale):
+    talk_set_locale(locale)
+
+# Deprecated alias (was whisper model path).
+def set_model(locale):
+    set_locale(locale)
