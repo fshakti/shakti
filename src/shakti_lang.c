@@ -293,6 +293,7 @@ static V *try_promote_matrix(V **elems, int nch) {
         } else if (row->t == T_LIST) {
             row_len = row->n;
             for (int64_t j = 0; j < row->n; j++) {
+                if (!elems[i]->L[j]) return NULL; // T_NIL
                 if (elems[i]->L[j]->t != T_CHAR) all_u8 = 0;
                 if (elems[i]->L[j]->t != T_INT && elems[i]->L[j]->t != T_CHAR) all_int = 0;
                 if (elems[i]->L[j]->t != T_CHAR && elems[i]->L[j]->t != T_INT && elems[i]->L[j]->t != T_FLOAT) all_num = 0;

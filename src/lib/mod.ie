@@ -2,9 +2,7 @@ notes:["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"]
 hu:"0123456789ABCDEF"
 
 def av(n):
-	a:[]
-	for x in range(n): append(a,None)
-	return a
+	return list[](n)
 def d2(n):
 	if n<1: return ".."
 	if n<10: return "0"+str(n)
