@@ -1483,8 +1483,8 @@ static Node *parse_join(Lexer *l, Node *left);
 static Node *parse_atom(Lexer *l);
 
 static int is_jux_arg_token(int tt) {
-    return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_ || tt == T_CHARZ_|| tt == T_AT_
-        || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_ || tt == T_STAR_ || tt == T_DSTAR_;
+    return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_ || tt == T_CHARZ_
+        || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_;
 }
 
 static int is_jux_arg_start(Lexer *l) {
@@ -1694,7 +1694,7 @@ static Node *parse_postfix(Lexer *l) {
             n = call;
         } else if(pk.type == T_LBRACKET_) {
             lex_next(l);
-            if(lex_peek(l).type == T_COLON_) {
+            if((pk=lex_peek(l)).type == T_COLON_) {
                 Node *sl = node_new(N_SLICE);
                 node_add(sl, n);
                 node_add(sl, node_new(N_NONE));
@@ -1713,6 +1713,42 @@ static Node *parse_postfix(Lexer *l) {
                 }
                 expect(l, T_RBRACKET_);
                 n = sl;
+            } else if(n->sval != NULL && strcmp(n->sval, "list") == 0) {
+                Node *t = node_new(N_LIST);
+                if(pk.type == T_RBRACKET_) {
+                  t->ival=T_LIST;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "char") == 0) {
+                  lex_next(l);t->ival=T_CVEC;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "int") == 0) {
+                  lex_next(l);t->ival=T_IVEC;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "float") == 0) {
+                  lex_next(l);t->ival=T_FVEC;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "bool") == 0) {
+                  lex_next(l);t->ival=T_BVEC;
+                }
+                expect(l,T_RBRACKET_);
+                node_free(n);n=node_new(N_CALL);
+                node_add(n, t);
+                node_add(n, parse_expr(l));
+            } else if(n->sval != NULL && strcmp(n->sval, "matrix") == 0) {
+                Node *t = node_new(N_LIST);
+                if(pk.type == T_NAME_ && strcmp(pk.sval, "char") == 0) {
+                    lex_next(l);t->ival=T_CMAT;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "int") == 0) {
+                    lex_next(l);t->ival=T_IMAT;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "float") == 0) {
+                    lex_next(l);t->ival=T_FMAT;
+                } else if(pk.type == T_NAME_ && strcmp(pk.sval, "bool") == 0) {
+                    lex_next(l);t->ival=T_BMAT;
+                }
+                expect(l,T_RBRACKET_);
+                expect(l,T_LPAREN_);
+                node_free(n);n=node_new(N_CALL);
+                node_add(n, t);
+                node_add(n, parse_expr(l));
+                expect(l,T_COMMA_);
+                node_add(n, parse_expr(l));
+                expect(l,T_RPAREN_);
             } else {
                 Node *first = parse_expr(l);
                 if(lex_peek(l).type == T_COLON_) {
@@ -2464,7 +2500,7 @@ Node *parse(const char *src) {
         if(s) node_add(prog, s);
         else if(lex_peek(&l).type == T_DEDENT_){
             if(lex_next(&l).type == T_EOF_)break;
-            printf("parse_stmt returned null? next token is %d\n", lex_peek(&l).type);
+            //printf("parse_stmt returned null? next token is %d\n", lex_peek(&l).type);
         }
     })
     return prog;
@@ -4508,6 +4544,53 @@ V *eval(Node *n, Env *e) {
             v_free(obj);
             v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
+        }
+        if(fn_node->type == N_LIST && fn_node->ival > 0) {
+            if(n->nch==1)return v_alloc(fn_node->ival);
+            if(n->nch==2) {
+                V *obj = eval(n->ch[1], e);
+                if(obj->t != T_CHAR && obj->t != T_INT) return builtin_call("list",&obj,1,NULL,NULL,0,e);
+                long long x = obj->j;
+                v_free(obj);
+
+                switch(fn_node->ival) {
+                case T_BVEC: return v_bvec(x);
+                case T_CVEC: return v_cvec(x);
+                case T_FVEC: return v_fvec(x);
+                case T_IVEC: return v_ivec(x);
+
+                case T_BMAT: return v_bmat(x,0);
+                case T_CMAT: return v_cmat(x,0);
+                case T_FMAT: return v_fmat(x,0);
+                case T_IMAT: return v_imat(x,0);
+                case T_LIST: return v_list(x);
+                default: __builtin_abort();
+                };
+            }
+            if(n->nch==3) {
+                V *o1 = eval(n->ch[1], e);
+                V *o2 = eval(n->ch[2], e);
+                if((o1->t != T_CHAR && o1->t != T_INT)||(o2->t != T_CHAR && o2->t != T_INT))
+                    return v_free(o1),v_free(o2),v_err("types");
+                long long x = o1->j;
+                long long y = o2->j;
+                v_free(o1);v_free(o2);
+
+                switch(fn_node->ival) {
+                case T_BVEC:
+                case T_CVEC:
+                case T_FVEC:
+                case T_IVEC:
+                case T_LIST: return v_err("too many dimensions");
+
+                case T_BMAT: return v_bmat(x,y);
+                case T_CMAT: return v_cmat(x,y);
+                case T_FMAT: return v_fmat(x,y);
+                case T_IMAT: return v_imat(x,y);
+                default: __builtin_abort();
+                };
+            }
+            return v_err("too many dimensions");
         }
 
         int positional_names = 0;
