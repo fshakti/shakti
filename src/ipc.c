@@ -1,6 +1,7 @@
 #include "ipc.h"
 #include "ipc_rdma.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -26,6 +27,15 @@
 #endif
 
 #define IPC_MAX_HANDLES 128
+
+static int ipc_valid_shm_user_name(const char *s) {
+    if (!s || !s[0]) return 0;
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (!(isalnum(c) || c == '_' || c == '-' || c == '.')) return 0;
+    }
+    return 1;
+}
 
 typedef enum {
     IPC_KIND_NONE = 0,
@@ -786,8 +796,10 @@ V *bi_ipc_shm_open(V **a, int n) {
         }
     }
     P(slot < 0, v_err("ipc_shm_open: no slots"))
+    P(!ipc_valid_shm_user_name(a[0]->s), v_err("ipc_shm_open: bad name"))
     char name[256];
-    snprintf(name, sizeof name, "/shakti_%s", a[0]->s);
+    int nn = snprintf(name, sizeof name, "/shakti_%s", a[0]->s);
+    P(nn < 0 || (size_t)nn >= sizeof name, v_err("ipc_shm_open: name too long"))
     shm_unlink(name);
     int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0666);
     if (fd < 0) return v_err("ipc_shm_open: shm_open failed");
