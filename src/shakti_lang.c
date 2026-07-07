@@ -3766,7 +3766,7 @@ static int shakti_sql_enabled(Env *e) {
     V *v = env_get(e, SHAKTI_SQL_FLAG);
     return v && v->t == T_BOOL && v->b;
 }
-static int uh(unsigned char c){return c < 'A' ? (c-'0') : c < 'a' ? (c - 'A')+10 : (c - 'f') + 10; }
+static int uh(unsigned char c){return c < 'A' ? (c-'0') : c < 'a' ? (c - 'A')+10 : (c - 'a') + 10; }
 V *eval(Node *n, Env *e) {
 //printf("eval :: "); node_sprint(n,stdout);puts("");
     P(!n,v_nil())
