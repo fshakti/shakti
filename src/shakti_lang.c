@@ -704,6 +704,12 @@ int env_update(Env *e, const char *name, V *val) {
             }
     return 0;
 }
+const char *env_complete(Env *e, char *s, in) {
+    for(; e; e=e->parent)
+        for(int i=0;i<e->len;++i)
+            if(e->names[i]&&strncmp(e->names[i],s,n)==0)return e->names[i];
+    return NULL;
+}
 V *env_get(Env *e, const char *name) {
     uint32_t h = fnv1a(name);
     for(; e; e=e->parent)
@@ -5051,25 +5057,6 @@ static const char *HL_QRYS[] = {
     "create", "table", "insert", "into", "values", NULL
 };
 static const char *HL_CONS[] = {"True","False","None",NULL};
-static const char *HL_BIS[] = {
-    "print","len","range","type","int","float","str","list","bool",
-    "sum","avg","min","max","abs","sqrt",
-    "sort","reverse","zip","enumerate","map","filter",
-    "table","columns","shape","head","tail",
-    "append","pop","keys","values",
-    "load","save","input","repr","clock",
-    "read","write","readlines",
-    "listdir","walk","stat",
-    "path_join","path_exists","path_isdir","path_isfile",
-    "path_basename","path_dirname","path_splitext",
-    "getcwd","mkdir","getenv","machine","sh",
-    "re_findall","re_sub","re_match","re_split",
-    "json_loads","json_dumps","json_load","json_dump",
-    "sorted","any","all","isinstance","hasattr","getattr",
-    "chr","ord","hex","dict","set","next","assert",
-    "int64","float64",
-    NULL
-};
 static int hl_in(const char *w, const char **t) {
     for(int i=0;t[i];i++) if(!strcmp(w,t[i])) return 1;
     return 0;
@@ -5131,9 +5118,9 @@ static void hl_render(const char *s, int len) {
             char w[256]; int wl=i-p0; if(wl>=(int)sizeof(w))wl=sizeof(w)-1;
             memcpy(w,s+p0,wl); w[wl]=0;
             if(hl_in(w,HL_KWS))       printf(HL_KW "%s" HL_RST,w);
-            else if(hl_in(w,HL_QRYS))  printf(HL_QRY "%s" HL_RST,w);
+            else if(dynamic_has_sql&&hl_in(w,HL_QRYS))  printf(HL_QRY "%s" HL_RST,w);
             else if(hl_in(w,HL_CONS))  printf(HL_CON "%s" HL_RST,w);
-            else if(hl_in(w,HL_BIS))   printf(HL_BI "%s" HL_RST,w);
+            else if(is_builtin(w))   printf(HL_BI "%s" HL_RST,w);
             else printf("%s",w);
             continue;
         }
@@ -5183,7 +5170,8 @@ static int hl_read_char(char *c) {
     return input_hub_read_char(c);
 }
 #endif
-static char *hl_readline(const char *prompt) {
+const char *builtin_complete(const char *s,in);
+static char *hl_readline(const char *prompt, Env*e) {
     static char buf[65536];
     int len=0, pos=0, hidx=hl_hlen;
     if(!isatty(STDIN_FILENO)){
@@ -5198,8 +5186,8 @@ static char *hl_readline(const char *prompt) {
         char c; if(!hl_read_char(&c)){hl_raw_off();return NULL;}
         if(c=='\r'||c=='\n'){buf[len]=0;printf("\r\n");fflush(stdout);hl_raw_off();hl_hadd(buf);return buf;}
         if(c==3){len=pos=0;printf("\r\n%s",prompt);fflush(stdout);continue;}
-        if(c==4){if(len==0){printf("\r\n");hl_raw_off();return NULL;}continue;}
-        if(c==127||c==8){if(pos>0){memmove(buf+pos-1,buf+pos,len-pos);pos--;len--;}}
+        else if(c==4){if(len==0){printf("\r\n");hl_raw_off();return NULL;}else if(pos==len)continue;memmove(buf+pos,buf+pos+1,len-(pos+1));--len;}
+        else if(c==127||c==8){if(pos>0){memmove(buf+pos-1,buf+pos,len-pos);pos--;len--;}}
         else if(c==1){pos=0;}
         else if(c==5){pos=len;}
         else if(c==21){memmove(buf,buf+pos,len-pos);len-=pos;pos=0;}
@@ -5211,7 +5199,22 @@ static char *hl_readline(const char *prompt) {
             memmove(buf+pos,buf+e,len-e);len-=(e-pos);
         }
         else if(c==9){
-            if(len+4<(int)sizeof(buf)){memmove(buf+pos+4,buf+pos,len-pos);memset(buf+pos,' ',4);pos+=4;len+=4;}
+            if(pos>0&&buf[pos-1]>' ') {
+                int s=pos,t=pos;for(;s>0&&isalnum(buf[s-1]);--s);for(;t<len&&isalnum(buf[t]);++t);
+                if(t!=s && (t-s)<255) {
+                    const char*ec=env_complete(e,buf+s,t-s);
+                    V*v;if(ec)v=env_get(e,ec);else{v=NULL;ec=builtin_complete(buf+s,t-s);}
+                    if(!ec)putchar(7);else{
+                        int d=strlen(ec);
+                        char deco = (!v || v->t==T_FN);
+                        memmove(buf+t,buf+s+d+deco,len-t);
+                        memcpy(buf+s,ec,d);
+                        if(deco)buf[s+d]='(';
+                        pos=s+d+deco;len+=(d-(t-s))+deco;
+                        v_free(v);
+                    }
+                }
+            } else if(len+4<(int)sizeof(buf)){memmove(buf+pos+4,buf+pos,len-pos);memset(buf+pos,' ',4);pos+=4;len+=4;}
         }
         else if(c==27){
             char sq[3]; if(!hl_read_char(&sq[0]))continue;
@@ -5397,7 +5400,7 @@ static void run_repl(Env *e) {
     char input[REPL_INPUT_CAP];
     for (;;) {
 #if SHAKTI_HL
-        char *line = hl_readline("> ");
+        char *line = hl_readline("> ",e);
 #else
         char *line = read_line("> ");
 #endif
@@ -5436,7 +5439,7 @@ static void run_repl(Env *e) {
         }
         while (needs_more(line)) {
 #if SHAKTI_HL
-            line = hl_readline("| ");
+            line = hl_readline("| ",e);
 #else
             line = read_line("| ");
 #endif

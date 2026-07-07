@@ -150,58 +150,6 @@ extern V *bi_rest_accept(V**,in);
 extern V *bi_rest_read(V**,in);
 extern V *bi_rest_write(V**,in);
 extern V *bi_rest_close(V**,in);
-static const char *BUILTINS[] = {
-    "print","len","range","type","int","float","str","list","bool",
-    "sum","avg","min","max","dot","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "sort","reverse","zip","enumerate","map","filter",
-    "table","columns","shape","head","tail","group_sum",
-    "append","pop","keys","values",
-    "load","save","input","readline","wait","repr","clock","timer",
-    "input_get_hz","input_set_hz","input_get_x","input_get_y","input_get_wheel",
-    "input_set_x","input_set_y","input_set_wheel","input_get_qwerty","input_set_own_gui","input_qwerty_reload",
-    "ipc_accept","ipc_close","ipc_connect","ipc_listen","ipc_poll","ipc_recv","ipc_recv_nowait",
-    "ipc_rdma_available","ipc_send","ipc_set_nonblock","ipc_shm_close","ipc_shm_open",
-    "lissen_trpc_query","lissen_trpc_mutation","lissen_set_token","lissen_get_token",
-    "lissen_set_api_base","lissen_get_api_base","lissen_app_url","lissen_web_url","lissen_open",
-    "govee_lan_scan","govee_lan_probe","govee_lan_send","govee_lan_status",
-    "govee_cmd_turn","govee_cmd_brightness","govee_cmd_color",
-    "govee_ble_segment","govee_ble_segment_kelvin","govee_cmd_ptreal",
-    "govee_get_model","govee_get_ip","govee_set_ip",
-    "graph_create","graph_add","graph_query","graph_neighbors","graph_path",
-    "graph_from_table","graph_to_table","graph_count","graph_clear",
-    "rest_request","rest_get","rest_post","rest_put","rest_delete",
-    "rest_listen","rest_accept","rest_read","rest_write","rest_close",
-    "read","write","readlines",
-    "listdir","walk","stat",
-    "path_join","path_exists","path_isdir","path_isfile",
-    "path_basename","path_dirname","path_splitext",
-    "getcwd","mkdir","getenv",
-    "machine",
-    "sh",
-    "re_findall","re_sub","re_match","re_split",
-    "json_loads","json_dumps","json_load","json_dump",
-    "sorted","any","all","isinstance","hasattr","getattr",
-    "chr","ord","hex",
-    "dict","ktable","set",
-    "next","assert",
-    "datetime","format_datetime","date","format_date","time_ms","format_time",
-    "save_context","load_context",
-    "talk_listen","talk_set_locale","talk_set_model",
-    "synth_open","synth_close","synth_alive","synth_tick","synth_set_steps","synth_steps",
-    "synth_set_metro","synth_metro_on","synth_set_metro_sound","synth_metro_sound",
-    "synth_set_mute","synth_mute_on",
-    "synth_note_on","synth_note_off","synth_set_bpm","synth_bpm",
-    "synth_set_tuning","synth_tuning",
-    "synth_set_level","synth_level","synth_set_cutoff","synth_cutoff",
-    "synth_set_reso","synth_reso","synth_set_seq_row","synth_play","synth_playing",
-    "synth_mouse_press","synth_mouse_release","synth_set_viz","synth_viz_mode",
-    "synth_load_sample","synth_sample_loaded","synth_sample_name",
-    "synth_set_row_note","synth_row_note",
-    "synth_looper_rec","synth_looper_play","synth_looper_clear","synth_looper_overdub",
-    "synth_looper_rec_on","synth_looper_play_on","synth_looper_has_loop",
-    NULL
-};
-int is_builtin(const char *name){if(is_host_builtin(name))return 1;for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
 
 static V *kw_get(V**kwn,V**kwv,int nkw,const char*name){
     i(nkw,{P(kwn[i]->t==T_STR&&!strcmp(kwn[i]->s,name),kwv[i])})return NULL;}
@@ -1188,6 +1136,11 @@ static const BiEntry bi_tab[] = {
     {"write", bi_w_fwrite},
     {"zip", bi_w_zip},
 };
+const char *builtin_complete(const char *s,in) {
+    for(int i=0;i<sizeof(bi_tab)/sizeof(*bi_tab);++i)
+        if(strncmp(bi_tab[i].name,s,n)==0)return bi_tab[i].name;
+    return NULL;
+}
 static BiCall bi_find(const char *name) {
     BiEntry key = {name, NULL};
     const BiEntry *hit = bsearch(&key, bi_tab, sizeof bi_tab / sizeof bi_tab[0], sizeof *hit, bi_name_cmp);
@@ -1205,6 +1158,7 @@ static BiCall bi_find(const char *name) {
 #endif
     return hit ? hit->fn : NULL;
 }
+int is_builtin(const char *name){if(is_host_builtin(name))return 1;if(bi_find(name)==NULL)return 0;return 1;}
 V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env *e){
     BiCall fn;
     if(!strcmp(name,"clock") || !strcmp(name,"timer")){
