@@ -1473,8 +1473,8 @@ static Node *parse_join(Lexer *l, Node *left);
 static Node *parse_atom(Lexer *l);
 
 static int is_jux_arg_token(int tt) {
-    return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_ || tt == T_CHARZ_
-        || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_;
+    return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_ || tt == T_CHARZ_|| tt == T_AT_
+        || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_ || tt == T_STAR_ || tt == T_DSTAR_;
 }
 
 static int is_jux_arg_start(Lexer *l) {
@@ -2081,6 +2081,12 @@ static Node *parse_progn(Lexer *l) {
 			  }
     		Node *block = node_new(N_BLOCK);
         Node *s=parse_stmt(l); if(s)node_add(block,s);
+        pk=lex_peek(l);
+        int extra_indent = 0;
+        while(pk.type == T_NEWLINE_||pk.type==T_INDENT_||(pk.type==T_DEDENT_&&extra_indent>0)) {
+            if(pk.type==T_INDENT_)extra_indent++;
+            else if(pk.type==T_DEDENT_)extra_indent--;
+        }
         return block;
 		}
     expect(l, T_LBRACE_);if(pk.type != T_LBRACE_) return NULL;
@@ -2094,7 +2100,13 @@ static Node *parse_progn(Lexer *l) {
         else {Node*s = parse_stmt(l);if(s)node_add(block,s);}
     }
     lex_next(l);
-    pk=lex_peek(l); while(pk.type == T_NEWLINE_ || pk.type == T_INDENT_ || pk.type == T_DEDENT_) lex_next(l),pk=lex_peek(l);
+    pk=lex_peek(l);
+    int extra_indent = 0;
+    while(pk.type == T_NEWLINE_||pk.type==T_INDENT_||(pk.type==T_DEDENT_&&extra_indent>0)) {
+        if(pk.type==T_INDENT_)extra_indent++;
+        else if(pk.type==T_DEDENT_)extra_indent--;
+        lex_next(l),pk=lex_peek(l);
+    }
     return block;
 }
 static Node *parse_if(Lexer *l) {
@@ -2153,53 +2165,62 @@ static Node *parse_for(Lexer *l) {
     return n;
 }
 static Node *parse_def(Lexer *l) {
-    Token name = lex_next(l);
-    expect(l, T_LPAREN_);
-    Node *params = node_new(N_LIST);
-    Node *defaults = node_new(N_LIST);
-    if(lex_peek(l).type != T_RPAREN_) {
-        char b = 0, wb;
-        if(lex_peek(l).type == T_STAR_) { lex_next(l); b = 1; }
-        if(lex_peek(l).type == T_DSTAR_) { lex_next(l); b = 2; }
-        Token p = lex_next(l);
-        Node *pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = wb = b;
-        node_add(params, pn);
-        if(lex_peek(l).type == T_COLON_) {
-            if(b) expect(l, T_COMMA_);
-            lex_next(l); node_add(defaults, parse_expr(l));
-        } else {
-            node_add(defaults, node_new(N_NONE));
-        }
-        while(lex_peek(l).type == T_COMMA_) {
-            lex_next(l);
-            if(lex_peek(l).type == T_RPAREN_) break;
-            if(lex_peek(l).type == T_STAR_) { lex_next(l); b = 1; }
-            else if(lex_peek(l).type == T_DSTAR_) { lex_next(l); b = 2; }
-            else b=0;
-            p = lex_next(l);wb|=b;
-            pn = node_new(N_NAME); pn->sval = strdup(p.sval);pn->ival = b;
-            node_add(params, pn);
-            if(lex_peek(l).type == T_COLON_) {
-                if(b) expect(l, T_COMMA_);
-                lex_next(l); node_add(defaults, parse_expr(l));
-            } else {
-                if(!b&&wb) expect(l, T_COLON_); // no positional arguments after keyword/ranges
-                node_add(defaults, node_new(N_NONE));
-            }
-        }
+    Node*a = parse_expr(l);
+    if(a->type != N_CALL) {
+        printf("invalid def: ");node_sprint(a,stdout);printf("\n");
+        node_free(a);
+        return NULL;
     }
-    expect(l, T_RPAREN_);
+    Node *body;
     if(lex_peek(l).type == T_MINUS_) {
         lex_next(l);
-        if(lex_peek(l).type == T_GT_) { lex_next(l); parse_expr(l);  }
+        if(lex_peek(l).type == T_GT_) { lex_next(l); body = parse_expr(l);  }
+        else body = parse_progn(l);
+    } else {
+        body = parse_progn(l);
     }
-    Node *body = parse_progn(l);
-    Node *n = node_new(N_DEF);
-    n->sval = strdup(name.sval);
-    node_add(n, params);
-    node_add(n, body);
-    node_add(n, defaults);
-    return n;
+
+    Node*f = a->ch[0];
+    a->ch[0] = NULL;
+    Node *params = node_new(N_LIST);
+    Node *defaults = node_new(N_LIST);
+    for(int i=1; i< a->nch;++i) {
+        Node *col = a->ch[i];
+        a->ch[i] = NULL;
+
+        if(col->type == N_KWARG) {
+           node_add(defaults, col->ch[0]);
+           Node *pn = node_new(N_NAME); pn->sval = col->sval;pn->ival = col->ival;
+           node_add(params, pn);col->nch=0;col->sval=NULL;node_free(col);
+        } else if(col->type == N_UNOP && (col->op == OP_POW || col->op == OP_MUL)) {
+           Node *pn = node_new(N_NAME); pn->sval = col->ch[0]->sval; pn->ival=1+(col->op == OP_POW);
+           col->ch[0]=NULL;col->nch=0;node_free(col);
+           node_add(defaults, node_new(N_NONE));
+           node_add(params, pn);
+
+        } else if(col->sval !=NULL) {
+           node_add(defaults, node_new(N_NONE));
+           node_add(params, col);
+        }
+    }
+
+    Node *def = node_new(N_DEF);
+    node_add(def, params);
+    node_add(def, body);
+    node_add(def, defaults);
+
+    Node *assign = node_new(N_ASSIGN);
+    node_add(assign, f);
+    node_add(assign, def);
+
+    if(f->type == N_INDEX) f = f->ch[0];
+    if(f->type == N_NAME) {
+        def->sval = strdup(f->sval);
+    } else {
+        def->sval = NULL;
+    }
+    a->nch=0;node_free(a);
+    return assign;
 }
 static Node *parse_try(Lexer *l) {
     Node *try_body = parse_progn(l);
@@ -4164,7 +4185,7 @@ V *eval(Node *n, Env *e) {
                 v_free(obj); v_free(idx); v_free(val);
                 return v_nil();
             }
-            if(idx->t==T_INT) {
+            if(idx->t==T_INT||idx->t==T_CHAR) {
                 int64_t i = idx->j;
                 if(i < 0) i += obj->n;
                 if(i >= 0 && i < obj->n) {
@@ -4271,12 +4292,12 @@ V *eval(Node *n, Env *e) {
                     }
                 }
                 if(!next) next = v_errf("table has no column '%s'", idx->s);
-            } else if(is_mat_t(obj->t) && idx->t==T_INT) {
+            } else if(is_mat_t(obj->t) && (idx->t==T_INT || idx->t == T_CHAR)) {
                 int64_t j = idx->j;
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) next = v_mat_row(obj, j);
                 else next = v_err("index out of range");
-            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_LIST||obj->t==T_CVEC) && idx->t==T_INT) {
+            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_LIST||obj->t==T_CVEC) && (idx->t==T_INT||idx->t==T_CHAR)) {
                 int64_t j = idx->j;
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) {
@@ -4303,7 +4324,7 @@ V *eval(Node *n, Env *e) {
                         v_free(c);
                     }
                 }
-            } else if(obj->t==T_STR && idx->t==T_INT) {
+            } else if(obj->t==T_STR && (idx->t==T_INT||idx->t==T_CHAR)) {
                 int64_t j = idx->j;
                 int64_t slen = strlen(obj->s);
                 if(j < 0) j += slen;
@@ -4745,10 +4766,10 @@ V *eval(Node *n, Env *e) {
                 defaults->L[i] = v_nil();
             }
         }
+        if(n->sval) n->ch[1]->sval = n->sval, n->sval = NULL;
         V *fn = v_fn(params, defaults, n->ch[1], e);
-        env_set(e, n->sval, fn);
-        v_free(params); v_free(defaults); v_free(fn);
-        return v_nil();
+        v_free(params); v_free(defaults);
+        return fn;
     }
     case N_LAMBDA: {
         V *params = v_list(n->ch[0]->nch);
