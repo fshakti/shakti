@@ -143,15 +143,19 @@ V *v_ivec(int64_t n) {
 }
 V *v_fvec(int64_t n) {
     V *v=v_alloc(T_FVEC); v->n=n;
-    v->F = calloc(n?n:1, sizeof(double));
+    v->F = calloc(n>0?n:1, sizeof(double));
     return v;
 }
 V *v_bvec(int64_t n) {
     V *v=v_alloc(T_BVEC); v->n=n;
-    v->B = calloc(n?n:1, 1);
+    v->B = calloc(n>0?n:1, 1);
     return v;
 }
-V *v_cvec(int64_t n) { V *v = v_bvec(n); v->t = T_CVEC; return v; }
+V *v_cvec(int64_t n) {
+    V *v=v_alloc(T_CVEC); v->n=n;
+    v->B = calloc(n>0?n:1, 1);
+    return v;
+}
 V *v_imat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_IMAT);
     v->n = rows;
@@ -363,7 +367,7 @@ static V *mat_matmul(V *a, V *b) {
 V *v_list(int64_t n) {
     V *v = calloc(1, sizeof(V)); v->t = T_LIST; v->rc = 1; v->n = n;
     v->_ht_cap = n > 0 ? (int)n : 0;
-    v->L = calloc(n > 0 ? (size_t)n : 1, sizeof(V*));
+    v->L = n < 1 ? NULL : calloc((size_t)n, sizeof(V*));
     return v;
 }
 void v_list_append(V *v, V *item) {
@@ -1007,7 +1011,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
                     fprintf(fp,": ");
                     if(col->t == T_IVEC) fprintf(fp, "%lld",(long long)col->J[i]);
                     else if(col->t == T_FVEC) fprintf(fp, "%g",col->F[i]);
-                    else if(col->t == T_CVEC) fprintf(fp, "0x%02x",col->B[i]);
+                    else if(col->t == T_CVEC) fprintf(fp, "0x%02x",(int)col->B[i]);
                     else if(col->t == T_BVEC) fprintf(fp, col->B[i]?"True":"False");
                     else if(col->t == T_LIST) print_val(col->L[i],fp,1);
                 }
@@ -1041,7 +1045,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         }
         for(int c=0;c<nc;c++) fprintf(fp, "%-*s  ", widths[c], cols->L[c]->s);
         fprintf(fp,"\n");
-        for(int c=0;c<nc;c++) { for(int i=0;i<widths[c];i++) fputc('-',fp); fprintf(fp,"  "); }
+        for(int c=0;c<nc;c++) { for(int i=0;i<widths[c];i++) fputs("—",fp); fprintf(fp,"  "); }
         fprintf(fp,"\n");
         for(int64_t r=0;r<nr && r<20;r++) {
             for(int c=0;c<nc;c++) {
@@ -2182,25 +2186,22 @@ static Node *parse_def(Lexer *l) {
 
     Node*f = a->ch[0];
     a->ch[0] = NULL;
+
     Node *params = node_new(N_LIST);
     Node *defaults = node_new(N_LIST);
     for(int i=1; i< a->nch;++i) {
         Node *col = a->ch[i];
-        a->ch[i] = NULL;
-
         if(col->type == N_KWARG) {
-           node_add(defaults, col->ch[0]);
-           Node *pn = node_new(N_NAME); pn->sval = col->sval;pn->ival = col->ival;
-           node_add(params, pn);col->nch=0;col->sval=NULL;node_free(col);
+           node_add(defaults, col->ch[0]); col->ch[0]=NULL;
+           Node *pn = node_new(N_NAME); pn->sval = col->sval;col->sval=NULL;pn->ival = col->ival;
+           node_add(params, pn);
         } else if(col->type == N_UNOP && (col->op == OP_POW || col->op == OP_MUL)) {
            Node *pn = node_new(N_NAME); pn->sval = col->ch[0]->sval; pn->ival=1+(col->op == OP_POW);
-           col->ch[0]=NULL;col->nch=0;node_free(col);
-           node_add(defaults, node_new(N_NONE));
-           node_add(params, pn);
+           col->ch[0]->sval=NULL;node_add(defaults, node_new(N_NONE)); node_add(params, pn);
 
         } else if(col->sval !=NULL) {
            node_add(defaults, node_new(N_NONE));
-           node_add(params, col);
+           node_add(params, col);a->ch[i]=NULL;
         }
     }
 
@@ -2219,7 +2220,7 @@ static Node *parse_def(Lexer *l) {
     } else {
         def->sval = NULL;
     }
-    a->nch=0;node_free(a);
+    node_free(a);
     return assign;
 }
 static Node *parse_try(Lexer *l) {
@@ -2519,6 +2520,7 @@ static void node_sprint_rec(Node *n, FILE *fp) {
         return;
     default:
         fprintf(fp, "(n%d", n->type);
+        if(n->sval)fprintf(fp, "`%s", n->sval);
         for (int i = 0; i < n->nch; i++) {
             fputc(' ', fp);
             node_sprint_rec(n->ch[i], fp);
@@ -3761,6 +3763,7 @@ static int shakti_sql_enabled(Env *e) {
 }
 static int uh(unsigned char c){return c < 'A' ? (c-'0') : c < 'a' ? (c - 'A')+10 : (c - 'f') + 10; }
 V *eval(Node *n, Env *e) {
+//printf("eval :: "); node_sprint(n,stdout);puts("");
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
     switch(n->type) {
@@ -3976,13 +3979,19 @@ V *eval(Node *n, Env *e) {
     case N_LIST: {
         int nch = n->nch;
         V **elems = calloc(nch?nch:1, sizeof(V*));
-        int all_int=1, all_num=1, all_bool=1;
+        int all_int = 1, all_u8 = 1, all_num = 1, all_bool = 1;
         for(int i=0;i<nch;i++) {
             elems[i] = eval(n->ch[i], e);
             if(g_error) { for(int j=0;j<=i;j++) v_free(elems[j]); free(elems); return v_nil(); }
-            if(elems[i]->t != T_INT) all_int = 0;
+            if(elems[i]->t != T_INT && elems[i]->t != T_CHAR) all_int = 0;
+            if(elems[i]->t != T_CHAR) all_u8= 0;
             if(elems[i]->t != T_INT && elems[i]->t != T_FLOAT) all_num = 0;
             if(elems[i]->t != T_BOOL) all_bool = 0;
+        }
+        if(nch > 0 && all_u8) {
+            V *r = v_cvec(nch);
+            i(nch,{r->B[i]=elems[i]->j; v_free(elems[i]);})
+            free(elems); return r;
         }
         if(nch > 0 && all_int) {
             V *r = v_ivec(nch);
