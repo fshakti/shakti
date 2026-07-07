@@ -1,0 +1,9 @@
+# sql — enable in-memory table SQL statement syntax.
+#
+# After `import sql`, use:
+#   select col by group from table where expr
+#   update col : expr from table where expr
+#   delete from table where expr
+#   create table name (col: default, ...)
+#   insert into name (cols...) values (...)
+#   table1 join table2 on col

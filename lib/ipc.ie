@@ -1,0 +1,49 @@
+# ipc — sync/async inter-process messaging (TCP, Unix domain sockets, optional RDMA)
+#
+#   import ipc
+#   srv : ipc.listen(9000)
+#   conn : ipc.accept(srv)
+#   ipc.send(conn, "hello")
+#   msg : ipc.recv(conn)
+#
+# Localhost defaults to Unix domain socket at $SHAKTI_IPC_DIR/shakti-<port>.sock
+# Remote hosts use RDMA (RoCE v2) when available, else TCP.
+
+def listen(port, host:"127.0.0.1", transport:"auto"):
+    return ipc_listen(port, host, transport)
+
+def accept(listen_h):
+    return ipc_accept(listen_h)
+
+def connect(host, port, transport:"auto"):
+    return ipc_connect(host, port, transport)
+
+def send(h, msg):
+    ipc_send(h, msg)
+
+def recv(h):
+    return ipc_recv(h)
+
+def recv_nowait(h):
+    return ipc_recv_nowait(h)
+
+def set_nonblock(h, enabled):
+    ipc_set_nonblock(h, enabled)
+
+def poll(handles, timeout_ms):
+    return ipc_poll(handles, timeout_ms)
+
+def close(h):
+    ipc_close(h)
+
+def shm_open(name, size):
+    return ipc_shm_open(name, size)
+
+def shm_close(token):
+    ipc_shm_close(token)
+
+def rdma_available():
+    return ipc_rdma_available()
+
+def reply(conn, msg):
+    ipc_send(conn, msg)

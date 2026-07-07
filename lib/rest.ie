@@ -1,0 +1,73 @@
+# rest — HTTP client (curl) and minimal HTTP/1.1 server (TCP)
+#
+# Client requires curl on PATH. Optional bearer token:
+#   export SHAKTI_REST_TOKEN=...
+#
+#   import rest
+#   resp : rest.get("https://example.com/api")
+#   if rest.ok(resp):
+#       print(rest.json(resp))
+#
+# Server:
+#   srv : rest.listen(8080)
+#   conn : rest.accept(srv)
+#   req : rest.read(conn)
+#   rest.write(conn, 200, "hello")
+#   rest.close(conn)
+#   rest.close(srv)
+
+def request(method, url, body:"", content_type:"", headers:0):
+    if headers:
+        return rest_request(method, url, body, content_type, headers)
+    return rest_request(method, url, body, content_type)
+
+def get(url):
+    return rest_get(url)
+
+def post(url, body:"", content_type:""):
+    return rest_post(url, body, content_type)
+
+def put(url, body:"", content_type:""):
+    return rest_put(url, body, content_type)
+
+def delete(url):
+    return rest_delete(url)
+
+def post_json(url, obj):
+    return rest_post(url, json_dumps(obj), "application/json")
+
+def put_json(url, obj):
+    return rest_put(url, json_dumps(obj), "application/json")
+
+def status(resp):
+    return resp["status"]
+
+def ok(resp):
+    s : resp["status"]
+    return s >= 200 and s < 300
+
+def text(resp):
+    if hasattr(resp, "raw"):
+        return resp["raw"]
+    return str(resp["body"])
+
+def json(resp):
+    return resp["body"]
+
+def listen(port, host:"127.0.0.1"):
+    return rest_listen(port, host)
+
+def accept(listen_h):
+    return rest_accept(listen_h)
+
+def read(conn):
+    return rest_read(conn)
+
+def write(conn, status, body:"", content_type:"text/plain"):
+    return rest_write(conn, status, body, content_type)
+
+def respond_json(conn, status, obj):
+    return rest_write(conn, status, json_dumps(obj), "application/json")
+
+def close(h):
+    return rest_close(h)

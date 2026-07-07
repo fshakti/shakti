@@ -1,0 +1,53 @@
+# input — unified terminal + GUI event hub (see src/input.c)
+#
+#   import input
+#   input.hz : 120
+#   for ev in input(2):
+#       print(ev["kind"], ev["code"])
+#
+# Poll batch (non-blocking / timed ms):
+#   events : input(0)
+#   events : input(50)
+#
+# Block until first event:
+#   wait(-1)          # forever
+#   wait(100)         # up to 100 ms
+#
+# Single line (assignment):
+#   line : readline("> ")
+#
+# Infinite streams (for-loops):
+#   for line in input("prompt"):
+#       print(line)
+#   for key in input(1):
+#       print(key)
+#   for ev in input(2):
+#       print(ev)
+
+inf : 1e30
+
+def line(prompt:""):
+    return readline(prompt)
+
+def set_hz(n):
+    input_set_hz(n)
+
+def set_own_gui(on):
+    input_set_own_gui(on)
+
+def reload_qwerty():
+    input_qwerty_reload()
+
+def refresh_side():
+    global x, y, wheel, qwerty, hz
+    x : input_get_x()
+    y : input_get_y()
+    wheel : input_get_wheel()
+    qwerty : input_get_qwerty()
+    hz : input_get_hz()
+
+x : input_get_x()
+y : input_get_y()
+wheel : input_get_wheel()
+qwerty : input_get_qwerty()
+hz : input_get_hz()
