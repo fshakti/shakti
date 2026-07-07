@@ -70,10 +70,16 @@ void ipc_rdma_shutdown(void) {
 }
 
 int ipc_rdma_available(void) {
+    static int cached = -1;
+    if (cached >= 0) return cached;
     struct ibv_device **list = ibv_get_device_list(NULL);
-    if (!list) return 0;
+    if (!list) {
+        cached = 0;
+        return 0;
+    }
     int ok = list[0] != NULL;
     ibv_free_device_list(list);
+    cached = ok;
     if (ok) ipc_rdma_init();
     return ok;
 }
