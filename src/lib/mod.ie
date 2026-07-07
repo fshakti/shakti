@@ -26,7 +26,8 @@ def asciiz(a):
 u16:lambda x:x[1]+x[0]*256
 
 class Sample:
-	def __init__(name:"",length:0,loop:None,finetine:0x00,volume:64,restart:None,repeatlength:None,patch:None):
+	def __init__(id:None,name:"",length:0,loop:None,finetine:0x00,volume:64,restart:None,repeatlength:None,patch:None):
+		self.id:id
 		self.name:asciiz(name)
 		self.length:length
 		self.finetune:int(finetune)
@@ -43,12 +44,31 @@ class Sample:
 		return self.name
 
 class Note:
-	def __init__(w,period,fx,param):
-		self.sample:w
-		self.period:period
-		self.note:pn(period)
-		self.fx:fx
-		self.param:param
+	sample:None
+	period:None
+	note:None
+	fx:None
+	param:None
+
+	def __init__(*any,sample:None,period:None,note:None,fx:None,x:None,y:None,param:None):
+		for x in any:
+			if instanceof(x,Note):
+				self.sample: x.sample
+				self.period: x.period
+				self.note  : x.note
+				self.fx    : x.fx
+				self.param : x.param
+			elif instanceof(x,Sample):
+				self.sample: x.id
+		if instanceof(sample,Sample):self.sample
+		if type(sample)="int": self.sample:sample
+		if type(period)="int": self.period:period
+		if note=None and type(self.period)="int": self.note:pn(self.period)
+		if fx<>None: self.fx:fx
+		if param<>None: self.param:param
+		if x<>None and y<>None: self.param:[x,y]
+		elif x<>None: self.param:[x,self.param[1]]
+		elif y<>None: self.param:[self.param[0],y]
 	def __str__():
 		nt:"..."
 		if self.period > 0:
@@ -64,7 +84,7 @@ def load(filename):
 	samples:[]
 	p:20
 	for i in range(31):
-		s:Sample(name:m[p:p+22],length:u16(m[p+22:p+24]),finetune:m[24],volume:int(m[25]),restart:u16(m[p+26:p+28]),repeatlength:u16(m[p+28:p+30]))
+		s:Sample(id:i+1,name:m[p:p+22],length:u16(m[p+22:p+24]),finetune:m[24],volume:int(m[25]),restart:u16(m[p+26:p+28]),repeatlength:u16(m[p+28:p+30]))
 		samples.push(s)
 		p+:30
 	tracks:map(int,m[p+2:p+m[p]])
@@ -76,7 +96,7 @@ def load(filename):
 			c:i%4
 			w:((m[p]//16)*16)+(m[p+2]//16)
 			period:(256*(m[p]%16))+m[p+1]
-			g:Note(w:w,period:period,fx:m[p+2]%16,param:[m[p+3]//16,m[p+3]%16])
+			g:Note(sample:w,period:period,fx:m[p+2]%16,param:[m[p+3]//16,m[p+3]%16])
 			rows[c][i//4]:g
 			p+:4
 		append(patterns,rows)
