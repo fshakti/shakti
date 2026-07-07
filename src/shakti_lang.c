@@ -1504,7 +1504,7 @@ static Node *parse_jux_arg(Lexer *l) {
 static void expect(Lexer *l, int type) {
     Token t = lex_next(l);
     if(t.type != type) {
-        fprintf(stderr, "parse error: expected token %d, got %d", type, t.type);
+        fprintf(stderr, "parse error: expected token %d, got %d on line %d", type, t.type, l->line);
         if(t.type == T_NAME_ || t.type == T_STR_) fprintf(stderr, " (%s)", t.sval);
         fprintf(stderr, "\n");
     }
