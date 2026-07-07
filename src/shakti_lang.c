@@ -578,6 +578,7 @@ static void dict_ht_rebuild(V *d) {
     uint32_t cap = 16;
     W(cap < (uint32_t)d->n * 2,cap <<= 1)
     d->_ht = realloc(d->_ht, cap * sizeof(uint32_t));
+    for(int i=d->_ht_cap;i<cap;++i)d->_ht[i]=DICT_HT_EMPTY;
     d->_ht_cap = cap;
     memset(d->_ht, 0xFF, cap * sizeof(uint32_t));
     uint32_t mask = cap - 1;
