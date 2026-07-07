@@ -514,8 +514,9 @@ void v_free(V *v) {
 }
 int fn_ast_store(Node *n) {
     if(n == NULL) return -3;
+    if(n->j) return n->j;
     if(fn_ast_n >= MAX_FN) { fprintf(stderr,"too many functions\n"); exit(1); }
-    fn_ast[fn_ast_n] = n;
+    fn_ast[n->j=fn_ast_n] = n;
     return fn_ast_n++;
 }
 const char *type_name(int t) {
@@ -2251,6 +2252,7 @@ static Node *parse_def(Lexer *l) {
     node_add(def, params);
     node_add(def, body);
     node_add(def, defaults);
+    def->j = -1;
 
     Node *assign = node_new(N_ASSIGN);
     node_add(assign, f);
