@@ -103,7 +103,10 @@ static inline __m512d fmat_binop_vec(__m512d x, __m512d y, int op) {
     case 0: return _mm512_add_pd(x, y);
     case 18: return _mm512_sub_pd(x, y);
     case 11: return _mm512_mul_pd(x, y);
-    case 2: return _mm512_div_pd(x, y);
+    case 2: {
+        __mmask8 nonzero = _mm512_cmp_pd_mask(y, _mm512_setzero_pd(), _CMP_NEQ_UQ);
+        return _mm512_maskz_div_pd(nonzero, x, y);
+    }
     default: return x;
     }
 }
@@ -196,7 +199,10 @@ static inline float64x2_t fmat_binop_vec_neon(float64x2_t x, float64x2_t y, int 
     case 0: return vaddq_f64(x, y);
     case 18: return vsubq_f64(x, y);
     case 11: return vmulq_f64(x, y);
-    case 2: return vdivq_f64(x, y);
+    case 2: {
+        uint64x2_t nonzero = veorq_u64(vceqq_f64(y, vdupq_n_f64(0.0)), vdupq_n_u64(UINT64_MAX));
+        return vbslq_f64(nonzero, vdivq_f64(x, y), vdupq_n_f64(0.0));
+    }
     default: return x;
     }
 }
@@ -529,7 +535,13 @@ void mat_fmat_binop_scalar_rev(double *r, double x, const double *b, int64_t ne,
         int64_t i = 0;
         for (; i + 8 <= ne; i += 8) {
             __m512d y = _mm512_loadu_pd(b + i);
-            __m512d z = (op == 18) ? _mm512_sub_pd(vx, y) : _mm512_div_pd(vx, y);
+            __m512d z;
+            if (op == 18) {
+                z = _mm512_sub_pd(vx, y);
+            } else {
+                __mmask8 nonzero = _mm512_cmp_pd_mask(y, _mm512_setzero_pd(), _CMP_NEQ_UQ);
+                z = _mm512_maskz_div_pd(nonzero, vx, y);
+            }
             _mm512_storeu_pd(r + i, z);
         }
         for (; i < ne; i++) {
@@ -545,7 +557,13 @@ void mat_fmat_binop_scalar_rev(double *r, double x, const double *b, int64_t ne,
         int64_t i = 0;
         for (; i + 2 <= ne; i += 2) {
             float64x2_t y = vld1q_f64(b + i);
-            float64x2_t z = (op == 18) ? vsubq_f64(vx, y) : vdivq_f64(vx, y);
+            float64x2_t z;
+            if (op == 18) {
+                z = vsubq_f64(vx, y);
+            } else {
+                uint64x2_t nonzero = veorq_u64(vceqq_f64(y, vdupq_n_f64(0.0)), vdupq_n_u64(UINT64_MAX));
+                z = vbslq_f64(nonzero, vdivq_f64(vx, y), vdupq_n_f64(0.0));
+            }
             vst1q_f64(r + i, z);
         }
         for (; i < ne; i++) {
