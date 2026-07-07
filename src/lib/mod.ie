@@ -90,7 +90,7 @@ def load(filename):
 	tracks:map(int,m[p+2:p+m[p]])
 	patterns:[]
 	p+:134
-	for j in range(max(tracks)):
+	for j in range(1+max(tracks)):
 		rows:[av(64),av(64),av(64),av(64)]
 		for i in range(256):
 			c:i%4
