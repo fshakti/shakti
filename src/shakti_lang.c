@@ -138,7 +138,7 @@ V *v_errf(const char *fmt, ...) {
 V *v_ivec(int64_t n) {
     V *v=v_alloc(T_IVEC); v->n=n;
     v->_ht_cap = n > 0 ? (int)n : 0;
-    v->J = malloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
+    v->J = calloc(n > 0 ? n : 1, sizeof(int64_t));
     return v;
 }
 V *v_fvec(int64_t n) {
@@ -933,7 +933,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
     case T_ERR: fprintf(fp, "Error: %s", v->s); break;
     case T_IVEC:
         fprintf(fp, "[");
-        for(int64_t i=0;i<v->n;i++) { if(i) fprintf(fp,", "); fprintf(fp,"%lld",(long long)v->J[i]); }
+        for(int64_t i=0;i<v->n;i++) { if(i) fputs(", ",fp); fprintf(fp,"%lld",(long long)v->J[i]); }
         fprintf(fp, "]"); break;
     case T_CVEC:
         if(v->n==1){fprintf(fp,"[0x%02x]",v->B[0]);break;}
