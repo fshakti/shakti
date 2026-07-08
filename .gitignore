@@ -1,8 +1,9 @@
-# Published repo: src/, lib/, doc.md, example.ie, README.md, Makefile, LICENSE, NOTICE, .gitignore
-# Everything below is local workspace (kept on disk, not in git).
-
+# OS / editor cruft
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+.cursor/
 
 # build outputs
 **/build/
@@ -11,19 +12,6 @@ Thumbs.db
 **/node_modules/
 **/out/
 **/cmake-build-*/
-
-# editors
-.vscode/
-.idea/
-.cursor/
-
-# local Ollama + Cursor hooks (machine-specific)
-.cursor/hooks.json
-.cursor/hooks/
-.cursor/
-.cursor/
-.cursor/
-//
 
 # logs / caches
 *.log
@@ -42,31 +30,11 @@ Thumbs.db
 *.dSYM/
 *.zip
 *.tmp
-
+*.bundle
 shakti
 shakti-standalone
 **/build-static-test/
 
-# local-only trees
-/android/
-/benchmarks/
-/cmake/
-/editors/
-/internal-bench/
-/scripts/
-/tests/
-/.github/
-/CMakeLists.txt
-/CMakePresets.json
-
-# local install script (machine-specific)
-/
-
-# local env / notes
+# env
 .env
 .env.*
-docs/MACROS.md
-docs/results/
-
-/
-/
