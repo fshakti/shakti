@@ -4749,6 +4749,12 @@ V *eval(Node *n, Env *e) {
         }
 
         if(!fn || fn->t != T_FN) {
+            if((n->nch==2) && n->ch[1]&&n->ch[1]->type==N_UNOP&&n->ch[1]->op==OP_NEG) {
+                V * nx = eval(n->ch[1]->ch[0], e);
+                V * res = vec_binop(fn,nx,OP_SUB);
+                v_ref(res); v_free(nx); v_free(fn); v_free(args); v_free(kwnames); v_free(kwvals); v_free(res);
+                return res;
+            }
             if(fn) v_free(fn);
             v_free(args); v_free(kwnames); v_free(kwvals);
             return v_errf("'%s' is not callable", fn_node->sval ? fn_node->sval : "?");
