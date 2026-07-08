@@ -58,11 +58,13 @@ static V*parse_string(const char*s,const char**end_out){
  return out;}
 static V*parse_number(const char*s,const char**end_out){
  char*e=NULL;
- if(*s=='-')s++;
- P(!isdigit((unsigned char)*s)&&*s!='.',v_err("json: bad number"))
+ /* Scan with p; keep s pointing at the start (including any '-') so strtod/
+  * strtoll below see the sign. Previously s was advanced past '-', which
+  * dropped the sign and parsed negative numbers as positive. */
  int has_dot=0;
  const char*p=s;
  if(*p=='-')p++;
+ P(!isdigit((unsigned char)*p)&&*p!='.',v_err("json: bad number"))
  W(isdigit((unsigned char)*p),p++)
  if(*p=='.'){has_dot=1;p++;W(isdigit((unsigned char)*p),p++)}
  if(*p=='e'||*p=='E'){has_dot=1;p++;if(*p=='+'||*p=='-')p++;W(isdigit((unsigned char)*p),p++)}
