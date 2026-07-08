@@ -5,6 +5,12 @@
 #include <ctype.h>
 
 #define SHAKTI_JSON_MAX_DEPTH 512
+/* Resource limits: nesting depth is already bounded above. These additionally
+ * bound total document size, single-string length, and per-container element
+ * count so a malformed-but-flat document cannot exhaust memory. */
+#define SHAKTI_JSON_MAX_INPUT  (64u * 1024u * 1024u)  /* 64 MiB whole document */
+#define SHAKTI_JSON_MAX_STRING (16u * 1024u * 1024u)  /* 16 MiB per string     */
+#define SHAKTI_JSON_MAX_ELEMS  (10u * 1000u * 1000u)  /* per array / object    */
 
 static const char*skip_ws(const char*s){W(*s==' '||*s=='\t'||*s=='\n'||*s=='\r',s++)return s;}
 static V*parse_value(const char*s,const char**end_out,int depth);
@@ -37,6 +43,7 @@ static V*parse_string(const char*s,const char**end_out){
     break;}
    default:free(buf);return v_err("json: bad escape");}}
   if(len+2>=cap){
+   if(cap>=SHAKTI_JSON_MAX_STRING){free(buf);return v_err("json: string too long");}
    cap*=2;
    char*n=realloc(buf,cap);
    if(!n){free(buf);return v_err("json: oom");}
@@ -74,12 +81,14 @@ static V*parse_array(const char*s,const char**end_out,int depth){
  s=skip_ws(s+1);
  V*r=v_list(0);
  if(*s==']'){*end_out=s+1;return r;}
+ size_t count=0;
  for(;;){
   const char*e=NULL;
   V*item=parse_value(s,&e,depth+1);
   if(!item||item->t==T_ERR){v_free(r);return item?item:v_err("json: array value");}
   v_list_append(r,item);
   v_free(item);
+  if(++count>SHAKTI_JSON_MAX_ELEMS){v_free(r);return v_err("json: too many array elements");}
   s=skip_ws(e);
   if(*s==']'){*end_out=s+1;return r;}
   Pr(*s!=',',v_free(r);v_err("json: expected , or ]");)s=skip_ws(s+1);}}
@@ -90,6 +99,7 @@ static V*parse_object(const char*s,const char**end_out,int depth){
  V*keys=v_list(0);
  V*vals=v_list(0);
  if(*s=='}'){*end_out=s+1;return v_dict(keys,vals);}
+ size_t count=0;
  for(;;){
   const char*e=NULL;
   V*key=parse_string(s,&e);
@@ -103,6 +113,7 @@ static V*parse_object(const char*s,const char**end_out,int depth){
   v_free(key);
   v_list_append(vals,val);
   v_free(val);
+  if(++count>SHAKTI_JSON_MAX_ELEMS){v_free(keys);v_free(vals);return v_err("json: too many object members");}
   s=skip_ws(e);
   if(*s=='}'){*end_out=s+1;return v_dict(keys,vals);}
   Pr(*s!=',',v_free(keys);v_free(vals);v_err("json: expected , or }");)s=skip_ws(s+1);}}
@@ -117,6 +128,10 @@ static V*parse_value(const char*s,const char**end_out,int depth){
  if(!strncmp(s,"null",4)){*end_out=s+4;return v_nil();}
  return v_err("json: unexpected token");}
 V*shakti_json_parse(const char*s,const char**end_out){
+ if(!s)return v_err("json: null input");
+ /* Bounded length scan: reject documents larger than the cap without walking
+  * the whole (potentially huge) buffer via strlen. */
+ for(size_t i=0;i<=SHAKTI_JSON_MAX_INPUT;i++){if(!s[i])break;if(i==SHAKTI_JSON_MAX_INPUT)return v_err("json: input too large");}
  const char*e=NULL;
  V*v=parse_value(s,&e,0);
  P(!v||v->t==T_ERR,v)
