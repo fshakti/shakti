@@ -100,6 +100,13 @@ static char *x_strdup(const char *s, const char *where) {
     if (!p) shakti_oom(where);
     return p;
 }
+/* Overflow-checked size multiply for allocation math. Aborts via shakti_oom()
+ * if a*b would wrap, preventing an undersized allocation followed by OOB use. */
+static size_t x_mul(size_t a, size_t b, const char *where) {
+    size_t r;
+    if (__builtin_mul_overflow(a, b, &r)) shakti_oom(where);
+    return r;
+}
 static V *v_alloc(int t) {
     V *v = x_calloc(1, sizeof(V), "v_alloc");
     v->t = t; v->rc = 1;
@@ -151,7 +158,7 @@ V *v_errf(const char *fmt, ...) {
 V *v_ivec(int64_t n) {
     V *v=v_alloc(T_IVEC); v->n=n;
     v->_ht_cap = n > 0 ? (int)n : 0;
-    v->J = x_malloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t), "v_ivec");
+    v->J = x_malloc(x_mul((size_t)(n > 0 ? n : 1), sizeof(int64_t), "v_ivec"), "v_ivec");
     return v;
 }
 V *v_fvec(int64_t n) {
@@ -168,7 +175,9 @@ V *v_imat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_IMAT);
     v->n = rows;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
-    int64_t sz = rows * (cols > 0 ? cols : 1);
+    int64_t sz;
+    if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
+        shakti_oom("v_imat");
     v->J = x_calloc((size_t)sz, sizeof(int64_t), "v_imat");
     return v;
 }
@@ -176,7 +185,9 @@ V *v_fmat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_FMAT);
     v->n = rows;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
-    int64_t sz = rows * (cols > 0 ? cols : 1);
+    int64_t sz;
+    if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
+        shakti_oom("v_fmat");
     v->F = x_calloc((size_t)sz, sizeof(double), "v_fmat");
     return v;
 }
@@ -184,7 +195,9 @@ V *v_bmat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_BMAT);
     v->n = rows;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
-    int64_t sz = rows * (cols > 0 ? cols : 1);
+    int64_t sz;
+    if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
+        shakti_oom("v_bmat");
     v->B = x_calloc((size_t)sz, 1, "v_bmat");
     return v;
 }
@@ -362,6 +375,9 @@ V *v_list(int64_t n) {
 void v_list_append(V *v, V *item) {
     Pv(v->t != T_LIST)
     if (v->n >= v->_ht_cap) {
+        /* _ht_cap is a signed int; guard the doubling so it can't overflow to a
+         * negative/undefined value that would corrupt the realloc size. */
+        if (v->_ht_cap > (1 << 30)) shakti_oom("v_list_append");
         int cap = v->_ht_cap ? v->_ht_cap * 2 : 8;
         v->L = x_realloc(v->L, (size_t)cap * sizeof(V*), "v_list_append");
         v->_ht_cap = cap;
