@@ -73,8 +73,35 @@ static uint32_t fnv1a(const char *s) {
     for (; *s; s++) h = (h ^ (unsigned char)*s) * 16777619u;
     return h ? h : 1;
 }
+void shakti_oom(const char *where) {
+    fprintf(stderr, "shakti: fatal: out of memory in %s\n", where ? where : "?");
+    exit(1);
+}
+/* Checked allocators for core interpreter internals (value layer, AST, env),
+ * whose callers assume non-NULL. On OOM they abort via shakti_oom() rather
+ * than returning NULL and risking a downstream deref. */
+static void *x_malloc(size_t sz, const char *where) {
+    void *p = malloc(sz ? sz : 1);
+    if (!p) shakti_oom(where);
+    return p;
+}
+static void *x_calloc(size_t nmemb, size_t sz, const char *where) {
+    void *p = calloc(nmemb ? nmemb : 1, sz ? sz : 1);
+    if (!p) shakti_oom(where);
+    return p;
+}
+static void *x_realloc(void *ptr, size_t sz, const char *where) {
+    void *p = realloc(ptr, sz ? sz : 1);
+    if (!p) shakti_oom(where);
+    return p;
+}
+static char *x_strdup(const char *s, const char *where) {
+    char *p = strdup(s);
+    if (!p) shakti_oom(where);
+    return p;
+}
 static V *v_alloc(int t) {
-    V *v = calloc(1, sizeof(V));
+    V *v = x_calloc(1, sizeof(V), "v_alloc");
     v->t = t; v->rc = 1;
     return v;
 }
@@ -101,7 +128,7 @@ V *v_int(int64_t j) {
     return v;
 }
 V *v_float(double f)     { V *v=v_alloc(T_FLOAT); v->f=f; return v; }
-V *v_str(const char *s)  { V *v=v_alloc(T_STR);  v->s=strdup(s); return v; }
+V *v_str(const char *s)  { V *v=v_alloc(T_STR);  v->s=x_strdup(s, "v_str"); return v; }
 V *v_str_take(char *s)   { V *v=v_alloc(T_STR);  v->s=s; return v; }
 V *v_date(int64_t utc_midnight_ms) {
     V *v = v_alloc(T_DATE);
@@ -113,7 +140,7 @@ V *v_time(int64_t ms_since_midnight) {
     v->j = ms_since_midnight;
     return v;
 }
-V *v_err(const char *s)  { V *v=v_alloc(T_ERR);  v->s=strdup(s); return v; }
+V *v_err(const char *s)  { V *v=v_alloc(T_ERR);  v->s=x_strdup(s, "v_err"); return v; }
 V *v_errf(const char *fmt, ...) {
     char buf[2048];
     va_list ap; va_start(ap,fmt);
@@ -124,17 +151,17 @@ V *v_errf(const char *fmt, ...) {
 V *v_ivec(int64_t n) {
     V *v=v_alloc(T_IVEC); v->n=n;
     v->_ht_cap = n > 0 ? (int)n : 0;
-    v->J = malloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
+    v->J = x_malloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t), "v_ivec");
     return v;
 }
 V *v_fvec(int64_t n) {
     V *v=v_alloc(T_FVEC); v->n=n;
-    v->F = calloc(n?n:1, sizeof(double));
+    v->F = x_calloc(n?n:1, sizeof(double), "v_fvec");
     return v;
 }
 V *v_bvec(int64_t n) {
     V *v=v_alloc(T_BVEC); v->n=n;
-    v->B = calloc(n?n:1, 1);
+    v->B = x_calloc(n?n:1, 1, "v_bvec");
     return v;
 }
 V *v_imat(int64_t rows, int64_t cols) {
@@ -142,7 +169,7 @@ V *v_imat(int64_t rows, int64_t cols) {
     v->n = rows;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz = rows * (cols > 0 ? cols : 1);
-    v->J = calloc((size_t)sz, sizeof(int64_t));
+    v->J = x_calloc((size_t)sz, sizeof(int64_t), "v_imat");
     return v;
 }
 V *v_fmat(int64_t rows, int64_t cols) {
@@ -150,7 +177,7 @@ V *v_fmat(int64_t rows, int64_t cols) {
     v->n = rows;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz = rows * (cols > 0 ? cols : 1);
-    v->F = calloc((size_t)sz, sizeof(double));
+    v->F = x_calloc((size_t)sz, sizeof(double), "v_fmat");
     return v;
 }
 V *v_bmat(int64_t rows, int64_t cols) {
@@ -158,7 +185,7 @@ V *v_bmat(int64_t rows, int64_t cols) {
     v->n = rows;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz = rows * (cols > 0 ? cols : 1);
-    v->B = calloc((size_t)sz, 1);
+    v->B = x_calloc((size_t)sz, 1, "v_bmat");
     return v;
 }
 static int is_mat_t(int t) { return t == T_IMAT || t == T_FMAT || t == T_BMAT; }
@@ -327,16 +354,16 @@ static V *mat_matmul(V *a, V *b) {
     return r;
 }
 V *v_list(int64_t n) {
-    V *v = calloc(1, sizeof(V)); v->t = T_LIST; v->rc = 1; v->n = n;
+    V *v = x_calloc(1, sizeof(V), "v_list"); v->t = T_LIST; v->rc = 1; v->n = n;
     v->_ht_cap = n > 0 ? (int)n : 0;
-    v->L = calloc(n > 0 ? (size_t)n : 1, sizeof(V*));
+    v->L = x_calloc(n > 0 ? (size_t)n : 1, sizeof(V*), "v_list");
     return v;
 }
 void v_list_append(V *v, V *item) {
     Pv(v->t != T_LIST)
     if (v->n >= v->_ht_cap) {
         int cap = v->_ht_cap ? v->_ht_cap * 2 : 8;
-        v->L = realloc(v->L, (size_t)cap * sizeof(V*));
+        v->L = x_realloc(v->L, (size_t)cap * sizeof(V*), "v_list_append");
         v->_ht_cap = cap;
     }
     v->L[v->n++] = v_ref(item);
@@ -525,7 +552,7 @@ V *v_copy(V *v) {
 static void dict_ht_rebuild(V *d) {
     uint32_t cap = 16;
     W(cap < (uint32_t)d->n * 2,cap <<= 1)
-    d->_ht = realloc(d->_ht, cap * sizeof(uint32_t));
+    d->_ht = x_realloc(d->_ht, cap * sizeof(uint32_t), "dict_ht_rebuild");
     d->_ht_cap = cap;
     memset(d->_ht, 0xFF, cap * sizeof(uint32_t));
     uint32_t mask = cap - 1;
@@ -550,8 +577,8 @@ void v_dict_set(V *d, const char *key, V *val) {
             }
             slot = (slot + 1) & mask;
         })
-        d->keys->L = realloc(d->keys->L, (d->n + 1) * sizeof(V*));
-        d->vals->L = realloc(d->vals->L, (d->n + 1) * sizeof(V*));
+        d->keys->L = x_realloc(d->keys->L, (d->n + 1) * sizeof(V*), "v_dict_set");
+        d->vals->L = x_realloc(d->vals->L, (d->n + 1) * sizeof(V*), "v_dict_set");
         d->keys->L[d->n] = v_str(key);
         d->vals->L[d->n] = v_ref(val);
         uint32_t new_idx = (uint32_t)d->n;
@@ -570,8 +597,8 @@ void v_dict_set(V *d, const char *key, V *val) {
             return;
         }
     }
-    d->keys->L = realloc(d->keys->L, (d->n + 1) * sizeof(V*));
-    d->vals->L = realloc(d->vals->L, (d->n + 1) * sizeof(V*));
+    d->keys->L = x_realloc(d->keys->L, (d->n + 1) * sizeof(V*), "v_dict_set");
+    d->vals->L = x_realloc(d->vals->L, (d->n + 1) * sizeof(V*), "v_dict_set");
     d->keys->L[d->n] = v_str(key);
     d->vals->L[d->n] = v_ref(val);
     d->n++; d->keys->n++; d->vals->n++;
@@ -595,11 +622,11 @@ V *v_dict_get(V *d, const char *key) {
     return NULL;
 }
 Env *env_new(Env *parent) {
-    Env *e = calloc(1, sizeof(Env));
+    Env *e = x_calloc(1, sizeof(Env), "env_new");
     e->rc = 1; e->cap = 16; e->len = 0;
-    e->names  = calloc(16, sizeof(char*));
-    e->vals   = calloc(16, sizeof(V*));
-    e->hashes = calloc(16, sizeof(uint32_t));
+    e->names  = x_calloc(16, sizeof(char*), "env_new");
+    e->vals   = x_calloc(16, sizeof(V*), "env_new");
+    e->hashes = x_calloc(16, sizeof(uint32_t), "env_new");
     e->parent = parent;
     if(parent) parent->rc++;
     return e;
@@ -615,11 +642,11 @@ void env_set(Env *e, const char *name, V *val) {
     }
     if(e->len >= e->cap) {
         e->cap *= 2;
-        e->names  = realloc(e->names,  e->cap * sizeof(char*));
-        e->vals   = realloc(e->vals,   e->cap * sizeof(V*));
-        e->hashes = realloc(e->hashes, e->cap * sizeof(uint32_t));
+        e->names  = x_realloc(e->names,  e->cap * sizeof(char*), "env_set");
+        e->vals   = x_realloc(e->vals,   e->cap * sizeof(V*), "env_set");
+        e->hashes = x_realloc(e->hashes, e->cap * sizeof(uint32_t), "env_set");
     }
-    e->names[e->len]  = strdup(name);
+    e->names[e->len]  = x_strdup(name, "env_set");
     e->vals[e->len]   = v_ref(val);
     e->hashes[e->len] = h;
     e->len++;
@@ -1415,17 +1442,12 @@ Token lex_peek(Lexer *l) {
     return l->peek;
 }
 Node *node_new(int type) {
-    Node *n = calloc(1, sizeof(Node));
+    Node *n = x_calloc(1, sizeof(Node), "node_new");
     n->type = type;
     return n;
 }
 void node_add(Node *n, Node *child) {
-    void *p = realloc(n->ch, (size_t)(n->nch + 1) * sizeof(Node *));
-    if (!p) {
-        fprintf(stderr, "node_add: out of memory\n");
-        exit(1);
-    }
-    n->ch = p;
+    n->ch = x_realloc(n->ch, (size_t)(n->nch + 1) * sizeof(Node *), "node_add");
     n->ch[n->nch++] = child;
 }
 void node_free(Node *n) {
