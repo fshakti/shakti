@@ -192,7 +192,7 @@ static void walk_inner_paths(const char *base, WalkPaths *wp) {
         char *path = malloc(plen + 1);
         memcpy(path, base, bl);
         path[bl] = '/';
-        strcpy(path + bl + 1, e->d_name);
+        memcpy(path + bl + 1, e->d_name, nl + 1);
 #if defined(_DIRENT_HAVE_D_TYPE) || defined(DT_UNKNOWN)
         if (e->d_type == DT_DIR) {
             walk_inner_paths(path, wp);
@@ -280,11 +280,14 @@ V *bi_path_join(V **a, in) {
     }
     char *o = malloc(tot + 1);
     P(!o,v_err("path_join: oom"))
-    o[0] = 0;
+    size_t off = 0;
     for (int i = 0; i < n; i++) {
-        if (i) strcat(o, "/");
-        strcat(o, a[i]->s);
+        if (i) o[off++] = '/';
+        size_t li = strlen(a[i]->s);
+        memcpy(o + off, a[i]->s, li);
+        off += li;
     }
+    o[off] = 0;
     V *r = v_str(o);
     free(o);
     return r;
@@ -325,7 +328,7 @@ V *bi_path_dirname(V **a, in) {
     if (bs && (!slash || bs > slash)) slash = bs;
 #endif
     if (slash) *slash = 0;
-    else strcpy(b, ".");
+    else { b[0] = '.'; b[1] = 0; }
     return v_str(b);
 }
 V *bi_path_splitext(V **a, in) {
