@@ -451,6 +451,14 @@ static int ipc_sock_recv_msg(IpcHandle *s, int block, char **out, size_t *out_le
         }
         rx->len += got;
     }
+    /* Defensive invariant: body fully received (rx->len) and backing buffer
+     * large enough (rx->cap). Both are guaranteed by the validation and read
+     * loop above; enforce here so any future regression fails safe instead of
+     * over-reading rx->data. */
+    if (rx->len < rx->msg_len || rx->cap < rx->msg_len) {
+        snprintf(err, err_cap, "ipc: internal framing error");
+        return -1;
+    }
     char *msg = malloc(rx->msg_len + 1);
     if (!msg) {
         snprintf(err, err_cap, "ipc: oom");

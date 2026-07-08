@@ -109,13 +109,16 @@ static V *make_response(int status, const char *raw_body, size_t body_len, V *he
     }
     v_dict_set(resp, "body", body);
     v_free(body);
-    char *raw_copy = malloc(body_len + 1);
+    /* Never copy from a NULL source: if raw_body is NULL, force length 0 so a
+     * nonzero body_len can't over-read the "" literal. */
+    size_t copy_len = raw_body ? body_len : 0;
+    char *raw_copy = malloc(copy_len + 1);
     if (!raw_copy) {
         v_free(resp);
         return v_err("rest: out of memory");
     }
-    memcpy(raw_copy, raw_body ? raw_body : "", body_len);
-    raw_copy[body_len] = 0;
+    memcpy(raw_copy, raw_body ? raw_body : "", copy_len);
+    raw_copy[copy_len] = 0;
     V *raw = v_str(raw_copy);
     free(raw_copy);
     v_dict_set(resp, "raw", raw);
