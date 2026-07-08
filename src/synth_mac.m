@@ -265,7 +265,8 @@ int synth_platform_poll(int *cfg_w, int *cfg_h, int *cfg_count) {
         if (!ev) break;
         [NSApp sendEvent:ev];
     }
-    /* AudioQueue callbacks are scheduled on the main run loop (see synth_audio_start). */
+    /* Pump the main run loop briefly for UI/system sources. Audio runs on the
+     * AudioQueue's own internal thread (see synth_audio_start). */
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, TRUE);
     if (g_win && synth_core_want_maximize()) {
         NSRect fr = g_win.frame;
@@ -297,8 +298,13 @@ int synth_audio_start(char *err, size_t cap) {
     fmt.mBytesPerFrame = 4;
     fmt.mBytesPerPacket = 4;
     synth_core_set_audio_run(1);
+    /* Pass NULL for the callback run loop so AudioQueue services buffers on its
+     * own internal audio thread instead of the main run loop. The main run loop
+     * is only pumped ~every 26ms (UI frame + usleep), which starves the ~10.7ms
+     * audio buffers and causes underruns. Shared state is guarded by g.mu, the
+     * same as the Linux dedicated audio thread. */
     st = AudioQueueNewOutput(&fmt, synth_mac_audio_callback, NULL,
-                             CFRunLoopGetMain(), kCFRunLoopCommonModes, 0, &g_aq);
+                             NULL, NULL, 0, &g_aq);
     if (st != noErr) {
         synth_core_set_audio_run(0);
         if (err && cap) snprintf(err, cap, "synth_open: AudioQueueNewOutput %d", (int)st);

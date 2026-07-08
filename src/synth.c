@@ -483,13 +483,20 @@ void synth_core_ui_draw(void) {
     g.dirty = 1;
 }
 static void synth_ui_blit(void) {
-    Pv(!g.dirty)
+    int dirty;
+    /* g.dirty is set by synth_core_render on the audio thread (under g.mu), so
+     * snapshot-and-clear it under the same lock. The lock is released before the
+     * (potentially slow) present so the audio thread is never blocked on it. */
+    synth_core_audio_lock();
+    dirty = g.dirty;
+    g.dirty = 0;
+    synth_core_audio_unlock();
+    Pv(!dirty)
 #ifdef __linux__
     Pv(!g.dpy || !g.img)
 #endif
     if (g.fb && g.present) synth_core_present_scale();
     synth_platform_present();
-    g.dirty = 0;
 }
 #ifdef SYNTH_HAVE_GL
 static const char *const g_knob_lbl[8] = {"BPM", "LEVEL", "CUT", "RES", "ATT", "DEC", "SUS", "REL"};
@@ -769,7 +776,7 @@ int synth_core_fb_design_init(void) {
     g.fb = (uint32_t *)calloc((size_t)DESIGN_W * (size_t)DESIGN_H, sizeof(uint32_t));
     return g.fb ? 0 : -1;
 }
-static void synth_request_maximize(void) { synth_platform_request_maximize(); }
+__attribute__((unused)) static void synth_request_maximize(void) { synth_platform_request_maximize(); }
 void synth_core_present_scale(void) {
     uint32_t bar = rgb(14, 15, 18);
     int x, y, dx, dy, dw, dh;

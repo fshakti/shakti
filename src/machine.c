@@ -83,7 +83,7 @@ static void mput_out_bytes(V *d, const char *k, const char *label, int64_t bytes
     mput_out(d, k, label, val);
 }
 
-static void mput_out_kb(V *d, const char *k, const char *label, int64_t kb) {
+__attribute__((unused)) static void mput_out_kb(V *d, const char *k, const char *label, int64_t kb) {
     char val[48];
     fmt_kb(val, sizeof val, kb);
     mput_out(d, k, label, val);
@@ -120,7 +120,7 @@ static int read_text(const char *path, char *buf, size_t bufsz) {
     return 0;
 }
 
-static int64_t read_int_file(const char *path) {
+__attribute__((unused)) static int64_t read_int_file(const char *path) {
     char buf[64];
     if (read_text(path, buf, sizeof buf) != 0)
         return -1;
