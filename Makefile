@@ -26,8 +26,8 @@ else
   OMP_LDFLAGS = -lgomp
 endif
 
-CFLAGS := -O2 -g3 -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
-	-I$(BUILD) -Isrc $(OMP_CFLAGS)
+CFLAGS := -Ofast -O2 -Os -g3 -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
+	-I$(BUILD) -Isrc $(OMP_CFLAGS) $(CFLAGS)
 
 LDFLAGS := -lm $(OMP_LDFLAGS)
 ifneq ($(filter Linux,$(UNAME_S)),)

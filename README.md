@@ -4,6 +4,8 @@ Small interpreted language (0.9.0).
 
 ## build
 
+> use docker/podman: `docker build -t shakti . && docker run --rm shakti base64 bin/shakti | base64 -d > shakti && chmod +x shakti`
+
 ```bash
 sudo apt-get install -y libexpat1-dev
 make prod          # or: make prod-speed
