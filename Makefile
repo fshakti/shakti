@@ -27,9 +27,15 @@ else
   OMP_LDFLAGS = -lgomp
 endif
 
-CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
+CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
 	-I$(BUILD) -Isrc \
 	$(OMP_CFLAGS)
+
+# -Wno-alloc-size-larger-than is a GCC-only flag; clang rejects it as "unknown
+# warning option", so only pass it when the compiler is not clang.
+ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
+  CFLAGS += -Wno-alloc-size-larger-than
+endif
 
 LDFLAGS := -lm $(OMP_LDFLAGS)
 ifneq ($(filter Linux,$(UNAME_S)),)
@@ -40,6 +46,18 @@ ifeq ($(UNAME_S),Darwin)
     CFLAGS += -DSHAKTI_USE_ACCELERATE=1
     LDFLAGS += -framework Accelerate
   endif
+  # Raw-PCM audio output (src/pcm.c) uses the AudioQueue C API.
+  LDFLAGS += -framework AudioToolbox -framework CoreFoundation
+endif
+
+# Raw-PCM audio output on Linux uses ALSA when the dev headers are present.
+# Define the macro and link the lib together so src/pcm.c never compiles the
+# ALSA backend without -lasound also being linked.
+ifeq ($(UNAME_S),Linux)
+  ifneq ($(wildcard /usr/include/alsa/asoundlib.h),)
+    CFLAGS += -DSHAKTI_PCM_ALSA=1
+    LDFLAGS += -lasound
+  endif
 endif
 
 ifeq ($(filter Linux Darwin,$(UNAME_S)),)
@@ -49,7 +67,7 @@ else
 endif
 
 LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c
-LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/isolde_bridge.c src/rest.c src/graph.c src/machine.c
+LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/isolde_bridge.c src/rest.c src/graph.c src/machine.c src/pcm.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1

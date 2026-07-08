@@ -491,7 +491,7 @@ V *bi_graph_path(V **a, int n) {
             }
         }
     }
-done:
+done:;
     V *r = v_list(0);
     if (found >= 0) {
         int path_len = depth[found] + 1;

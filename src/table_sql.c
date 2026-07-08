@@ -597,7 +597,7 @@ static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by) {
     }
     gh_sort_nby = nby;
     qsort(tab.slots, (size_t)tab.nslots, sizeof(GhSlot), gh_sort_cmp);
-build_table:
+build_table:;
     int include_by[32];
     for (int i = 0; i < nby; i++) {
         include_by[i] = 1;

@@ -121,6 +121,9 @@ extern V *bi_rest_accept(V**,in);
 extern V *bi_rest_read(V**,in);
 extern V *bi_rest_write(V**,in);
 extern V *bi_rest_close(V**,in);
+extern V *bi_pcm_open(V**,in);
+extern V *bi_pcm_write(V**,in);
+extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
@@ -136,6 +139,7 @@ static const char *BUILTINS[] = {
     "graph_from_table","graph_to_table","graph_count","graph_clear",
     "rest_request","rest_get","rest_post","rest_put","rest_delete",
     "rest_listen","rest_accept","rest_read","rest_write","rest_close",
+    "pcm_open","pcm_write","pcm_close",
     "read","write","readlines",
     "listdir","walk","stat",
     "path_join","path_exists","path_isdir","path_isfile",
@@ -873,6 +877,7 @@ BI0(graph_create) BI0(graph_add) BI0(graph_query) BI0(graph_neighbors) BI0(graph
 BI0(graph_from_table) BI0(graph_to_table) BI0(graph_count) BI0(graph_clear)
 BI0(rest_request) BI0(rest_get) BI0(rest_post) BI0(rest_put) BI0(rest_delete)
 BI0(rest_listen) BI0(rest_accept) BI0(rest_read) BI0(rest_write) BI0(rest_close)
+BI0(pcm_open) BI0(pcm_write) BI0(pcm_close)
 #undef BI0
 #undef BIKW
 #undef BIE
@@ -972,6 +977,9 @@ static const BiEntry bi_tab[] = {
     {"path_isfile", bi_w_path_isfile},
     {"path_join", bi_w_path_join},
     {"path_splitext", bi_w_path_splitext},
+    {"pcm_close", bi_w_pcm_close},
+    {"pcm_open", bi_w_pcm_open},
+    {"pcm_write", bi_w_pcm_write},
     {"pop", bi_w_pop},
     {"print", bi_w_print},
     {"range", bi_w_range},
