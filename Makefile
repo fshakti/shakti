@@ -79,7 +79,7 @@ clean:
 
 PROD_RELEASE_CFLAGS := -fno-stack-protector
 
-prod:
+prod: $(BUILD)/shakti_version.h
 	$(MAKE) prod-size SHAKTI_PORTABLE_CPU=1
 
 PROD_SIZE_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -Os -DNDEBUG -DSHAKTI_MINSIZE=1 $(PROD_RELEASE_CFLAGS)

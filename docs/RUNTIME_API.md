@@ -138,8 +138,8 @@ t : load("file.xml")
 save(t, "out.csv")
 ```
 
-- Extensible: **csv** files are handled by [`csv.ie`](../src/lib/csv.ie),
-  json files are handled by [`json.ie`](../src/lib/json.ie) and so on
+- Extensible: **csv** files are handled by [`csv.ie`](../lib/shakti/csv.ie),
+  json files are handled by [`json.ie`](../lib/shakti/json.ie) and so on
 - Directories have binary representation for faster load/save (directory must exist)
 
 

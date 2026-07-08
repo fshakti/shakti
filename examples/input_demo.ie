@@ -1,5 +1,4 @@
 # Terminal + event-hub input demo (no synth window).
-#   export SHAKTI_LIB=$PWD/src/lib
 #   ./shakti examples/input_demo.ie
 #   echo hello | ./shakti examples/input_demo.ie   # readline path
 

@@ -1,5 +1,4 @@
 # Knowledge graph demo — subject/predicate/object triples.
-#   export SHAKTI_LIB=$PWD/src/lib
 #   ./shakti examples/graph_demo.ie
 
 import graph

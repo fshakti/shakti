@@ -1,5 +1,4 @@
 # In-memory table SQL — requires `import sql` before statement syntax.
-#   export SHAKTI_LIB=$PWD/src/lib
 #   ./shakti examples/sql_demo.ie
 
 import sql

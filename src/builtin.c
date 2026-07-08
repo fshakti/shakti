@@ -2,6 +2,8 @@
 #include "vec_kernels.h"
 #include "input.h"
 #include <time.h>
+#include <sys/time.h>
+#include <sys/select.h>
 #include <dirent.h>
 #include <unistd.h>
 extern volatile int g_sigint;
