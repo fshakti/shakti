@@ -17,6 +17,7 @@
 #else
 #include <unistd.h>
 #include <sys/utsname.h>
+#include <signal.h>
 #endif
 #include <time.h>
 
@@ -66,6 +67,8 @@ int   g_returning  = 0;
 int   g_breaking   = 0;
 int   g_continuing = 0;
 int   g_error      = 0;
+volatile int g_sigint = 0;
+int g_interactive = 0;
 V    *g_retval     = NULL;
 V    *g_error_val  = NULL;
 char  g_lib_path[4096] = "";
@@ -3812,10 +3815,21 @@ static int shakti_sql_enabled(Env *e) {
     V *v = env_get(e, SHAKTI_SQL_FLAG);
     return v && v->t == T_BOOL && v->b;
 }
+static int run_repl(Env *e, int depth);
 static int uh(unsigned char c){return c < 'A' ? (c-'0') : c < 'a' ? (c - 'A')+10 : (c - 'a') + 10; }
 V *eval(Node *n, Env *e) {
-//printf("eval :: "); node_sprint(n,stdout);puts("");
+    if(g_sigint){
+       g_sigint=0;
+       printf("Interrupt at :: "); node_sprint(n,stdout);
+       printf("\nuse \\none to return None, \\raise to raise exception, or \\c to continue\n");
+       if(!(g_interactive && run_repl(e,1))){
+           g_error=1;
+           if(!g_error_val)v_free(g_error_val);
+           g_error_val = v_err("sigint");
+       };
+    }
     P(!n,v_nil())
+
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
     switch(n->type) {
     case N_INT:  return v_int(n->ival);
@@ -5142,7 +5156,9 @@ static struct termios hl_orig;
 static int hl_raw=0;
 static void hl_raw_off(void){if(hl_raw){tcsetattr(STDIN_FILENO,TCSAFLUSH,&hl_orig);hl_raw=0;}}
 static void hl_raw_on(void){
+    static int hl_installed=0;
     if(!isatty(STDIN_FILENO))return;
+    if(!hl_installed)atexit(hl_raw_off),hl_installed=1;
     tcgetattr(STDIN_FILENO,&hl_orig);
     struct termios r=hl_orig;
     r.c_iflag &= ~(BRKINT|ICRNL|INPCK|ISTRIP|IXON);
@@ -5174,7 +5190,7 @@ const char *builtin_complete(const char *s,in);
 static char *hl_readline(const char *prompt, Env*e) {
     static char buf[65536];
     int len=0, pos=0, hidx=hl_hlen;
-    if(!isatty(STDIN_FILENO)){
+    if(!g_interactive) {
         printf("%s",prompt); fflush(stdout);
         if(!fgets(buf,sizeof(buf),stdin))return NULL;
         size_t l=strlen(buf); if(l>0&&buf[l-1]=='\n')buf[l-1]=0;
@@ -5391,11 +5407,8 @@ static void repl_print_runtime_doc(void) {
     if (!prev_blank) putchar('\n');
     fclose(f);
 }
-static void run_repl(Env *e) {
+static int run_repl(Env *e, int depth) {
 
-#if SHAKTI_HL
-    atexit(hl_raw_off);
-#endif
     enum { REPL_INPUT_CAP = 262144 };
     char input[REPL_INPUT_CAP];
     for (;;) {
@@ -5404,6 +5417,7 @@ static void run_repl(Env *e) {
 #else
         char *line = read_line("> ");
 #endif
+        g_sigint=0;
         if (!line) break;
         if (strcmp(line, "quit") == 0 || strcmp(line, "exit") == 0) break;
         if (line[0] == 0) continue;
@@ -5415,6 +5429,23 @@ static void run_repl(Env *e) {
         memcpy(input, line, inlen);
         input[inlen++] = '\n';
         input[inlen] = 0;
+        if (depth && (strcmp(line, "\\c") == 0 || strcasecmp(line, "\\continue") == 0)) {
+            printf("continuing...");
+            return 1;
+        }
+        if (depth && strcasecmp(line, "\\none") == 0) {
+            g_returning = 1;
+            if(g_retval) v_free(g_retval);
+            g_retval = v_nil();
+            return 1;
+        }
+        if (depth && strcasecmp(line, "\\raise") == 0) {
+            g_error = 1;
+            if(g_error_val) v_free(g_error_val);
+            g_error_val = v_err("abort");
+            return 1;
+        }
+
         if (strcmp(line, "\\v") == 0) {
             for(int i=0; i<e->len; i++) {
                 printf("%-15s", e->names[i]);
@@ -5472,6 +5503,7 @@ static void run_repl(Env *e) {
         }
         v_free(result);
     }
+    return 0;
 }
 char *read_file(const char *path) {
     FILE *f = fopen(path, "r");
@@ -5486,6 +5518,7 @@ char *read_file(const char *path) {
     return buf;
 }
 #ifndef SHAKTI_NO_MAIN
+static void sigint(int signo) { g_sigint = signo; }
 int shakti_lang_main(int argc, char **argv) {
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     {
@@ -5563,6 +5596,11 @@ int shakti_lang_main(int argc, char **argv) {
         i++;
     }
 
+    struct sigaction sa = {0};
+    sa.sa_handler = sigint;
+    sigaction(SIGINT, &sa, NULL);
+    g_interactive = interactive || isatty(STDIN_FILENO);
+
     if (parse_profile) {
         const char *src = cmd;
         char *file_buf = NULL;
@@ -5626,7 +5664,7 @@ int shakti_lang_main(int argc, char **argv) {
             putchar('\n');
         }
         v_free(r);
-        if(interactive) run_repl(global);
+        if(interactive) run_repl(global,0);
     } else if(i < argc) {
         strncpy(g_script_dir, argv[i], sizeof(g_script_dir)-1);
         char *slash = strrchr(g_script_dir, '/');
@@ -5639,12 +5677,12 @@ int shakti_lang_main(int argc, char **argv) {
         if(g_error && g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
         if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
         v_free(r);
-        if(interactive) run_repl(global);
+        if(interactive) run_repl(global,0);
         free(src);
         env_free(global);
         return script_err ? 1 : 0;
     } else {
-        run_repl(global);
+        run_repl(global,0);
     }
     env_free(global);
     return 0;

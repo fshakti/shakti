@@ -4,6 +4,8 @@
 #include <time.h>
 #include <dirent.h>
 #include <unistd.h>
+extern volatile int g_sigint;
+extern Node*parse_sql(const char*src);
 extern Node*parse_sql(const char*src);
 extern void v_serialize(V *v, FILE *fp);
 extern V *v_deserialize(FILE *fp);
@@ -547,6 +549,7 @@ static V *bi_sleep(V**a,in) {
         }
     }
     select(0,NULL,NULL,NULL,tvp);
+    if(g_sigint) return g_sigint=0,v_err("interrupted");
     return v_nil();
 }
 static V *bi_abs(V **a, in) {
