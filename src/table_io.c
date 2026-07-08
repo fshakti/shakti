@@ -172,6 +172,11 @@ static V *table_csv_load(const char *path, V *columns_opt) {
     char *at = buf;
     while (*at) {
         if (nl >= cap) {
+            if (cap > (1 << 30)) {
+                free(lines);
+                free(raw);
+                return v_err("csv: too many lines");
+            }
             cap *= 2;
             char **nlines = realloc(lines, (size_t)cap * sizeof(char *));
             if (!nlines) {
