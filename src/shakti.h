@@ -271,6 +271,11 @@ Token lex_peek(Lexer *l);
 Node *node_new(int type);
 void node_add(Node *n, Node *child);
 void node_free(Node *n);
+/* Fatal out-of-memory handler for core interpreter allocations whose callers
+ * universally assume success (value layer, AST, environments). Prints to
+ * stderr and exit(1), matching the existing fatal convention. External-input
+ * paths (REST/JSON/IPC/table I/O) return T_ERR values instead. */
+void shakti_oom(const char *where);
 V *v_nil(void);
 V *v_bool(int b);
 V *v_int(int64_t j);
