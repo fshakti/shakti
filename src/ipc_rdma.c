@@ -365,8 +365,14 @@ int ipc_rdma_recv(IpcRdmaConn *c, int block, char **out, size_t *out_len, char *
     *out_len = mlen;
     c->recv_ready = 0;
     if (rdma_post_recv(c->id, NULL, c->recv_buf, IPC_RDMA_BUF, c->recv_mr) != 0) {
+        /* Ownership of msg transfers to the connection's pending slot so it is
+         * returned on the next recv. Clear the caller's out-params so the same
+         * buffer is not owned by both the caller and c->pending_msg (which would
+         * risk a double free / use-after-free on the error path). */
         c->pending_msg = msg;
         c->pending_len = mlen;
+        *out = NULL;
+        *out_len = 0;
         snprintf(err, err_cap, "ipc rdma: repost recv failed");
         return -1;
     }
