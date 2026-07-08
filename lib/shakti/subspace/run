@@ -1,4 +1,5 @@
 #!/bin/sh
+[ "x`docker images -q shakti`" \!= "x" ] || docker build -t shakti ../../
 docker run --rm -e TERM=dumb -i \
-	-v "$__dir__:/shakti:ro"      \
-	-w /shakti shakti "$@"
+  -e LOGNAME="$USER" -w /shakti  \
+	-v "$__dir__:/shakti:ro" shakti "$@"
