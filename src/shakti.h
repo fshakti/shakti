@@ -371,6 +371,11 @@ void win_close_memstream(FILE *fp, char **ptr, size_t *sizeloc);
 #define CLOSE_MEMSTREAM(fp,ptr,sz) do { fclose(fp); } while (0)
 #endif
 
+int debug(const char *a,const char *b,int debug_f);
+#define DEBUG_CONTINUE 1
+#define DEBUG_RETRY    2
+#define DEBUG_ABORT    4
+
 #ifdef __cplusplus
 }
 #endif

@@ -114,8 +114,6 @@ Example: [`examples/matrix.ie`](../examples/matrix.ie).
 
 A matrix column stores one matrix per table row (table height = matrix row count). SQL `where` filters copy matrix rows like other column types.
 
-CSV/XML load and CSV save do **not** round-trip matrix columns as typed matrices; use in-memory tables or nested lists.
-
 ## Data
 
 ```ie
@@ -203,3 +201,30 @@ delete from u where id = 2
 | `sonicpi` | [SONICPI.md](SONICPI.md) | [`examples/sonicpi_demo.ie`](../examples/sonicpi_demo.ie) |
 
 Index: [EXAMPLES.md](EXAMPLES.md).
+
+## Debugging
+
+Debugging is enabled during **unhandled exceptions**, **restartable exceptions**, and **interrupts**,
+the former occur ultimately because of `raise` and the latter because the operator pressed **Control-C** (stylised `^C`)
+
+    \abort
+
+During any debugging sesssion returns `None` which your program may be able to tolerate.
+
+    \continue
+    \c
+
+During an **interrupt** continue processing normally. An unhandled exception cannot continue.
+
+    \fail
+
+Unwind the stack completely, return to the toplevel environment and stop all processing.
+
+    \retry
+
+If an exception is raised implements `__retry__`, this function will be called instead,
+and its value will be returned.
+
+
+
+

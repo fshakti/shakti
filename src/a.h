@@ -20,7 +20,11 @@
 #define ss g0*s
 #define st g0*t
 #ifdef SHAKTI_MINSIZE
-#define MS __attribute__((minsize))
+#if defined(__clang__)
+#define MS __attribute__((minsize)) 
+#else
+#define MS __attribute__((optimize(0)))
+#endif
 #else
 #define MS
 #endif

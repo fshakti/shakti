@@ -12,8 +12,6 @@ extern V *v_deserialize(FILE *fp);
 extern V*load_module(const char *name);
 extern char *read_file(const char *path);
 extern V*table_xml_load(const char*path,V*columns_opt);
-extern int is_host_builtin(const char *name);
-extern V *host_builtin_call(const char *name, V **args, int nargs);
 extern V *bi_fread(V**,in);
 extern V *bi_fwrite(V**,in);
 extern V *bi_readlines(V**,in);
@@ -111,28 +109,6 @@ extern V *bi_ipc_send(V**,in);
 extern V *bi_ipc_set_nonblock(V**,in);
 extern V *bi_ipc_shm_close(V**,in);
 extern V *bi_ipc_shm_open(V**,in);
-extern V *bi_lissen_trpc_query(V**,in);
-extern V *bi_lissen_trpc_mutation(V**,in);
-extern V *bi_lissen_set_token(V**,in);
-extern V *bi_lissen_get_token(V**,in);
-extern V *bi_lissen_set_api_base(V**,in);
-extern V *bi_lissen_get_api_base(V**,in);
-extern V *bi_lissen_app_url(V**,in);
-extern V *bi_lissen_web_url(V**,in);
-extern V *bi_lissen_open(V**,in);
-extern V *bi_govee_lan_scan(V**,in);
-extern V *bi_govee_lan_probe(V**,in);
-extern V *bi_govee_lan_send(V**,in);
-extern V *bi_govee_lan_status(V**,in);
-extern V *bi_govee_cmd_turn(V**,in);
-extern V *bi_govee_cmd_brightness(V**,in);
-extern V *bi_govee_cmd_color(V**,in);
-extern V *bi_govee_ble_segment(V**,in);
-extern V *bi_govee_ble_segment_kelvin(V**,in);
-extern V *bi_govee_cmd_ptreal(V**,in);
-extern V *bi_govee_get_model(V**,in);
-extern V *bi_govee_get_ip(V**,in);
-extern V *bi_govee_set_ip(V**,in);
 extern V *bi_graph_create(V**,in);
 extern V *bi_graph_add(V**,in);
 extern V *bi_graph_query(V**,in);
@@ -142,16 +118,6 @@ extern V *bi_graph_from_table(V**,in);
 extern V *bi_graph_to_table(V**,in);
 extern V *bi_graph_count(V**,in);
 extern V *bi_graph_clear(V**,in);
-extern V *bi_rest_request(V**,in);
-extern V *bi_rest_get(V**,in);
-extern V *bi_rest_post(V**,in);
-extern V *bi_rest_put(V**,in);
-extern V *bi_rest_delete(V**,in);
-extern V *bi_rest_listen(V**,in);
-extern V *bi_rest_accept(V**,in);
-extern V *bi_rest_read(V**,in);
-extern V *bi_rest_write(V**,in);
-extern V *bi_rest_close(V**,in);
 
 static V *kw_get(V**kwn,V**kwv,int nkw,const char*name){
     i(nkw,{P(kwn[i]->t==T_STR&&!strcmp(kwn[i]->s,name),kwv[i])})return NULL;}
@@ -448,8 +414,6 @@ static V *bi_sum(V **a, in) {
     P(n < 1,v_int(0))
     if (n == 1) {
         V *v = a[0];
-        if ((v->t >= T_IVEC && v->t <= T_LIST) && is_host_builtin("host_sum"))
-            return host_builtin_call("host_sum", a, n);
         P(v->t >= T_IVEC && v->t <= T_LIST,vec_reduce_sum(v))
         P(v->t >= T_IMAT && v->t <= T_FMAT,vec_reduce_sum(v))
         P(v->t == T_FLOAT,v_float(v->f))
@@ -479,8 +443,6 @@ static V *bi_sum(V **a, in) {
 }
 static V *bi_dot(V **a, in) {
     P(n < 2, v_err("dot(x, y)"))
-    if (is_host_builtin("host_dot"))
-        return host_builtin_call("host_dot", a, n);
     if (a[0]->n != a[1]->n) return v_err("dot: length mismatch");
     if (a[0]->t == T_FVEC && a[1]->t == T_FVEC)
         return v_float(shakti_dot_f64(a[0]->F, a[1]->F, a[0]->n));
@@ -507,8 +469,6 @@ static V *bi_avg(V **a, in) {
 }
 static V *bi_min(V **a, in) {
     P(n < 1,v_nil())
-    if (n == 1 && (a[0]->t >= T_IVEC && a[0]->t <= T_LIST) && is_host_builtin("host_min"))
-        return host_builtin_call("host_min", a, n);
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_min(a[0]))
     if (n == 2) {
         double x = a[0]->t == T_FLOAT ? a[0]->f : (double)a[0]->j;
@@ -519,8 +479,6 @@ static V *bi_min(V **a, in) {
 }
 static V *bi_max(V **a, in) {
     P(n < 1,v_nil())
-    if (n == 1 && (a[0]->t >= T_IVEC && a[0]->t <= T_LIST) && is_host_builtin("host_max"))
-        return host_builtin_call("host_max", a, n);
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_max(a[0]))
     if (n == 2) {
         double x = a[0]->t == T_FLOAT ? a[0]->f : (double)a[0]->j;
@@ -914,38 +872,13 @@ BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine) BI0(sh)
 BI0(re_findall) BI0(re_sub) BI0(re_match) BI0(re_split)
 BI0(json_loads) BI0(json_dumps) BI0(json_load) BI0(json_dump)
 BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(chr) BI0(ord) BI0(hex)
-#ifdef SHAKTI_HAVE_TALK
-BI0(talk_listen) BI0(talk_set_locale) BI0(talk_set_model)
-#endif
-#ifdef SHAKTI_HAVE_SYNTH
-BI0(synth_open) BI0(synth_close) BI0(synth_alive) BI0(synth_tick)
-BI0(synth_set_steps) BI0(synth_steps) BI0(synth_set_metro) BI0(synth_metro_on)
-BI0(synth_set_metro_sound) BI0(synth_metro_sound) BI0(synth_set_mute) BI0(synth_mute_on)
-BI0(synth_note_on) BI0(synth_note_off) BI0(synth_set_bpm) BI0(synth_bpm)
-BI0(synth_set_tuning) BI0(synth_tuning)
-BI0(synth_set_level) BI0(synth_level) BI0(synth_set_cutoff) BI0(synth_cutoff)
-BI0(synth_set_reso) BI0(synth_reso) BI0(synth_set_seq_row) BI0(synth_play) BI0(synth_playing)
-BI0(synth_mouse_press) BI0(synth_mouse_release) BI0(synth_set_viz) BI0(synth_viz_mode)
-BI0(synth_load_sample) BI0(synth_sample_loaded) BI0(synth_sample_name)
-BI0(synth_set_row_note) BI0(synth_row_note)
-BI0(synth_looper_rec) BI0(synth_looper_play) BI0(synth_looper_clear) BI0(synth_looper_overdub)
-BI0(synth_looper_rec_on) BI0(synth_looper_play_on) BI0(synth_looper_has_loop)
-#endif
 #ifdef SHAKTI_HAVE_IPC
 BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
 BI0(ipc_recv) BI0(ipc_recv_nowait) BI0(ipc_rdma_available) BI0(ipc_send)
 BI0(ipc_set_nonblock) BI0(ipc_shm_close) BI0(ipc_shm_open)
 #endif
-BI0(lissen_trpc_query) BI0(lissen_trpc_mutation) BI0(lissen_set_token) BI0(lissen_get_token)
-BI0(lissen_set_api_base) BI0(lissen_get_api_base) BI0(lissen_app_url) BI0(lissen_web_url) BI0(lissen_open)
-BI0(govee_lan_scan) BI0(govee_lan_probe) BI0(govee_lan_send) BI0(govee_lan_status)
-BI0(govee_cmd_turn) BI0(govee_cmd_brightness) BI0(govee_cmd_color)
-BI0(govee_ble_segment) BI0(govee_ble_segment_kelvin) BI0(govee_cmd_ptreal)
-BI0(govee_get_model) BI0(govee_get_ip) BI0(govee_set_ip)
 BI0(graph_create) BI0(graph_add) BI0(graph_query) BI0(graph_neighbors) BI0(graph_path)
 BI0(graph_from_table) BI0(graph_to_table) BI0(graph_count) BI0(graph_clear)
-BI0(rest_request) BI0(rest_get) BI0(rest_post) BI0(rest_put) BI0(rest_delete)
-BI0(rest_listen) BI0(rest_accept) BI0(rest_read) BI0(rest_write) BI0(rest_close)
 #undef BI0
 #undef BIKW
 #undef BIE
@@ -981,19 +914,6 @@ static const BiEntry bi_tab[] = {
     {"getattr", bi_w_getattr},
     {"getcwd", bi_w_getcwd},
     {"getenv", bi_w_getenv},
-    {"govee_ble_segment", bi_w_govee_ble_segment},
-    {"govee_ble_segment_kelvin", bi_w_govee_ble_segment_kelvin},
-    {"govee_cmd_brightness", bi_w_govee_cmd_brightness},
-    {"govee_cmd_color", bi_w_govee_cmd_color},
-    {"govee_cmd_ptreal", bi_w_govee_cmd_ptreal},
-    {"govee_cmd_turn", bi_w_govee_cmd_turn},
-    {"govee_get_ip", bi_w_govee_get_ip},
-    {"govee_get_model", bi_w_govee_get_model},
-    {"govee_lan_probe", bi_w_govee_lan_probe},
-    {"govee_lan_scan", bi_w_govee_lan_scan},
-    {"govee_lan_send", bi_w_govee_lan_send},
-    {"govee_lan_status", bi_w_govee_lan_status},
-    {"govee_set_ip", bi_w_govee_set_ip},
     {"graph_add", bi_w_graph_add},
     {"graph_clear", bi_w_graph_clear},
     {"graph_count", bi_w_graph_count},
@@ -1042,15 +962,6 @@ static const BiEntry bi_tab[] = {
     {"keys", bi_w_keys},
     {"ktable", bi_w_ktable},
     {"len", bi_w_len},
-    {"lissen_app_url", bi_w_lissen_app_url},
-    {"lissen_get_api_base", bi_w_lissen_get_api_base},
-    {"lissen_get_token", bi_w_lissen_get_token},
-    {"lissen_open", bi_w_lissen_open},
-    {"lissen_set_api_base", bi_w_lissen_set_api_base},
-    {"lissen_set_token", bi_w_lissen_set_token},
-    {"lissen_trpc_mutation", bi_w_lissen_trpc_mutation},
-    {"lissen_trpc_query", bi_w_lissen_trpc_query},
-    {"lissen_web_url", bi_w_lissen_web_url},
     {"list", bi_w_list},
     {"listdir", bi_w_listdir},
     {"log", bi_w_log},
@@ -1079,16 +990,6 @@ static const BiEntry bi_tab[] = {
     {"readline", bi_w_readline},
     {"readlines", bi_w_readlines},
     {"repr", bi_w_repr},
-    {"rest_accept", bi_w_rest_accept},
-    {"rest_close", bi_w_rest_close},
-    {"rest_delete", bi_w_rest_delete},
-    {"rest_get", bi_w_rest_get},
-    {"rest_listen", bi_w_rest_listen},
-    {"rest_post", bi_w_rest_post},
-    {"rest_put", bi_w_rest_put},
-    {"rest_read", bi_w_rest_read},
-    {"rest_request", bi_w_rest_request},
-    {"rest_write", bi_w_rest_write},
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
     {"sh", bi_w_sh},
@@ -1101,58 +1002,8 @@ static const BiEntry bi_tab[] = {
     {"stat", bi_w_stat},
     {"str", bi_w_str},
     {"sum", bi_w_sum},
-#ifdef SHAKTI_HAVE_SYNTH
-    {"synth_alive", bi_w_synth_alive},
-    {"synth_bpm", bi_w_synth_bpm},
-    {"synth_close", bi_w_synth_close},
-    {"synth_cutoff", bi_w_synth_cutoff},
-    {"synth_level", bi_w_synth_level},
-    {"synth_load_sample", bi_w_synth_load_sample},
-    {"synth_looper_clear", bi_w_synth_looper_clear},
-    {"synth_looper_has_loop", bi_w_synth_looper_has_loop},
-    {"synth_looper_overdub", bi_w_synth_looper_overdub},
-    {"synth_looper_play", bi_w_synth_looper_play},
-    {"synth_looper_play_on", bi_w_synth_looper_play_on},
-    {"synth_looper_rec", bi_w_synth_looper_rec},
-    {"synth_looper_rec_on", bi_w_synth_looper_rec_on},
-    {"synth_metro_on", bi_w_synth_metro_on},
-    {"synth_metro_sound", bi_w_synth_metro_sound},
-    {"synth_mouse_press", bi_w_synth_mouse_press},
-    {"synth_mouse_release", bi_w_synth_mouse_release},
-    {"synth_mute_on", bi_w_synth_mute_on},
-    {"synth_note_off", bi_w_synth_note_off},
-    {"synth_note_on", bi_w_synth_note_on},
-    {"synth_open", bi_w_synth_open},
-    {"synth_play", bi_w_synth_play},
-    {"synth_playing", bi_w_synth_playing},
-    {"synth_reso", bi_w_synth_reso},
-    {"synth_row_note", bi_w_synth_row_note},
-    {"synth_sample_loaded", bi_w_synth_sample_loaded},
-    {"synth_sample_name", bi_w_synth_sample_name},
-    {"synth_set_bpm", bi_w_synth_set_bpm},
-    {"synth_set_cutoff", bi_w_synth_set_cutoff},
-    {"synth_set_level", bi_w_synth_set_level},
-    {"synth_set_metro", bi_w_synth_set_metro},
-    {"synth_set_metro_sound", bi_w_synth_set_metro_sound},
-    {"synth_set_mute", bi_w_synth_set_mute},
-    {"synth_set_reso", bi_w_synth_set_reso},
-    {"synth_set_row_note", bi_w_synth_set_row_note},
-    {"synth_set_seq_row", bi_w_synth_set_seq_row},
-    {"synth_set_steps", bi_w_synth_set_steps},
-    {"synth_set_tuning", bi_w_synth_set_tuning},
-    {"synth_set_viz", bi_w_synth_set_viz},
-    {"synth_steps", bi_w_synth_steps},
-    {"synth_tick", bi_w_synth_tick},
-    {"synth_tuning", bi_w_synth_tuning},
-    {"synth_viz_mode", bi_w_synth_viz_mode},
-#endif
     {"table", bi_w_table},
     {"tail", bi_w_tail},
-#ifdef SHAKTI_HAVE_TALK
-    {"talk_listen", bi_w_talk_listen},
-    {"talk_set_locale", bi_w_talk_set_locale},
-    {"talk_set_model", bi_w_talk_set_model},
-#endif
     {"tan", bi_w_tan},
     {"time_ms", bi_w_time_ms},
     {"type", bi_w_type},
@@ -1193,10 +1044,12 @@ int is_builtin(const char *name){
   if(strcmp(name,"load")==0)return 1;
   if(strcmp(name,"__apply__")==0)return 1;
   if(strcmp(name,"__invoke__")==0)return 1;
-  return is_host_builtin(name);
+  return 0;
 }
+__thread Env*shakti_builtin_call_env = NULL;
 V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env *e){
     BiCall fn;
+    shakti_builtin_call_env = e;
     if(!strcmp(name,"clock") || !strcmp(name,"timer")){
         struct timespec tb;
         clock_gettime(CLOCK_MONOTONIC, &tb);
@@ -1420,7 +1273,6 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         fclose(f);
         return v_int(n);
     }
-    if(is_host_builtin(name)) return host_builtin_call(name, args, nargs);
     return v_errf("unknown builtin '%s'",name);
 }
-void builtin_register(Env *e){(void)e;}
+void builtin_register(Env *e){shakti_builtin_call_env=e;}

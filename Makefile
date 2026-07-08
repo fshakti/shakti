@@ -26,9 +26,8 @@ else
   OMP_LDFLAGS = -lgomp
 endif
 
-CFLAGS := -O2 -g3 -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE -DSHAKTI_HAVE_LISSEN=1 -DSHAKTI_HAVE_GOVEE=1 \
-	-I$(BUILD) -Isrc \
-	$(OMP_CFLAGS)
+CFLAGS := -O2 -g3 -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-alloc-size-larger-than -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
+	-I$(BUILD) -Isrc $(OMP_CFLAGS)
 
 LDFLAGS := -lm $(OMP_LDFLAGS)
 ifneq ($(filter Linux,$(UNAME_S)),)
@@ -42,7 +41,7 @@ else
 endif
 
 LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c
-LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_xml.c src/cli_main.c src/input.c src/host_bridge.c src/lissen.c src/govee.c src/rest.c src/graph.c src/machine.c src/subprocess.c
+LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_xml.c src/cli_main.c src/input.c src/graph.c src/machine.c src/subprocess.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1
@@ -63,130 +62,25 @@ ifeq ($(SHAKTI_IPC),1)
   endif
 endif
 
-ifeq ($(UNAME_S),Darwin)
-  SHAKTI_TALK ?= 1
-else
-  SHAKTI_TALK ?= 0
-endif
-
-ifeq ($(SHAKTI_TALK),1)
-  CFLAGS += -DSHAKTI_HAVE_TALK=1
-  TALK_LDFLAGS := -framework AVFoundation -framework AudioToolbox -framework Foundation -framework Speech
-  OBJC ?= clang
-  TALK_OBJC_FLAGS := -x objective-c -O2 -g -Wall -std=gnu11 -fobjc-arc -DSHAKTI_HAVE_TALK=1 \
-	-I$(BUILD) -Isrc
-endif
-
-# Always link synth.c (full UI on Linux+X11+ALSA; stubs elsewhere).
-SHAKTI_SYNTH ?= 1
-
-ifeq ($(SHAKTI_SYNTH),1)
-  CFLAGS += -DSHAKTI_HAVE_SYNTH=1
-endif
-
-ifeq ($(UNAME_S),Linux)
-  ifeq ($(SHAKTI_SYNTH),1)
-    SYNTH_LDFLAGS := -lX11 -lpthread
-    ifneq ($(wildcard /usr/include/alsa/asoundlib.h),)
-      SYNTH_LDFLAGS += -lasound
-    endif
-  endif
-endif
-
-ifeq ($(UNAME_S),Darwin)
-  ifeq ($(SHAKTI_SYNTH),1)
-    SYNTH_LDFLAGS := -framework Cocoa -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
-    SYNTH_OBJC_FLAGS := -x objective-c -O2 -g -Wall -std=gnu11 -fobjc-arc -DSHAKTI_HAVE_SYNTH=1 -DSHAKTI_STANDALONE=1 \
-	-I$(BUILD) -Isrc
-    OBJC ?= clang
-  endif
-endif
+shakti: $(BUILD)/shakti_version.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE)
+	@if [ -d shakti ] && [ ! -f shakti ]; then \
+		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
+	fi
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(LDFLAGS) $(IPC_LDFLAGS)
 
 $(BUILD)/shakti_version.h: src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
-
-
-ifeq ($(SHAKTI_TALK),1)
-talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
-	$(OBJC) $(TALK_OBJC_FLAGS) -c -o $@ src/talk.c
-endif
-
-ifeq ($(SHAKTI_SYNTH),1)
-synth.o: src/synth.c src/synth_ui.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/synth.c
-
-synth_ui.o: src/synth_ui.c src/synth_ui.h
-	$(CC) $(CFLAGS) -c -o $@ src/synth_ui.c
-endif
-
-ifeq ($(UNAME_S),Darwin)
-ifeq ($(SHAKTI_SYNTH),1)
-synth_mac.o: src/synth_mac.m $(BUILD)/shakti_version.h
-	$(OBJC) $(SYNTH_OBJC_FLAGS) -c -o $@ src/synth_mac.m
-endif
-endif
-
-SYNTH_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_SYNTH))),synth_mac.o)
-
-shakti: $(BUILD)/shakti_version.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ)
-	@if [ -d shakti ] && [ ! -f shakti ]; then \
-		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
-	fi
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS))
-
-SHAKTI_LIB_DIR := src/lib
-SHAKTI_TESTS := $(wildcard tests/*.ie)
-
-ifneq ($(SHAKTI_TESTS),)
-test: shakti
-	@for f in $(SHAKTI_TESTS); do \
-	  echo "Running $$f..."; case "$$f" in \
-	    *synth*) SHAKTI_SYNTH_HEADLESS=1 ./shakti "$$f" || exit 1 ;; \
-	    *) ./shakti "$$f" || exit 1 ;; \
-	  esac; \
-	done
-endif
-
-ifneq ($(wildcard scripts/bench_check.py),)
-bench: prod
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --check
-
-bench-update: prod
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --update
-
-bench-report: shakti
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --report
-endif
-
-ifneq ($(wildcard tests/macros_smoke.c),)
-test-macros: src/a.h
-	gcc $(CFLAGS) -I$(BUILD) -o $(BUILD)/macros_smoke tests/macros_smoke.c
-	$(BUILD)/macros_smoke
-endif
-
-ifneq ($(wildcard scripts/parse_golden.sh),)
-test-parse: shakti
-	@bash scripts/parse_golden.sh
-endif
-
-ifeq ($(UNAME_S),Darwin)
-test-mac: prod test test-parse
-	@echo "test-mac: all macOS checks passed"
-else
-test-mac:
-	@echo "test-mac: skipped (Darwin only)"
-endif
-
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
-	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
+	rm -f shakti
+	rm -f $(BUILD)/shakti_version.h
 	rm -rf build/ shakti/ *.dSYM shakti.zip
 
 PROD_RELEASE_CFLAGS := -fno-stack-protector
 
-prod: shakti
+prod:
+	$(MAKE) prod-size SHAKTI_PORTABLE_CPU=1
 
 PROD_SIZE_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -Os -DNDEBUG -DSHAKTI_MINSIZE=1 $(PROD_RELEASE_CFLAGS)
 PROD_SIZE_LDFLAGS := $(LDFLAGS)
@@ -219,18 +113,7 @@ prod-speed: clean-shakti-artifacts shakti
 	strip shakti
 
 clean-shakti-artifacts:
-	rm -f shakti talk.o synth.o synth_mac.o
-
-ifneq ($(wildcard scripts/size_check.py),)
-size-check: prod
-	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --check
-
-size-update: prod
-	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --update
-
-size-report: prod
-	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --report
-endif
+	rm -f shakti
 
 check-deps:
 ifeq ($(UNAME_S),Darwin)

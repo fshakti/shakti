@@ -121,10 +121,20 @@ V *bi_fread(V **a, in) {
 }
 V *bi_fwrite(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || (a[1]->t != T_STR && a[1]->t != T_CVEC),v_err("write(path, data)"))
+retry:
+    size_t wn=1, w=0;
     FILE *f = fopen(a[0]->s, "wb");
-    P(!f,v_errf("write: %s", strerror(errno)))
-    size_t w = a[1]->t == T_STR ? fwrite(a[1]->s, 1, strlen(a[1]->s), f) : fwrite(a[1]->B, 1, a[1]->n, f);
-    fclose(f);
+    if(!f) goto oops;
+    w = a[1]->t == T_STR ? fwrite(a[1]->s, 1, wn=strlen(a[1]->s), f) : fwrite(a[1]->B, 1, wn=a[1]->n, f);
+    if(w!=wn){ oops:
+        switch(debug("write", strerror(errno), DEBUG_RETRY | DEBUG_CONTINUE | DEBUG_ABORT)) {
+        case DEBUG_RETRY: if(f)fclose(f);goto retry;
+        case DEBUG_CONTINUE: break;
+        case DEBUG_ABORT: if(f)fclose(f); return NULL;
+        default: exit(1);
+        };
+    }
+    if(f)fclose(f);
     return v_int((int64_t)w);
 }
 V *bi_readlines(V **a, in) {

@@ -17,6 +17,7 @@
 #else
 #include <unistd.h>
 #include <sys/utsname.h>
+#include <sys/ioctl.h>
 #include <signal.h>
 #endif
 #include <time.h>
@@ -903,6 +904,20 @@ int env_load(Env *e, const char *path) {
     fclose(fp);
     return 1;
 }
+static int console_size[2]={80,25};
+static void get_console_size(void) {
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO b={0};
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE),&b);
+    console_size[0]=b.dwSize.X;
+    console_size[1]=b.dwSize.Y;
+#else
+    struct winsize a={0};char*b;
+    if(!ioctl(0,TIOCGWINSZ,&a)&&a.ws_row>0&&a.ws_col>0){console_size[0]=a.ws_col,console_size[1]=a.ws_row;return;}
+    b=getenv("LINES");if(b)console_size[1]=atoi(b);
+    b=getenv("COLUMNS");if(b)console_size[0]=atoi(b);
+#endif
+}
 static void print_val(V *v, FILE *fp, int repr_mode) {
     if(!v) { fprintf(fp, "None"); return; }
     switch(v->t) {
@@ -1060,7 +1075,8 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
         fprintf(fp,"\n");
         for(int c=0;c<nc;c++) { for(int i=0;i<widths[c];i++) fputs("—",fp); fprintf(fp,"  "); }
         fprintf(fp,"\n");
-        for(int64_t r=0;r<nr && r<20;r++) {
+        int max_rows = console_size[1]-2;if(max_rows<20)max_rows=20;
+        for(int64_t r=0;r<nr && r<max_rows;r++) {
             for(int c=0;c<nc;c++) {
                 V *col=data->L[c]; char buf[64];
                 if(col->t==T_IVEC) snprintf(buf,64,"%lld",(long long)col->J[r]);
@@ -1080,7 +1096,7 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
             }
             fprintf(fp,"\n");
         }
-        if(nr>20) fprintf(fp,"... %lld more rows\n",(long long)(nr-20));
+        if(nr>max_rows) fprintf(fp,"... %lld more rows\n",(long long)(nr-max_rows));
         free(widths); break;
     }
     case T_FN:
@@ -3815,14 +3831,44 @@ static int shakti_sql_enabled(Env *e) {
     V *v = env_get(e, SHAKTI_SQL_FLAG);
     return v && v->t == T_BOOL && v->b;
 }
-static int run_repl(Env *e, int depth);
+static int run_repl(Env *e, int debug_f);
+extern __thread Env*shakti_builtin_call_env;
+int debug(const char *a,const char *b,int debug_f) {
+    printf("%s trouble: %s\n", a, b);
+    printf("try an expression");
+    if(debug_f & DEBUG_RETRY) printf(" or \\retry");
+    if(debug_f & DEBUG_ABORT) {
+      if(debug_f & DEBUG_CONTINUE) puts(" \\abort or \\continue"); else puts(" or \\abort");
+    } else if(debug_f & DEBUG_CONTINUE) puts(" or \\continue");
+    for(;;){
+        int t = run_repl(shakti_builtin_call_env, debug_f);
+        if(!t) {
+           if(debug_f & DEBUG_ABORT) {
+               g_error=1;
+               if(!g_error_val)v_free(g_error_val);
+               g_error_val = v_errf("%s: %s", a,b);
+               return DEBUG_ABORT;
+           }
+           exit(1);
+        }
+        if(t == 1) { // continue
+           if(g_error && (debug_f & DEBUG_ABORT))return DEBUG_ABORT;
+           if(!g_error && (debug_f & DEBUG_CONTINUE)) return DEBUG_CONTINUE;
+           printf("can't continue (stopped)\n");
+           g_returning = 0;
+           continue;
+        }
+        if(debug_f & DEBUG_RETRY) return DEBUG_RETRY;
+    }
+}
+
 static int uh(unsigned char c){return c < 'A' ? (c-'0') : c < 'a' ? (c - 'A')+10 : (c - 'a') + 10; }
 V *eval(Node *n, Env *e) {
     if(g_sigint){
        g_sigint=0;
        printf("Interrupt at :: "); node_sprint(n,stdout);
        printf("\nuse \\none to return None, \\raise to raise exception, or \\c to continue\n");
-       if(!(g_interactive && run_repl(e,1))){
+       if(!(g_interactive && run_repl(e,DEBUG_ABORT|DEBUG_CONTINUE))){
            g_error=1;
            if(!g_error_val)v_free(g_error_val);
            g_error_val = v_err("sigint");
@@ -4919,6 +4965,27 @@ V *eval(Node *n, Env *e) {
     case N_CONTINUE: { g_continuing = 1; return v_nil(); }
     case N_RAISE: {
         V *val = n->nch > 0 ? eval(n->ch[0], e) : v_err("Exception");
+        if(val && val->t == T_DICT) {
+            V*r=v_dict_get(val, "__retry__");
+            if(r) {
+                Env *call_env = env_new(r->closure);
+                V*fun = v_fn(v_ref(r->params), v_ref(r->defaults), fn_ast[r->j], call_env);
+                env_set(call_env,"self",val);
+                env_set(call_env,"__retry__",fun);
+                int t = run_repl(e,DEBUG_CONTINUE); // but no DEBUG_RETRY
+                v_ref(val);
+                env_free(call_env);
+                if(g_returning) {
+                    g_returning = 0;
+                    V *result = g_retval ? g_retval : v_nil();
+                    g_retval = NULL;
+                    v_free(val);
+                    return result;
+                }
+                if(t) return v_nil();
+            }
+        }
+
         g_error = 1;
         g_error_val = val->t == T_ERR ? v_ref(val) : v_errf("%s", v_to_str(val));
         v_free(val);
@@ -5407,10 +5474,20 @@ static void repl_print_runtime_doc(void) {
     if (!prev_blank) putchar('\n');
     fclose(f);
 }
-static int run_repl(Env *e, int depth) {
+static void v_print_console(V*result, int w){
+    char *buf = v_repr(result);
+    if(strlen(buf) >= (w-2)) { w-=5; buf[w++]='.'; buf[w++]='.'; buf[w++]='.'; buf[w++]='\0'; }
+    puts(buf);
+    free(buf);
+}
+
+static int run_repl(Env *e, int debug_f) {
 
     enum { REPL_INPUT_CAP = 262144 };
     char input[REPL_INPUT_CAP];
+#if SHAKTI_HL
+    int was_raw = hl_raw;
+#endif
     for (;;) {
 #if SHAKTI_HL
         char *line = hl_readline("> ",e);
@@ -5429,28 +5506,57 @@ static int run_repl(Env *e, int depth) {
         memcpy(input, line, inlen);
         input[inlen++] = '\n';
         input[inlen] = 0;
-        if (depth && (strcmp(line, "\\c") == 0 || strcasecmp(line, "\\continue") == 0)) {
-            printf("continuing...");
-            return 1;
-        }
-        if (depth && strcasecmp(line, "\\none") == 0) {
-            g_returning = 1;
-            if(g_retval) v_free(g_retval);
-            g_retval = v_nil();
-            return 1;
-        }
-        if (depth && strcasecmp(line, "\\raise") == 0) {
-            g_error = 1;
-            if(g_error_val) v_free(g_error_val);
-            g_error_val = v_err("abort");
-            return 1;
+
+        if (debug_f) {
+            if (strcmp(line, "\\c") == 0 || strcasecmp(line, "\\continue") == 0) {
+#if SHAKTI_HL
+                if(was_raw)hl_raw_on();
+#endif
+                if (debug_f & DEBUG_CONTINUE)return printf("continuing...\n"),1;
+                if (debug_f & DEBUG_RETRY)printf("can't continue. try \\abort \\retry or \\fail\n");
+            }
+            if (strcasecmp(line, "\\fail") == 0 || strcasecmp(line, "\\none") == 0) {
+                if(debug_f & DEBUG_CONTINUE) return 0; // use original exception
+                g_returning = 1;
+                if(g_retval) v_free(g_retval);
+                g_retval = v_nil();
+#if SHAKTI_HL
+                if(was_raw)hl_raw_on();
+#endif
+                return 1;
+            }
+            if (strcasecmp(line, "\\raise") == 0 || strcasecmp(line, "\\abort") == 0) {
+                g_error = 1;
+                if(g_error_val) v_free(g_error_val);
+                g_error_val = v_err("abort");
+                return 1;
+            }
+            if (strcasecmp(line, "\\retry") == 0 || strcasecmp(line, "\\r") == 0) {
+                V *fun=env_get(e,"__retry__");
+                if(fun) {
+#if SHAKTI_HL
+                    if(was_raw)hl_raw_on();
+#endif
+                    g_error = 0;
+                    V *r=eval(fn_ast[fun->j],e);
+                    g_returning = 1;
+                    if(g_retval) v_free(g_retval);
+                    g_retval = r;
+                    return 1;
+                }
+                if(debug_f & DEBUG_RETRY)return DEBUG_RETRY; // retry-signal
+                printf("can't retry\n");
+            }
+            continue;
         }
 
         if (strcmp(line, "\\v") == 0) {
+            get_console_size();
+            int w = console_size[0] - 16;
+            if(w<20)w=20;
             for(int i=0; i<e->len; i++) {
-                printf("%-15s", e->names[i]);
-                print_val(e->vals[i], stdout, 1);
-                printf("\n");
+                printf("%-15s ", e->names[i]);
+                v_print_console(e->vals[i], w);
             }
             continue;
         }
@@ -5495,8 +5601,18 @@ static int run_repl(Env *e, int depth) {
             if(g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
             g_error = 0;
         } else if(!shakti_prog_silent_last(prog) && result && result->t != T_NIL && result->t != T_ERR) {
-            print_val(result, stdout, 1);
-            putchar('\n');
+            get_console_size();
+            if(result->t == T_TABLE) {
+                v_print(result,1);
+            } else {
+                char *buf = v_repr(result);
+                if(strlen(buf) >= (console_size[0]-2)) {
+                    int w=console_size[0]-5;
+                    buf[w++]='.'; buf[w++]='.'; buf[w++]='.'; buf[w++]='\0';
+                }
+                puts(buf);
+                free(buf);
+            }
         }
         if(result && result->t == T_ERR) {
             fprintf(stderr, "Error: %s\n", result->s);
@@ -5599,7 +5715,7 @@ int shakti_lang_main(int argc, char **argv) {
     struct sigaction sa = {0};
     sa.sa_handler = sigint;
     sigaction(SIGINT, &sa, NULL);
-    g_interactive = interactive || isatty(STDIN_FILENO);
+    g_interactive = interactive;
 
     if (parse_profile) {
         const char *src = cmd;
@@ -5607,6 +5723,7 @@ int shakti_lang_main(int argc, char **argv) {
         if (!src && i < argc) {
             file_buf = read_file(argv[i]);
             if (!file_buf) return 1;
+            env_set(global, "__file__", v_str(argv[i]));
             src = file_buf;
         }
         if (!src) src = "x = 1 2 3\ny = abs -1.2\n";
@@ -5627,6 +5744,7 @@ int shakti_lang_main(int argc, char **argv) {
         const char *src = cmd;
         char *file_buf = NULL;
         if (!src && i < argc) {
+            env_set(global, "__file__", v_str(argv[i]));
             file_buf = read_file(argv[i]);
             if (!file_buf) return 1;
             src = file_buf;
@@ -5670,7 +5788,7 @@ int shakti_lang_main(int argc, char **argv) {
         char *slash = strrchr(g_script_dir, '/');
         if(slash) *slash = 0; else strcpy(g_script_dir, ".");
         char *src = read_file(argv[i]);
-        P(!src,1)
+        P(!src,1)if((*(unsigned char*)src)>1)g_interactive |= isatty(STDIN_FILENO);
         Node *prog = parse(src);
         V *r = eval(prog, global);
         int script_err = g_error || (r && r->t == T_ERR);
@@ -5682,6 +5800,7 @@ int shakti_lang_main(int argc, char **argv) {
         env_free(global);
         return script_err ? 1 : 0;
     } else {
+        g_interactive |= isatty(STDIN_FILENO);
         run_repl(global,0);
     }
     env_free(global);
