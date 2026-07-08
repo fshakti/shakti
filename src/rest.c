@@ -13,6 +13,7 @@
 #if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #endif
 
 #define REST_MAX_HANDLES 128
@@ -47,9 +48,25 @@ static void rest_init(void) {
     if (env && env[0]) strncpy(g_rest_token, env, sizeof g_rest_token - 1);
 }
 
-static int shell_unsafe(const char *s) { return s && strchr(s, '\''); }
+/* Reject request-splitting control characters (CR/LF) in values that end up in
+ * an HTTP request line or header. */
+static int rest_has_ctl(const char *s) {
+    if (!s) return 0;
+    for (; *s; s++)
+        if (*s == '\r' || *s == '\n') return 1;
+    return 0;
+}
 
-static char *read_all_file(const char *path, size_t *out_len) {
+/* Only allow real HTTP(S) URLs. This also prevents a leading '-' from being
+ * interpreted by curl as an option, and blocks file://, etc. */
+static int rest_valid_url(const char *u) {
+    return u && (!strncmp(u, "http://", 7) || !strncmp(u, "https://", 8));
+}
+
+/* Read a file fully, but never more than max_len bytes (0 = unlimited). Returns
+ * NULL on error or if the cap is exceeded, so untrusted curl output cannot grow
+ * memory without bound. */
+static char *read_all_file(const char *path, size_t *out_len, size_t max_len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     size_t cap = 4096, len = 0;
@@ -71,6 +88,11 @@ static char *read_all_file(const char *path, size_t *out_len) {
         }
         size_t n = fread(buf + len, 1, cap - len, f);
         len += n;
+        if (max_len && len > max_len) {
+            free(buf);
+            fclose(f);
+            return NULL;
+        }
         if (n == 0) break;
     }
     fclose(f);
@@ -131,7 +153,7 @@ static V *make_response(int status, const char *raw_body, size_t body_len, V *he
 
 static V *parse_curl_headers(const char *path) {
     V *hdrs = v_dict(v_list(0), v_list(0));
-    char *text = read_all_file(path, NULL);
+    char *text = read_all_file(path, NULL, REST_MAX_HDR);
     if (!text) return hdrs;
     char *line = text;
     int past_status = 0;
@@ -216,16 +238,45 @@ static ssize_t rest_read_line(int fd, char *buf, size_t cap) {
     return (ssize_t)i;
 }
 
+/* Run curl with an explicit argv (no shell) and capture its stdout (the
+ * -w http_code) into code_path. Returns curl's exit status, or -1 on error.
+ * Because arguments are passed literally via execvp, shell metacharacters in
+ * the URL/headers/token carry no meaning: there is no command-injection path. */
+static int rest_run_curl(char *const argv[], const char *code_path) {
+    int ofd = open(code_path, O_WRONLY | O_TRUNC, 0600);
+    if (ofd < 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(ofd);
+        return -1;
+    }
+    if (pid == 0) {
+        dup2(ofd, STDOUT_FILENO);
+        int dn = open("/dev/null", O_WRONLY);
+        if (dn >= 0) dup2(dn, STDERR_FILENO);
+        close(ofd);
+        if (dn >= 0) close(dn);
+        execvp("curl", argv);
+        _exit(127);
+    }
+    close(ofd);
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    return -1;
+}
+
 static V *rest_http_request(const char *method, const char *url, const char *body,
                             const char *content_type, V *extra_hdrs) {
     rest_init();
     if (!method || !method[0] || !url || !url[0])
         return v_err("rest: empty method or url");
-    if (shell_unsafe(url) || shell_unsafe(g_rest_token) || shell_unsafe(method))
-        return v_err("rest: unsafe character in method, url, or token");
-    if (body && shell_unsafe(body)) return v_err("rest: unsafe character in body");
-    if (content_type && shell_unsafe(content_type))
-        return v_err("rest: unsafe character in content_type");
+    if (rest_has_ctl(method) || rest_has_ctl(url) || rest_has_ctl(g_rest_token))
+        return v_err("rest: invalid control character in method, url, or token");
+    if (content_type && rest_has_ctl(content_type))
+        return v_err("rest: invalid control character in content_type");
+    if (!rest_valid_url(url))
+        return v_err("rest: url must start with http:// or https://");
 
     char hdr_tmpl[] = "/tmp/shakti-rest-hdr-XXXXXX";
     char body_tmpl[] = "/tmp/shakti-rest-body-XXXXXX";
@@ -244,11 +295,13 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     close(code_fd);
 
     char data_tmpl[] = "/tmp/shakti-rest-data-XXXXXX";
-    char data_opt[256];
-    data_opt[0] = 0;
-    int data_fd = -1;
+    int have_data = 0;
+    char ct_hdr[512];
+    char data_at[sizeof data_tmpl + 1];
+    ct_hdr[0] = 0;
+    data_at[0] = 0;
     if (body && body[0]) {
-        data_fd = mkstemp(data_tmpl);
+        int data_fd = mkstemp(data_tmpl);
         if (data_fd < 0) {
             unlink(hdr_tmpl);
             unlink(body_tmpl);
@@ -266,38 +319,88 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         }
         close(data_fd);
         const char *ct = (content_type && content_type[0]) ? content_type : "application/json";
-        snprintf(data_opt, sizeof data_opt,
-                 "-H 'Content-Type: %s' --data-binary @%s", ct, data_tmpl);
+        snprintf(ct_hdr, sizeof ct_hdr, "Content-Type: %s", ct);
+        snprintf(data_at, sizeof data_at, "@%s", data_tmpl);
+        have_data = 1;
     }
 
-    char auth[4200];
-    auth[0] = 0;
+    char auth_hdr[4200];
+    auth_hdr[0] = 0;
     if (g_rest_token[0])
-        snprintf(auth, sizeof auth, "-H 'Authorization: Bearer %s'", g_rest_token);
+        snprintf(auth_hdr, sizeof auth_hdr, "Authorization: Bearer %s", g_rest_token);
 
-    char extra[8192];
-    extra[0] = 0;
+    /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
+     * literal argument, so URL/header/token contents cannot inject a command. */
+    int nextra = (extra_hdrs && extra_hdrs->t == T_DICT) ? (int)extra_hdrs->keys->n : 0;
+    int max_args = 24 + nextra * 2;
+    char **argv = calloc((size_t)max_args, sizeof(char *));
+    char **hdr_lines = calloc((size_t)(nextra > 0 ? nextra : 1), sizeof(char *));
+    if (!argv || !hdr_lines) {
+        free(argv);
+        free(hdr_lines);
+        if (have_data) unlink(data_tmpl);
+        unlink(hdr_tmpl);
+        unlink(body_tmpl);
+        unlink(code_tmpl);
+        return v_err("rest: out of memory");
+    }
+    int nh = 0;
+    int ac = 0;
+    argv[ac++] = "curl";
+    argv[ac++] = "-sS";
+    argv[ac++] = "-m";
+    argv[ac++] = "60";
+    argv[ac++] = "-X";
+    argv[ac++] = (char *)method;
+    if (auth_hdr[0]) {
+        argv[ac++] = "-H";
+        argv[ac++] = auth_hdr;
+    }
     if (extra_hdrs && extra_hdrs->t == T_DICT) {
-        size_t pos = 0;
-        for (int64_t i = 0; i < extra_hdrs->keys->n && pos + 64 < sizeof extra; i++) {
+        for (int64_t i = 0; i < extra_hdrs->keys->n; i++) {
             V *k = extra_hdrs->keys->L[i];
             V *v = extra_hdrs->vals->L[i];
             if (k->t != T_STR || v->t != T_STR) continue;
-            if (shell_unsafe(k->s) || shell_unsafe(v->s))
-                return v_err("rest: unsafe character in headers");
-            int n = snprintf(extra + pos, sizeof extra - pos, " -H '%s: %s'", k->s, v->s);
-            if (n < 0) break;
-            pos += (size_t)n;
+            if (rest_has_ctl(k->s) || rest_has_ctl(v->s)) {
+                for (int j = 0; j < nh; j++) free(hdr_lines[j]);
+                free(hdr_lines);
+                free(argv);
+                if (have_data) unlink(data_tmpl);
+                unlink(hdr_tmpl);
+                unlink(body_tmpl);
+                unlink(code_tmpl);
+                return v_err("rest: invalid control character in headers");
+            }
+            size_t ln = strlen(k->s) + strlen(v->s) + 3;
+            char *line = malloc(ln);
+            if (!line) continue;
+            snprintf(line, ln, "%s: %s", k->s, v->s);
+            hdr_lines[nh++] = line;
+            argv[ac++] = "-H";
+            argv[ac++] = line;
         }
     }
+    if (have_data) {
+        argv[ac++] = "-H";
+        argv[ac++] = ct_hdr;
+        argv[ac++] = "--data-binary";
+        argv[ac++] = data_at;
+    }
+    argv[ac++] = "-D";
+    argv[ac++] = hdr_tmpl;
+    argv[ac++] = "-o";
+    argv[ac++] = body_tmpl;
+    argv[ac++] = "-w";
+    argv[ac++] = "%{http_code}";
+    argv[ac++] = (char *)url;
+    argv[ac] = NULL;
 
-    char cmd[24576];
-    snprintf(cmd, sizeof cmd,
-             "curl -sS -m 60 -X %s %s%s %s -D '%s' -o '%s' -w '%%{http_code}' '%s' > '%s' 2>/dev/null",
-             method, auth, extra, data_opt[0] ? data_opt : "", hdr_tmpl, body_tmpl, url, code_tmpl);
+    int rc = rest_run_curl(argv, code_tmpl);
 
-    int rc = system(cmd);
-    if (data_opt[0]) unlink(data_tmpl);
+    for (int j = 0; j < nh; j++) free(hdr_lines[j]);
+    free(hdr_lines);
+    free(argv);
+    if (have_data) unlink(data_tmpl);
     if (rc != 0) {
         unlink(hdr_tmpl);
         unlink(body_tmpl);
@@ -305,12 +408,12 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         return v_err("rest: curl request failed");
     }
 
-    char *code_s = read_all_file(code_tmpl, NULL);
+    char *code_s = read_all_file(code_tmpl, NULL, 64);
     int status = code_s ? atoi(code_s) : 0;
     free(code_s);
 
     size_t blen = 0;
-    char *raw_body = read_all_file(body_tmpl, &blen);
+    char *raw_body = read_all_file(body_tmpl, &blen, REST_MAX_BODY);
     V *hdrs = parse_curl_headers(hdr_tmpl);
     unlink(hdr_tmpl);
     unlink(body_tmpl);
