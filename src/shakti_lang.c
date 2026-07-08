@@ -4817,9 +4817,13 @@ static char *read_file(const char *path) {
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char *buf = malloc(sz+2);
-    fread(buf, 1, sz, f);
-    buf[sz] = '\n'; buf[sz+1] = 0;
+    /* Guard against ftell failure (e.g. path is a directory): a negative sz
+     * would make buf[sz] a heap underflow and fread read (size_t)-1 bytes. */
+    if (sz < 0) { fprintf(stderr, "cannot read %s\n", path); fclose(f); return NULL; }
+    char *buf = malloc((size_t)sz + 2);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)sz, f);
+    buf[got] = '\n'; buf[got+1] = 0;
     fclose(f);
     return buf;
 }

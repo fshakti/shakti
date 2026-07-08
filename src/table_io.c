@@ -30,13 +30,15 @@ int table_save(V *table, const char *path) {
     return -1;
 }
 
+/* Upper bound on a single CSV file read fully into memory. */
+#define SHAKTI_CSV_MAX_FILE (256u * 1024u * 1024u)
 static char *read_all(const char *s) {
     FILE *f = fopen(s, "rb");
     P(!f, NULL)
     fseek(f, 0, SEEK_END);
     long z = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (z < 0) {
+    if (z < 0 || (unsigned long)z > SHAKTI_CSV_MAX_FILE) {
         fclose(f);
         return NULL;
     }
@@ -45,8 +47,10 @@ static char *read_all(const char *s) {
         fclose(f);
         return NULL;
     }
-    fread(b, 1, (size_t)z, f);
-    b[z] = 0;
+    /* Use the actual byte count so a short read can't leave the tail
+     * uninitialized before the NUL terminator. */
+    size_t got = fread(b, 1, (size_t)z, f);
+    b[got] = 0;
     fclose(f);
     return b;
 }

@@ -28,6 +28,7 @@ static void xml_ch(void*ud,const XML_Char*s,int len){
  n[o+(size_t)len]=0;
  free(last->s);
  last->s=n;}
+#define SHAKTI_XML_MAX_FILE (256u * 1024u * 1024u)
 V*table_xml_load(const char*path,V*columns_opt){
  (void)columns_opt;
  FILE*f=fopen(path,"rb");
@@ -35,10 +36,11 @@ V*table_xml_load(const char*path,V*columns_opt){
  fseek(f,0,SEEK_END);
  long z=ftell(f);
  fseek(f,0,SEEK_SET);
+ if(z<0||(unsigned long)z>SHAKTI_XML_MAX_FILE){fclose(f);return v_err("xml: file too large or unreadable");}
  char*buf=malloc((size_t)z+1);
  if(!buf){fclose(f);return v_err("xml: oom");}
- fread(buf,1,(size_t)z,f);
- buf[z]=0;
+ size_t got=fread(buf,1,(size_t)z,f);
+ buf[got]=0;
  fclose(f);
  struct xml_cb cb;
  memset(&cb,0,sizeof(cb));
@@ -57,7 +59,7 @@ V*table_xml_load(const char*path,V*columns_opt){
  XML_SetUserData(p,&cb);
  XML_SetElementHandler(p,xml_start,NULL);
  XML_SetCharacterDataHandler(p,xml_ch);
- if(XML_Parse(p,buf,(int)z,1)==XML_STATUS_ERROR){
+ if(XML_Parse(p,buf,(int)got,1)==XML_STATUS_ERROR){
   XML_ParserFree(p);
   free(buf);
   v_free(cb.tag);
