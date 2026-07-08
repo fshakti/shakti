@@ -405,11 +405,11 @@ static V *rest_do_read(int conn_h) {
             return v_err("rest_read: headers too large");
         }
         if (hdr_len) {
-            strcat(hdr_block, "\n");
-            hdr_len++;
+            hdr_block[hdr_len++] = '\n';
         }
-        strcat(hdr_block, line);
+        memcpy(hdr_block + hdr_len, line, ll);
         hdr_len += ll;
+        hdr_block[hdr_len] = 0;
         char *colon = strchr(line, ':');
         if (colon) {
             *colon = 0;

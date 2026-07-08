@@ -374,11 +374,12 @@ int talk_set_locale(const char *locale, char *err, size_t err_cap) {
         snprintf(err, err_cap, "talk_set_locale: empty locale");
         return -1;
     }
-    if (strlen(locale) >= sizeof g_locale_override) {
+    size_t loclen = strlen(locale);
+    if (loclen >= sizeof g_locale_override) {
         snprintf(err, err_cap, "talk_set_locale: locale too long");
         return -1;
     }
-    strcpy(g_locale_override, locale);
+    memcpy(g_locale_override, locale, loclen + 1);
     return 0;
 }
 #else

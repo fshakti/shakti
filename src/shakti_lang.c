@@ -3487,12 +3487,15 @@ V *eval(Node *n, Env *e) {
                         break;
                     }
                 }
-                expr = malloc(strlen(raw) + 2);
+                size_t rawlen = strlen(raw);
+                expr = malloc(rawlen + 2);
                 if (!expr) {
                     free(raw);
                     goto fstr_oom;
                 }
-                sprintf(expr, "%s\n", raw);
+                memcpy(expr, raw, rawlen);
+                expr[rawlen] = '\n';
+                expr[rawlen + 1] = 0;
                 Node *ast = parse(expr);
                 V *val = eval(ast, e);
                 node_free(ast);
@@ -4878,8 +4881,9 @@ int shakti_lang_main(int argc, char **argv) {
         if(interactive) run_repl(global);
     } else if(i < argc) {
         strncpy(g_script_dir, argv[i], sizeof(g_script_dir)-1);
+        g_script_dir[sizeof(g_script_dir)-1] = 0;
         char *slash = strrchr(g_script_dir, '/');
-        if(slash) *slash = 0; else strcpy(g_script_dir, ".");
+        if(slash) *slash = 0; else { g_script_dir[0] = '.'; g_script_dir[1] = 0; }
         char *src = read_file(argv[i]);
         P(!src,1)
         Node *prog = parse(src);
