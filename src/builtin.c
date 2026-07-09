@@ -3,8 +3,10 @@
 #include "input.h"
 #include <time.h>
 #include <sys/time.h>
+#ifndef _WIN32
 #include <sys/select.h>
-#include <dirent.h>
+#include <signal.h>
+#endif
 #include <unistd.h>
 extern volatile int g_sigint;
 extern Node*parse_sql(const char*src);
@@ -31,7 +33,6 @@ extern V *bi_getcwd(V**,in);
 extern V *bi_mkdir(V**,in);
 extern V *bi_getenv(V**,in);
 extern V *bi_machine(V**,in);
-extern V *bi_sh(V**,in);
 extern V *bi_re_findall(V**,in);
 extern V *bi_re_sub(V**,in);
 extern V *bi_re_match(V**,in);
@@ -490,27 +491,38 @@ static V *bi_max(V **a, in) {
     return v_nil();
 }
 static V *bi_sleep(V**a,in) {
-    struct timeval tv={0},*tvp=NULL;
+    unsigned long long sec=0, usec=0;
+    char forever=0;
     if(n>0) {
         if(a[0]->t == T_FLOAT) {
-            tv.tv_sec = (long long)a[0]->f;
-            tv.tv_usec = (long long)((a[0]->f*1e6) - (tv.tv_sec*1e6));
-            tvp=&tv;
+            sec = (long long)a[0]->f;
+            usec = (long long)((a[0]->f*1e6) - (sec*1e6));
         } else if(a[0]->t == T_INT) {
-            tv.tv_sec = (long long)a[0]->j;
-            tvp=&tv;
+            sec = (long long)a[0]->j;
         } else if(a[0]->t == T_CHAR) {
-            tv.tv_sec = 0;
-            tv.tv_usec = a[0]->j * 5000;
-            tvp=&tv;
+            sec = 0;
+            usec = a[0]->j * 5000;
         } else if(a[0]->t == T_NIL) {
+            forever=1;
         } else {
             return v_err("sleep(time)");
         }
     }
-    select(0,NULL,NULL,NULL,tvp);
+
+#ifdef _WIN32
+    SleepEx((sec*1000)+((int64_t)(usec/1000)),TRUE);
+#else
+    if(forever) {
+        int s=0;sigset_t sig;sigemptyset(&sig);sigaddset(&sig,SIGINT);
+        do sigwait(&sig,&s); while (s!=SIGINT);g_sigint=1;
+    } else {
+        struct timeval tv={0};
+        tv.tv_sec = sec; tv.tv_usec = usec;
+        select(0,NULL,NULL,NULL,&tv);
+    }
     if(g_sigint) return g_sigint=0,v_err("interrupted");
     return v_nil();
+#endif
 }
 static V *bi_abs(V **a, in) {
     P(n < 1,v_int(0))
@@ -870,7 +882,7 @@ static MS V *bi_w_time_ms(V **a,in,V **k,V **v,int nk,Env *e){
 BI0(fread) BI0(fwrite) BI0(readlines) BI0(listdir) BI0(walk) BI0(stat)
 BI0(path_join) BI0(path_exists) BI0(path_isdir) BI0(path_isfile)
 BI0(path_basename) BI0(path_dirname) BI0(path_splitext)
-BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine) BI0(sh)
+BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine)
 BI0(re_findall) BI0(re_sub) BI0(re_match) BI0(re_split)
 BI0(json_loads) BI0(json_dumps) BI0(json_load) BI0(json_dump)
 BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(chr) BI0(ord) BI0(hex)
@@ -994,7 +1006,6 @@ static const BiEntry bi_tab[] = {
     {"repr", bi_w_repr},
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
-    {"sh", bi_w_sh},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
     {"sleep", bi_w_sleep},
@@ -1130,21 +1141,18 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
                 i(nargs-1,keys->L[i]=v_ref(v_ref(args[i]));vals->L[i]=builtin_call("load",args+i,1,kwn,kwv,nkw,e));
                 result=check_table(v_table(keys,vals));
             } else {
-                V*keys = v_list(0);
-                V*vals = v_list(0);
-                DIR*dir=opendir(".");
-                struct dirent*d;
+                V*dot=v_str(".");
+                V*keys = bi_listdir(&dot,1);
+                V*vals = v_list(keys->n);
                 int pn = strlen(args[0]->s);
-                while((d=readdir(dir))) {
-                    if(*d->d_name == '.')continue;
-                    v_list_append(keys, v_str(d->d_name));
-                    int sn = pn+ strlen(d->d_name)+2;
+                i(keys->n,{
+                    char *d = keys->L[i]->s;
+                    int sn = pn+ strlen(d)+2;
                     char *s = malloc(sn);
-                    snprintf(s,sn,"%s/%s",args[0]->s,d->d_name);
+                    snprintf(s,sn,"%s/%s",args[0]->s,d);
                     V*fun = v_fn(NULL, v_str(s), NULL, NULL);
-                    v_list_append(vals, fun);free(s);
-                }
-                closedir(dir);
+                    vals->L[i] = fun;free(s);
+                })
                 result=v_dict(keys,vals);
             }
             extern int start_dir;

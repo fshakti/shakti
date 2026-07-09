@@ -413,15 +413,6 @@ V *bi_getenv(V **a, in) {
     const char *v = getenv(a[0]->s);
     return v ? v_str(v) : v_nil();
 }
-V *bi_sh(V **a, in) {
-    P(n < 1 || a[0]->t != T_STR,v_err("sh(cmd)"))
-#if defined(__EMSCRIPTEN__)
-    return v_err("sh: not available in WASM builds");
-#else
-    int rc = system(a[0]->s);
-    return v_int(rc);
-#endif
-}
 #if defined(SHAKTI_HAVE_POSIX_REGEX)
 V *bi_re_findall(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("re_findall(pat, s)"))
