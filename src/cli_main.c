@@ -24,8 +24,8 @@ static const char *shakti_banner_qr[] = {
 };
 #define SHAKTI_BANNER_QR_N (sizeof shakti_banner_qr / sizeof shakti_banner_qr[0])
 #define SHAKTI_BANNER_COL 41
-#define SHAKTI_QR_ORANGE "\033[38;2;255;127;0m"
-#define SHAKTI_QR_BLUE   "\033[48;2;0;90;200m"
+#define SHAKTI_QR_ORANGE "\033[38;2;237;124;58m"
+#define SHAKTI_QR_BLUE   "\033[48;2;42;71;245m"
 #define SHAKTI_QR_RST    "\033[0m"
 static const char *shakti_qr_next(const char *s) {
     unsigned char c = (unsigned char)*s;
