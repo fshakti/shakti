@@ -953,7 +953,7 @@ static V *append_cell(V *col, V *cell) {
     if (col->t == T_IVEC) {
         int64_t val = cell->t == T_INT ? cell->j : (int64_t)cell_float(cell, 0);
         if (col->rc == 1) {
-            int cap = col->_ht_cap >= (int)col->n ? col->_ht_cap : (int)col->n;
+            int cap = (int)col->_ht_cap >= (int)col->n ? (int)col->_ht_cap : (int)col->n;
             if (col->n >= cap) {
                 cap = cap ? cap * 2 : 8;
                 col->J = realloc(col->J, (size_t)cap * sizeof(int64_t));

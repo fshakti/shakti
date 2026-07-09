@@ -216,7 +216,7 @@ static void walk_inner(const char *base, V *out) {
 #if defined(SHAKTI_HAVE_DIRENT)
     WalkPaths wp = {0};
     walk_inner_paths(base, &wp);
-    if (out->_ht_cap < wp.n) {
+    if (out->_ht_cap < (uint32_t)wp.n) {
         out->_ht_cap = wp.n > 0 ? wp.n : 8;
         out->L = realloc(out->L, (size_t)out->_ht_cap * sizeof(V*));
     }
