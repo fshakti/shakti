@@ -1,6 +1,12 @@
 # shakti
 
-Small interpreted language
+Small interpreted language.
+
+>
+> see [docs/RUNTIME_API.md](docs/RUNTIME_API.md) for quickstart.
+>
+> tutorial and other stuff coming soon
+>
 
 ## build
 
