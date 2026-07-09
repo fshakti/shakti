@@ -36,23 +36,25 @@ d:thing(*range(69),b:"cool")
 
 ## Methods
 
-| Method | Types |
-|--------|-------|
-| `append(x)` | `list` |
-| `pop()` | `list` aka `list[]` |
-| `keys()`, `values()` | `dict`, `table` |
-| `len()` | `list`, `str`, `list[int]`, `list[float]`, `list[char]`, `list[bool]`, `matrix[int]`, `matrix[float]`, `matrix[char]`, `matrix[bool]` |
+| Method               | Applicable types |
+|----------------------|------------------|
+| `append(x)`          | `list` |
+| `pop()`              | `list` aka `list[]` |
+| `keys()`, `values()`   | `dict`, `table` |
+| `len()`              | `list`, `str`, `list[int]`, `list[float]`, `list[char]`, `list[bool]`, `matrix[int]`, `matrix[float]`, `matrix[char]`, `matrix[bool]` |
+
+- useful e.g. for when unfortunately-named var/function named `len` etc is in environment
 
 ## Vectors
 
 `range(n)` builds an `list[int]` `[0, 1, …, n - 1]`. Element-wise `+`, `-`, `*`, `/`, `//`, `%` work on matching-length `list[int]` / `list[float]` pairs (and scalar broadcast).
 
-| Builtin | Meaning |
-|---------|---------|
-| `dot(a, b)` | Inner product (fused; no intermediate vector) |
-| `sum(v)` | Sum of elements |
-| `min(v)`, `max(v)`, `avg(v)` | Reducers |
-| `abs(v)` | Element-wise absolute value |
+| Builtin                      | Meaning |
+|------------------------------|---------|
+| `dot(a, b)`                  | Inner product (fused; no intermediate vector) |
+| `sum(v)`                     | Sum of elements |
+| `min(v)`, `max(v)`, `avg(v)`     | Reducers |
+| `abs(v)`                     | Element-wise absolute value |
 
 ```ie
 a : range(1000000)
@@ -69,11 +71,11 @@ On large `list[float]`, `sum` uses a SIMD path when built with `make prod-speed`
 
 Rectangular nested literals promote to native matrix types. Ragged nested lists stay as `list`.
 
-| Type | Literal | `type()` name |
-|------|---------|---------------|
-| int | `[[1, 2], [3, 4]]` | `matrix[int]` |
-| float | `[[1.0, 2.0], [3.0, 4.0]]` | `matrix[float]` |
-| bool | `[[True, False], [False, True]]` | `matrix[bool]` |
+| Type  | Literal                          | `type()` name |
+|-------|----------------------------------|---------------|
+| int   | `[[1, 2], [3, 4]]`               | `matrix[int]` |
+| float | `[[1.0, 2.0], [3.0, 4.0]]`       | `matrix[float]` |
+| bool  | `[[True, False], [False, True]]` | `matrix[bool]` |
 
 ### Indexing and shape
 
@@ -91,14 +93,19 @@ shape(m)    # [rows, cols]
 
 ### Operators
 
-| Operator | Meaning |
-|----------|---------|
-| `@` | matrix multiply (`matrix[bool]` not supported) |
-| `+`, `-`, `*`, `/`, `//`, `%`, `**` | element-wise on numeric matrices |
-| unary `-` | element-wise negation (int/float matrices) |
-| `=`, `!=`, `<`, `>`, `<=`, `>=` | element-wise compare → `matrix[bool]` |
+| Operator  | Meaning |
+|-----------|---------|
+| `@`         | matrix multiply (`matrix[bool]` not supported) |
+| `+`, `-`, `*`   | type-preserving addition, subtraction, multiplication; element-wise on numeric matrices |
+| `//`, `%`     | integer-divison, modulo, produce integers element-wise |
+| `/`, `*``*`     | float-divison and power; element-wise on numeric matrices |
+| unary `-`   | element-wise negation (int/float matrices) |
+| `=`, `!=`, `<>` | element-wise compare (equal, not-equal, not-equal)     → `matrix[bool]` |
+| `<`, `<=`, `=<` | element-wise compare (less, less/eq, less/eq)          → `matrix[bool]` |
+| `>`, `>=`, `>=` | element-wise compare (greater, greater/eq, greater/eq) → `matrix[bool]` |
 
-`matrix[bool]` does not support arithmetic or `@`.
+- `matrix[bool]` does not support arithmetic or `@`.
+- `matrix[char]` is unsigned
 
 Mixed int/float operands promote to `matrix[float]` where needed.
 
@@ -117,7 +124,7 @@ Example: [`examples/matrix.ie`](../examples/matrix.ie).
 ### Printing
 
 - `print(m)` — column-aligned rows
-- `repr(m)` — compact `[[1, 2], [3, 4]]`
+- `repr(m)`  — compact `[[1, 2], [3, 4]]`
 
 ### Tables
 
@@ -171,12 +178,12 @@ line   : readline("name? ") # one blocking line
 wait(-1)                    # block until first event
 ```
 
-| Form | Meaning |
-|------|---------|
-| `input(0)` | Pending events (non-blocking list) |
-| `input(ms)` | Events within `ms` milliseconds |
-| `input(1)` | Stream of raw characters |
-| `input(2)` | Stream of `{code, modifiers, utf8, kind}` dicts |
+| Form              | Meaning |
+|-------------------|---------|
+| `input(0)`        | Pending events (non-blocking list) |
+| `input(ms)`       | Events within `ms` milliseconds |
+| `input(1)`        | Stream of raw characters |
+| `input(2)`        | Stream of `{code, modifiers, utf8, kind}` dicts |
 | `input("prompt")` | Stream of lines |
 
 ## SQL
@@ -198,11 +205,11 @@ delete from u where id = 2
 
 ## Modules
 
-| Module | Doc | Example |
-|--------|-----|---------|
-| `sql` | [SQL.md](SQL.md) | [`examples/sql_demo.ie`](../examples/sql_demo.ie) |
+| Module  | Doc                  | Example |
+|---------|----------------------|---------|
+| `sql`   | [SQL.md](SQL.md)     | [`examples/sql_demo.ie`](../examples/sql_demo.ie) |
 | `input` | [INPUT.md](INPUT.md) | [`examples/input_demo.ie`](../examples/input_demo.ie) |
-| `ipc` | [IPC.md](IPC.md) | [`examples/ipc_echo.ie`](../examples/ipc_echo.ie) |
+| `ipc`   | [IPC.md](IPC.md)     | [`examples/ipc_echo.ie`](../examples/ipc_echo.ie) |
 
 Index: [EXAMPLES.md](EXAMPLES.md).
 
@@ -228,8 +235,4 @@ Unwind the stack completely, return to the toplevel environment and stop all pro
 
 If an exception is raised implements `__retry__`, this function will be called instead,
 and its value will be returned.
-
-
-
-
 

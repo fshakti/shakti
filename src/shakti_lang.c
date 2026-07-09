@@ -5480,6 +5480,7 @@ static void repl_print_runtime_doc(void) {
     char line[4096];
     int in_code = 0;
     int prev_blank = 1;
+    char *nc = getenv("NO_COLORS");int colors=!(nc&&*nc)&&isatty(0);
     while (fgets(line, (int)sizeof line, f)) {
         size_t n = strlen(line);
         while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
@@ -5490,10 +5491,14 @@ static void repl_print_runtime_doc(void) {
             continue;
         }
         if (in_code) {
+#if SHAKTI_HL
+            if(colors){int i=strlen(line);hl_redraw("    ",line,i,i);putchar('\n');}else
+#endif
             puts(line);
             prev_blank = (n == 0);
             continue;
         }
+        int head=0;for(;head<7&&line[head]=='#';++head);
         if (repl_md_table_sep(line)) continue;
         repl_md_plain_line(line);
         if (line[0] == 0) {
@@ -5502,7 +5507,12 @@ static void repl_print_runtime_doc(void) {
             continue;
         }
         if (!prev_blank) putchar('\n');
-        puts(line);
+        if(colors&&head) {
+            printf("\x1b[1m");i(head,putchar('#'));putchar(' ');
+            printf("%s\x1b[0m\n",line);
+        } else {
+            puts(line);
+        }
         prev_blank = 0;
     }
     if (!prev_blank) putchar('\n');

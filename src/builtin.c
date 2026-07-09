@@ -1043,6 +1043,7 @@ int is_builtin(const char *name){
   if(strcmp(name,"save_context")==0)return 1;
   if(strcmp(name,"load_context")==0)return 1;
   if(strcmp(name,"load")==0)return 1;
+  if(strcmp(name,"save")==0)return 1;
   if(strcmp(name,"__apply__")==0)return 1;
   if(strcmp(name,"__invoke__")==0)return 1;
   return 0;
