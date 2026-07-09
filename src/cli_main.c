@@ -5,14 +5,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#if defined __has_include
-#if __has_include("shakti_version.h")
-#include "shakti_version.h"
-#endif
-#endif
-#ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.9.0"
-#endif
 extern int shakti_lang_main(int argc, char **argv);
 static const char *shakti_banner_qr[] = {
     "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
@@ -60,9 +52,15 @@ static void shakti_print_qr_line(const char *line,int row) {
     }
 }
 static void shakti_print_banner(void) {
+static char buildstamp[11]={ __DATE__[7], __DATE__[8], __DATE__[9], __DATE__[10], '.',
+__DATE__[0] == 'O' || __DATE__[0] == 'N' || __DATE__[0] == 'D' ? '1' : '0',
+__DATE__[0] == 'F' || __DATE__[0] == 'D' ? '2' : __DATE__[0] == 'M' ? ( __DATE__[2] == 'r' ? '3' : '5') : __DATE__[0] == 'A' ? ( __DATE__[2] == 'g' ? '8' : '4') : __DATE__[0] == 'S' ? '9' : __DATE__[0] == 'O' ? '0' : __DATE__[0] == 'N' || __DATE__[1] == 'a' ? '1' : __DATE__[2] == 'l' ? '7' : '6',
+'.', __DATE__[4] == ' ' ? '0' : __DATE__[4], __DATE__[5],0};
+
     char t0[80], t1[80], t2[80];
-    snprintf(t0, sizeof t0, "   shakti engine v%s", SHAKTI_PKG_VERSION);
-    snprintf(t1, sizeof t1, "   (c) shakti.com - %s", SHAKTI_PKG_VERSION);
+
+    snprintf(t0, sizeof t0, "   shakti engine %s", buildstamp);
+    snprintf(t1, sizeof t1, "   (c) shakti.com and contributors");
     snprintf(t2, sizeof t2, "   \\d docs  \\v vars  \\w names  quit|exit");
     const char *txt[] = { t0, t1, t2 };
     int txt_n = 3;

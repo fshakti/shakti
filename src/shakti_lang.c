@@ -6,9 +6,6 @@
 #include "shakti_version.h"
 #endif
 #endif
-#ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.9.0"
-#endif
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
@@ -410,11 +407,11 @@ V *v_datetime(int64_t ms_utc) {
     return v;
 }
 int shakti_parse_datetime_ms(const char *s, int64_t *out_ms) {
-    int y, M, d, H, m, S, ms;
+    int y, M, d, H, m, S, ms; char _[4];
     P(!s || !out_ms,0)
     P(strlen(s) < 23,0)
-    P(s[4] != '.' || s[7] != '.' || s[10] != 'T' || s[13] != ':' || s[16] != ':' || s[19] != '.',0)
-    P(sscanf(s, "%4d.%2d.%2dT%2d:%2d:%2d.%3d", &y, &M, &d, &H, &m, &S, &ms) != 7,0)
+    P((s[4] != '.' && s[4] != '-') || (s[7] != '.' && s[7] != '-') || (s[10] != 'T' && s[10] != 'D') || s[13] != ':' || s[16] != ':' || (s[19] != '.' && s[19] != ','),0)
+    P(sscanf(s, "%4d%c%2d%c%2d%c%2d:%2d:%2d%c%3d", &y, _, &M, _+1, &d, _+2, &H, &m, &S, _+3, &ms) != 11,0)
     struct tm tmv = {};
     tmv.tm_year = y - 1900;
     tmv.tm_mon = M - 1;
@@ -442,7 +439,7 @@ void shakti_format_datetime_ms(int64_t ms, char *buf, size_t cap) {
 int shakti_parse_date_ymd(const char *s, int64_t *out_ms) {
     int y, M, d;
     P(!s || !out_ms,0)
-    P(sscanf(s, "%4d-%2d-%2d", &y, &M, &d) != 3,0)
+    P(sscanf(s, "%4d.%2d.%2d", &y, &M, &d) != 3 && sscanf(s, "%4d-%2d-%2d", &y, &M, &d) != 3,0)
     struct tm tmv = {};
     tmv.tm_year = y - 1900;
     tmv.tm_mon = M - 1;
@@ -1324,11 +1321,27 @@ static Token lex_raw(Lexer *l) {
         if(shakti_parse_datetime_ms(tmp, &ms)) {
             Token t = {T_DATETIME_};
             t.ival = ms;
+            t.fval = 1.0;
             t.line = l->line;
             l->pos = p + 23;
             return t;
         }
     }
+    if(isdigit((unsigned char)c) && p + 11 <= l->len) {
+        char tmp[32];
+        memcpy(tmp, s + p, 11);
+        tmp[11]=0;
+        int64_t ms;
+        if(shakti_parse_date_ymd(tmp, &ms)) {
+            Token t = {T_DATETIME_};
+            t.ival = ms;
+            t.fval = 86400.0;
+            t.line = l->line;
+            l->pos = p + 23;
+            return t;
+        }
+    }
+
     /* Number (optional leading sign when not in noun context: -1, not a-1) */
     {
         int neg_lit = 0;
@@ -1544,7 +1557,7 @@ static Node *parse_atom(Lexer *l) {
     case T_INT_:
         n = node_new(N_INT); n->ival = t.ival; return n;
     case T_DATETIME_:
-        n = node_new(N_DATETIME); n->ival = t.ival; return n;
+        n = node_new(N_DATETIME); n->ival = t.ival; n->fval = t.fval; return n;
     case T_FLOAT_:
         n = node_new(N_FLOAT); n->fval = t.fval; return n;
     case T_CHARZ_:
@@ -3887,7 +3900,9 @@ V *eval(Node *n, Env *e) {
     case N_BOOL: return v_bool(n->ival);
     case N_NONE: return v_nil();
     case N_PASS: return v_nil();
-    case N_DATETIME: return v_datetime(n->ival);
+    case N_DATETIME:
+        if(n->fval>1)return v_date(n->ival);
+        return v_datetime(n->ival);
     case N_SELECT: {
         V *from0 = eval(n->ch[0], e);
         V *from;

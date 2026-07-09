@@ -62,24 +62,19 @@ ifeq ($(SHAKTI_IPC),1)
   endif
 endif
 
-shakti: $(BUILD)/shakti_version.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE)
+shakti: src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(LDFLAGS) $(IPC_LDFLAGS)
 
-$(BUILD)/shakti_version.h: src/VERSION
-	@mkdir -p $(BUILD)
-	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
-
 clean:
 	rm -f shakti
-	rm -f $(BUILD)/shakti_version.h
 	rm -rf build/ shakti/ *.dSYM shakti.zip
 
 PROD_RELEASE_CFLAGS := -fno-stack-protector
 
-prod: $(BUILD)/shakti_version.h
+prod:
 	$(MAKE) prod-size SHAKTI_PORTABLE_CPU=1
 
 PROD_SIZE_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -Os -DNDEBUG -DSHAKTI_MINSIZE=1 $(PROD_RELEASE_CFLAGS)
