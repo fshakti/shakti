@@ -23,8 +23,6 @@ import sql
 r : select id, amount by dept from t where amount > 15
 ```
 
-**Note:** `n - 1` after a variable parses as a call (`n(-1)`). Use `n + (-1)` instead.
-
 ## Methods
 
 | Method | Types |
@@ -169,7 +167,6 @@ wait(-1)                    # block until first event
 | `input(1)` | Stream of raw characters |
 | `input(2)` | Stream of `{code, modifiers, utf8, kind}` dicts |
 | `input("prompt")` | Stream of lines |
-| `input_set_own_gui(1)` | Synth window keys go to hub only (see [SYNTH.md](SYNTH.md)) |
 
 ## SQL
 
@@ -194,11 +191,7 @@ delete from u where id = 2
 |--------|-----|---------|
 | `sql` | [SQL.md](SQL.md) | [`examples/sql_demo.ie`](../examples/sql_demo.ie) |
 | `input` | [INPUT.md](INPUT.md) | [`examples/input_demo.ie`](../examples/input_demo.ie) |
-| `synth` | [SYNTH.md](SYNTH.md) | [`examples/synth_demo.ie`](../examples/synth_demo.ie) |
-| `talk` | [TALK.md](TALK.md) | [`examples/talk_demo.ie`](../examples/talk_demo.ie) |
 | `ipc` | [IPC.md](IPC.md) | [`examples/ipc_echo.ie`](../examples/ipc_echo.ie) |
-| `lissen` | [LISSEN.md](LISSEN.md) | [`examples/lissen_demo.ie`](../examples/lissen_demo.ie) |
-| `sonicpi` | [SONICPI.md](SONICPI.md) | [`examples/sonicpi_demo.ie`](../examples/sonicpi_demo.ie) |
 
 Index: [EXAMPLES.md](EXAMPLES.md).
 
