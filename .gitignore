@@ -38,3 +38,11 @@ shakti-standalone
 # env
 .env
 .env.*
+
+# local scripts
+vuln_scan.sh
+
+# static analyzer / stray local artifacts
+/*.plist
+stluRITA
+

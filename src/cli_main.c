@@ -17,75 +17,22 @@
 #define SHAKTI_PKG_VERSION "0.9.0"
 #endif
 extern int shakti_lang_main(int argc, char **argv);
-static const char *shakti_banner_qr[] = {
-    "█ ▄▄▄▄▄ ██▀▄██   ▀█ ▄▄▄▄▄ █",
-    "█ █   █ █▄▀█▄▀▀█▄██ █   █ █",
-    "█ █▄▄▄█ ██▄▀▀ ▄  ▀█ █▄▄▄█ █",
-    "█▄▄▄▄▄▄▄█ █▄▀▄█▄█▄█▄▄▄▄▄▄▄█",
-    "█ ▄▄▀▄ ▄▄▄▀█▀ ▀██   ███▄█▀█",
-    "█▄▄▄▀▀█▄██▀ ▄ ▀ █ ▀█ ██▄ ▄█",
-    "█▄▀▀▄▀▄▄ ▄█  ██ ▄▄  ▄█ █▄ █",
-    "█▄▀▀ ▀▄▄▀ █ ▀█▄█▀██▄▄▀█▄ ▄█",
-    "█▄█▄██▄▄▄▀▄█▀ ▀█  ▄▄▄  █▀▀█",
-    "█ ▄▄▄▄▄ █  ▀▄ ▀ ▄ █▄█  █  █",
-    "█ █   █ █▄ ▀ ██ ▀▄▄▄   ▀█▄█",
-    "█ █▄▄▄█ █ █▄▀█▄█▄ ▀▀█ ▀█▀▄█",
-    "█▄▄▄▄▄▄▄█▄█▄█▄██▄▄▄█▄███▄▄█",
-};
-#define SHAKTI_BANNER_QR_N (sizeof shakti_banner_qr / sizeof shakti_banner_qr[0])
-#define SHAKTI_BANNER_COL 41
-#define SHAKTI_QR_ORANGE "\033[38;2;255;127;0m"
-#define SHAKTI_QR_BLUE   "\033[48;2;0;90;200m"
-#define SHAKTI_QR_RST    "\033[0m"
-static const char *shakti_qr_next(const char *s) {
-    unsigned char c = (unsigned char)*s;
-    if (!c) return s;
-    if (c < 0x80) return s + 1;
-    if ((c & 0xE0) == 0xC0) return s + 2;
-    if ((c & 0xF0) == 0xE0) return s + 3;
-    if ((c & 0xF8) == 0xF0) return s + 4;
-    return s + 1;
-}
-static void shakti_print_qr_line(const char *line) {
-    for (const char *p = line; *p; p = shakti_qr_next(p)) {
-        if (*p == ' ') fprintf(stderr, SHAKTI_QR_BLUE " " SHAKTI_QR_RST);
-        else {
-            char ch[8];
-            const char *q = shakti_qr_next(p);
-            size_t n = (size_t)(q - p);
-            if (n >= sizeof ch) n = sizeof ch - 1;
-            memcpy(ch, p, n);
-            ch[n] = 0;
-            fprintf(stderr, SHAKTI_QR_ORANGE SHAKTI_QR_BLUE "%s" SHAKTI_QR_RST, ch);
-        }
-    }
-}
 static void shakti_print_banner(void) {
     char t0[80], t1[80], t2[80];
     snprintf(t0, sizeof t0, "   shakti engine v%s", SHAKTI_PKG_VERSION);
     snprintf(t1, sizeof t1, "   (c) shakti.com - %s", SHAKTI_PKG_VERSION);
     snprintf(t2, sizeof t2, "   \\d docs  \\v vars  \\w names  quit|exit");
-    const char *txt[] = { t0, t1, t2 };
-    int txt_n = 3;
-    int rows = (int)SHAKTI_BANNER_QR_N > txt_n ? (int)SHAKTI_BANNER_QR_N : txt_n;
-    for (int i = 0; i < rows; i++) {
-        if (i < txt_n) fprintf(stderr, "%-*s", SHAKTI_BANNER_COL, txt[i]);
-        else fprintf(stderr, "%*s", SHAKTI_BANNER_COL, "");
-        if (i < (int)SHAKTI_BANNER_QR_N) {
-            fputc(' ', stderr);
-            shakti_print_qr_line(shakti_banner_qr[i]);
-        }
-        fprintf(stderr, "\n");
-    }
+    fprintf(stderr, "%s\n%s\n%s\n", t0, t1, t2);
 }
 static int shakti_flag_is(const char *arg, const char *name, const char *short_name) {
     return !strcmp(arg, name) || (short_name && !strcmp(arg, short_name));
 }
 static int shakti_parent_is_self(void) {
 #if defined(__linux__)
-    char self[4096], parent[4096];
+    char self[4096], parent[4096], ppath[64];
     ssize_t slen = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    ssize_t plen = readlink("/proc/ppid/exe", parent, sizeof(parent) - 1);
+    snprintf(ppath, sizeof(ppath), "/proc/%d/exe", (int)getppid());
+    ssize_t plen = readlink(ppath, parent, sizeof(parent) - 1);
     if (slen <= 0 || plen <= 0) return 0;
     self[slen] = parent[plen] = 0;
     return !strcmp(self, parent);

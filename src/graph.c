@@ -403,14 +403,23 @@ static void pool_free(NodePool *pool) {
 
 static int pool_ensure_aux(NodePool *pool, int **parent, int **depth, unsigned char **visited, int **q, int64_t *aux_cap) {
     if (pool->cap <= *aux_cap) return 0;
-    int *np = realloc(*parent, (size_t)pool->cap * sizeof(int));
-    int *nd = realloc(*depth, (size_t)pool->cap * sizeof(int));
-    unsigned char *nv = realloc(*visited, (size_t)pool->cap);
-    int *nq = realloc(*q, (size_t)pool->cap * sizeof(int));
-    P(!np || !nd || !nv || !nq, -1)
+    size_t cap = (size_t)pool->cap;
+    /* Assign each reallocated pointer back into the caller immediately after a
+     * successful realloc. On failure we return -1 with every caller pointer
+     * still pointing at a valid allocation, so the caller's cleanup frees each
+     * exactly once (no double-free) and nothing is leaked. aux_cap is left
+     * unchanged so the grow is retried on the next call. */
+    int *np = realloc(*parent, cap * sizeof(int));
+    if (!np) return -1;
     *parent = np;
+    int *nd = realloc(*depth, cap * sizeof(int));
+    if (!nd) return -1;
     *depth = nd;
+    unsigned char *nv = realloc(*visited, cap);
+    if (!nv) return -1;
     *visited = nv;
+    int *nq = realloc(*q, cap * sizeof(int));
+    if (!nq) return -1;
     *q = nq;
     *aux_cap = pool->cap;
     return 0;

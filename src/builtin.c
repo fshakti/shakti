@@ -90,6 +90,19 @@ extern V *bi_synth_looper_overdub(V**,in);
 extern V *bi_synth_looper_rec_on(V**,in);
 extern V *bi_synth_looper_play_on(V**,in);
 extern V *bi_synth_looper_has_loop(V**,in);
+extern V *bi_gfx_open(V**,in);
+extern V *bi_gfx_close(V**,in);
+extern V *bi_gfx_alive(V**,in);
+extern V *bi_gfx_available(V**,in);
+extern V *bi_gfx_tick(V**,in);
+extern V *bi_gfx_clear(V**,in);
+extern V *bi_gfx_fill_rect(V**,in);
+extern V *bi_gfx_line(V**,in);
+extern V *bi_gfx_fill_circle(V**,in);
+extern V *bi_gfx_click_pending(V**,in);
+extern V *bi_gfx_click_x(V**,in);
+extern V *bi_gfx_click_y(V**,in);
+extern V *bi_gfx_consume_click(V**,in);
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
 extern V *bi_ipc_connect(V**,in);
@@ -168,6 +181,9 @@ static const char *BUILTINS[] = {
     "synth_set_row_note","synth_row_note",
     "synth_looper_rec","synth_looper_play","synth_looper_clear","synth_looper_overdub",
     "synth_looper_rec_on","synth_looper_play_on","synth_looper_has_loop",
+    "gfx_open","gfx_close","gfx_alive","gfx_available","gfx_tick",
+    "gfx_clear","gfx_fill_rect","gfx_line","gfx_fill_circle",
+    "gfx_click_pending","gfx_click_x","gfx_click_y","gfx_consume_click",
     NULL
 };
 int is_builtin(const char *name){if(is_isolde_builtin(name))return 1;for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
@@ -868,6 +884,11 @@ BI0(synth_set_row_note) BI0(synth_row_note)
 BI0(synth_looper_rec) BI0(synth_looper_play) BI0(synth_looper_clear) BI0(synth_looper_overdub)
 BI0(synth_looper_rec_on) BI0(synth_looper_play_on) BI0(synth_looper_has_loop)
 #endif
+#ifdef SHAKTI_HAVE_GFX
+BI0(gfx_open) BI0(gfx_close) BI0(gfx_alive) BI0(gfx_available) BI0(gfx_tick)
+BI0(gfx_clear) BI0(gfx_fill_rect) BI0(gfx_line) BI0(gfx_fill_circle)
+BI0(gfx_click_pending) BI0(gfx_click_x) BI0(gfx_click_y) BI0(gfx_consume_click)
+#endif
 #ifdef SHAKTI_HAVE_IPC
 BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
 BI0(ipc_recv) BI0(ipc_recv_nowait) BI0(ipc_rdma_available) BI0(ipc_send)
@@ -912,6 +933,21 @@ static const BiEntry bi_tab[] = {
     {"getattr", bi_w_getattr},
     {"getcwd", bi_w_getcwd},
     {"getenv", bi_w_getenv},
+#ifdef SHAKTI_HAVE_GFX
+    {"gfx_alive", bi_w_gfx_alive},
+    {"gfx_available", bi_w_gfx_available},
+    {"gfx_clear", bi_w_gfx_clear},
+    {"gfx_click_pending", bi_w_gfx_click_pending},
+    {"gfx_click_x", bi_w_gfx_click_x},
+    {"gfx_click_y", bi_w_gfx_click_y},
+    {"gfx_close", bi_w_gfx_close},
+    {"gfx_consume_click", bi_w_gfx_consume_click},
+    {"gfx_fill_circle", bi_w_gfx_fill_circle},
+    {"gfx_fill_rect", bi_w_gfx_fill_rect},
+    {"gfx_line", bi_w_gfx_line},
+    {"gfx_open", bi_w_gfx_open},
+    {"gfx_tick", bi_w_gfx_tick},
+#endif
     {"graph_add", bi_w_graph_add},
     {"graph_clear", bi_w_graph_clear},
     {"graph_count", bi_w_graph_count},

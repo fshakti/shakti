@@ -390,7 +390,7 @@ V *v_dict(V *keys, V *vals) {
     return v;
 }
 V *v_table(V *cols, V *data) {
-    V *v=v_alloc(T_TABLE); v->n = (data->n>0 && data->L[0]) ? data->L[0]->n : 0;
+    V *v=v_alloc(T_TABLE); v->n = (data->n>0 && data->L && data->L[0]) ? data->L[0]->n : 0;
     v->keys=v_ref(cols); v->vals=v_ref(data);
     return v;
 }
@@ -3179,8 +3179,11 @@ static V *do_import(const char *name, Env *e) {
     }
     P(!f,v_errf("cannot import '%s'", name))
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    char *buf = malloc(sz+2);
-    fread(buf, 1, sz, f); buf[sz]='\n'; buf[sz+1]=0;
+    if(sz < 0) { fclose(f); return v_errf("cannot import '%s': invalid file size", name); }
+    char *buf = malloc((size_t)sz+2);
+    if(!buf) { fclose(f); return v_err("import: oom"); }
+    size_t got = fread(buf, 1, (size_t)sz, f);
+    buf[got]='\n'; buf[got+1]=0;
     fclose(f);
     Env *mod_env = env_new(e);
     Node *prog = parse(buf);
