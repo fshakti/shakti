@@ -5,7 +5,7 @@
 - **Bind** with `:` — `x: 1`, `a, b: (1, 2)`, `def f(n:2):`, `table(a:[1])`
 - **Compare** with `=` — `if x = 1:`, `while i < len(s):`
 - Dict literals and slices keep `:` — `{k: v}`, `a[1:3]`
-- `==` is not supported
+- `==` is not supported; `self` is redundant
 
 ```ie
 def index_of(s, ch):
@@ -21,20 +21,31 @@ for c in "abc":
 
 import sql
 r : select id, amount by dept from t where amount > 15
+
+class thing:
+  def __init__(*a,b:"default"):
+    self.a:a
+    self.b:b
+d:thing(*range(69),b:"cool")
 ```
+
+### Syntax and types
+
+- `list[char]` has dedicated syntax: `0x0000`, but other uniform lists just looks like `[1,2,3]`
+- `date`/`datetime` has dedicated syntax: `2026.07.09` or `2026.07.09D00:00:00.000` (iso8601 dates/times ok too)
 
 ## Methods
 
 | Method | Types |
 |--------|-------|
 | `append(x)` | `list` |
-| `pop()` | `list` |
+| `pop()` | `list` aka `list[]` |
 | `keys()`, `values()` | `dict`, `table` |
-| `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `matrix[int]`, `matrix[float]`, `matrix[bool]` |
+| `len()` | `list`, `str`, `list[int]`, `list[float]`, `list[char]`, `list[bool]`, `matrix[int]`, `matrix[float]`, `matrix[char]`, `matrix[bool]` |
 
 ## Vectors
 
-`range(n)` builds an `ivec` `[0, 1, …, n - 1]`. Element-wise `+`, `-`, `*`, `/`, `//`, `%` work on matching-length `ivec` / `fvec` pairs (and scalar broadcast).
+`range(n)` builds an `list[int]` `[0, 1, …, n - 1]`. Element-wise `+`, `-`, `*`, `/`, `//`, `%` work on matching-length `list[int]` / `list[float]` pairs (and scalar broadcast).
 
 | Builtin | Meaning |
 |---------|---------|
@@ -52,7 +63,7 @@ print(sum(a * b))      # same math; allocates a * b first
 
 **`.` is not dot product** — it is attribute / column access (`table.col`, `dict.key`). Matrix multiply is **`@`**. For a vector inner product use **`dot(a, b)`**.
 
-On large `fvec`, `sum` uses a SIMD path when built with `make prod-speed`. With `.so` loaded (``), `dot` / `sum` / `min` / `max` may delegate to faster `host_*` kernels.
+On large `list[float]`, `sum` uses a SIMD path when built with `make prod-speed`.
 
 ## Matrices
 
@@ -68,7 +79,7 @@ Rectangular nested literals promote to native matrix types. Ragged nested lists 
 
 ```ie
 m : [[1, 2], [3, 4]]
-m[0]        # row [1, 2] as ivec
+m[0]        # row [1, 2] as list[int]
 m[0, 1]     # cell 2
 m[0:1]      # row slice (submatrix)
 m[0] : [9, 8]   # assign row
@@ -99,7 +110,7 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 
 On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `@`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
-Vector **`dot`** and large **`sum`** on `fvec` use the same SIMD/OpenMP stack (`src/vec_kernels.c`). There is no GPU backend in the standalone binary.
+Vector **`dot`** and large **`sum`** on `list[float]` use the same SIMD/OpenMP stack (`src/vec_kernels.c`). There is no GPU backend in the standalone binary.
 
 Example: [`examples/matrix.ie`](../examples/matrix.ie).
 

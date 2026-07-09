@@ -34,3 +34,13 @@ print(a)
 a.doit()
 print(a.did_base_init)
 print([isinstance(a,foo),isinstance(a,base)])
+
+class thing:
+	def __init__(*a,b:"hello"):
+		self.a:a
+		self.b:b
+	def __str__():
+		return "thing<"+str(self.a)+";"+str(self.b)+">"
+
+a:thing(*range(9),b:"cool")
+print(str(a))

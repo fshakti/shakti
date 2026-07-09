@@ -991,11 +991,14 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
             if(!v->b){fprintf(fp,"<class#%ld>",v->j);break;}
             if(!repr_mode) {
                 V*r = v_dict_get(v, "__str__");
+printf("** found str %p\n",r);
                 if(r && r->t == T_FN && r->j > -1) {
                     Env*call_env=env_new(r->closure);
                     env_set(call_env,"self",v_ref(v));
                     Node *body = fn_ast[(int)r->j];
                     V *result = eval(body, call_env);
+printf("*** found str ast \n");
+v_print(result,1);
                     if(g_returning) {
                         g_returning = 0; v_free(result);
                         result = g_retval ? g_retval : v_nil();
@@ -4526,7 +4529,13 @@ V *eval(Node *n, Env *e) {
                     v_list_append(kwnames, v_str(n->ch[i]->sval));
                     v_list_append(kwvals, eval(n->ch[i]->ch[0], e));
                 } else if(n->ch[i]->type == N_UNOP && n->ch[i]->op == OP_MUL) {
-                    V *rest = eval(n->ch[i]->ch[0], e); i(rest->n, v_list_append(args, rest->L[i])); v_free(rest);
+                    V *rest = eval(n->ch[i]->ch[0], e);
+                    if(rest->t==T_LIST)i(rest->n, v_list_append(args, v_ref(rest->L[i])))
+                    else if(rest->t==T_IVEC)i(rest->n, v_list_append(args, v_int(rest->J[i])))
+                    else if(rest->t==T_FVEC)i(rest->n, v_list_append(args, v_float(rest->F[i])))
+                    else if(rest->t==T_BVEC)i(rest->n, v_list_append(args, v_bool(rest->B[i])))
+                    else if(rest->t==T_CVEC)i(rest->n, v_list_append(args, v_char(rest->B[i])))
+                    v_free(rest);
                 } else {
                     v_list_append(args, eval(n->ch[i], e));
                 }
@@ -4698,7 +4707,13 @@ V *eval(Node *n, Env *e) {
                 v_list_append(kwnames, v_str(n->ch[i]->sval));
                 v_list_append(kwvals, eval(n->ch[i], e));
             } else if(n->ch[i]->type == N_UNOP && n->ch[i]->op == OP_MUL) {
-                V *rest = eval(n->ch[i]->ch[0], e); i(rest->n, v_list_append(args, rest->L[i])); v_free(rest);
+                V *rest = eval(n->ch[i]->ch[0], e);
+                if(rest->t==T_LIST)i(rest->n, v_list_append(args, v_ref(rest->L[i])))
+                else if(rest->t==T_IVEC)i(rest->n, v_list_append(args, v_int(rest->J[i])))
+                else if(rest->t==T_FVEC)i(rest->n, v_list_append(args, v_float(rest->F[i])))
+                else if(rest->t==T_BVEC)i(rest->n, v_list_append(args, v_bool(rest->B[i])))
+                else if(rest->t==T_CVEC)i(rest->n, v_list_append(args, v_char(rest->B[i])))
+                v_free(rest);
             } else {
                 v_list_append(args, eval(n->ch[i], e));
             }
@@ -4706,6 +4721,11 @@ V *eval(Node *n, Env *e) {
 
         if(fn_node->type == N_NAME && is_builtin(fn_node->sval)) {
             V *r = builtin_call(fn_node->sval, args->L, args->n, kwnames->L, kwvals->L, kwnames->n, e);
+            v_free(args); v_free(kwnames); v_free(kwvals);
+            return r;
+        }
+        if(fn_node->type == N_UNOP && fn_node->op == OP_MUL && fn_node->nch && is_builtin(fn_node->ch[0]->sval)) {
+            V *r = builtin_call(fn_node->ch[0]->sval, args->L, args->n, kwnames->L, kwvals->L, kwnames->n, e);
             v_free(args); v_free(kwnames); v_free(kwvals);
             return r;
         }
