@@ -1023,7 +1023,7 @@ const char *builtin_complete(const char *s,in) {
 static BiCall bi_find(const char *name) {
     BiEntry key = {name, NULL};
     const BiEntry *hit = bsearch(&key, bi_tab, sizeof bi_tab / sizeof bi_tab[0], sizeof *hit, bi_name_cmp);
-#ifdef __APPLE__
+#ifndef NDEBUG
     if(!hit) {
           static int order_report = 0;
           if(!order_report)for(int i=1;i<sizeof(bi_tab)/sizeof(*bi_tab);++i,order_report=1){
@@ -1031,7 +1031,6 @@ static BiCall bi_find(const char *name) {
               if(g<1){
                   printf("%d is out of order (near %s <=> %s)\n",i,bi_tab[i].name,bi_tab[i-1].name);
               }
-              __builtin_abort();
           }
     }
 #endif
