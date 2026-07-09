@@ -61,6 +61,9 @@ shakti-standalone
 /CMakeLists.txt
 /CMakePresets.json
 
+# local install script (machine-specific)
+/
+
 # local env / notes
 .env
 .env.*

@@ -74,6 +74,15 @@ clean:
 
 PROD_RELEASE_CFLAGS := -fno-stack-protector
 
+# On Apple Silicon, `strip` mutates the Mach-O and invalidates the linker-signed
+# ad-hoc code signature, so the kernel SIGKILLs the binary at launch
+# ("Code Signature Invalid"). Re-sign ad-hoc after every strip. No-op elsewhere.
+ifeq ($(UNAME_S),Darwin)
+  MACOS_RESIGN := codesign --force --sign - shakti
+else
+  MACOS_RESIGN := :
+endif
+
 prod:
 	$(MAKE) prod-size SHAKTI_PORTABLE_CPU=1
 
@@ -84,6 +93,7 @@ prod-size: CFLAGS := $(PROD_SIZE_CFLAGS)
 prod-size: LDFLAGS := $(PROD_SIZE_LDFLAGS)
 prod-size: clean-shakti-artifacts shakti
 	strip shakti
+	$(MACOS_RESIGN)
 
 SHAKTI_PORTABLE_CPU ?= 0
 ifeq ($(SHAKTI_PORTABLE_CPU),1)
@@ -106,6 +116,7 @@ prod-speed: CFLAGS := $(PROD_SPEED_CFLAGS)
 prod-speed: LDFLAGS := $(PROD_SPEED_LDFLAGS)
 prod-speed: clean-shakti-artifacts shakti
 	strip shakti
+	$(MACOS_RESIGN)
 
 clean-shakti-artifacts:
 	rm -f shakti
