@@ -32,8 +32,8 @@ def line(prompt:""):
 def set_hz(n):
     input_set_hz(n)
 
-def set_own_gui(on):
-    input_set_own_gui(on)
+def set_own_gui(enable):
+    input_set_own_gui(enable)
 
 def reload_qwerty():
     input_qwerty_reload()

@@ -8,25 +8,17 @@
 #define GFX_MAC_W 960
 #define GFX_MAC_H 540
 
-@interface GfxView : NSView
+@interface GfxView : NSView {
+    NSBitmapImageRep *_rep;
+    int _repW;
+    int _repH;
+}
 @end
 
-@implementation GfxView
-- (BOOL)isFlipped { return YES; }
-- (void)drawRect:(NSRect)dirtyRect {
-    (void)dirtyRect;
-    uint32_t *px = gfx_core_present_pixels();
-    int w = gfx_core_present_width();
-    int h = gfx_core_present_height();
-    NSBitmapImageRep *rep;
+static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) {
     unsigned char *dst;
     int x, y;
-    if (!px || w <= 0 || h <= 0) return;
-    rep = [[NSBitmapImageRep alloc]
-        initWithBitmapDataPlanes:NULL pixelsWide:w pixelsHigh:h
-        bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
-        colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:w * 4 bitsPerPixel:32];
-    if (!rep) return;
+    if (!rep || !px || w <= 0 || h <= 0) return;
     dst = [rep bitmapData];
     for (y = 0; y < h; y++) {
         int dy = (h - 1) - y;
@@ -41,7 +33,13 @@
             p[3] = 255;
         }
     }
-    [rep drawInRect:self.bounds];
+}
+
+@implementation GfxView
+- (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    if (_rep) [_rep drawInRect:self.bounds];
 }
 - (void)mouseDown:(NSEvent *)ev {
     NSPoint p = [self convertPoint:ev.locationInWindow fromView:nil];
@@ -70,6 +68,20 @@
     if (chars.length > 0)
         [chars getCString:utf8 maxLength:sizeof utf8 encoding:NSUTF8StringEncoding];
     input_hub_inject_key((int)code, (int)[ev modifierFlags], utf8, 0);
+}
+- (void)gfxEnsureRep:(int)w h:(int)h {
+    if (_rep && _repW == w && _repH == h) return;
+    _rep = [[NSBitmapImageRep alloc]
+        initWithBitmapDataPlanes:NULL pixelsWide:w pixelsHigh:h
+        bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+        colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:w * 4 bitsPerPixel:32];
+    _repW = w;
+    _repH = h;
+}
+- (void)gfxUpdatePixels:(uint32_t *)px w:(int)w h:(int)h {
+    [self gfxEnsureRep:w h:h];
+    gfx_mac_blit_rep(_rep, px, w, h);
+    [self setNeedsDisplay:YES];
 }
 @end
 
@@ -131,7 +143,14 @@ void gfx_platform_shutdown(void) {
 }
 
 void gfx_platform_present(void) {
-    if (g_view) [g_view setNeedsDisplay:YES];
+    uint32_t *px;
+    int w, h;
+    if (!g_view) return;
+    px = gfx_core_present_pixels();
+    w = gfx_core_present_width();
+    h = gfx_core_present_height();
+    if (!px || w <= 0 || h <= 0) return;
+    [g_view gfxUpdatePixels:px w:w h:h];
 }
 
 int gfx_platform_poll(void) {
@@ -145,6 +164,5 @@ int gfx_platform_poll(void) {
         if (!ev) break;
         [NSApp sendEvent:ev];
     }
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, TRUE);
     return gfx_core_is_alive() ? 0 : -1;
 }

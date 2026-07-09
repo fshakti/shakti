@@ -50,14 +50,26 @@ static void gfx_letterbox(void) {
     g.off_x = (ww - (int)(GFX_DESIGN_W * g.ui_scale)) / 2;
     g.off_y = (wh - (int)(GFX_DESIGN_H * g.ui_scale)) / 2;
     if (!g.present || g.win_w <= 0 || g.win_h <= 0) return;
+    /* Fast path: 1:1 copy when window matches design buffer. */
+    if (g.ui_scale == 1.0f && g.off_x == 0 && g.off_y == 0 &&
+        ww == GFX_DESIGN_W && wh == GFX_DESIGN_H) {
+        memcpy(g.present, g.fb, (size_t)GFX_DESIGN_W * (size_t)GFX_DESIGN_H * sizeof(uint32_t));
+        return;
+    }
     for (y = 0; y < g.win_h; y++) {
-        for (x = 0; x < g.win_w; x++) {
-            dx = (int)((x - g.off_x) / g.ui_scale);
-            dy = (int)((y - g.off_y) / g.ui_scale);
-            if (dx < 0 || dy < 0 || dx >= GFX_DESIGN_W || dy >= GFX_DESIGN_H)
-                g.present[y * g.win_w + x] = 0x0a0a12;
-            else
-                g.present[y * g.win_w + x] = g.fb[dy * GFX_DESIGN_W + dx];
+        uint32_t *dst = g.present + (size_t)y * (size_t)g.win_w;
+        dy = (int)((y - g.off_y) / g.ui_scale);
+        if (dy < 0 || dy >= GFX_DESIGN_H) {
+            for (x = 0; x < g.win_w; x++) dst[x] = 0x0a0a12;
+            continue;
+        }
+        {
+            const uint32_t *src = g.fb + (size_t)dy * (size_t)GFX_DESIGN_W;
+            for (x = 0; x < g.win_w; x++) {
+                dx = (int)((x - g.off_x) / g.ui_scale);
+                if (dx < 0 || dx >= GFX_DESIGN_W) dst[x] = 0x0a0a12;
+                else dst[x] = src[dx];
+            }
         }
     }
 }
@@ -138,19 +150,33 @@ int gfx_tick(char *err, size_t err_cap) {
 }
 
 void gfx_clear(uint32_t color) {
-    size_t n = (size_t)g.design_w * (size_t)g.design_h;
+    size_t n;
     size_t i;
     if (!g.fb) return;
-    for (i = 0; i < n; i++) g.fb[i] = color;
+    n = (size_t)g.design_w * (size_t)g.design_h;
+    if (color == 0) {
+        memset(g.fb, 0, n * sizeof(uint32_t));
+    } else {
+        for (i = 0; i < n; i++) g.fb[i] = color;
+    }
     g.dirty = 1;
 }
 
 void gfx_fill_rect(int x, int y, int w, int h, uint32_t color) {
-    int i, j;
-    if (!g.fb) return;
-    for (j = 0; j < h; j++)
-        for (i = 0; i < w; i++)
-            gfx_put(x + i, y + j, color);
+    int j, x0, x1;
+    if (!g.fb || w <= 0 || h <= 0) return;
+    x0 = x < 0 ? 0 : x;
+    y = y < 0 ? 0 : y;
+    x1 = x + w;
+    if (x1 > g.design_w) x1 = g.design_w;
+    w = x1 - x0;
+    if (w <= 0 || y >= g.design_h) return;
+    if (y + h > g.design_h) h = g.design_h - y;
+    for (j = 0; j < h; j++) {
+        uint32_t *row = g.fb + (size_t)(y + j) * (size_t)g.design_w + (size_t)x0;
+        int i;
+        for (i = 0; i < w; i++) row[i] = color;
+    }
     g.dirty = 1;
 }
 
