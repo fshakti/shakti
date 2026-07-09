@@ -107,9 +107,14 @@ endif
 
 # Always link synth.c (full UI on Linux+X11+ALSA; stubs elsewhere).
 SHAKTI_SYNTH ?= 1
+SHAKTI_GFX ?= 1
 
 ifeq ($(SHAKTI_SYNTH),1)
   CFLAGS += -DSHAKTI_HAVE_SYNTH=1
+endif
+
+ifeq ($(SHAKTI_GFX),1)
+  CFLAGS += -DSHAKTI_HAVE_GFX=1
 endif
 
 ifeq ($(UNAME_S),Linux)
@@ -118,6 +123,9 @@ ifeq ($(UNAME_S),Linux)
     ifneq ($(wildcard /usr/include/alsa/asoundlib.h),)
       SYNTH_LDFLAGS += -lasound
     endif
+  endif
+  ifeq ($(SHAKTI_GFX),1)
+    GFX_LDFLAGS := -lX11
   endif
 endif
 
@@ -129,6 +137,12 @@ ifeq ($(UNAME_S),Darwin)
     ifeq ($(SHAKTI_USE_ACCELERATE),1)
       SYNTH_OBJC_FLAGS += -DSHAKTI_USE_ACCELERATE=1
     endif
+    OBJC ?= clang
+  endif
+  ifeq ($(SHAKTI_GFX),1)
+    GFX_LDFLAGS := -framework Cocoa
+    GFX_OBJC_FLAGS := -x objective-c -O2 -g -Wall -std=gnu11 -fobjc-arc -DSHAKTI_HAVE_GFX=1 -DSHAKTI_STANDALONE=1 \
+	-I$(BUILD) -Isrc
     OBJC ?= clang
   endif
 endif
@@ -152,20 +166,38 @@ synth_ui.o: src/synth_ui.c src/synth_ui.h
 	$(CC) $(CFLAGS) -c -o $@ src/synth_ui.c
 endif
 
+ifeq ($(SHAKTI_GFX),1)
+gfx.o: src/gfx.c src/gfx.h src/gfx_platform.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/gfx.c
+endif
+
 ifeq ($(UNAME_S),Darwin)
 ifeq ($(SHAKTI_SYNTH),1)
 synth_mac.o: src/synth_mac.m $(BUILD)/shakti_version.h
 	$(OBJC) $(SYNTH_OBJC_FLAGS) -c -o $@ src/synth_mac.m
 endif
+ifeq ($(SHAKTI_GFX),1)
+gfx_mac.o: src/gfx_mac.m $(BUILD)/shakti_version.h
+	$(OBJC) $(GFX_OBJC_FLAGS) -c -o $@ src/gfx_mac.m
+endif
+endif
+
+ifeq ($(UNAME_S),Linux)
+ifeq ($(SHAKTI_GFX),1)
+gfx_x11.o: src/gfx_x11.c src/gfx_platform.h src/gfx.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/gfx_x11.c
+endif
 endif
 
 SYNTH_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_SYNTH))),synth_mac.o)
+GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_mac.o)
+GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_x11.o)
 
-shakti: $(BUILD)/shakti_version.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ)
+shakti: $(BUILD)/shakti_version.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS))
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
 SHAKTI_TESTS := $(wildcard tests/*.ie)
@@ -215,7 +247,7 @@ clean:
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
 	rm -rf build/ shakti/ *.dSYM shakti.zip
 
-PROD_RELEASE_CFLAGS := -fno-stack-protector
+PROD_RELEASE_CFLAGS := -fstack-protector-strong
 
 # On Apple Silicon, `strip` mutates the Mach-O and invalidates the linker-signed
 # ad-hoc code signature, so the kernel SIGKILLs the binary at launch

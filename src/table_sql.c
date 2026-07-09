@@ -481,13 +481,16 @@ static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by) {
     GhTab tab;
     // Fast path: nby == 1 and group column is T_IVEC
     V *bcol = tbl_col(tbl, by_idx[0]);
-    if (nby == 1 && bcol && bcol->t == T_IVEC) {
+    if (nby == 1 && bcol && bcol->t == T_IVEC && tbl->n > 0) {
         int64_t max_val = -1;
         int64_t min_val = INT64_MAX;
         for (int64_t r = 0; r < tbl->n; r++) {
             if (bcol->J[r] > max_val) max_val = bcol->J[r];
             if (bcol->J[r] < min_val) min_val = bcol->J[r];
         }
+        /* tbl->n > 0 guaranteed above, so min_val/max_val are real data
+         * values here and slots_cap = max_val + 1 >= 1 (never a zero-size
+         * allocation). Empty tables fall through to the general hash path. */
         if (min_val >= 0 && max_val < 1000000) {
             int slots_cap = (int)max_val + 1;
             int *s_nrows = calloc((size_t)slots_cap, sizeof(int));

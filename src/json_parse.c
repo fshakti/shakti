@@ -12,7 +12,7 @@
 #define SHAKTI_JSON_MAX_STRING (16u * 1024u * 1024u)  /* 16 MiB per string     */
 #define SHAKTI_JSON_MAX_ELEMS  (10u * 1000u * 1000u)  /* per array / object    */
 
-static const char*skip_ws(const char*s){W(*s==' '||*s=='\t'||*s=='\n'||*s=='\r',s++)return s;}
+static const char*skip_ws(const char*s){P(!s,s)W(*s==' '||*s=='\t'||*s=='\n'||*s=='\r',s++)return s;}
 static V*parse_value(const char*s,const char**end_out,int depth);
 static int hex_digit(char c){P(c>='0'&&c<='9',c-'0')P(c>='a'&&c<='f',c-'a'+10)P(c>='A'&&c<='F',c-'A'+10)return-1;}
 static V*parse_string(const char*s,const char**end_out){
