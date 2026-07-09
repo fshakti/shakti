@@ -27,7 +27,7 @@ make prod-speed
 
 Portable CPU build (no native arch tuning): `SHAKTI_PORTABLE_CPU=1 make prod-speed`
 
-The standalone binary auto-detects `src/lib` next to the executable when `SHAKTI_LIB` is unset.
+The standalone binary auto-detects `lib/shakti` next to the executable when `SHAKTI_LIB` is unset.
 
 ## run
 

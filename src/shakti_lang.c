@@ -5359,11 +5359,14 @@ static FILE *repl_open_runtime_doc(void) {
     char path[4096];
     if (g_lib_path[0]) {
         size_t n = strlen(g_lib_path);
-        if (n > 8 && !strcmp(g_lib_path + n - 8, "/lib/shakti")) {
+        if (n > 8 && !strcmp(g_lib_path + n - 8, "/../lib/shakti")) {
             memcpy(path, g_lib_path, n - 8);
             path[n - 8] = 0;
-            snprintf(path + n - 8, sizeof path - (n - 8), "/docs/RUNTIME_API.md");
+            snprintf(path + n - 8, sizeof path - (n - 8), "/../docs/RUNTIME_API.md");
             FILE *f = fopen(path, "r");
+            if (f) return f;
+            snprintf(path + n - 8, sizeof path - (n - 8), "/../share/shakti/RUNTIME_API.md");
+            f = fopen(path, "r");
             if (f) return f;
         }
     }
@@ -5377,23 +5380,13 @@ static FILE *repl_open_runtime_doc(void) {
         snprintf(path, sizeof path, "%s/../docs/RUNTIME_API.md", lib);
         FILE *f = fopen(path, "r");
         if (f) return f;
+        snprintf(path, sizeof path, "%s/../share/shakti/RUNTIME_API.md", lib);
+        if (f) return f;
+        snprintf(path, sizeof path, "%s/../../share/shakti/RUNTIME_API.md", lib);
+        if (f) return f;
+        snprintf(path, sizeof path, "%s/../../docs/RUNTIME_API.md", lib);
+        if (f) return f;
     }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-    {
-        char exe[4096];
-        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-        if (len > 0) {
-            exe[len] = 0;
-            char *slash = strrchr(exe, '/');
-            if (slash) {
-                *slash = 0;
-                snprintf(path, sizeof path, "%s/docs/RUNTIME_API.md", exe);
-                FILE *f = fopen(path, "r");
-                if (f) return f;
-            }
-        }
-    }
-#endif
     return fopen("docs/RUNTIME_API.md", "r");
 }
 static int repl_md_table_sep(const char *s) {
@@ -5665,7 +5658,7 @@ int shakti_lang_main(int argc, char **argv) {
         if(len > 0) {
             exe[len] = 0;
             char *slash = strrchr(exe, '/');
-            if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib/shakti", exe); }
+            if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/../lib/shakti", exe); }
         }
 #if defined(__linux__)
         uname(&uts);
@@ -5678,7 +5671,7 @@ int shakti_lang_main(int argc, char **argv) {
         extern int _NSGetExecutablePath(char* buf, unsigned int* bufsize);
         int len = sizeof(exe)-1, r = _NSGetExecutablePath(exe, &len);  exe[len]=0;
         char *slash = strrchr(exe, '/');
-        if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib/shakti", exe); }
+        if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/../lib/shakti", exe); }
 
         FILE*f=popen("/usr/bin/profiles status -type enrollment","r");
         if(f) {
@@ -5699,7 +5692,7 @@ int shakti_lang_main(int argc, char **argv) {
             if(slash > exe) {
                 char quote = slash[-1];
                 while(slash>exe && slash[-1] == quote) *--slash=0;
-                snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib/shakti", exe);
+                snprintf(g_lib_path, sizeof(g_lib_path), "%s/../lib/shakti", exe);
             }
         }
     };
