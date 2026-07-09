@@ -415,7 +415,8 @@ int shakti_parse_datetime_ms(const char *s, int64_t *out_ms) {
     P(strlen(s) < 23,0)
     P(s[4] != '.' || s[7] != '.' || s[10] != 'T' || s[13] != ':' || s[16] != ':' || s[19] != '.',0)
     P(sscanf(s, "%4d.%2d.%2dT%2d:%2d:%2d.%3d", &y, &M, &d, &H, &m, &S, &ms) != 7,0)
-    struct tm tmv = {};
+    struct tm tmv;
+    memset(&tmv, 0, sizeof tmv);
     tmv.tm_year = y - 1900;
     tmv.tm_mon = M - 1;
     tmv.tm_mday = d;
@@ -443,7 +444,8 @@ int shakti_parse_date_ymd(const char *s, int64_t *out_ms) {
     int y, M, d;
     P(!s || !out_ms,0)
     P(sscanf(s, "%4d-%2d-%2d", &y, &M, &d) != 3,0)
-    struct tm tmv = {};
+    struct tm tmv;
+    memset(&tmv, 0, sizeof tmv);
     tmv.tm_year = y - 1900;
     tmv.tm_mon = M - 1;
     tmv.tm_mday = d;
@@ -1163,7 +1165,7 @@ static Token lex_fstring(Lexer *l) {
     const char *s = l->src;
     size_t p = l->pos;
     char q = s[p]; p++;
-    Token t = {T_FSTR_};
+    Token t = {.type = T_FSTR_};
     int qi = 0;
     while(p < l->len && s[p] != q) {
         if(s[p]=='{' && p+1<l->len && s[p+1]=='{') {
@@ -1253,7 +1255,7 @@ static Token lex_raw(Lexer *l) {
     }
     if(c == '#') { skip_comment(l); return lex_raw(l); }
     if((c=='"'||c=='\'') && p+2<l->len && s[p+1]==c && s[p+2]==c) {
-        Token t = {T_STR_}; int qi = 0;
+        Token t = {.type = T_STR_}; int qi = 0;
         char q = c; p += 3;
         while(p+2 < l->len && !(s[p]==q && s[p+1]==q && s[p+2]==q)) {
             if(s[p]=='\\' && p+1<l->len) {
@@ -1273,7 +1275,7 @@ static Token lex_raw(Lexer *l) {
         return t;
     }
     if(c == '"' || c == '\'') {
-        Token t = {T_STR_}; int qi = 0;
+        Token t = {.type = T_STR_}; int qi = 0;
         char q = c; p++;
         while(p < l->len && s[p] != q) {
             if(s[p]=='\\' && p+1<l->len) {
@@ -1302,7 +1304,7 @@ static Token lex_raw(Lexer *l) {
         tmp[23] = 0;
         int64_t ms;
         if(shakti_parse_datetime_ms(tmp, &ms)) {
-            Token t = {T_DATETIME_};
+            Token t = {.type = T_DATETIME_};
             t.ival = ms;
             t.line = l->line;
             l->pos = p + 23;
@@ -1318,7 +1320,7 @@ static Token lex_raw(Lexer *l) {
             c = s[p];
         }
         if (isdigit((unsigned char)c) || (c == '.' && p + 1 < l->len && isdigit((unsigned char)s[p + 1]))) {
-        Token t = {T_INT_};
+        Token t = {.type = T_INT_};
         size_t start = p;
         int is_float = 0;
         if(c=='0' && p+1<l->len && (s[p+1]=='x'||s[p+1]=='X')) {
@@ -1353,7 +1355,7 @@ static Token lex_raw(Lexer *l) {
             return lex_fstring(l);
         }
         if((c=='r'||c=='R') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
-            Token t = {T_STR_}; int qi = 0;
+            Token t = {.type = T_STR_}; int qi = 0;
             p++; char q = s[p]; p++;
             while(p < l->len && s[p] != q) { t.sval[qi++] = s[p]; p++; }
             t.sval[qi] = 0;
@@ -1364,7 +1366,7 @@ static Token lex_raw(Lexer *l) {
         if((c=='b'||c=='B') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
             p++;
         }
-        Token t = {T_NAME_};
+        Token t = {.type = T_NAME_};
         size_t start = p;
         W(p<l->len && is_id_char(s[p]),p++)
         size_t n = p - start;
