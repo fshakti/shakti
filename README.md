@@ -1,6 +1,6 @@
 # shakti
 
-Small interpreted language (0.9.0).
+Small interpreted language
 
 ## build
 
@@ -11,7 +11,7 @@ sudo apt-get install -y libexpat1-dev
 make prod          # or: make prod-speed
 ```
 
-macOS (Cocoa + Core Audio for synth; talk module on by default):
+macOS:
 
 ```bash
 brew install libomp expat
