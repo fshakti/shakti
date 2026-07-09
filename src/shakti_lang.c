@@ -5492,7 +5492,8 @@ static void repl_print_runtime_doc(void) {
         }
         if (in_code) {
 #if SHAKTI_HL
-            if(colors){int i=strlen(line);hl_redraw("    ",line,i,i);putchar('\n');}else
+            if(colors){int _=dynamic_has_sql;dynamic_has_sql=1;int i=strlen(line);hl_redraw("    ",line,i,i);putchar('\n');
+                       dynamic_has_sql=_;}else
 #endif
             puts(line);
             prev_blank = (n == 0);
