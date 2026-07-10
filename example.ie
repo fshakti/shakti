@@ -18,7 +18,7 @@ print("cell [1,0]:", m[1, 0])
 a : [[1, 2], [3, 4]]
 b : [[5, 6], [7, 8]]
 print("element-wise *:", a * b)
-print("matmul a @ b:", a @ b)
+print("matmul mmul(a, b):", mmul(a, b))
 
 f : [[1.0, 2.0], [3.0, 4.0]]
 print("sum(f):", sum(f))

@@ -28,7 +28,7 @@ export SHAKTI_LIB=$PWD/lib
 
 | Module | Example | Description |
 |--------|---------|-------------|
-| *(core)* | `matrix.ie` | Matrices (`@`), `dot`, `sum` / `min` / `max` |
+| *(core)* | `matrix.ie` | Matrices (`mmul`), `dot`, `sum` / `min` / `max` |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
@@ -119,7 +119,7 @@ print(dot(a, b))       # prefer this on large vectors
 print(sum(a * b))      # same math; allocates a * b first
 ```
 
-**`.` is not dot product** — it is attribute / column access (`table.col`, `dict.key`). Matrix multiply is **`@`**. For a vector inner product use **`dot(a, b)`**.
+**`.` is not dot product** — it is attribute / column access (`table.col`, `dict.key`). Matrix multiply is **`mmul(a, b)`**. For a vector inner product use **`dot(a, b)`**. `@` is reserved and currently unimplemented.
 
 On large `fvec`, `sum` uses a SIMD path when built with `make prod-speed`. With `libisolde.so` loaded (`ISOLDE_LIB`), `dot` / `sum` / `min` / `max` may delegate to faster `isolde_*` kernels.
 
@@ -151,22 +151,24 @@ shape(m)    # [rows, cols]
 
 | Operator | Meaning |
 |----------|---------|
-| `@` | matrix multiply (`matrix[bool]` not supported) |
+| `mmul(a, b)` | matrix multiply (`matrix[bool]` not supported) |
 | `+`, `-`, `*`, `/`, `//`, `%`, `**` | element-wise on numeric matrices |
 | unary `-` | element-wise negation (int/float matrices) |
 | `=`, `!=`, `<`, `>`, `<=`, `>=` | element-wise compare → `matrix[bool]` |
 
-`matrix[bool]` does not support arithmetic or `@`.
+`@` is reserved and currently unimplemented (use `mmul`).
+
+`matrix[bool]` does not support arithmetic or `mmul`.
 
 Mixed int/float operands promote to `matrix[float]` where needed.
 
 ### Builtins
 
-Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`, `abs`. `dot` applies to vectors only, not matrices.
+Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`, `abs`. `dot` applies to vectors only, not matrices. `mmul(a, b)` is matrix multiply.
 
 ### Performance
 
-On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `@`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
+On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
 Vector **`dot`** and large **`sum`** on `fvec` use the same SIMD/OpenMP stack (`src/vec_kernels.c`). There is no GPU backend in the standalone binary.
 
@@ -799,7 +801,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | Cocoa, Core Audio, Core Foundation | Synth UI | macOS |
 | Speech, AVFoundation | `import talk` | macOS |
 | librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
-| libgomp | OpenMP (matrix `@`, vector `dot` / large `sum`) | Linux (default with GCC) |
+| libgomp | OpenMP (matrix `mmul`, vector `dot` / large `sum`) | Linux (default with GCC) |
 | libomp | OpenMP (`brew install libomp`) | macOS |
 | libpthread, libm, librt, libdl | Runtime | Linux |
 

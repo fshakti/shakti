@@ -262,7 +262,7 @@ enum {
     OP_OR = 16,
     OP_POW = 17,
     OP_SUB = 18,
-    OP_MATMUL = 19,
+    OP_MATMUL = 19,  /* '@' reserved; unimplemented (use mmul) */
 };
 
 void lex_init(Lexer *l, const char *src);
@@ -294,6 +294,7 @@ V *v_fmat(int64_t rows, int64_t cols);
 V *v_bmat(int64_t rows, int64_t cols);
 static inline int64_t mat_cols(V *m) { return (int64_t)m->_ht_cap; }
 static inline int64_t mat_idx(V *m, int64_t r, int64_t c) { return r * mat_cols(m) + c; }
+V *mat_matmul(V *a, V *b);
 V *v_mat_row(V *m, int64_t row);
 V *v_list(int64_t n);
 void v_list_append(V *v, V *item);

@@ -139,7 +139,7 @@ extern V *bi_pcm_write(V**,in);
 extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
-    "sum","avg","min","max","dot","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
+    "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
@@ -496,6 +496,10 @@ static V *bi_dot(V **a, in) {
     }
     return v_err("dot: need numeric vectors or scalars");
 }
+static V *bi_mmul(V **a, in) {
+    P(n < 2, v_err("mmul(a, b)"))
+    return mat_matmul(a[0], a[1]);
+}
 static V *bi_avg(V **a, in) {
     P(n < 1,v_float(0))
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_avg(a[0]))
@@ -846,7 +850,7 @@ typedef V *(*BiCall)(V **a, in, V **kwn, V **kwv, int nkw, Env *e);
 BIKW(print)
 BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
-BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(abs)
+BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
@@ -1004,6 +1008,7 @@ static const BiEntry bi_tab[] = {
     {"max", bi_w_max},
     {"min", bi_w_min},
     {"mkdir", bi_w_mkdir},
+    {"mmul", bi_w_mmul},
     {"next", bi_w_next},
     {"ord", bi_w_ord},
     {"path_basename", bi_w_path_basename},
