@@ -349,10 +349,10 @@ static V *try_promote_matrix(V **elems, int nch) {
     }
     return NULL;
 }
-static V *mat_matmul(V *a, V *b) {
-    P(!is_mat_t(a->t) || !is_mat_t(b->t), v_err("matmul requires numeric matrices"))
-    P(a->t == T_BMAT || b->t == T_BMAT, v_err("matmul not supported for matrix[bool]"))
-    P(mat_cols(a) != b->n, v_err("matmul shape mismatch"))
+V *mat_matmul(V *a, V *b) {
+    P(!is_mat_t(a->t) || !is_mat_t(b->t), v_err("mmul requires numeric matrices"))
+    P(a->t == T_BMAT || b->t == T_BMAT, v_err("mmul not supported for matrix[bool]"))
+    P(mat_cols(a) != b->n, v_err("mmul shape mismatch"))
     int64_t m = a->n, k = mat_cols(a), n = mat_cols(b);
     int out_t = (a->t == T_FMAT || b->t == T_FMAT) ? T_FMAT : T_IMAT;
     V *r = out_t == T_FMAT ? v_fmat(m, n) : (V *)v_imat(m, n);
@@ -1013,10 +1013,35 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
     case T_BMAT:
         print_mat_val(v, fp, repr_mode);
         break;
-    case T_LIST:
+    case T_LIST: {
+        /* Fast path: homogeneous int/float lists avoid per-element recursion. */
+        int all_int = v->n > 0, all_float = v->n > 0;
+        for (int64_t i = 0; i < v->n && (all_int || all_float); i++) {
+            if (!v->L[i] || v->L[i]->t != T_INT) all_int = 0;
+            if (!v->L[i] || v->L[i]->t != T_FLOAT) all_float = 0;
+        }
         fprintf(fp, "[");
-        for(int64_t i=0;i<v->n;i++) { if(i) fprintf(fp,", "); print_val_depth(v->L[i],fp,1,depth+1); }
-        fprintf(fp, "]"); break;
+        if (all_int) {
+            for (int64_t i = 0; i < v->n; i++) {
+                if (i) fprintf(fp, ", ");
+                fprintf(fp, "%lld", (long long)v->L[i]->j);
+            }
+        } else if (all_float) {
+            for (int64_t i = 0; i < v->n; i++) {
+                if (i) fprintf(fp, ", ");
+                double d = v->L[i]->f;
+                if (d == (int64_t)d && d < 1e15 && d > -1e15) fprintf(fp, "%.1f", d);
+                else fprintf(fp, "%g", d);
+            }
+        } else {
+            for (int64_t i = 0; i < v->n; i++) {
+                if (i) fprintf(fp, ", ");
+                print_val_depth(v->L[i], fp, 1, depth + 1);
+            }
+        }
+        fprintf(fp, "]");
+        break;
+    }
     case T_DICT:
         fprintf(fp, "{");
         for(int64_t i=0;i<v->n;i++) {
@@ -1084,7 +1109,54 @@ static void print_val(V *v, FILE *fp, int repr_mode) {
     print_val_depth(v, fp, repr_mode, 0);
 }
 void v_print(V *v, int nl) { print_val(v, stdout, 0); if(nl) putchar('\n'); }
+
+/* Fast path: format a homogeneous int list / ivec without OPEN_MEMSTREAM. */
+static char *v_repr_int_seq(int64_t n, int64_t (*at)(void *, int64_t), void *ctx) {
+    /* Worst case: each int is 20 digits + ", " (2) + brackets. */
+    size_t cap = (size_t)n * 22 + 3;
+    if (n == 0) cap = 3;
+    char *buf = malloc(cap);
+    if (!buf) return NULL;
+    size_t pos = 0;
+    buf[pos++] = '[';
+    for (int64_t i = 0; i < n; i++) {
+        if (i) {
+            buf[pos++] = ',';
+            buf[pos++] = ' ';
+        }
+        int w = snprintf(buf + pos, cap - pos, "%lld", (long long)at(ctx, i));
+        if (w < 0 || (size_t)w >= cap - pos) {
+            free(buf);
+            return NULL;
+        }
+        pos += (size_t)w;
+    }
+    if (pos + 1 >= cap) {
+        free(buf);
+        return NULL;
+    }
+    buf[pos++] = ']';
+    buf[pos] = 0;
+    return buf;
+}
+static int64_t repr_ivec_at(void *ctx, int64_t i) { return ((V *)ctx)->J[i]; }
+static int64_t repr_list_int_at(void *ctx, int64_t i) { return ((V *)ctx)->L[i]->j; }
+
 char *v_repr(V *v) {
+    if (v && v->t == T_IVEC) {
+        char *r = v_repr_int_seq(v->n, repr_ivec_at, v);
+        if (r) return r;
+    }
+    if (v && v->t == T_LIST && v->n > 0) {
+        int all_int = 1;
+        for (int64_t i = 0; i < v->n; i++) {
+            if (!v->L[i] || v->L[i]->t != T_INT) { all_int = 0; break; }
+        }
+        if (all_int) {
+            char *r = v_repr_int_seq(v->n, repr_list_int_at, v);
+            if (r) return r;
+        }
+    }
     char *buf = NULL; size_t sz = 0;
     FILE *fp = OPEN_MEMSTREAM(&buf, &sz);
     print_val(v, fp, 1);
@@ -1766,6 +1838,7 @@ static Node *parse_power(Lexer *l) {
     return n;
 }
 static Node *parse_matmul(Lexer *l) {
+    /* '@' is reserved (unimplemented). Matrix multiply is mmul(a, b). */
     Node *n = parse_power(l);
     W(lex_peek(l).type == T_AT_, {
         lex_next(l);
@@ -2592,18 +2665,13 @@ static V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_IVEC && b->t == T_IVEC && op != OP_DIV && op != OP_POW) {
         int64_t n = a->n < b->n ? a->n : b->n;
         V *r = v_ivec(n);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
+            mat_imat_binop_mm(r->J, a->J, b->J, n, op);
+            return r;
+        }
         const int64_t *aj = a->J, *bj = b->J;
         int64_t *rj = r->J;
         switch (op) {
-        case OP_ADD:
-            for (int64_t i = 0; i < n; i++) rj[i] = aj[i] + bj[i];
-            break;
-        case OP_SUB:
-            for (int64_t i = 0; i < n; i++) rj[i] = aj[i] - bj[i];
-            break;
-        case OP_MUL:
-            for (int64_t i = 0; i < n; i++) rj[i] = aj[i] * bj[i];
-            break;
         case OP_FLOORDIV:
             for (int64_t i = 0; i < n; i++) rj[i] = bj[i] ? aj[i] / bj[i] : 0;
             break;
@@ -2617,18 +2685,13 @@ static V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_IVEC && b->t == T_INT && op != OP_DIV && op != OP_POW) {
         int64_t n = a->n, y = b->j;
         V *r = v_ivec(n);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
+            mat_imat_binop_scalar(r->J, a->J, y, n, op);
+            return r;
+        }
         const int64_t *aj = a->J;
         int64_t *rj = r->J;
         switch (op) {
-        case OP_ADD:
-            for (int64_t i = 0; i < n; i++) rj[i] = aj[i] + y;
-            break;
-        case OP_SUB:
-            for (int64_t i = 0; i < n; i++) rj[i] = aj[i] - y;
-            break;
-        case OP_MUL:
-            for (int64_t i = 0; i < n; i++) rj[i] = aj[i] * y;
-            break;
         case OP_FLOORDIV:
             for (int64_t i = 0; i < n; i++) rj[i] = y ? aj[i] / y : 0;
             break;
@@ -2642,18 +2705,13 @@ static V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_INT && b->t == T_IVEC && op != OP_DIV && op != OP_POW) {
         int64_t n = b->n, x = a->j;
         V *r = v_ivec(n);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
+            mat_imat_binop_scalar_rev(r->J, x, b->J, n, op);
+            return r;
+        }
         const int64_t *bj = b->J;
         int64_t *rj = r->J;
         switch (op) {
-        case OP_ADD:
-            for (int64_t i = 0; i < n; i++) rj[i] = x + bj[i];
-            break;
-        case OP_SUB:
-            for (int64_t i = 0; i < n; i++) rj[i] = x - bj[i];
-            break;
-        case OP_MUL:
-            for (int64_t i = 0; i < n; i++) rj[i] = x * bj[i];
-            break;
         case OP_FLOORDIV:
             for (int64_t i = 0; i < n; i++) rj[i] = bj[i] ? x / bj[i] : 0;
             break;
@@ -2710,6 +2768,35 @@ static V *vec_binop(V *a, V *b, int op) {
         return v;
     }
     P(a->t==T_INT && b->t==T_STR && op==OP_MUL,vec_binop(b, a, op))
+    if (a->t == T_FVEC && b->t == T_FVEC) {
+        int64_t n = a->n < b->n ? a->n : b->n;
+        V *r = v_fvec(n);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
+            op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
+            mat_fmat_binop_mm(r->F, a->F, b->F, n, op);
+            return r;
+        }
+    }
+    if (a->t == T_FVEC && (b->t == T_INT || b->t == T_FLOAT)) {
+        int64_t n = a->n;
+        double y = to_float(b);
+        V *r = v_fvec(n);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
+            op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
+            mat_fmat_binop_scalar(r->F, a->F, y, n, op);
+            return r;
+        }
+    }
+    if ((a->t == T_INT || a->t == T_FLOAT) && b->t == T_FVEC) {
+        int64_t n = b->n;
+        double x = to_float(a);
+        V *r = v_fvec(n);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
+            op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
+            mat_fmat_binop_scalar_rev(r->F, x, b->F, n, op);
+            return r;
+        }
+    }
     #define VEC_BIN(AT,BT,AJ,BJ) \
     if(a->t==AT && b->t==BT) { \
         int64_t n=a->n<b->n?a->n:b->n; \
@@ -3697,9 +3784,9 @@ V *eval(Node *n, Env *e) {
         P(a->t==T_ERR,(v_free(b),a))
         P(b->t==T_ERR,(v_free(a),b))
         if (n->op == OP_MATMUL) {
-            V *r = mat_matmul(a, b);
+            /* '@' is reserved; matrix multiply is mmul(a, b). */
             v_free(a); v_free(b);
-            return r;
+            return v_err("'@' is not implemented (use mmul)");
         }
         V *r = vec_binop(a, b, n->op);
         v_free(a); v_free(b);
@@ -4389,7 +4476,7 @@ static const char *HL_QRYS[] = {
 static const char *HL_CONS[] = {"True","False","None",NULL};
 static const char *HL_BIS[] = {
     "print","len","range","type","int","float","str","list","bool",
-    "sum","avg","min","max","abs","sqrt",
+    "sum","avg","min","max","dot","mmul","abs","sqrt",
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail",
     "append","pop","keys","values",
