@@ -78,7 +78,7 @@ V *bi_fread(V **a, in) {
     fseek(f, 0, SEEK_END);
     long z = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (z < 0) {
+    if (z < 0 || (unsigned long)z > (256u * 1024u * 1024u)) {
         fclose(f);
         return v_err("read: size");
     }
@@ -87,8 +87,8 @@ V *bi_fread(V **a, in) {
         fclose(f);
         return v_err("read: oom");
     }
-    fread(b, 1, (size_t)z, f);
-    b[z] = 0;
+    size_t got = fread(b, 1, (size_t)z, f);
+    b[got] = 0;
     fclose(f);
     return v_str(b);
 }
