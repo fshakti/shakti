@@ -42,6 +42,9 @@ shakti-standalone
 # local scripts
 vuln_scan.sh
 
+# local workspace notes (never publish)
+CONTEXT.md
+
 # static analyzer / stray local artifacts
 /*.plist
 stluRITA
