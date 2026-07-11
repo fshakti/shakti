@@ -6,9 +6,9 @@
 
 #define SHAKTI_JSON_MAX_DEPTH 512
 /* Resource limits: nesting depth is already bounded above. These additionally
- * bound total document size, single-string length, and per-container element
- * count so a malformed-but-flat document cannot exhaust memory. */
-#define SHAKTI_JSON_MAX_INPUT  (64u * 1024u * 1024u)  /* 64 MiB whole document */
+ * bound single-string length and per-container element count so a
+ * malformed-but-flat document cannot exhaust memory. Whole-document size for
+ * file loads is capped in bi_fread (256 MiB). */
 #define SHAKTI_JSON_MAX_STRING (16u * 1024u * 1024u)  /* 16 MiB per string     */
 #define SHAKTI_JSON_MAX_ELEMS  (10u * 1000u * 1000u)  /* per array / object    */
 
@@ -131,9 +131,9 @@ static V*parse_value(const char*s,const char**end_out,int depth){
  return v_err("json: unexpected token");}
 V*shakti_json_parse(const char*s,const char**end_out){
  if(!s)return v_err("json: null input");
- /* Bounded length scan: reject documents larger than the cap without walking
-  * the whole (potentially huge) buffer via strlen. */
- for(size_t i=0;i<=SHAKTI_JSON_MAX_INPUT;i++){if(!s[i])break;if(i==SHAKTI_JSON_MAX_INPUT)return v_err("json: input too large");}
+ /* Size is bounded by bi_fread's 256 MiB cap for file loads, and by
+  * SHAKTI_JSON_MAX_STRING / SHAKTI_JSON_MAX_ELEMS / SHAKTI_JSON_MAX_DEPTH
+  * during parse. Avoid a redundant full-document scan before parsing. */
  const char*e=NULL;
  V*v=parse_value(s,&e,0);
  P(!v||v->t==T_ERR,v)

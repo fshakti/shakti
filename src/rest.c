@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,9 +37,23 @@ typedef struct {
 static char g_rest_token[4096];
 static int g_rest_inited;
 
+/* Process-lifetime temp paths for curl I/O — created once, truncated per request. */
+static char g_rest_hdr_path[] = "/tmp/shakti-rest-hdr-XXXXXX";
+static char g_rest_body_path[] = "/tmp/shakti-rest-body-XXXXXX";
+static char g_rest_code_path[] = "/tmp/shakti-rest-code-XXXXXX";
+static char g_rest_data_path[] = "/tmp/shakti-rest-data-XXXXXX";
+static int g_rest_temps_ok;
+
 #ifndef SHAKTI_WASM
 static RestHandle g_rest_handles[REST_MAX_HANDLES];
 #endif
+
+static int rest_make_temp(char *tmpl) {
+    int fd = mkstemp(tmpl);
+    if (fd < 0) return -1;
+    close(fd);
+    return 0;
+}
 
 static void rest_init(void) {
     if (g_rest_inited) return;
@@ -46,6 +61,11 @@ static void rest_init(void) {
     g_rest_token[0] = 0;
     const char *env = getenv("SHAKTI_REST_TOKEN");
     if (env && env[0]) strncpy(g_rest_token, env, sizeof g_rest_token - 1);
+    if (rest_make_temp(g_rest_hdr_path) == 0 &&
+        rest_make_temp(g_rest_body_path) == 0 &&
+        rest_make_temp(g_rest_code_path) == 0 &&
+        rest_make_temp(g_rest_data_path) == 0)
+        g_rest_temps_ok = 1;
 }
 
 /* Reject request-splitting control characters (CR/LF) in values that end up in
@@ -240,26 +260,32 @@ static ssize_t rest_read_line(int fd, char *buf, size_t cap) {
 
 /* Run curl with an explicit argv (no shell) and capture its stdout (the
  * -w http_code) into code_path. Returns curl's exit status, or -1 on error.
- * Because arguments are passed literally via execvp, shell metacharacters in
- * the URL/headers/token carry no meaning: there is no command-injection path. */
+ * posix_spawn avoids a full address-space copy from fork(). */
 static int rest_run_curl(char *const argv[], const char *code_path) {
     int ofd = open(code_path, O_WRONLY | O_TRUNC, 0600);
     if (ofd < 0) return -1;
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(ofd);
-        return -1;
-    }
-    if (pid == 0) {
-        dup2(ofd, STDOUT_FILENO);
-        int dn = open("/dev/null", O_WRONLY);
-        if (dn >= 0) dup2(dn, STDERR_FILENO);
+    int dn = open("/dev/null", O_WRONLY);
+    posix_spawn_file_actions_t fa;
+    if (posix_spawn_file_actions_init(&fa) != 0) {
         close(ofd);
         if (dn >= 0) close(dn);
-        execvp("curl", argv);
-        _exit(127);
+        return -1;
     }
+    posix_spawn_file_actions_adddup2(&fa, ofd, STDOUT_FILENO);
+    if (dn >= 0)
+        posix_spawn_file_actions_adddup2(&fa, dn, STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&fa, ofd);
+    if (dn >= 0)
+        posix_spawn_file_actions_addclose(&fa, dn);
+
+    pid_t pid = 0;
+    extern char **environ;
+    int rc = posix_spawnp(&pid, "curl", &fa, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
     close(ofd);
+    if (dn >= 0) close(dn);
+    if (rc != 0) return -1;
+
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) return -1;
     if (WIFEXITED(status)) return WEXITSTATUS(status);
@@ -277,50 +303,27 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         return v_err("rest: invalid control character in content_type");
     if (!rest_valid_url(url))
         return v_err("rest: url must start with http:// or https://");
-
-    char hdr_tmpl[] = "/tmp/shakti-rest-hdr-XXXXXX";
-    char body_tmpl[] = "/tmp/shakti-rest-body-XXXXXX";
-    char code_tmpl[] = "/tmp/shakti-rest-code-XXXXXX";
-    int hdr_fd = mkstemp(hdr_tmpl);
-    int body_fd = mkstemp(body_tmpl);
-    int code_fd = mkstemp(code_tmpl);
-    if (hdr_fd < 0 || body_fd < 0 || code_fd < 0) {
-        if (hdr_fd >= 0) { close(hdr_fd); unlink(hdr_tmpl); }
-        if (body_fd >= 0) { close(body_fd); unlink(body_tmpl); }
-        if (code_fd >= 0) { close(code_fd); unlink(code_tmpl); }
+    if (!g_rest_temps_ok)
         return v_err("rest: temp file failed");
-    }
-    close(hdr_fd);
-    close(body_fd);
-    close(code_fd);
 
-    char data_tmpl[] = "/tmp/shakti-rest-data-XXXXXX";
     int have_data = 0;
     char ct_hdr[512];
-    char data_at[sizeof data_tmpl + 1];
+    char data_at[sizeof g_rest_data_path + 1];
     ct_hdr[0] = 0;
     data_at[0] = 0;
     if (body && body[0]) {
-        int data_fd = mkstemp(data_tmpl);
-        if (data_fd < 0) {
-            unlink(hdr_tmpl);
-            unlink(body_tmpl);
-            unlink(code_tmpl);
+        int data_fd = open(g_rest_data_path, O_WRONLY | O_TRUNC);
+        if (data_fd < 0)
             return v_err("rest: temp file failed");
-        }
         size_t blen = strlen(body);
         if (write(data_fd, body, blen) != (ssize_t)blen) {
             close(data_fd);
-            unlink(data_tmpl);
-            unlink(hdr_tmpl);
-            unlink(body_tmpl);
-            unlink(code_tmpl);
             return v_err("rest: write failed");
         }
         close(data_fd);
         const char *ct = (content_type && content_type[0]) ? content_type : "application/json";
         snprintf(ct_hdr, sizeof ct_hdr, "Content-Type: %s", ct);
-        snprintf(data_at, sizeof data_at, "@%s", data_tmpl);
+        snprintf(data_at, sizeof data_at, "@%s", g_rest_data_path);
         have_data = 1;
     }
 
@@ -338,10 +341,6 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     if (!argv || !hdr_lines) {
         free(argv);
         free(hdr_lines);
-        if (have_data) unlink(data_tmpl);
-        unlink(hdr_tmpl);
-        unlink(body_tmpl);
-        unlink(code_tmpl);
         return v_err("rest: out of memory");
     }
     int nh = 0;
@@ -365,10 +364,6 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
                 for (int j = 0; j < nh; j++) free(hdr_lines[j]);
                 free(hdr_lines);
                 free(argv);
-                if (have_data) unlink(data_tmpl);
-                unlink(hdr_tmpl);
-                unlink(body_tmpl);
-                unlink(code_tmpl);
                 return v_err("rest: invalid control character in headers");
             }
             size_t ln = strlen(k->s) + strlen(v->s) + 3;
@@ -387,37 +382,29 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         argv[ac++] = data_at;
     }
     argv[ac++] = "-D";
-    argv[ac++] = hdr_tmpl;
+    argv[ac++] = g_rest_hdr_path;
     argv[ac++] = "-o";
-    argv[ac++] = body_tmpl;
+    argv[ac++] = g_rest_body_path;
     argv[ac++] = "-w";
     argv[ac++] = "%{http_code}";
     argv[ac++] = (char *)url;
     argv[ac] = NULL;
 
-    int rc = rest_run_curl(argv, code_tmpl);
+    int rc = rest_run_curl(argv, g_rest_code_path);
 
     for (int j = 0; j < nh; j++) free(hdr_lines[j]);
     free(hdr_lines);
     free(argv);
-    if (have_data) unlink(data_tmpl);
-    if (rc != 0) {
-        unlink(hdr_tmpl);
-        unlink(body_tmpl);
-        unlink(code_tmpl);
+    if (rc != 0)
         return v_err("rest: curl request failed");
-    }
 
-    char *code_s = read_all_file(code_tmpl, NULL, 64);
+    char *code_s = read_all_file(g_rest_code_path, NULL, 64);
     int status = code_s ? atoi(code_s) : 0;
     free(code_s);
 
     size_t blen = 0;
-    char *raw_body = read_all_file(body_tmpl, &blen, REST_MAX_BODY);
-    V *hdrs = parse_curl_headers(hdr_tmpl);
-    unlink(hdr_tmpl);
-    unlink(body_tmpl);
-    unlink(code_tmpl);
+    char *raw_body = read_all_file(g_rest_body_path, &blen, REST_MAX_BODY);
+    V *hdrs = parse_curl_headers(g_rest_hdr_path);
 
     if (!raw_body) {
         v_free(hdrs);
