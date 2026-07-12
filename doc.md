@@ -29,6 +29,7 @@ export SHAKTI_LIB=$PWD/lib
 | Module | Example | Description |
 |--------|---------|-------------|
 | *(core)* | `matrix.ie` | Matrices (`mmul`), `dot`, `sum` / `min` / `max` |
+| *(core)* | `table_csv.ie` | CSV `save` / `load` (numeric + string columns) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
@@ -121,7 +122,7 @@ print(sum(a * b))      # same math; allocates a * b first
 
 **`.` is not dot product** — it is attribute / column access (`table.col`, `dict.key`). Matrix multiply is **`mmul(a, b)`**. For a vector inner product use **`dot(a, b)`**. `@` is reserved and currently unimplemented.
 
-On large `fvec`, `sum` uses a SIMD path when built with `make prod-speed`. With `libisolde.so` loaded (`ISOLDE_LIB`), `dot` / `sum` / `min` / `max` may delegate to faster `isolde_*` kernels.
+Large `ivec` element-wise `+`, `-`, and `*` (vector/vector or scalar broadcast, including `2 * a`) use OpenMP when the length is at least about 1e6. On large `fvec`, `sum` uses a SIMD path when built with `make prod-speed`. With `libisolde.so` loaded (`ISOLDE_LIB`), `dot` / `sum` / `min` / `max` may delegate to faster `isolde_*` kernels.
 
 ## Matrices
 
@@ -170,7 +171,7 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 
 On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
-Vector **`dot`** and large **`sum`** on `fvec` use the same SIMD/OpenMP stack (`src/vec_kernels.c`). There is no GPU backend in the standalone binary.
+The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (AVX-512/NEON when `prod-speed` enables those ISAs). There is no GPU backend in the standalone binary.
 
 Example: `matrix.ie`.
 
@@ -183,7 +184,7 @@ Example: `matrix.ie`.
 
 A matrix column stores one matrix per table row (table height = matrix row count). SQL `where` filters copy matrix rows like other column types.
 
-CSV/XML load and CSV save do **not** round-trip matrix columns as typed matrices; use in-memory tables or nested lists.
+CSV/XML load and CSV save do **not** round-trip matrix columns as typed matrices; use in-memory tables or nested lists. See [Tables from files](#tables-from-files) for CSV string-column and short-row behavior.
 
 ## Data
 
@@ -209,6 +210,18 @@ save(t, "out.csv")
 ```
 
 Supported formats: **CSV** and **XML** only. `save` writes **CSV** only.
+
+### CSV save
+
+- Numeric columns: `ivec` / `fvec` (and int/float cells in list columns).
+- String columns: list-of-string columns write each cell as text; `None` / unsupported cell types emit an empty field.
+- Matrix columns are not supported (save fails).
+
+### CSV load
+
+- Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0`.
+- Short rows (missing trailing fields) pad missing fields as `0`.
+- String columns written by `save` do **not** round-trip as strings — reload yields numerics (often `0` for labels).
 
 ## Input
 
@@ -801,7 +814,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | Cocoa, Core Audio, Core Foundation | Synth UI | macOS |
 | Speech, AVFoundation | `import talk` | macOS |
 | librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
-| libgomp | OpenMP (matrix `mmul`, vector `dot` / large `sum`) | Linux (default with GCC) |
+| libgomp | OpenMP (matrix `mmul`, large `ivec` `+`/`-`/`*`, vector `dot` / large `sum`) | Linux (default with GCC) |
 | libomp | OpenMP (`brew install libomp`) | macOS |
 | libpthread, libm, librt, libdl | Runtime | Linux |
 

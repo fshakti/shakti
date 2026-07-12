@@ -22,8 +22,8 @@ export SHAKTI_LIB=$PWD/lib
 
 | Target | Purpose |
 |--------|---------|
-| `make prod` | Default optimized build (`-O2`) |
-| `make prod-speed` | `-O3` with `-march=native` (x86) or `-mcpu=native` (arm64); AVX-512/NEON for matrix `mmul` and vector `dot` |
+| `make prod` | Default optimized build (`-O2`); OpenMP for large `ivec` `+`/`-`/`*` |
+| `make prod-speed` | `-O3` with `-march=native` (x86) or `-mcpu=native` (arm64); AVX-512/NEON for `mmul`, element-wise ops, and vector `dot`/`sum` |
 | `make prod-size` | Size-optimized build |
 | `make check-deps` | macOS: verify Homebrew `libomp` and `expat` |
 
@@ -58,6 +58,7 @@ See [doc.md](doc.md#examples-index) for the full index. All example code lives i
 | Module | section | what it does |
 |--------|---------|----------------|
 | *(core)* | `matrix.ie` | matrices, `mmul`, `dot`, reducers |
+| *(core)* | `table_csv.ie` | CSV `save` / `load` (numeric + string columns) |
 | `sql` | `sql_demo.ie` | in-memory table SQL |
 | `graph` | `graph_demo.ie` | knowledge graph triples |
 | `input` | `input_demo.ie` | readline + event poll |

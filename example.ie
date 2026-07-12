@@ -36,6 +36,28 @@ print("dot(range(5), range(5)):", dot(u, v))
 print("sum(u * v):", sum(u * v))
 
 # =============================================================================
+# table_csv.ie
+# =============================================================================
+# CSV table save/load. String columns save as text; load is numeric-only.
+#   ./shakti example.ie   # or copy this section to its own file
+
+people : table(id:[1, 2, 3], name:["ada", "bob", "cam"])
+r : save(people, "/tmp/shakti_people.csv")
+print("save returned:", r)
+print("csv bytes:", read("/tmp/shakti_people.csv"))
+
+# Missing fields pad as 0
+write("/tmp/shakti_short.csv", "id,val\n1,\n")
+short : load("/tmp/shakti_short.csv")
+print("short-row load:")
+print(short)
+
+# Reload of a string CSV is numeric
+reloaded : load("/tmp/shakti_people.csv")
+print("reloaded (numeric columns only):")
+print(reloaded)
+
+# =============================================================================
 # sql_demo.ie
 # =============================================================================
 # In-memory table SQL — requires `import sql` before statement syntax.
