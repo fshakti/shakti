@@ -13,6 +13,9 @@ def alive():
 def tick():
     gfx_tick()
 
+def sync_keys():
+    gfx_sync_keys()
+
 def available():
     return gfx_available()
 

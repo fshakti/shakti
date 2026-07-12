@@ -1,5 +1,6 @@
 #include "gfx.h"
 #include "gfx_platform.h"
+#include "input.h"
 #include "shakti.h"
 #include <math.h>
 #include <stdint.h>
@@ -141,6 +142,7 @@ int gfx_tick(char *err, size_t err_cap) {
     (void)err_cap;
     if (!gfx_alive()) return 0;
     if (gfx_platform_poll() != 0) g.alive = 0;
+    if (input_own_gui()) gfx_platform_sync_keys();
     if (g.dirty) {
         gfx_letterbox();
         gfx_platform_present();
@@ -151,13 +153,17 @@ int gfx_tick(char *err, size_t err_cap) {
 
 void gfx_clear(uint32_t color) {
     size_t n;
-    size_t i;
     if (!g.fb) return;
     n = (size_t)g.design_w * (size_t)g.design_h;
     if (color == 0) {
         memset(g.fb, 0, n * sizeof(uint32_t));
     } else {
-        for (i = 0; i < n; i++) g.fb[i] = color;
+        size_t row = (size_t)g.design_w;
+        size_t y;
+        uint32_t *p = g.fb;
+        for (y = 0; y < row; y++) p[y] = color;
+        for (y = 1; y < (size_t)g.design_h; y++)
+            memcpy(p + y * row, p, row * sizeof(uint32_t));
     }
     g.dirty = 1;
 }
@@ -195,12 +201,13 @@ void gfx_line(int x0, int y0, int x1, int y1, uint32_t color) {
 }
 
 void gfx_fill_circle(int cx, int cy, int r, uint32_t color) {
-    int y, x;
+    int y;
     if (!g.fb || r <= 0) return;
-    for (y = -r; y <= r; y++)
-        for (x = -r; x <= r; x++)
-            if (x * x + y * y <= r * r)
-                gfx_put(cx + x, cy + y, color);
+    for (y = -r; y <= r; y++) {
+        int dy2 = r * r - y * y;
+        int dx = dy2 > 0 ? (int)sqrt((double)dy2) : 0;
+        gfx_fill_rect(cx - dx, cy + y, dx * 2 + 1, 1, color);
+    }
     g.dirty = 1;
 }
 
@@ -260,6 +267,11 @@ V *bi_gfx_close(V **a, int n) { (void)a;(void)n; gfx_close(); return v_nil(); }
 V *bi_gfx_alive(V **a, int n) { (void)a;(void)n; return v_int(gfx_alive()); }
 V *bi_gfx_available(V **a, int n) { (void)a;(void)n; return v_int(gfx_available()); }
 V *bi_gfx_tick(V **a, int n) { char err[512]; (void)a;(void)n; err[0]=0; gfx_tick(err,sizeof err); return v_nil(); }
+V *bi_gfx_sync_keys(V **a, int n) {
+    (void)a;(void)n;
+    if (input_own_gui()) gfx_platform_sync_keys();
+    return v_nil();
+}
 V *bi_gfx_clear(V **a, int n) {
     P(n<1,v_err("gfx_clear(color)"));
     gfx_clear((uint32_t)gfx_arg_int(a,n,0,0));

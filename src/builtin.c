@@ -95,6 +95,7 @@ extern V *bi_gfx_close(V**,in);
 extern V *bi_gfx_alive(V**,in);
 extern V *bi_gfx_available(V**,in);
 extern V *bi_gfx_tick(V**,in);
+extern V *bi_gfx_sync_keys(V**,in);
 extern V *bi_gfx_clear(V**,in);
 extern V *bi_gfx_fill_rect(V**,in);
 extern V *bi_gfx_line(V**,in);
@@ -145,6 +146,7 @@ static const char *BUILTINS[] = {
     "append","pop","keys","values",
     "load","save","input","readline","wait","repr","clock","timer",
     "input_get_hz","input_set_hz","input_get_x","input_get_y","input_get_wheel",
+    "input_key_down","input_keys_clear",
     "input_set_x","input_set_y","input_set_wheel","input_get_qwerty","input_set_own_gui","input_qwerty_reload",
     "ipc_accept","ipc_close","ipc_connect","ipc_listen","ipc_poll","ipc_recv","ipc_recv_nowait",
     "ipc_rdma_available","ipc_send","ipc_set_nonblock","ipc_shm_close","ipc_shm_open",
@@ -181,7 +183,7 @@ static const char *BUILTINS[] = {
     "synth_set_row_note","synth_row_note",
     "synth_looper_rec","synth_looper_play","synth_looper_clear","synth_looper_overdub",
     "synth_looper_rec_on","synth_looper_play_on","synth_looper_has_loop",
-    "gfx_open","gfx_close","gfx_alive","gfx_available","gfx_tick",
+    "gfx_open","gfx_close","gfx_alive","gfx_available","gfx_tick","gfx_sync_keys",
     "gfx_clear","gfx_fill_rect","gfx_line","gfx_fill_circle",
     "gfx_click_pending","gfx_click_x","gfx_click_y","gfx_consume_click",
     NULL
@@ -802,6 +804,15 @@ static V *bi_input_qwerty_reload(V **a, in) {
     input_qwerty_reload();
     return v_nil();
 }
+static V *bi_input_key_down(V **a, in) {
+    P(n < 1 || a[0]->t != T_INT, v_err("input_key_down(code)"))
+    return v_int(input_hub_key_down((int)a[0]->j));
+}
+static V *bi_input_keys_clear(V **a, in) {
+    (void)a; (void)n;
+    input_hub_keys_clear();
+    return v_nil();
+}
 static V *bi_repr(V**a,in){P(n<1,v_str("None"))char*r=v_repr(a[0]);V*v=v_str(r);free(r);return v;}
 static V *bi_datetime(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("datetime(str)"))
@@ -859,6 +870,7 @@ BI0(append) BI0(pop) BI0(keys) BI0(values) BI0(next)
 BI0(input) BI0(readline) BI0(wait) BI0(repr)
 BI0(input_get_hz) BI0(input_set_hz)
 BI0(input_get_x) BI0(input_get_y) BI0(input_get_wheel)
+BI0(input_key_down) BI0(input_keys_clear)
 BI0(input_set_x) BI0(input_set_y) BI0(input_set_wheel)
 BI0(input_get_qwerty) BI0(input_set_own_gui) BI0(input_qwerty_reload)
 BI0(datetime) BI0(format_datetime) BI0(date) BI0(format_date) BI0(format_time)
@@ -889,7 +901,7 @@ BI0(synth_looper_rec) BI0(synth_looper_play) BI0(synth_looper_clear) BI0(synth_l
 BI0(synth_looper_rec_on) BI0(synth_looper_play_on) BI0(synth_looper_has_loop)
 #endif
 #ifdef SHAKTI_HAVE_GFX
-BI0(gfx_open) BI0(gfx_close) BI0(gfx_alive) BI0(gfx_available) BI0(gfx_tick)
+BI0(gfx_open) BI0(gfx_close) BI0(gfx_alive) BI0(gfx_available) BI0(gfx_tick) BI0(gfx_sync_keys)
 BI0(gfx_clear) BI0(gfx_fill_rect) BI0(gfx_line) BI0(gfx_fill_circle)
 BI0(gfx_click_pending) BI0(gfx_click_x) BI0(gfx_click_y) BI0(gfx_consume_click)
 #endif
@@ -950,6 +962,7 @@ static const BiEntry bi_tab[] = {
     {"gfx_fill_rect", bi_w_gfx_fill_rect},
     {"gfx_line", bi_w_gfx_line},
     {"gfx_open", bi_w_gfx_open},
+    {"gfx_sync_keys", bi_w_gfx_sync_keys},
     {"gfx_tick", bi_w_gfx_tick},
 #endif
     {"graph_add", bi_w_graph_add},
@@ -971,6 +984,8 @@ static const BiEntry bi_tab[] = {
     {"input_get_wheel", bi_w_input_get_wheel},
     {"input_get_x", bi_w_input_get_x},
     {"input_get_y", bi_w_input_get_y},
+    {"input_key_down", bi_w_input_key_down},
+    {"input_keys_clear", bi_w_input_keys_clear},
     {"input_qwerty_reload", bi_w_input_qwerty_reload},
     {"input_set_hz", bi_w_input_set_hz},
     {"input_set_own_gui", bi_w_input_set_own_gui},
