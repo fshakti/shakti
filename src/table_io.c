@@ -108,15 +108,28 @@ static int table_csv_save(V *table, const char *path) {
                 fputc(',', f);
             V *col = table->vals->L[j];
             char buf[64];
-            if (col->t == T_FVEC)
+            if (col->t == T_FVEC) {
                 snprintf(buf, sizeof buf, "%g", col->F[r]);
-            else if (col->t == T_IVEC)
+                fputs(buf, f);
+            } else if (col->t == T_IVEC) {
                 snprintf(buf, sizeof buf, "%lld", (long long)col->J[r]);
-            else {
+                fputs(buf, f);
+            } else if (col->t == T_LIST && r < col->n) {
+                V *cell = col->L[r];
+                if (cell && cell->t == T_STR)
+                    fputs(cell->s, f);
+                else if (cell && cell->t == T_INT) {
+                    snprintf(buf, sizeof buf, "%lld", (long long)cell->j);
+                    fputs(buf, f);
+                } else if (cell && cell->t == T_FLOAT) {
+                    snprintf(buf, sizeof buf, "%g", cell->f);
+                    fputs(buf, f);
+                }
+                /* empty / unsupported cell -> empty field */
+            } else {
                 fclose(f);
                 return -1;
             }
-            fputs(buf, f);
         }
         fputc('\n', f);
     }
@@ -252,12 +265,15 @@ static V *table_csv_load(const char *path, V *columns_opt) {
         strip_ws(lines[li]);
         if (!lines[li][0])
             continue;
+        for (int cj = 0; cj < nh; cj++)
+            cells[cj] = NULL;
         split_csv_line(lines[li], cells, 64);
         for (int cj = 0; cj < nh; cj++) {
+            const char *cell = cells[cj] ? cells[cj] : "";
             if (use_float[cj])
-                cols[cj]->F[row] = strtod(cells[cj], NULL);
+                cols[cj]->F[row] = strtod(cell, NULL);
             else
-                cols[cj]->J[row] = (int64_t)strtoll(cells[cj], NULL, 10);
+                cols[cj]->J[row] = (int64_t)strtoll(cell, NULL, 10);
         }
         row++;
     }
