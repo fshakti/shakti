@@ -48,6 +48,11 @@ void input_qwerty_reload(void);
 V *input_event_dict(int code, int modifiers, const char *utf8, const char *kind);
 
 void input_hub_pump(int timeout_ms);
+
+void input_hub_keys_clear(void);
+int input_hub_key_down(int code);
+void input_hub_key_set(int code, int down);
+
 int input_hub_take_stop(void);
 
 #ifdef __cplusplus

@@ -138,6 +138,8 @@ int gfx_platform_poll(void) {
     return gfx_core_is_alive() ? 0 : -1;
 }
 
+void gfx_platform_sync_keys(void) {}
+
 #else
 
 int gfx_platform_init(const char *title, char *err, size_t cap) {
@@ -148,5 +150,6 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
 void gfx_platform_shutdown(void) {}
 void gfx_platform_present(void) {}
 int gfx_platform_poll(void) { return -1; }
+void gfx_platform_sync_keys(void) {}
 
 #endif

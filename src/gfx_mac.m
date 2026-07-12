@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#include <ApplicationServices/ApplicationServices.h>
 #include "gfx_platform.h"
 #include "gfx.h"
 #include "input.h"
@@ -37,11 +38,13 @@ static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) 
 
 @implementation GfxView
 - (BOOL)isFlipped { return YES; }
+- (BOOL)acceptsFirstResponder { return YES; }
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
     if (_rep) [_rep drawInRect:self.bounds];
 }
 - (void)mouseDown:(NSEvent *)ev {
+    [[self window] makeFirstResponder:self];
     NSPoint p = [self convertPoint:ev.locationInWindow fromView:nil];
     input_hub_inject_mouse((int)p.x, (int)p.y, 1);
     gfx_core_mouse_design((int)p.x, (int)p.y, 1);
@@ -54,20 +57,29 @@ static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) 
     gfx_core_mark_dirty();
 }
 - (void)keyDown:(NSEvent *)ev {
+    [[self window] makeFirstResponder:self];
     unsigned short code = [ev keyCode];
     NSString *chars = [ev charactersIgnoringModifiers];
     char utf8[8] = {0};
     if (chars.length > 0)
         [chars getCString:utf8 maxLength:sizeof utf8 encoding:NSUTF8StringEncoding];
     input_hub_inject_key((int)code, (int)[ev modifierFlags], utf8, 1);
+    if (input_own_gui())
+        input_hub_key_set((int)code, 1);
 }
 - (void)keyUp:(NSEvent *)ev {
     unsigned short code = [ev keyCode];
     NSString *chars = [ev charactersIgnoringModifiers];
     char utf8[8] = {0};
+    int focused;
     if (chars.length > 0)
         [chars getCString:utf8 maxLength:sizeof utf8 encoding:NSUTF8StringEncoding];
     input_hub_inject_key((int)code, (int)[ev modifierFlags], utf8, 0);
+    /* Ignore keyUp when we are not the key window — macOS synthesizes
+     * releases on resignKey, which previously stuck the bat after scoring. */
+    focused = (self.window && [self.window isKeyWindow]) ? 1 : 0;
+    if (input_own_gui() && focused)
+        input_hub_key_set((int)code, 0);
 }
 - (void)gfxEnsureRep:(int)w h:(int)h {
     if (_rep && _repW == w && _repH == h) return;
@@ -87,6 +99,25 @@ static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) 
 
 @interface GfxWindowDelegate : NSObject <NSWindowDelegate>
 @end
+
+static NSWindow *g_win;
+static GfxView *g_view;
+static GfxWindowDelegate *g_delegate;
+static int g_app_ready;
+
+/* Full HID sync after focus returns. Regular poll only promotes keys. */
+static void gfx_mac_recover_held_keys(void) {
+    static const CGKeyCode codes[] = {126, 125, 13, 1};
+    size_t i;
+    if (!input_own_gui()) return;
+    for (i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
+        CGKeyCode c = codes[i];
+        int hid = CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, c) ? 1 : 0;
+        int ses = CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState, c) ? 1 : 0;
+        input_hub_key_set((int)c, (hid || ses) ? 1 : 0);
+    }
+}
+
 @implementation GfxWindowDelegate
 - (void)windowWillClose:(NSNotification *)note {
     (void)note;
@@ -99,12 +130,13 @@ static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) 
     gfx_core_fb_resize((int)fr.size.width, (int)fr.size.height);
     gfx_core_mark_dirty();
 }
+- (void)windowDidBecomeKey:(NSNotification *)note {
+    (void)note;
+    if (g_win && g_view)
+        [g_win makeFirstResponder:g_view];
+    gfx_mac_recover_held_keys();
+}
 @end
-
-static NSWindow *g_win;
-static GfxView *g_view;
-static GfxWindowDelegate *g_delegate;
-static int g_app_ready;
 
 static void gfx_mac_ensure_app(void) {
     if (g_app_ready) return;
@@ -132,6 +164,7 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
     g_delegate = [[GfxWindowDelegate alloc] init];
     [g_win setDelegate:g_delegate];
     [g_win makeKeyAndOrderFront:nil];
+    [g_win makeFirstResponder:g_view];
     [NSApp activateIgnoringOtherApps:YES];
     return 0;
 }
@@ -153,6 +186,21 @@ void gfx_platform_present(void) {
     [g_view gfxUpdatePixels:px w:w h:h];
 }
 
+/* Poll path: only promote HID-down keys. Never clear — call-count debounce
+ * previously fired multiple times per frame via tick+physics sync. */
+static void gfx_mac_sync_keys(void) {
+    static const CGKeyCode codes[] = {126, 125, 13, 1};
+    size_t i;
+    if (!input_own_gui()) return;
+    for (i = 0; i < sizeof(codes) / sizeof(codes[0]); i++) {
+        CGKeyCode c = codes[i];
+        int hid = CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, c) ? 1 : 0;
+        int ses = CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState, c) ? 1 : 0;
+        if (hid || ses)
+            input_hub_key_set((int)c, 1);
+    }
+}
+
 int gfx_platform_poll(void) {
     NSEvent *ev;
     if (!gfx_core_is_alive()) return 0;
@@ -164,5 +212,13 @@ int gfx_platform_poll(void) {
         if (!ev) break;
         [NSApp sendEvent:ev];
     }
+    /* Do not call makeKeyAndOrderFront every frame — that resigns/becomes key
+     * and synthesizes keyUps after scoring. */
+    if (g_win && g_view && [g_win isKeyWindow] && [g_win firstResponder] != g_view)
+        [g_win makeFirstResponder:g_view];
     return gfx_core_is_alive() ? 0 : -1;
+}
+
+void gfx_platform_sync_keys(void) {
+    gfx_mac_sync_keys();
 }

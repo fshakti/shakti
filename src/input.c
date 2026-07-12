@@ -54,6 +54,7 @@ typedef struct {
     int active_streams;
     int mouse_buttons;
     int stop_latch;
+    unsigned char key_down[65536];
 } InputHub;
 
 static InputHub g_in;
@@ -117,6 +118,20 @@ void input_hub_init(void) {
     qwerty_build();
 }
 
+void input_hub_keys_clear(void) {
+    memset(g_in.key_down, 0, sizeof g_in.key_down);
+}
+
+int input_hub_key_down(int code) {
+    if (code < 0 || code >= 65536) return 0;
+    return g_in.key_down[code] ? 1 : 0;
+}
+
+void input_hub_key_set(int code, int down) {
+    if (code >= 0 && code < 65536)
+        g_in.key_down[code] = down ? 1 : 0;
+}
+
 void input_hub_shutdown(void) {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
     if (g_in.raw && g_in.has_orig) {
@@ -170,7 +185,13 @@ void input_hub_inject_key(int code, int modifiers, const char *utf8, int down) {
         ev.utf8[0] = (char)code;
     }
     q_push(&ev);
-    if (down && ev.utf8[0]) {
+    if (!g_in.own_gui && code >= 0 && code < 65536) {
+        if (down)
+            g_in.key_down[code] = 1;
+        else
+            g_in.key_down[code] = 0;
+    }
+    if (down && ev.utf8[0] && !g_in.own_gui) {
         InputEvent up = ev;
         up.kind = EV_KEY_UP;
         q_push(&up);
@@ -360,7 +381,13 @@ static void emit_key(int code, const char *utf8, int down) {
     ev.kind = down ? EV_KEY_DOWN : EV_KEY_UP;
     ev.code = code;
     if (utf8 && utf8[0]) strncpy(ev.utf8, utf8, sizeof ev.utf8 - 1);
-    else if (code >= 32 && code < 127) ev.utf8[0] = (char)code;
+    else     if (code >= 32 && code < 127) ev.utf8[0] = (char)code;
+    if (!g_in.own_gui && code >= 0 && code < 65536) {
+        if (down)
+            g_in.key_down[code] = 1;
+        else
+            g_in.key_down[code] = 0;
+    }
     q_push(&ev);
 }
 
@@ -510,7 +537,8 @@ V *input_poll_ms(int ms) {
             pump_synth();
         }
     } else {
-        tty_drain(0);
+        if (!g_in.own_gui)
+            tty_drain(0);
     }
     V *out = v_list(0);
     InputEvent ev;
