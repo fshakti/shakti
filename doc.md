@@ -29,7 +29,7 @@ export SHAKTI_LIB=$PWD/lib
 | Module | Example | Description |
 |--------|---------|-------------|
 | *(core)* | `matrix.ie` | Matrices (`mmul`), `dot`, `sum` / `min` / `max` |
-| *(core)* | `table_csv.ie` | CSV `save` / `load` (numeric + string columns) |
+| *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` (numeric + string columns) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
@@ -184,7 +184,7 @@ Example: `matrix.ie`.
 
 A matrix column stores one matrix per table row (table height = matrix row count). SQL `where` filters copy matrix rows like other column types.
 
-CSV/XML load and CSV save do **not** round-trip matrix columns as typed matrices; use in-memory tables or nested lists. See [Tables from files](#tables-from-files) for CSV string-column and short-row behavior.
+CSV/TSV/XML load and CSV/TSV save do **not** round-trip matrix columns as typed matrices; use in-memory tables or nested lists. See [Tables from files](#tables-from-files) for string-column and short-row behavior.
 
 ## Data
 
@@ -205,22 +205,25 @@ k : ktable(a:1, b:2)
 
 ```ie
 t : load("file.csv")
+t : load("file.tsv")
 t : load("file.xml")
 save(t, "out.csv")
+save(t, "out.tsv")
 ```
 
-Supported formats: **CSV** and **XML** only. `save` writes **CSV** only.
+Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TSV** only.
 
-### CSV save
+### CSV / TSV save
 
 - Numeric columns: `ivec` / `fvec` (and int/float cells in list columns).
 - String columns: list-of-string columns write each cell as text; `None` / unsupported cell types emit an empty field.
 - Matrix columns are not supported (save fails).
+- Delimiter is `,` for `.csv` and tab for `.tsv`. Fields are not quoted; values must not contain the delimiter.
 
-### CSV load
+### CSV / TSV load
 
 - Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0`.
-- Short rows (missing trailing fields) pad missing fields as `0`.
+- Empty fields (e.g. CSV `1,` or TSV `1\t`) pad as `0`. Leading/trailing empty fields are preserved.
 - String columns written by `save` do **not** round-trip as strings — reload yields numerics (often `0` for labels).
 
 ## Input

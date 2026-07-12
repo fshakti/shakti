@@ -38,7 +38,7 @@ print("sum(u * v):", sum(u * v))
 # =============================================================================
 # table_csv.ie
 # =============================================================================
-# CSV table save/load. String columns save as text; load is numeric-only.
+# CSV/TSV table save/load. String columns save as text; load is numeric-only.
 #   ./shakti example.ie   # or copy this section to its own file
 
 people : table(id:[1, 2, 3], name:["ada", "bob", "cam"])
@@ -56,6 +56,24 @@ print(short)
 reloaded : load("/tmp/shakti_people.csv")
 print("reloaded (numeric columns only):")
 print(reloaded)
+
+# TSV round-trip (same table API; tab delimiter)
+save(people, "/tmp/shakti_people.tsv")
+print("tsv bytes:", read("/tmp/shakti_people.tsv"))
+tsv_reloaded : load("/tmp/shakti_people.tsv")
+print("tsv reloaded (numeric columns only):")
+print(tsv_reloaded)
+
+# TSV empty leading / trailing fields pad as 0
+write("/tmp/shakti_edge.tsv", "a\tb\tc\n\t2\t3\n1\t2\t\n")
+edge : load("/tmp/shakti_edge.tsv")
+print("tsv empty-edge load:")
+print(edge)
+
+write("/tmp/shakti_short.tsv", "id\tval\n1\t\n")
+tsv_short : load("/tmp/shakti_short.tsv")
+print("tsv short-row load:")
+print(tsv_short)
 
 # =============================================================================
 # sql_demo.ie

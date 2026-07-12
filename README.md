@@ -58,7 +58,7 @@ See [doc.md](doc.md#examples-index) for the full index. All example code lives i
 | Module | section | what it does |
 |--------|---------|----------------|
 | *(core)* | `matrix.ie` | matrices, `mmul`, `dot`, reducers |
-| *(core)* | `table_csv.ie` | CSV `save` / `load` (numeric + string columns) |
+| *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` (numeric + string columns) |
 | `sql` | `sql_demo.ie` | in-memory table SQL |
 | `graph` | `graph_demo.ie` | knowledge graph triples |
 | `input` | `input_demo.ie` | readline + event poll |

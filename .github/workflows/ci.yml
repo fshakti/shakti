@@ -1,0 +1,18 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y libexpat1-dev
+      - name: Build
+        run: SHAKTI_SYNTH=0 SHAKTI_GFX=0 SHAKTI_RDMA=0 make prod
+      - name: Table CSV/TSV smoke
+        run: SHAKTI_LIB=$PWD/lib ./shakti tests/table_tsv.ie
