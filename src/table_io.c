@@ -37,7 +37,7 @@ int table_save(V *table, const char *path) {
 }
 
 /* Upper bound on a single CSV/TSV file read fully into memory. */
-#define SHAKTI_CSV_MAX_FILE (256u * 1024u * 1024u)
+#define SHAKTI_CSV_MAX_FILE (1024u * 1024u * 1024u)
 static char *read_all(const char *s) {
     FILE *f = fopen(s, "rb");
     P(!f, NULL)
