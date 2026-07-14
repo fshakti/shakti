@@ -6,6 +6,7 @@
 - [Syntax and builtins](#syntax-and-builtins)
 - [Decorators](#decorators)
 - [Each (`@`)](#each-)
+- [Python 3 → Shakti converter](#python-3--shakti-converter)
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
 - [`input` module](#input-module)
@@ -54,6 +55,12 @@ export SHAKTI_LIB=$PWD/lib
 |------|-------------|
 | `bridge.ie` | Bridge hand dealer / HCP filter (stdlib only) |
 
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `examples/python3_to_shakti.py` | Strict Python 3 → Shakti converter |
+
 ## Module docs
 
 | Module | Doc |
@@ -67,6 +74,43 @@ export SHAKTI_LIB=$PWD/lib
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
 
+---
+
+# Python 3 → Shakti converter
+
+Strict subset converter. Uses Python’s `ast` module and emits `.ie` source.
+
+```bash
+python3 examples/python3_to_shakti.py input.py -o out.ie
+python3 examples/python3_to_shakti.py < input.py
+python3 examples/python3_to_shakti.py example.py | ./shakti /dev/stdin
+```
+
+Unsupported syntax exits nonzero with `file:line:col` diagnostics.
+
+## Rewrites
+
+| Python | Shakti |
+|--------|--------|
+| `x = 1` | `x : 1` |
+| `x == 1` | `x = 1` |
+| `def f(n=2):` | `def f(n:2):` |
+| `f(k=1)` | `f(k:1)` |
+| `a @ b` | `mmul(a, b)` |
+| `assert x` | `assert(x)` |
+
+Also converts functions, one-argument lambdas, `if`/`elif`/`else`, `while`, `for`, break/continue/pass, lists/tuples/dicts, indexing/slices, attributes, calls, decorators, f-strings (without format specs), augmented `+= -= *= /=`, and `import name`.
+
+`example.py` demonstrates NumPy and pandas lowering. `numpy.array`/`asarray`
+become native vectors or matrices; common reducers map to Shakti builtins;
+`pandas.Series` becomes a vector and `pandas.DataFrame({...})` becomes
+`table(...)`. Other NumPy/pandas calls fail with a source location.
+
+## Rejected
+
+Chained assignment/comparisons, annotations, classes, comprehensions/generators, sets/bytes/complex, `is`/`is not`, bitwise ops, unary `+`, `*args`/`**kwargs`, keyword-only/positional-only args, multi-argument lambdas, loop `else`, from-import/aliases, nested/starred unpacking, exceptions/`with`/`yield`/`async`, and `del`/`global`/`nonlocal`.
+
+Docstrings become `#` comments.
 
 ---
 
@@ -78,6 +122,10 @@ export SHAKTI_LIB=$PWD/lib
 - **Compare** with `=` — `if x = 1:`, `while i < len(s):`
 - Dict literals and slices keep `:` — `{k: v}`, `a[1:3]`
 - `==` is not supported
+
+String and formatted-string token text is limited to 8191 bytes, and source
+indentation is limited to 255 nested levels. Inputs beyond either limit fail
+with a lexer error instead of being truncated.
 
 ```ie
 def index_of(s, ch):
@@ -270,6 +318,17 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
 The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (AVX-512/NEON when `prod-speed` enables those ISAs). There is no GPU backend in the standalone binary.
+
+Benchmark baselines depend on the host CPU and OpenMP thread count. Keep
+`OMP_NUM_THREADS` fixed when creating and checking a local baseline. On
+many-core hosts, a modest value can avoid thread startup and synchronization
+overhead dominating short vector benchmarks:
+
+```bash
+OMP_NUM_THREADS=4 make bench-update
+OMP_NUM_THREADS=4 make bench
+OMP_NUM_THREADS=4 make bench-report
+```
 
 Example: `matrix.ie`.
 
@@ -928,6 +987,7 @@ Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `S
 
 ## Apple / Microsoft SDKs
 
-macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses. Windows/Android tooling in the local-only tree is not part of the published release.
+macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses.
+Windows/Android tooling in the local-only tree is not part of the published release.
 
 ---
