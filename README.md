@@ -46,6 +46,15 @@ These require gitignored `tests/` and `scripts/` trees in your working copy (not
 | `make bench-update` | Refresh `benchmarks/baselines/local.json` |
 | `make bench-report` | Print benchmark table (no fail on regression) |
 
+Benchmark baselines are machine- and OpenMP-thread-count-specific. Use the same
+fixed thread count when recording and comparing a baseline, especially on
+many-core hosts:
+
+```bash
+OMP_NUM_THREADS=4 make bench-update
+OMP_NUM_THREADS=4 make bench
+```
+
 ## run
 
 ```bash
@@ -75,6 +84,20 @@ See [doc.md](doc.md#examples-index) for the full index. All example code lives i
 | `rest` | `rest_demo.ie` | HTTP client + local server |
 | *(stdlib)* | `bridge.ie` | bridge hand dealer / HCP filter |
 
+## tools
+
+Python 3 → Shakti (strict subset):
+
+```bash
+python3 examples/python3_to_shakti.py input.py -o out.ie
+python3 examples/python3_to_shakti.py example.py | ./shakti /dev/stdin
+```
+
+Maps `=`→`:`, `==`→`=`, defaults/keywords to `:`, and matrix `@`→`mmul`.
+Common NumPy arrays/reducers and pandas DataFrames lower to native vectors,
+reducers, and tables. Rejects unsupported Python with line/column diagnostics.
+See [doc.md](doc.md#python-3--shakti-converter).
+
 ## docs
 
 All documentation is in [doc.md](doc.md):
@@ -83,6 +106,7 @@ All documentation is in [doc.md](doc.md):
 - [Syntax and builtins](doc.md#syntax-and-builtins)
 - [Decorators](doc.md#decorators)
 - [Each (`@`)](doc.md#each-)
+- [Python 3 → Shakti converter](doc.md#python-3--shakti-converter)
 - [`sql` module](doc.md#sql-module)
 - [graph module](doc.md#graph-module)
 - [`input` module](doc.md#input-module)
