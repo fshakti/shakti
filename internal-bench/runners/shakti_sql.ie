@@ -1,0 +1,54 @@
+# Shakti SQL workloads — mirrors benchmarks/suites/sql.ie
+import sql
+
+def bench_line(name, seconds, iterations):
+    ops : 0.0
+    if seconds > 0:
+        ops : float(iterations) / float(seconds)
+    print("BENCH\t" + name + "\t" + str(seconds) + "\t" + str(iterations) + "\t" + str(ops))
+
+n : 10000
+dept : range(n)
+amount : range(n)
+id_col : range(n)
+t : table(id:id_col, dept:dept, amount:amount)
+
+runs : 15
+t0 : clock()
+for i in range(runs):
+    select amount by dept from t where amount > n / 2
+bench_line("sql_select_group_filter", clock() - t0, runs)
+
+t2 : table(id:id_col, dept:dept, amount:amount)
+runs : 15
+t0 : clock()
+for i in range(runs):
+    select amount by dept from t2 where amount > 5000
+bench_line("sql_select_group_filter_2", clock() - t0, runs)
+
+tu : table(id:[1, 2, 3], name:["a", "b", "c"], score:range(3))
+n : 2000
+t0 : clock()
+for i in range(n):
+    update score : 99 from tu where id = 2
+bench_line("sql_update", clock() - t0, n)
+
+td : table(id:range(1000), v:range(1000))
+n : 1000
+t0 : clock()
+for i in range(n):
+    delete from td where id > 900
+bench_line("sql_delete", clock() - t0, n)
+
+n : 2000
+t0 : clock()
+for i in range(n):
+    create table bench_u (id: 0, name: "")
+bench_line("sql_create", clock() - t0, n)
+
+create table ins (id: 0, name: "")
+n : 2000
+t0 : clock()
+for i in range(n):
+    insert into ins (id, name) values (1, "ada")
+bench_line("sql_insert", clock() - t0, n)

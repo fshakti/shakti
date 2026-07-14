@@ -1,0 +1,7 @@
+# Stdlib smoke (portable)
+assert(sorted([3, 1, 2])[0] = 1)
+assert(any(0, 1, 0))
+assert(all(1, 1, 1))
+s : json_dumps({"k": "v"})
+assert(isinstance(s, "str"))
+print("stdlib ok")

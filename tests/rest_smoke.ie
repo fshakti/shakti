@@ -1,0 +1,16 @@
+# rest module — offline smoke (no network)
+import rest
+
+curl_ok : sh("command -v curl >/dev/null 2>&1") = 0
+if curl_ok:
+    print("rest: curl available")
+else:
+    print("rest: curl not on PATH — skipping client checks")
+
+# Server builtins are always registered when not WASM
+port : 19100
+srv2 : rest.listen(port)
+assert(srv2 >= 1)
+rest.close(srv2)
+
+print("rest_smoke ok")

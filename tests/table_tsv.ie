@@ -1,0 +1,38 @@
+# CSV/TSV table I/O smoke
+def assert_eq(a, b, msg):
+    if a != b:
+        print("FAIL:", msg, "got", a, "want", b)
+        raise msg
+
+t : table(id:[1, 2], x:[10, 20])
+save(t, "/tmp/shakti_rt.tsv")
+u : load("/tmp/shakti_rt.tsv")
+assert_eq(type(u), "table", "tsv load type")
+assert_eq(u["id"][0], 1, "tsv id0")
+assert_eq(u["x"][1], 20, "tsv x1")
+
+write("/tmp/shakti_edge.tsv", "a\tb\tc\n\t2\t3\n1\t2\t\n")
+e : load("/tmp/shakti_edge.tsv")
+assert_eq(e["a"][0], 0, "tsv leading empty")
+assert_eq(e["b"][0], 2, "tsv mid")
+assert_eq(e["c"][0], 3, "tsv c0")
+assert_eq(e["a"][1], 1, "tsv a1")
+assert_eq(e["c"][1], 0, "tsv trailing empty")
+
+write("/tmp/shakti_short.tsv", "id\tval\n1\t\n")
+s : load("/tmp/shakti_short.tsv")
+assert_eq(s["id"][0], 1, "tsv short id")
+assert_eq(s["val"][0], 0, "tsv short val")
+
+write("/tmp/shakti_short.csv", "id,val\n1,\n")
+c : load("/tmp/shakti_short.csv")
+assert_eq(c["val"][0], 0, "csv short val")
+
+bad : load("/tmp/no_such_file.tsv")
+assert_eq(type(bad), "error", "missing tsv is error")
+assert_eq("tsv:" in str(bad), True, "tsv error prefix")
+
+badc : load("/tmp/no_such_file.csv")
+assert_eq("csv:" in str(badc), True, "csv error prefix")
+
+print("table_tsv ok")

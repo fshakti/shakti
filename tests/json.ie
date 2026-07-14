@@ -1,0 +1,5 @@
+# JSON parser smoke
+d : json_loads("{\"a\": 1, \"b\": [true, null, \"x\"]}")
+assert(d["a"] = 1)
+assert(len(d["b"]) = 3)
+print("json ok")

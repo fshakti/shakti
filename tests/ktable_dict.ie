@@ -1,0 +1,42 @@
+# dict() and ktable() key-value constructors
+
+# dict: keyword, positional names, and (keys, values) lists
+d1 : dict(a:1, b:2)
+assert(d1.a = 1)
+assert(d1.b = 2)
+
+a : 10
+b : 20
+d2 : dict(a, b)
+assert(d2.a = 10)
+assert(d2.b = 20)
+
+d3 : dict(["x", "y"], [3, 4])
+assert(d3.x = 3)
+assert(d3.y = 4)
+
+# ktable: vertical key/value table (2 columns)
+k1 : ktable(sym:1, price:1.5)
+assert(shape(k1)[0] = 2)
+assert(shape(k1)[1] = 2)
+assert(columns(k1)[0] = "key")
+assert(columns(k1)[1] = "value")
+
+x : "sym"
+y : 99
+k2 : ktable(x, y)
+assert(k2.key[0] = "x")
+assert(k2.value[0] = "sym")
+assert(k2.key[1] = "y")
+assert(k2.value[1] = 99)
+
+kd : dict(a:10, b:20)
+k3 : ktable(kd)
+assert(k3.key[0] = "a")
+assert(k3.value[0] = 10)
+
+k4 : ktable(["p", "q"], [7, 8])
+assert(k4.key[0] = "p")
+assert(k4.value[0] = 7)
+
+print("ktable_dict ok")

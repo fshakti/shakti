@@ -1,0 +1,15 @@
+# synth headless smoke — safe without DISPLAY (must not be named synth.ie; import resolution)
+import synth
+
+r : synth_open()
+if type(r) = "error":
+    print("synth headless ok")
+else:
+    assert synth_alive() = 1
+    synth_set_steps(32)
+    assert synth_steps() = 32
+    synth_tick()
+    synth_close()
+    print("synth interactive ok")
+
+print("synth ok")

@@ -1,0 +1,13 @@
+workload	shakti_sql	shakti_vectors	numpy	pandas	sqlite	duckdb
+sql_select_group_filter	0.021137			0.004905	0.029398	0.047548
+sql_select_group_filter_2	0.008227			0.003782	0.028919	0.048511
+sql_update	0.001194			0.178301	0.002937	0.433071
+sql_delete	0.004876			0.064767	0.017321	0.352215
+sql_create	0.001634			0.194374	0.117908	0.438059
+sql_insert	0.000623			0.203534	0.003478	0.436198
+vec_add_1m		0.011503	0.003009			
+vec_mul_1m		0.014356	0.007409			
+vec_compare_1m		0.007990	0.001744			
+vec_filter_mask_1m		0.007917	0.006774			
+vec_sum_1m		0.004027	0.001282			
+vec_dot_1m		0.124999	0.008441			

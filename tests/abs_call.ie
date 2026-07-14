@@ -1,0 +1,5 @@
+# Builtin juxtaposition: abs -1.2  =  abs(-1.2)
+assert(abs(-1.2) = 1.2)
+x : abs -1.2
+assert(x = 1.2)
+print("abs ok")
