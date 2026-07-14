@@ -1,0 +1,14 @@
+# Banner appears exactly once on interactive startup; nested/piped children stay quiet.
+sh("printf 'exit\\n' | script -q -c './shakti' /dev/null > test_banner.txt 2>&1")
+txt : read("test_banner.txt")
+sh("rm test_banner.txt")
+parts : re_split("shakti engine", txt)
+assert(len(parts) = 2, "Banner should appear exactly once")
+
+sh("./shakti -q -c 'sh(\"(printf exit | ./shakti) &\")' > test_nested.txt 2>&1")
+nested : read("test_nested.txt")
+sh("rm test_nested.txt")
+nested_parts : re_split("shakti engine", nested)
+assert(len(nested_parts) = 1, "Nested shakti should not print banner")
+
+print("Banner duplicate test passed")

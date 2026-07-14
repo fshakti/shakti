@@ -1,0 +1,21 @@
+# synth tuning API — set_tuning requires open synth; errors cleanly when closed
+r : synth_set_tuning("just")
+assert(type(r) = "error")
+
+r2 : synth_set_tuning("nope")
+assert(type(r2) = "error")
+
+import synth
+
+opened : synth.open()
+if type(opened) = "error":
+    print("synth tuning headless ok")
+else:
+    synth.set_tuning("just")
+    assert(synth.tuning() = "just")
+    synth.set_tuning("12tet")
+    assert(synth.tuning() = "12tet")
+    synth.close()
+    print("synth tuning interactive ok")
+
+print("synth_tuning ok")

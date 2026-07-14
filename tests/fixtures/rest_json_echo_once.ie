@@ -1,0 +1,10 @@
+# One-shot JSON echo server for POST tests
+import rest
+
+port : 19093
+srv : rest.listen(port)
+c : rest.accept(srv)
+req : rest.read(c)
+rest.write(c, 200, req["body"], "application/json")
+rest.close(c)
+rest.close(srv)

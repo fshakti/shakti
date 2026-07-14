@@ -1,0 +1,27 @@
+# rest local round-trip — client (curl) + server (TCP)
+import rest
+
+skip : getenv("SHAKTI_REST_SKIP_NET")
+curl_ok : sh("command -v curl >/dev/null 2>&1") = 0
+
+if skip = "1":
+    print("rest_local: skipped (SHAKTI_REST_SKIP_NET=1)")
+elif not curl_ok:
+    print("rest_local: skipped (no curl)")
+else:
+    sh("./shakti tests/fixtures/rest_echo_once.ie &")
+    sh("sleep 0.5")
+
+    resp : rest.get("http://127.0.0.1:19092/hello")
+    assert(rest.ok(resp))
+    assert(rest.text(resp) = "hello")
+
+    sh("./shakti tests/fixtures/rest_json_echo_once.ie &")
+    sh("sleep 0.5")
+
+    resp2 : rest.post_json("http://127.0.0.1:19093/echo", {"msg": "hi"})
+    assert(rest.ok(resp2))
+    body : rest.json(resp2)
+    assert(body["msg"] = "hi")
+
+    print("rest ok")

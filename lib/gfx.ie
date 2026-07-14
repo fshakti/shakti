@@ -1,0 +1,44 @@
+# gfx — standalone pixel window (cross-platform where built).
+
+def open(title:"Shakti GFX"):
+    r : gfx_open(title)
+    return r
+
+def close():
+    gfx_close()
+
+def alive():
+    return gfx_alive()
+
+def tick():
+    gfx_tick()
+
+def sync_keys():
+    gfx_sync_keys()
+
+def available():
+    return gfx_available()
+
+def clear(color):
+    gfx_clear(color)
+
+def fill_rect(x, y, w, h, color):
+    gfx_fill_rect(x, y, w, h, color)
+
+def line(x0, y0, x1, y1, color):
+    gfx_line(x0, y0, x1, y1, color)
+
+def fill_circle(cx, cy, r, color):
+    gfx_fill_circle(cx, cy, r, color)
+
+def click_pending():
+    return gfx_click_pending()
+
+def click_x():
+    return gfx_click_x()
+
+def click_y():
+    return gfx_click_y()
+
+def consume_click():
+    gfx_consume_click()

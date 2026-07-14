@@ -1,0 +1,72 @@
+# Targeted regression measurements — writes BENCH lines for independent timers.
+import ipc
+
+# A: shared-timer artifact check (chr/ord/hex)
+n : 20000
+t0 : clock()
+for i in range(n):
+    chr(65)
+t_chr : clock() - t0
+t0 : clock()
+for i in range(n):
+    ord("A")
+t_ord : clock() - t0
+t0 : clock()
+for i in range(n):
+    hex(255)
+t_hex : clock() - t0
+t0 : clock()
+for i in range(n):
+    chr(65)
+    ord("A")
+    hex(255)
+t_combo : clock() - t0
+print("BENCH\tchr_alone\t" + str(t_chr) + "\t" + str(n) + "\t" + str(n / t_chr))
+print("BENCH\tord_alone\t" + str(t_ord) + "\t" + str(n) + "\t" + str(n / t_ord))
+print("BENCH\thex_alone\t" + str(t_hex) + "\t" + str(n) + "\t" + str(n / t_hex))
+print("BENCH\tchr_ord_hex_combo\t" + str(t_combo) + "\t" + str(n) + "\t" + str(n / t_combo))
+
+# A: path shared-timer artifact
+tmp : "/tmp/shakti_bench_path.txt"
+n : 30000
+t0 : clock()
+for i in range(n):
+    path_basename(tmp)
+t_base : clock() - t0
+t0 : clock()
+for i in range(n):
+    path_dirname(tmp)
+t_dir : clock() - t0
+t0 : clock()
+for i in range(n):
+    path_splitext(tmp)
+t_ext : clock() - t0
+t0 : clock()
+for i in range(n):
+    path_basename(tmp)
+    path_dirname(tmp)
+    path_splitext(tmp)
+t_path_combo : clock() - t0
+print("BENCH\tpath_basename_alone\t" + str(t_base) + "\t" + str(n) + "\t" + str(n / t_base))
+print("BENCH\tpath_dirname_alone\t" + str(t_dir) + "\t" + str(n) + "\t" + str(n / t_dir))
+print("BENCH\tpath_splitext_alone\t" + str(t_ext) + "\t" + str(n) + "\t" + str(n / t_ext))
+print("BENCH\tpath_combo\t" + str(t_path_combo) + "\t" + str(n) + "\t" + str(n / t_path_combo))
+
+# B/D: repr_list realism
+lst : list(range(1000))
+n : 10000
+t0 : clock()
+for i in range(n):
+    repr(lst)
+t_repr : clock() - t0
+print("BENCH\trepr_list\t" + str(t_repr) + "\t" + str(n) + "\t" + str(n / t_repr))
+print("repr_sample_len", len(repr(lst)))
+
+# C: rdma available
+n_rd : 100000
+t0 : clock()
+for i in range(n_rd):
+    ipc.rdma_available()
+t_rd : clock() - t0
+print("BENCH\tipc_rdma_available\t" + str(t_rd) + "\t" + str(n_rd) + "\t" + str(n_rd / t_rd))
+print("rdma_available", ipc.rdma_available())

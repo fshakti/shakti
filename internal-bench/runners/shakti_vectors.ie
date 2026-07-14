@@ -1,0 +1,47 @@
+# Shakti vector workloads — subset of benchmarks/suites/vectors.ie
+
+def bench_line(name, seconds, iterations):
+    ops : 0.0
+    if seconds > 0:
+        ops : float(iterations) / float(seconds)
+    print("BENCH\t" + name + "\t" + str(seconds) + "\t" + str(iterations) + "\t" + str(ops))
+
+a : range(1000000)
+b : range(1000000)
+n : 10
+t0 : clock()
+for i in range(n):
+    a + b
+bench_line("vec_add_1m", clock() - t0, n)
+
+n : 50
+t0 : clock()
+for i in range(n):
+    a * 2
+bench_line("vec_mul_1m", clock() - t0, n)
+
+n : 20
+t0 : clock()
+for i in range(n):
+    a > 500000
+bench_line("vec_compare_1m", clock() - t0, n)
+
+n : 20
+t0 : clock()
+for i in range(n):
+    a[a > 500000]
+bench_line("vec_filter_mask_1m", clock() - t0, n)
+
+n : 20
+s : sum(a)
+t0 : clock()
+for i in range(n):
+    s : sum(a)
+bench_line("vec_sum_1m", clock() - t0, n)
+
+n : 20
+d : dot(a, b)
+t0 : clock()
+for i in range(n):
+    d : dot(a, b)
+bench_line("vec_dot_1m", clock() - t0, n)

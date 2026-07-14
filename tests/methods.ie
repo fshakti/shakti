@@ -1,0 +1,9 @@
+# Method dispatch smoke (dict/table; list methods need in-place append fix in lang)
+d : {"x": 1, "y": 2}
+ks : d.keys()
+assert(len(ks) = 2)
+vs : d.values()
+assert(len(vs) = 2)
+xs : [10, 20, 30]
+assert(xs.len() = 3)
+print("methods ok")

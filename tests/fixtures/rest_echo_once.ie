@@ -1,0 +1,13 @@
+# One-shot echo server for tests — returns fixed body for GET, echoes body for POST JSON
+import rest
+
+port : 19092
+srv : rest.listen(port)
+c : rest.accept(srv)
+req : rest.read(c)
+body : "hello"
+if req["method"] = "POST":
+    body : req["body"]
+rest.write(c, 200, body, "text/plain")
+rest.close(c)
+rest.close(srv)

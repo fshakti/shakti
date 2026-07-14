@@ -1,0 +1,79 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Shakti",
+  "scopeName": "source.shakti",
+  "patterns": [
+    {
+      "name": "string.quoted.triple.shakti",
+      "begin": "\"\"\"",
+      "end": "\"\"\""
+    },
+    {
+      "name": "string.quoted.triple.shakti",
+      "begin": "'''",
+      "end": "'''"
+    },
+    {
+      "name": "string.quoted.double.shakti",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.shakti",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.shakti",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.shakti",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "comment.line.number-sign.shakti",
+      "match": "#.*"
+    },
+    {
+      "name": "meta.vector.numeric.shakti",
+      "match": "\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?(?:[ \\t]+\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)+\\b"
+    },
+    {
+      "name": "constant.numeric.hex.shakti",
+      "match": "\\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\\b"
+    },
+    {
+      "name": "constant.numeric.shakti",
+      "match": "\\b\\d[\\d_]*(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b"
+    },
+    {
+      "name": "meta.decorator.shakti",
+      "match": "^[ \\t]*@[A-Za-z_][\\w.]*(?:\\([^\\n]*\\))?"
+    },
+    {
+      "name": "keyword.operator.each.shakti",
+      "match": "@"
+    },
+    {
+      "name": "constant.language.shakti",
+      "match": "\\b(True|False|None)\\b"
+    },
+    {
+      "name": "keyword.control.shakti",
+      "match": "\\b(def|return|if|elif|else|while|for|in|break|continue|and|or|not|import|try|except|finally|as|lambda|pass|class|global|del|raise|with|yield)\\b"
+    },
+    {
+      "name": "keyword.other.query.shakti",
+      "match": "\\b(select|update|delete|from|where|by|create|table|insert|into|values)\\b"
+    },
+    {
+      "name": "support.function.builtin.shakti",
+      "match": "\\b(print|len|range|type|int|float|str|list|bool|sum|avg|min|max|abs|sqrt|sort|reverse|zip|enumerate|map|filter|table|columns|shape|head|tail|append|pop|keys|values|load|save|input|repr|clock|read|write|readlines|listdir|walk|stat|path_join|path_exists|path_isdir|path_isfile|path_basename|path_dirname|path_splitext|getcwd|mkdir|getenv|sh|re_findall|re_sub|re_match|re_split|json_loads|json_dumps|json_load|json_dump|sorted|any|all|isinstance|hasattr|getattr|chr|ord|hex|dict|set|next|assert|int64|float64)\\b"
+    }
+  ]
+}

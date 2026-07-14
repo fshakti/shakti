@@ -1,0 +1,63 @@
+# Tuple literals share list storage: ivec, fvec, or heterogeneous list.
+
+# Homogeneous ints -> list[int] (ivec)
+t_int : (1, 2, 3)
+assert(isinstance(t_int, "list[int]"))
+assert(len(t_int) = 3)
+assert(t_int[0] = 1)
+assert(t_int[2] = 3)
+
+# Bracket and paren literals use the same representation
+b_int : [4, 5, 6]
+assert(type(t_int) = type(b_int))
+
+# Homogeneous numerics -> list[float] (fvec)
+t_float : (1.0, 2.0, 3.0)
+assert(isinstance(t_float, "list[float]"))
+assert(t_float[1] = 2.0)
+
+t_mixed_num : (1, 2.0)
+assert(isinstance(t_mixed_num, "list[float]"))
+assert(t_mixed_num[0] = 1.0)
+
+# Mixed types -> heterogeneous list
+t_mix : (1, "a")
+assert(isinstance(t_mix, "list"))
+assert(t_mix[0] = 1)
+assert(t_mix[1] = "a")
+
+# Empty tuple and list
+assert(len(()) = 0)
+assert(len([]) = 0)
+assert(type(()) = type([]))
+
+# Single-element tuple vs grouping parentheses
+assert((42,) != 42)
+assert(isinstance((42,), "list[int]"))
+assert(len((42,)) = 1)
+assert((42,)[0] = 42)
+assert((1 + 2) = 3)
+
+# Unpacking assignment from tuple literals
+a, b : (10, 20)
+assert(a = 10)
+assert(b = 20)
+
+x, y, z : (1, 2, 3)
+assert(x = 1 and y = 2 and z = 3)
+
+# Unpacking works for all sequence representations
+p, q : [7, 8]
+assert(p = 7 and q = 8)
+
+# Unpacking in for loops
+pairs : [("p", 1), ("q", 2)]
+seen_k : []
+seen_v : []
+for k, v in pairs:
+    seen_k.append(k)
+    seen_v.append(v)
+assert(seen_k = ["p", "q"])
+assert(seen_v = [1, 2])
+
+print("tuples ok")

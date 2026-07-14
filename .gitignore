@@ -1,0 +1,54 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cursor/
+
+# build outputs
+**/build/
+**/.build/
+**/dist/
+**/node_modules/
+**/out/
+**/cmake-build-*/
+
+# logs / caches
+*.log
+**/__pycache__/
+
+# binaries / objects
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
+*.dSYM/
+*.zip
+*.tmp
+*.bundle
+shakti
+shakti-standalone
+**/build-static-test/
+
+# env
+.env
+.env.*
+
+# local scripts
+vuln_scan.sh
+
+# local workspace notes (never publish)
+CONTEXT.md
+
+# local audio sample library (large; not redistributed)
+/samples/
+
+# static analyzer / stray local artifacts
+/*.plist
+stluRITA
+

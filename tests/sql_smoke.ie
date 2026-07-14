@@ -1,0 +1,40 @@
+# SQL smoke test — import sql, then use statement syntax
+
+import sql
+
+t : table(id:[1, 2, 3], dept:["sales", "eng", "sales"], amount:[10, 20, 30])
+
+r : select amount by dept from t where amount > 15
+assert(shape(r)[0] = 2)
+assert(sum(r["amount"]) = 50)
+
+r2 : select id, dept from t where dept = "sales"
+assert(shape(r2)[0] = 2)
+
+r3 : select id, amount from t where amount > 15
+assert(shape(r3)[0] = 2)
+
+t3 : table(id:[1, 2, 3, 4], dept:["a", "a", "b", "b"], region:["x", "y", "x", "y"], amount:[10, 20, 30, 40])
+r4 : select amount by dept, region from t3
+assert(shape(r4)[0] = 4)
+assert(r4["dept"][0] = "a")
+assert(r4["region"][0] = "x")
+assert(r4["dept"][3] = "b")
+assert(r4["region"][3] = "y")
+
+r5 : select sum amount by dept from t
+assert(shape(r5)[0] = 2)
+assert(sum(r5["amount"]) = 60)
+
+create table u (id: 0, name: "")
+insert into u (id, name) values (1, "ada")
+insert into u (id, name) values (2, "bob")
+assert(shape(u)[0] = 2)
+
+update name : "ADA" from u where id = 1
+assert(u["name"][0] = "ADA")
+
+delete from u where id = 2
+assert(shape(u)[0] = 1)
+
+print("sql ok")

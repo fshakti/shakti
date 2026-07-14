@@ -1,0 +1,330 @@
+#include "shakti.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern V *table_xml_load(const char *path, V *columns_opt);
+
+static V *table_tsv_load(const char *path, V *columns_opt);
+static V *table_csv_load(const char *path, V *columns_opt);
+static int table_csv_save(V *table, const char *path);
+static int table_tsv_save(V *table, const char *path);
+
+static int ends_with(const char *s, const char *t) {
+    size_t ls = strlen(s), lu = strlen(t);
+    return ls >= lu && strcmp(s + ls - lu, t) == 0;
+}
+
+V *table_load(const char *path, V *columns_opt) {
+    P(!path, v_err("load: path"))
+    if (ends_with(path, ".csv"))
+        return table_csv_load(path, columns_opt);
+    if (ends_with(path, ".xml"))
+        return table_xml_load(path, columns_opt);
+    if (ends_with(path, ".tsv"))
+        return table_tsv_load(path, columns_opt);
+    return v_err("load: supported formats are .csv, .xml and .tsv");
+}
+
+int table_save(V *table, const char *path) {
+    P(!table || !path, -1)
+    if (ends_with(path, ".csv"))
+        return table_csv_save(table, path);
+    if (ends_with(path, ".tsv"))
+        return table_tsv_save(table, path);
+    return -1;
+}
+
+/* Upper bound on a single CSV/TSV file read fully into memory.
+ * Override with SHAKTI_CSV_MAX_BYTES (e.g. for STAC-M3 medium TAQ loads). */
+static unsigned long csv_max_file_bytes(void) {
+    const char *env = getenv("SHAKTI_CSV_MAX_BYTES");
+    if (env && env[0]) {
+        char *end = NULL;
+        unsigned long v = strtoul(env, &end, 10);
+        if (end != env && v > 0)
+            return v;
+    }
+    return 1024ul * 1024ul * 1024ul;
+}
+static char *read_all(const char *s) {
+    FILE *f = fopen(s, "rb");
+    P(!f, NULL)
+    fseek(f, 0, SEEK_END);
+    long z = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (z < 0 || (unsigned long)z > csv_max_file_bytes()) {
+        fclose(f);
+        return NULL;
+    }
+    char *b = malloc((size_t)z + 1);
+    if (!b) {
+        fclose(f);
+        return NULL;
+    }
+    /* Use the actual byte count so a short read can't leave the tail
+     * uninitialized before the NUL terminator. */
+    size_t got = fread(b, 1, (size_t)z, f);
+    b[got] = 0;
+    fclose(f);
+    return b;
+}
+
+/* Trim padding whitespace; never trim `delim` (TSV tabs are fields). */
+static void strip_pad(char *s, char delim) {
+    char *a = s;
+    W(*a == ' ' || (*a == '\t' && delim != '\t'), a++)
+    if (a != s)
+        memmove(s, a, strlen(a) + 1);
+    size_t n = strlen(s);
+    W(n && (s[n - 1] == ' ' || (s[n - 1] == '\t' && delim != '\t') || s[n - 1] == '\r' || s[n - 1] == '\n'),
+      s[--n] = 0)
+}
+
+static int split_delim_line(char *line, char **out, int max, char c) {
+    int n = 0;
+    char *p = line;
+    while (*p && n < max) {
+        char *start = p;
+        W(*p && *p != c, p++)
+        if (*p == c)
+            *p++ = 0;
+        out[n++] = start;
+        strip_pad(start, c);
+    }
+    return n;
+}
+
+static int all_int_cell(const char *s) {
+    const char *p = s;
+    if (*p == '-' || *p == '+')
+        p++;
+    P(!*p, 0)
+    for (; *p; p++)
+        P(!isdigit((unsigned char)*p), 0)
+    return 1;
+}
+
+static int table_delim_save(V *table, const char *path, char c) {
+    P(!table || table->t != T_TABLE || !table->keys || !table->vals, -1)
+    int nc = (int)table->keys->n;
+    int64_t nrows = table->n;
+    FILE *f = fopen(path, "wb");
+    P(!f, -1)
+    for (int j = 0; j < nc; j++) {
+        if (j)
+            fputc(c, f);
+        V *cn = table->keys->L[j];
+        const char *nm = (cn && cn->t == T_STR) ? cn->s : "col";
+        fputs(nm, f);
+    }
+    fputc('\n', f);
+    for (int64_t r = 0; r < nrows; r++) {
+        for (int j = 0; j < nc; j++) {
+            if (j)
+                fputc(c, f);
+            V *col = table->vals->L[j];
+            char buf[64];
+            if (col->t == T_FVEC) {
+                snprintf(buf, sizeof buf, "%g", col->F[r]);
+                fputs(buf, f);
+            } else if (col->t == T_IVEC) {
+                snprintf(buf, sizeof buf, "%lld", (long long)col->J[r]);
+                fputs(buf, f);
+            } else if (col->t == T_LIST && r < col->n) {
+                V *cell = col->L[r];
+                if (cell && cell->t == T_STR)
+                    fputs(cell->s, f);
+                else if (cell && cell->t == T_INT) {
+                    snprintf(buf, sizeof buf, "%lld", (long long)cell->j);
+                    fputs(buf, f);
+                } else if (cell && cell->t == T_FLOAT) {
+                    snprintf(buf, sizeof buf, "%g", cell->f);
+                    fputs(buf, f);
+                }
+                /* empty / unsupported cell -> empty field */
+            } else {
+                fclose(f);
+                return -1;
+            }
+        }
+        fputc('\n', f);
+    }
+    fclose(f);
+    return 0;
+}
+
+static int table_csv_save(V *table, const char *path) {
+    return table_delim_save(table, path, ',');
+}
+
+static int table_tsv_save(V *table, const char *path) {
+    return table_delim_save(table, path, '\t');
+}
+
+static int scan_delim_field(const char *line, int field, char *buf, size_t bufsz, char c) {
+    const char *p = line;
+    for (int f = 0; f < field && *p; f++) {
+        while (*p && *p != c)
+            p++;
+        if (*p == c)
+            p++;
+    }
+    if (!*p)
+        return 0;
+    const char *start = p;
+    while (*p && *p != c)
+        p++;
+    size_t len = (size_t)(p - start);
+    if (len >= bufsz)
+        len = bufsz - 1;
+    memcpy(buf, start, len);
+    buf[len] = 0;
+    strip_pad(buf, c);
+    return 1;
+}
+
+static int count_delim_fields(const char *line, char c) {
+    int n = 0;
+    const char *p = line;
+    while (1) {
+        n++;
+        while (*p && *p != c)
+            p++;
+        if (!*p)
+            break;
+        p++;
+    }
+    return n;
+}
+
+static V *table_delim_load(const char *path, V *columns_opt, char c, const char *fmt) {
+    (void)columns_opt;
+    char *raw = read_all(path);
+    P(!raw, v_errf("%s: cannot read '%s'", fmt, path))
+    char *buf = raw;
+    if ((unsigned char)buf[0] == 0xef && (unsigned char)buf[1] == 0xbb && (unsigned char)buf[2] == 0xbf)
+        buf += 3;
+    int cap = 256, nl = 0;
+    char **lines = malloc((size_t)cap * sizeof(char *));
+    if (!lines) {
+        free(raw);
+        return v_errf("%s: out of memory", fmt);
+    }
+    char *at = buf;
+    while (*at) {
+        if (nl >= cap) {
+            if (cap > (1 << 30)) {
+                free(lines);
+                free(raw);
+                return v_errf("%s: too many lines", fmt);
+            }
+            cap *= 2;
+            char **nlines = realloc(lines, (size_t)cap * sizeof(char *));
+            if (!nlines) {
+                free(lines);
+                free(raw);
+                return v_errf("%s: out of memory", fmt);
+            }
+            lines = nlines;
+        }
+        char *e = strchr(at, '\n');
+        if (e) {
+            *e = 0;
+            if (e > at && e[-1] == '\r')
+                e[-1] = 0;
+            lines[nl++] = at;
+            at = e + 1;
+        } else {
+            lines[nl++] = at;
+            break;
+        }
+    }
+    if (nl < 2) {
+        free(lines);
+        free(raw);
+        return v_errf("%s: need header + rows", fmt);
+    }
+    char *hdr_cells[64];
+    int nh = split_delim_line(lines[0], hdr_cells, 64, c);
+    if (nh <= 0) {
+        free(lines);
+        free(raw);
+        return v_errf("%s: bad header", fmt);
+    }
+    int data_rows = 0;
+    char *cells[64];
+    char cell_buf[64];
+    int use_float[64];
+    memset(use_float, 0, sizeof(use_float));
+    for (int li = 1; li < nl; li++) {
+        strip_pad(lines[li], c);
+        if (!lines[li][0])
+            continue;
+        data_rows++;
+        if (count_delim_fields(lines[li], c) != nh) {
+            free(lines);
+            free(raw);
+            return v_errf("%s: column count mismatch", fmt);
+        }
+        for (int cj = 0; cj < nh; cj++) {
+            if (!scan_delim_field(lines[li], cj, cell_buf, sizeof cell_buf, c))
+                continue;
+            if (!all_int_cell(cell_buf))
+                use_float[cj] = 1;
+        }
+    }
+    if (data_rows <= 0) {
+        free(lines);
+        free(raw);
+        return v_errf("%s: need header + rows", fmt);
+    }
+    V **cols = calloc((size_t)nh, sizeof(V *));
+    for (int cj = 0; cj < nh; cj++)
+        cols[cj] = use_float[cj] ? v_fvec(data_rows) : v_ivec(data_rows);
+    for (int cj = 0; cj < nh; cj++)
+        if (!use_float[cj])
+            memset(cols[cj]->J, 0, (size_t)data_rows * sizeof(int64_t));
+    int row = 0;
+    for (int li = 1; li < nl; li++) {
+        strip_pad(lines[li], c);
+        if (!lines[li][0])
+            continue;
+        for (int cj = 0; cj < nh; cj++)
+            cells[cj] = NULL;
+        split_delim_line(lines[li], cells, 64, c);
+        for (int cj = 0; cj < nh; cj++) {
+            const char *cell = cells[cj] ? cells[cj] : "";
+            if (use_float[cj])
+                cols[cj]->F[row] = strtod(cell, NULL);
+            else
+                cols[cj]->J[row] = (int64_t)strtoll(cell, NULL, 10);
+        }
+        row++;
+    }
+    V *kl = v_list(nh);
+    V *dl = v_list(nh);
+    for (int ci = 0; ci < nh; ci++) {
+        kl->L[ci] = v_str(hdr_cells[ci]);
+        dl->L[ci] = cols[ci];
+    }
+    free(cols);
+    free(lines);
+    free(raw);
+    V *t = v_table(kl, dl);
+    v_free(kl);
+    v_free(dl);
+    t->n = row;
+    for (int ci = 0; ci < nh; ci++)
+        t->vals->L[ci]->n = row;
+    return t;
+}
+
+static V *table_csv_load(const char *path, V *columns_opt) {
+    return table_delim_load(path, columns_opt, ',', "csv");
+}
+
+static V *table_tsv_load(const char *path, V *columns_opt) {
+    return table_delim_load(path, columns_opt, '\t', "tsv");
+}

@@ -1,0 +1,30 @@
+# synth load_sample — 16/24-bit WAV fixtures; optional BSR Yellow kick when installed.
+import synth
+
+fixture24 : "benchmarks/fixtures/kick_24bit.wav"
+fixture16 : "benchmarks/fixtures/tone_16bit.wav"
+bsr_kick : "samples/bsr_yellow/BSR_Samples_Yellow_BSRSamples001/BSR_Samples_Yellow_Drums/BSR_Samples_Yellow_KickDrum/BSR_Samples_Yellow_KickDrum_25.wav"
+
+r : synth_load_sample("benchmarks/fixtures/not_a.wav")
+assert(type(r) = "error")
+
+r : synth_load_sample(fixture24)
+assert(type(r) != "error")
+assert(synth_sample_loaded() = 1)
+assert(synth_sample_name() = "kick_24bit.wav")
+
+r : synth_load_sample(fixture16)
+assert(type(r) != "error")
+assert(synth_sample_loaded() = 1)
+assert(synth_sample_name() = "tone_16bit.wav")
+
+if path_exists(bsr_kick):
+    r : synth_load_sample(bsr_kick)
+    assert(type(r) != "error")
+    assert(synth_sample_loaded() = 1)
+    assert(synth_sample_name() = "BSR_Samples_Yellow_KickDrum_25.wav")
+    print("bsr kick ok")
+else:
+    print("bsr kick skipped (samples/ not installed)")
+
+print("synth_sample_load ok")

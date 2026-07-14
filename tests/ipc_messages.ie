@@ -1,0 +1,33 @@
+# Length-prefixed message framing — small, medium, and empty payloads.
+import ipc
+
+port : 19991
+
+def echo_once(p):
+    sh("rm -f /tmp/shakti-" + str(p) + ".sock 2>/dev/null; true")
+    cmd : "./shakti -c 'import ipc; srv: ipc.listen(" + str(p) + "); c: ipc.accept(srv); ipc.send(c, ipc.recv(c)); ipc.close(c); ipc.close(srv)' &"
+    sh(cmd)
+    sh("sleep 0.5")
+    c : ipc.connect("127.0.0.1", p)
+    return c
+
+c0 : echo_once(port)
+ipc.send(c0, "")
+assert(ipc.recv(c0) = "")
+ipc.close(c0)
+
+small : "hi"
+c1 : echo_once(port + 1)
+ipc.send(c1, small)
+assert(ipc.recv(c1) = small)
+ipc.close(c1)
+
+medium : "m"
+for i in range(200):
+    medium : medium + "x"
+c2 : echo_once(port + 2)
+ipc.send(c2, medium)
+assert(len(ipc.recv(c2)) = len(medium))
+ipc.close(c2)
+
+print("ipc messages ok")

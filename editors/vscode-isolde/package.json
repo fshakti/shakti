@@ -1,0 +1,29 @@
+{
+  "name": "vscode-shakti",
+  "displayName": "Shakti",
+  "description": "Syntax highlighting for Shakti (.ie / .is)",
+  "version": "0.0.1",
+  "publisher": "shakti",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "shakti",
+        "aliases": ["Shakti", "shakti"],
+        "extensions": [".ie", ".is"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "shakti",
+        "scopeName": "source.shakti",
+        "path": "./syntaxes/shakti.tmLanguage.json"
+      }
+    ]
+  }
+}
