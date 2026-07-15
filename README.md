@@ -88,8 +88,8 @@ See [doc.md](doc.md#examples-index) for the full index. All example code lives i
 Python 3 → Shakti (strict subset):
 
 ```bash
-./shakti examples/s2p.ie input.py -o out.ie
-./shakti examples/s2p.ie python.py -o python.ie
+./shakti s2p.ie input.py -o out.ie
+./shakti s2p.ie python.py -o python.ie
 SHAKTI_LIB=$PWD/lib ./shakti python.ie
 ```
 
