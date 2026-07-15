@@ -9,6 +9,7 @@
 #ifndef SHAKTI_PKG_VERSION
 #define SHAKTI_PKG_VERSION "0.10.0"
 #endif
+#include "shakti_s2p_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
@@ -1225,9 +1226,10 @@ static int lex_peek_is_signed_literal(Lexer *l) {
         lex_peek(l);
     if (l->peek.type != T_MINUS_)
         return 0;
-    size_t p = l->pos;
-    while (p < l->len && l->src[p] == ' ') p++;
-    return lex_src_is_digit_start(l, p);
+    /* Tight signed literal only: "-2" / "- 2" is NOT a literal for
+     * juxtaposition or numeric vectors. That keeps `abs -1.2` and
+     * `1 -2 3` as jux/vector forms while letting `x - 1` be subtraction. */
+    return lex_src_is_digit_start(l, l->pos);
 }
 
 static Node *parse_power(Lexer *l);
@@ -2916,14 +2918,51 @@ static V *vec_binop(V *a, V *b, int op) {
         return r;
     }
     if((a->t==T_INT||a->t==T_FLOAT) && (b->t==T_INT||b->t==T_FLOAT)) {
-        int use_int = (a->t==T_INT && b->t==T_INT && op!=OP_DIV && op!=OP_POW);
+        int use_int = (a->t==T_INT && b->t==T_INT && op!=OP_DIV);
         if(use_int) {
             int64_t x=a->j, y=b->j;
             switch(op) {
-            case OP_ADD: return v_int(x+y); case OP_SUB: return v_int(x-y);
-            case OP_MUL: return v_int(x*y);
-            case OP_FLOORDIV: return y?v_int(x/y):v_err("division by zero");
-            case OP_MOD: return y?v_int(x%y):v_err("modulo by zero");
+            case OP_ADD: {
+                int64_t z;
+                if(__builtin_add_overflow(x, y, &z)) return v_float((double)x+(double)y);
+                return v_int(z);
+            }
+            case OP_SUB: {
+                int64_t z;
+                if(__builtin_sub_overflow(x, y, &z)) return v_float((double)x-(double)y);
+                return v_int(z);
+            }
+            case OP_MUL: {
+                int64_t z;
+                if(__builtin_mul_overflow(x, y, &z)) return v_float((double)x*(double)y);
+                return v_int(z);
+            }
+            case OP_FLOORDIV:
+                if(!y) return v_err("division by zero");
+                /* INT64_MIN / -1 overflows int64 (UB in C); promote to float. */
+                if(x==INT64_MIN && y==-1) return v_float(-(double)INT64_MIN);
+                return v_int(x/y);
+            case OP_MOD:
+                if(!y) return v_err("modulo by zero");
+                if(x==INT64_MIN && y==-1) return v_int(0);
+                return v_int(x%y);
+            case OP_POW: {
+                /* Exact integer power via squaring; overflow falls back to
+                 * float so we never emit a rounded integer (pow() on doubles
+                 * loses precision above 2^53, e.g. 5**27). */
+                if(y >= 0) {
+                    int64_t base=x, exp=y, acc=1; int overflow=0;
+                    while(exp > 0) {
+                        if(exp & 1) {
+                            if(__builtin_mul_overflow(acc, base, &acc)) { overflow=1; break; }
+                        }
+                        exp >>= 1;
+                        if(exp && __builtin_mul_overflow(base, base, &base)) { overflow=1; break; }
+                    }
+                    if(!overflow) return v_int(acc);
+                }
+                return v_float(pow((double)x, (double)y));
+            }
             default: break;
             }
         }
@@ -4586,7 +4625,11 @@ V *eval(Node *n, Env *e) {
     case N_UNOP: {
         V *a = eval(n->ch[0], e);
         if(n->op == OP_NEG) {
-            if(a->t==T_INT)  { V *r=v_int(-a->j); v_free(a); return r; }
+            if(a->t==T_INT)  {
+                /* -INT64_MIN overflows int64; promote to float. */
+                V *r = (a->j==INT64_MIN) ? v_float(-(double)INT64_MIN) : v_int(-a->j);
+                v_free(a); return r;
+            }
             if(a->t==T_FLOAT){ V *r=v_float(-a->f); v_free(a); return r; }
             if(a->t==T_IVEC) { V *r=v_ivec(a->n); for(int64_t i=0;i<a->n;i++) r->J[i]=-a->J[i]; v_free(a); return r; }
             if(a->t==T_FVEC) { V *r=v_fvec(a->n); for(int64_t i=0;i<a->n;i++) r->F[i]=-a->F[i]; v_free(a); return r; }
@@ -5696,6 +5739,85 @@ static char *read_file(const char *path) {
     fclose(f);
     return buf;
 }
+static int shakti_path_is_python(const char *path) {
+    size_t n;
+    if (!path) return 0;
+    n = strlen(path);
+    return n >= 3 && path[n - 3] == '.' && path[n - 2] == 'p' && path[n - 1] == 'y';
+}
+/* Load the embedded s2p converter and transpile Python subset source to Shakti.
+ * Returns a malloc'd Shakti source string, or NULL after printing an Error: line. */
+static char *shakti_transpile_python(const char *py_src, const char *filename, Env *global) {
+    V *mod = env_get(global, "__shakti_s2p__");
+    if (!mod || mod->t != T_DICT) {
+        Env *mod_env = env_new(global);
+        Node *prog = parse(shakti_s2p_source);
+        V *er = eval(prog, mod_env);
+        int load_err = g_error || (er && er->t == T_ERR);
+        if (load_err) {
+            if (g_error && g_error_val) {
+                fprintf(stderr, "Error: %s\n", g_error_val->s);
+                v_free(g_error_val); g_error_val = NULL; g_error = 0;
+            } else if (er && er->t == T_ERR)
+                fprintf(stderr, "Error: %s\n", er->s);
+            else
+                fprintf(stderr, "Error: failed to load embedded s2p converter\n");
+            v_free(er);
+            env_free(mod_env);
+            return NULL;
+        }
+        v_free(er);
+
+        V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
+        for (int i = 0; i < mod_env->len; i++) {
+            mk->L[i] = v_str(mod_env->names[i]);
+            mv->L[i] = v_ref(mod_env->vals[i]);
+        }
+        V *mod_dict = v_dict(mk, mv);
+        v_free(mk); v_free(mv);
+        /* Keep the module on the global env so function closures stay alive,
+         * matching do_import lifetime semantics. */
+        env_set(global, "__shakti_s2p__", mod_dict);
+        v_free(mod_dict);
+        env_free(mod_env);
+        mod = env_get(global, "__shakti_s2p__");
+    }
+    if (!mod || mod->t != T_DICT) {
+        fprintf(stderr, "Error: embedded s2p module missing\n");
+        return NULL;
+    }
+
+    V *fn = v_dict_get(mod, "transpile");
+    if (!fn || fn->t != T_FN) {
+        fprintf(stderr, "Error: embedded s2p.transpile not found\n");
+        return NULL;
+    }
+    fn = v_ref(fn);
+
+    V *al = v_list(2);
+    al->L[0] = v_str(py_src);
+    al->L[1] = v_str(filename);
+    if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+    g_error = 0;
+    V *out = builtin_call("__invoke__", (V*[]){fn, al}, 2, NULL, NULL, 0, global);
+    v_free(fn);
+    v_free(al);
+
+    char *ie = NULL;
+    if (g_error && g_error_val) {
+        fprintf(stderr, "Error: %s\n", g_error_val->s);
+        v_free(g_error_val); g_error_val = NULL; g_error = 0;
+    } else if (!out || out->t == T_ERR) {
+        fprintf(stderr, "Error: %s\n", (out && out->s) ? out->s : "transpile failed");
+    } else if (out->t != T_STR) {
+        fprintf(stderr, "Error: transpile did not return a string\n");
+    } else {
+        ie = strdup(out->s);
+        if (!ie) fprintf(stderr, "Error: out of memory\n");
+    }
+    v_free(out);
+    return ie;
+}
 #ifndef SHAKTI_NO_MAIN
 int shakti_lang_main(int argc, char **argv) {
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
@@ -5805,6 +5927,12 @@ int shakti_lang_main(int argc, char **argv) {
         }
         char *src = read_file(argv[i]);
         P(!src,1)
+        if (shakti_path_is_python(argv[i])) {
+            char *ie = shakti_transpile_python(src, argv[i], global);
+            free(src);
+            if (!ie) { env_free(global); return 1; }
+            src = ie;
+        }
         Node *prog = parse(src);
         V *r = eval(prog, global);
         int script_err = g_error || (r && r->t == T_ERR);

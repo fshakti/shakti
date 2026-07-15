@@ -1,11 +1,11 @@
 # s2p — strict Python 3 subset to Shakti.
 
-reserved : ["def", "return", "if", "elif", "else", "while", "for", "in",
-            "break", "continue", "and", "or", "not", "import", "try", "except",
-            "finally", "as", "lambda", "pass", "class", "global", "del", "raise",
-            "with", "yield", "select", "update", "delete", "by", "from", "where",
-            "create", "insert", "into", "values", "join", "on", "True", "False",
-            "None"]
+python_reserved : ["def", "return", "if", "elif", "else", "while", "for", "in",
+                   "break", "continue", "and", "or", "not", "import", "try", "except",
+                   "finally", "as", "lambda", "pass", "class", "global", "del", "raise",
+                   "with", "yield", "True", "False", "None"]
+shakti_reserved : ["select", "update", "delete", "by", "from", "where",
+                   "create", "insert", "into", "values", "join", "on"]
 
 def tok(kind, text, val, line, col):
     return {"kind":kind, "text":text, "val":val, "line":line, "col":col}
@@ -207,9 +207,16 @@ def need_kind(p, k):
     return take(p)
 
 def ident(p, x):
-    if x["text"] in reserved:
+    if x["text"] in python_reserved:
         fail(p, "identifier '" + x["text"] + "' is reserved in Shakti", x)
-    return x["text"]
+    # Mangle Shakti keywords. Also mangle any name that already starts with
+    # the mangling prefix so user identifiers like __s2p_values cannot collide
+    # with a mangled reserved word (values -> __s2p_values).
+    name : x["text"]
+    if name in shakti_reserved or starts(name, "__s2p_"):
+        name : "__s2p_" + name
+    x["text"] : name
+    return name
 
 def parse(source, filename):
     lx : lex(source)
@@ -735,9 +742,9 @@ def parse_atom(p):
         if x["text"] = "yield":
             fail(p, "Yield is unsupported", x)
         z : node("Const" if x["text"] in ["True", "False", "None"] else "Name", x)
-        z["value"] : x["text"]
+        z["value"] : x["text"] if z["t"] = "Const" else ident(p, x)
         if z["t"] = "Name":
-            ident(p, x)
+            x["text"] : z["value"]
         return z
     if at(p, "("):
         take(p)
