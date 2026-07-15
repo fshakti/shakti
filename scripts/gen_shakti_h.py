@@ -41,6 +41,10 @@ def main() -> None:
         "T_FN",
         "T_DATETIME",
         "T_TIME",
+        "T_INPUT",
+        "T_IMAT",
+        "T_FMAT",
+        "T_BMAT",
     ]
     nodes = sorted(set(re.findall(r"\bN_[A-Z][A-Z0-9_]*\b", t)))
     nodes = [n for n in nodes if len(n) > 2 and not n.endswith("__")]
@@ -72,6 +76,7 @@ def main() -> None:
     lines.append("#define MAX_FN 4096")
     lines.append("#endif")
     lines.append("#define SHAKTI_INDENT_STACK 256")
+    lines.append("#define SHAKTI_TOKEN_TEXT 8192")
     lines.append("")
     lines.append("typedef struct Node Node;")
     lines.append("typedef struct Env Env;")
@@ -82,7 +87,7 @@ def main() -> None:
     lines.append("    int line;")
     lines.append("    int64_t ival;")
     lines.append("    double fval;")
-    lines.append("    char sval[8192];")
+    lines.append("    char sval[SHAKTI_TOKEN_TEXT];")
     lines.append("} Token;")
     lines.append("")
     lines.append("typedef struct Lexer {")
@@ -96,7 +101,11 @@ def main() -> None:
     lines.append("    int emit_newline;")
     lines.append("    int pending_dedents;")
     lines.append("    int has_peek;")
+    lines.append("    int failed;")
+    lines.append("    char error[128];")
     lines.append("    Token peek;")
+    lines.append("    /* 1 after a noun/literal/closer: next '-' before a digit is subtract, not sign. */")
+    lines.append("    int noun_pos;")
     lines.append("} Lexer;")
     lines.append("")
     lines.append("struct Node {")
@@ -169,6 +178,7 @@ def main() -> None:
     lines.append("V *v_int(int64_t j);")
     lines.append("V *v_float(double f);")
     lines.append("V *v_str(const char *s);")
+    lines.append("V *v_str_take(char *s);")
     lines.append("V *v_date(int64_t utc_midnight_ms);")
     lines.append("V *v_time(int64_t ms_since_midnight);")
     lines.append("V *v_err(const char *s);")
@@ -176,6 +186,13 @@ def main() -> None:
     lines.append("V *v_ivec(int64_t n);")
     lines.append("V *v_fvec(int64_t n);")
     lines.append("V *v_bvec(int64_t n);")
+    lines.append("V *v_imat(int64_t rows, int64_t cols);")
+    lines.append("V *v_fmat(int64_t rows, int64_t cols);")
+    lines.append("V *v_bmat(int64_t rows, int64_t cols);")
+    lines.append("static inline int64_t mat_cols(V *m) { return (int64_t)m->_ht_cap; }")
+    lines.append("static inline int64_t mat_idx(V *m, int64_t r, int64_t c) { return r * mat_cols(m) + c; }")
+    lines.append("V *mat_matmul(V *a, V *b);")
+    lines.append("V *v_mat_row(V *m, int64_t row);")
     lines.append("V *v_list(int64_t n);")
     lines.append("void v_list_append(V *v, V *item);")
     lines.append("V *v_dict(V *keys, V *vals);")

@@ -223,6 +223,11 @@ bench-report: shakti
 	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --report
 endif
 
+ifneq ($(wildcard scripts/bench_python3_to_shakti.py),)
+bench-transpile:
+	python3 scripts/bench_python3_to_shakti.py
+endif
+
 ifneq ($(wildcard tests/macros_smoke.c),)
 test-macros: src/a.h
 	gcc $(CFLAGS) -I$(BUILD) -o $(BUILD)/macros_smoke tests/macros_smoke.c

@@ -15,6 +15,7 @@
 
 #define GFX_DESIGN_W 960
 #define GFX_DESIGN_H 540
+#define GFX_MAX_WINDOW_DIM 16384
 
 typedef struct GfxState {
     uint32_t *fb;
@@ -84,8 +85,10 @@ int gfx_core_present_height(void) { return g.win_h; }
 
 int gfx_core_fb_resize(int w, int h) {
     uint32_t *np;
-    if (w <= 0 || h <= 0) return -1;
-    np = (uint32_t *)realloc(g.present, (size_t)w * (size_t)h * sizeof(uint32_t));
+    if (w <= 0 || h <= 0 || w > GFX_MAX_WINDOW_DIM || h > GFX_MAX_WINDOW_DIM) return -1;
+    size_t pixels = (size_t)w * (size_t)h;
+    if (pixels > SIZE_MAX / sizeof(uint32_t)) return -1;
+    np = (uint32_t *)realloc(g.present, pixels * sizeof(uint32_t));
     if (!np) return -1;
     g.present = np;
     g.win_w = w;

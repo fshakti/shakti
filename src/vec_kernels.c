@@ -15,6 +15,21 @@
 #include <arm_neon.h>
 #endif
 
+#ifdef _OPENMP
+static inline int isl_vec_omp_threads(int64_t ne) {
+    int max = omp_get_max_threads();
+    int want;
+    if (max <= 1 || ne < ISL_OMP_VEC_MIN) return 1;
+    want = (int)(ne / ISL_OMP_VEC_CHUNK);
+    if (want < 1) want = 1;
+    if (want > max) want = max;
+    if (want > ISL_OMP_VEC_MAX_THREADS) want = ISL_OMP_VEC_MAX_THREADS;
+    return want;
+}
+#else
+static inline int isl_vec_omp_threads(int64_t ne) { (void)ne; return 1; }
+#endif
+
 #if SHAKTI_USE_AVX512
 static inline double hsum512(__m512d v) {
 #if defined(__AVX512DQ__)
@@ -137,7 +152,8 @@ double shakti_sum_f64(const double *d, int64_t n) {
 #else
     double r = 0;
 #ifdef _OPENMP
-    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN)
+    int nt = isl_vec_omp_threads(n);
+    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
     for (int64_t i = 0; i < n; i++) r += d[i];
     return r;
@@ -152,7 +168,8 @@ double shakti_dot_f64(const double *a, const double *b, int64_t n) {
     if (n >= ISL_OMP_VEC_MIN) {
         double r = 0;
 #ifdef _OPENMP
-        #pragma omp parallel for reduction(+:r)
+        int nt = isl_vec_omp_threads(n);
+        #pragma omp parallel for reduction(+:r) num_threads(nt)
 #endif
         for (int64_t i = 0; i < n; i++) r += a[i] * b[i];
         return r;
@@ -161,7 +178,8 @@ double shakti_dot_f64(const double *a, const double *b, int64_t n) {
 #else
     double r = 0;
 #ifdef _OPENMP
-    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN)
+    int nt = isl_vec_omp_threads(n);
+    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
     for (int64_t i = 0; i < n; i++) r += a[i] * b[i];
     return r;
@@ -175,7 +193,8 @@ double shakti_dot_numeric(const int64_t *aj, const double *af, int a_fvec,
     if (a_fvec && b_fvec) return shakti_dot_f64(af, bf, n);
     double r = 0;
 #ifdef _OPENMP
-    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN)
+    int nt = isl_vec_omp_threads(n);
+    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
     for (int64_t i = 0; i < n; i++) {
         double x = a_fvec ? af[i] : (double)aj[i];

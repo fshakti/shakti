@@ -905,6 +905,7 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     float *pcm = NULL;
     int i, n, frames;
     size_t bps;
+    const uint32_t max_data_bytes = 64u * 1024u * 1024u; /* 64 MiB PCM payload */
     f = fopen(path, "rb");
     if (!f) return -1;
     if (fread(hdr, 1, 12, f) != 12 || memcmp(hdr, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4)) {
@@ -938,8 +939,20 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
         fclose(f);
         return -1;
     }
+    if (data_bytes > max_data_bytes || fmt_rate < 1000u || fmt_rate > 192000u) {
+        fclose(f);
+        return -1;
+    }
     bps = (size_t)fmt_ch * ((size_t)fmt_bits / 8u);
+    if (bps == 0 || data_bytes % bps != 0) {
+        fclose(f);
+        return -1;
+    }
     frames = (int)(data_bytes / bps);
+    if (frames <= 0 || (size_t)frames > SIZE_MAX / sizeof(float)) {
+        fclose(f);
+        return -1;
+    }
     pcm = (float *)malloc((size_t)frames * sizeof(float));
     if (!pcm) {
         fclose(f);
@@ -966,7 +979,15 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     fclose(f);
     n = i;
     if (fmt_rate != SYNTH_SR) {
+        if ((int64_t)n > (INT64_C(1) << 30) / (int64_t)SYNTH_SR) {
+            free(pcm);
+            return -1;
+        }
         int out_frames = (int)((int64_t)n * SYNTH_SR / (int64_t)fmt_rate);
+        if (out_frames <= 0 || (size_t)out_frames > SIZE_MAX / sizeof(float)) {
+            free(pcm);
+            return -1;
+        }
         float *rs = (float *)malloc((size_t)out_frames * sizeof(float));
         if (!rs) {
             free(pcm);

@@ -82,7 +82,6 @@ See [doc.md](doc.md#examples-index) for the full index. All example code lives i
 | `ipc` | `ipc_echo.ie` + `ipc_echo_client.ie` | local UDS echo |
 | `ipc` | `ipc_rdma.ie` + `ipc_rdma_client.ie` | RDMA/RoCE IPC (Linux + NIC) |
 | `rest` | `rest_demo.ie` | HTTP client + local server |
-| *(stdlib)* | `bridge.ie` | bridge hand dealer / HCP filter |
 
 ## tools
 

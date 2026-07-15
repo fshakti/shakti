@@ -73,8 +73,6 @@ set(SHAKTI_LIB_STANDALONE
     src/table_xml.c
     src/input.c
     src/isolde_bridge.c
-    src/lissen.c
-    src/govee.c
     src/rest.c
     src/graph.c
     src/machine.c)
@@ -142,8 +140,7 @@ else()
 endif()
 
 foreach(_t IN LISTS _shakti_targets)
-  target_compile_definitions(${_t} PRIVATE SHAKTI_STANDALONE=1 _GNU_SOURCE
-      SHAKTI_HAVE_LISSEN=1 SHAKTI_HAVE_GOVEE=1)
+  target_compile_definitions(${_t} PRIVATE SHAKTI_STANDALONE=1 _GNU_SOURCE)
   target_include_directories(${_t} PRIVATE
       "${CMAKE_CURRENT_BINARY_DIR}"
       "${CMAKE_CURRENT_SOURCE_DIR}/src")

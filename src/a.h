@@ -44,6 +44,10 @@
 #define W(b,x...)while(b){x;}
 #define N(n,x){it=n;ii=0;for(;i<t;++i){x;}}
 #define ISL_OMP_VEC_MIN 1000000
+/* Work-sized OpenMP teams: ~125k elems/thread; hard-cap avoids many-core
+ * fork/join collapse on large ivec add/sub/mul (e.g. 24 threads at 1M). */
+#define ISL_OMP_VEC_CHUNK 125000
+#define ISL_OMP_VEC_MAX_THREADS 16
 #define ISL_MAT_SIMD_MIN_ELEMS 64
 #define ISL_MAT_SIMD_K_MIN 8
 #define ISL_MAT_OMP_ROWS_MIN 32

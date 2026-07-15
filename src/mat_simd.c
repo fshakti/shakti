@@ -12,6 +12,21 @@
 #include <arm_neon.h>
 #endif
 
+#ifdef _OPENMP
+static inline int isl_vec_omp_threads(int64_t ne) {
+    int max = omp_get_max_threads();
+    int want;
+    if (max <= 1 || ne < ISL_OMP_VEC_MIN) return 1;
+    want = (int)(ne / ISL_OMP_VEC_CHUNK);
+    if (want < 1) want = 1;
+    if (want > max) want = max;
+    if (want > ISL_OMP_VEC_MAX_THREADS) want = ISL_OMP_VEC_MAX_THREADS;
+    return want;
+}
+#else
+static inline int isl_vec_omp_threads(int64_t ne) { (void)ne; return 1; }
+#endif
+
 #if (defined(__AVX512F__) && defined(__AVX512BW__)) || defined(__aarch64__)
 static inline int use_simd_elems(int64_t ne) { return ne >= ISL_MAT_SIMD_MIN_ELEMS; }
 static inline int use_simd_mul(int64_t m, int64_t k, int64_t n) {
@@ -653,8 +668,9 @@ void mat_imat_binop_mm(int64_t *r, const int64_t *a, const int64_t *b, int64_t n
     }
 #endif
     if (op == 0 || op == 18 || op == 11) {
+        int nt = isl_vec_omp_threads(ne);
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) if (ne >= ISL_OMP_VEC_MIN)
+#pragma omp parallel for schedule(static) if (ne >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
         for (int64_t i = 0; i < ne; i++) {
             int64_t x = a[i], y = b[i];
@@ -720,8 +736,9 @@ void mat_imat_binop_scalar(int64_t *r, const int64_t *a, int64_t y, int64_t ne, 
     }
 #endif
     if (op == 0 || op == 18 || op == 11) {
+        int nt = isl_vec_omp_threads(ne);
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) if (ne >= ISL_OMP_VEC_MIN)
+#pragma omp parallel for schedule(static) if (ne >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
         for (int64_t i = 0; i < ne; i++) {
             int64_t x = a[i];
@@ -794,8 +811,9 @@ void mat_imat_binop_scalar_rev(int64_t *r, int64_t x, const int64_t *b, int64_t 
     }
 #endif
     if (op == 0 || op == 18 || op == 11) {
+        int nt = isl_vec_omp_threads(ne);
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) if (ne >= ISL_OMP_VEC_MIN)
+#pragma omp parallel for schedule(static) if (ne >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
         for (int64_t i = 0; i < ne; i++) {
             int64_t y = b[i];
