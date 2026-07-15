@@ -40,11 +40,14 @@ These require gitignored `tests/` and `scripts/` trees in your working copy (not
 | Target | Purpose |
 |--------|---------|
 | `make test` | Run `tests/*.ie` |
+| `make test-memory-stress` | Opt-in adaptive large-allocation and OOM tests |
 | `make test-parse` | Golden parser tests (`scripts/parse_golden.sh`) |
 | `make test-mac` | macOS: `test` + `test-parse` |
 | `make bench` | Compare against local benchmark baselines (`benchmarks/`) |
 | `make bench-update` | Refresh `benchmarks/baselines/local.json` |
 | `make bench-report` | Print benchmark table (no fail on regression) |
+| `make bench-transpile` | Measure Python-subset transpiler throughput |
+| `make bench-python` | Compare identical `.py` workloads in CPython and Shakti |
 
 Benchmark baselines are machine- and OpenMP-thread-count-specific. Use the same
 fixed thread count when recording and comparing a baseline, especially on
@@ -53,6 +56,14 @@ many-core hosts:
 ```bash
 OMP_NUM_THREADS=4 make bench-update
 OMP_NUM_THREADS=4 make bench
+```
+
+The RAM stress suite is intentionally excluded from `make test`. By default it
+uses up to 25% of currently available RAM, capped at 16 GiB, then verifies OOM
+handling under a 512 MiB process limit. Override the safe cap explicitly:
+
+```bash
+MEMORY_STRESS_MAX_GIB=32 MEMORY_STRESS_FRACTION=0.3 make test-memory-stress
 ```
 
 ## run
@@ -88,10 +99,24 @@ See [doc.md](doc.md#examples-index) for the full index. All example code lives i
 Python 3 → Shakti (strict subset):
 
 ```bash
-./shakti s2p.ie input.py -o out.ie
-./shakti s2p.ie python.py -o python.ie
-SHAKTI_LIB=$PWD/lib ./shakti python.ie
+./shakti file.py          # transpile + run in-process
+./shakti python.py
+./shakti s2p.ie input.py -o out.ie   # emit .ie only
+SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
+
+`./shakti file.py` runs the supported Python subset through the embedded
+transpiler, then evaluates the generated Shakti. This is not CPython.
+
+Compare correctness and end-to-end performance with the host CPython:
+
+```bash
+python3 scripts/test_python_vs_shakti.py
+make bench-python
+```
+
+The benchmark validates matching output first. Timings include process startup
+and, for Shakti, in-process transpilation.
 
 Maps `=`→`:`, `==`→`=`, defaults/keywords to `:`, and matrix `@`→`mmul`.
 Common NumPy arrays/reducers and pandas DataFrames lower to native vectors,

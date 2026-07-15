@@ -568,3 +568,57 @@ else:
     print("error status:", rest.status(resp2))
 
 print("rest demo done")
+
+# =============================================================================
+# example.py — Python 3 subset translated to Shakti
+# =============================================================================
+# Run the source directly with:
+#   ./shakti example.py
+#
+# Regenerate this section with:
+#   ./shakti s2p.ie example.py -o /tmp/example_python.ie
+
+# Python 3 subset examples runnable by CPython or `./shakti example.py`.
+def traced(f):
+    def wrapper(x):
+        print("call", x)
+        return f(x)
+    return wrapper
+@traced
+def square(x):
+    return (x * x)
+def clamp(x, low:0, high:10):
+    if (x < low):
+        return low
+    elif (x > high):
+        return high
+    return x
+# Arithmetic, defaults, keyword arguments, decorators, and one-argument lambda.
+print("square", square(6))
+print("clamp", clamp(15, high:12))
+increment : (lambda x: (x + 1))
+print("lambda", increment(9))
+# Lists, slices, tuple unpacking, dictionaries, loops, and augmented assignment.
+__s2p_values : [2, 4, 6, 8]
+size : len(__s2p_values)
+print("slice", __s2p_values[1:3])
+first, second : (10, 20)
+print("tuple", (first + second))
+record : {"name": "shakti", "count": size}
+print("dict", record["name"], record["count"])
+total : 0
+for i in range(len(__s2p_values)):
+    total += __s2p_values[i]
+print("for", total)
+countdown : 3
+while (countdown > 0):
+    print("while", countdown)
+    countdown -= 1
+name : "python"
+print(f"f-string {name}:{size}")
+# NumPy and pandas calls lowered to native Shakti vectors and tables.
+data : [1, 2, 3, 4]
+scaled : (data * 2)
+frame : table(value:data, scaled:scaled)
+print(frame)
+print("sum", sum(frame["scaled"]))
