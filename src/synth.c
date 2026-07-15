@@ -9,7 +9,8 @@
 #include <string.h>
 #if defined(SHAKTI_HAVE_SYNTH) && ( \
     (defined(__linux__) && __has_include(<alsa/asoundlib.h>) && __has_include(<X11/Xlib.h>)) || \
-    (defined(__APPLE__) && !defined(__IOS__)) \
+    (defined(__APPLE__) && !defined(__IOS__)) || \
+    defined(__EMSCRIPTEN__) \
 )
 #include "synth_platform.h"
 #include <pthread.h>
@@ -1616,7 +1617,12 @@ static void synth_shutdown(void) {
     memset(&g, 0, sizeof g);
 }
 int synth_open(char *err, size_t err_cap) {
-    int headless = getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
+    int headless =
+#ifdef __EMSCRIPTEN__
+        1;
+#else
+        getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
+#endif
     P(g.open && g.alive,0)
 #ifdef __linux__
     if (!headless && !getenv("DISPLAY")) {
