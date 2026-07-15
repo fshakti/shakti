@@ -1,33 +1,21 @@
-#ifdef SHAKTI_SYNTH_CORE_ONLY
-#include <math.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "a.h"
-#undef in
-#else
 #include "shakti.h"
-#endif
 #include "synth.h"
 #include "synth_ui.h"
 #include "synth_render.h"
-#ifndef SHAKTI_SYNTH_CORE_ONLY
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#endif
 #if defined(SHAKTI_HAVE_SYNTH) && ( \
-    (defined(__linux__) && !defined(__EMSCRIPTEN__) && __has_include(<alsa/asoundlib.h>) && __has_include(<X11/Xlib.h>)) || \
+    (defined(__linux__) && __has_include(<alsa/asoundlib.h>) && __has_include(<X11/Xlib.h>)) || \
     (defined(__APPLE__) && !defined(__IOS__)) || \
     defined(__EMSCRIPTEN__) \
 )
 #include "synth_platform.h"
 #include <pthread.h>
 #include <unistd.h>
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
 #undef in
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -97,7 +85,7 @@ typedef struct MetroVoice {
 typedef struct SynthState {
     int open;
     int alive;
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     Display *dpy;
     Window win;
     GC gc;
@@ -146,12 +134,12 @@ typedef struct SynthState {
     float loop_gain;
     SynthVoice voices[SYNTH_VOICES];
     MetroVoice metro;
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     pthread_t audio_tid;
 #endif
     pthread_mutex_t mu;
     int audio_run;
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     snd_pcm_t *pcm;
 #endif
     double phase_samples;
@@ -505,7 +493,7 @@ static void synth_ui_blit(void) {
     g.dirty = 0;
     synth_core_audio_unlock();
     Pv(!dirty)
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     Pv(!g.dpy || !g.img)
 #endif
     if (g.fb && g.present) synth_core_present_scale();
@@ -838,7 +826,7 @@ int synth_core_fb_resize(int w, int h) {
         return 0;
     }
 #endif
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     if (g.dpy && g.img) {
         g.img->data = NULL;
         XDestroyImage(g.img);
@@ -848,7 +836,7 @@ int synth_core_fb_resize(int w, int h) {
     free(g.present);
     g.present = (uint32_t *)calloc((size_t)g.win_w * (size_t)g.win_h, sizeof(uint32_t));
     P(!g.present,-1)
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     if (g.dpy) {
         g.img = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, (char *)g.present, g.win_w,
                              g.win_h, 32, 0);
@@ -905,7 +893,6 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     float *pcm = NULL;
     int i, n, frames;
     size_t bps;
-    const uint32_t max_data_bytes = 64u * 1024u * 1024u; /* 64 MiB PCM payload */
     f = fopen(path, "rb");
     if (!f) return -1;
     if (fread(hdr, 1, 12, f) != 12 || memcmp(hdr, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4)) {
@@ -939,20 +926,8 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
         fclose(f);
         return -1;
     }
-    if (data_bytes > max_data_bytes || fmt_rate < 1000u || fmt_rate > 192000u) {
-        fclose(f);
-        return -1;
-    }
     bps = (size_t)fmt_ch * ((size_t)fmt_bits / 8u);
-    if (bps == 0 || data_bytes % bps != 0) {
-        fclose(f);
-        return -1;
-    }
     frames = (int)(data_bytes / bps);
-    if (frames <= 0 || (size_t)frames > SIZE_MAX / sizeof(float)) {
-        fclose(f);
-        return -1;
-    }
     pcm = (float *)malloc((size_t)frames * sizeof(float));
     if (!pcm) {
         fclose(f);
@@ -979,15 +954,7 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     fclose(f);
     n = i;
     if (fmt_rate != SYNTH_SR) {
-        if ((int64_t)n > (INT64_C(1) << 30) / (int64_t)SYNTH_SR) {
-            free(pcm);
-            return -1;
-        }
         int out_frames = (int)((int64_t)n * SYNTH_SR / (int64_t)fmt_rate);
-        if (out_frames <= 0 || (size_t)out_frames > SIZE_MAX / sizeof(float)) {
-            free(pcm);
-            return -1;
-        }
         float *rs = (float *)malloc((size_t)out_frames * sizeof(float));
         if (!rs) {
             free(pcm);
@@ -1374,7 +1341,7 @@ void synth_core_render(float *out, int n) {
     synth_ui_push_audio_samples(out, n);
     synth_core_audio_unlock();
 }
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
 static void *synth_audio_loop(void *arg) {
     float mono[SYNTH_BUF];
     int16_t stereo[SYNTH_BUF * 2];
@@ -1411,7 +1378,7 @@ static void *synth_audio_loop(void *arg) {
     return NULL;
 }
 #endif
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
 static int synth_x11_init(char *err, size_t cap) {
     int scr;
     XSetWindowAttributes swa;
@@ -1650,9 +1617,14 @@ static void synth_shutdown(void) {
     memset(&g, 0, sizeof g);
 }
 int synth_open(char *err, size_t err_cap) {
-    int headless = getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
+    int headless =
+#ifdef __EMSCRIPTEN__
+        1;
+#else
+        getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
+#endif
     P(g.open && g.alive,0)
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#ifdef __linux__
     if (!headless && !getenv("DISPLAY")) {
         snprintf(err, err_cap, "synth_open: DISPLAY not set");
         return -1;
@@ -1722,11 +1694,9 @@ int synth_tick(char *err, size_t err_cap) {
         synth_present_frame();
     }
     if (!g.alive) synth_shutdown();
-#if !defined(__EMSCRIPTEN__)
     if (!headless) {
         usleep(16000);
     }
-#endif
     return g.alive;
 }
 int synth_set_steps(int n, char *err, size_t err_cap) {
@@ -2262,9 +2232,7 @@ const char *synth_row_label(int row) {
     P(row < 0 || row >= 8, "")
     return lbls[row];
 }
-#endif /* SHAKTI_HAVE_SYNTH / platform */
-
-#ifndef SHAKTI_SYNTH_CORE_ONLY
+#endif
 static inline int synth_arg_int(V**a,int n,int idx,int fallback){P(n<=idx,fallback)P(a[idx]->t==T_INT,(int)a[idx]->j)P(a[idx]->t==T_FLOAT,(int)a[idx]->f)return fallback;}
 static V *synth_err(char *err) {
     P(err[0],v_err(err))return v_err("synth: failed");
@@ -2582,4 +2550,3 @@ V *bi_synth_looper_has_loop(V **a, int n) {
     (void)n;
     return v_int(synth_looper_has_loop());
 }
-#endif /* !SHAKTI_SYNTH_CORE_ONLY */
