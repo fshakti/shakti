@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Shakti</string>
-    <string name="run_shakti">Run smoke.ie</string>
-    <string name="result_label">Exit code / output is logged; see Logcat tag Shakti</string>
-</resources>
