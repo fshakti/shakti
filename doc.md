@@ -53,7 +53,7 @@ export SHAKTI_LIB=$PWD/lib
 
 | Tool | Description |
 |------|-------------|
-| `examples/python3_to_shakti.py` | Strict Python 3 → Shakti converter |
+| `examples/s2p.ie` | Strict Python 3 → Shakti converter |
 
 ## Module docs
 
@@ -72,12 +72,12 @@ export SHAKTI_LIB=$PWD/lib
 
 # Python 3 → Shakti converter
 
-Strict subset converter. Uses Python’s `ast` module and emits `.ie` source.
+Strict subset converter written in Shakti. Emits `.ie` source.
 
 ```bash
-python3 examples/python3_to_shakti.py input.py -o out.ie
-python3 examples/python3_to_shakti.py < input.py
-python3 examples/python3_to_shakti.py example.py | ./shakti /dev/stdin
+./shakti examples/s2p.ie input.py -o out.ie
+./shakti examples/s2p.ie python.py -o python.ie
+SHAKTI_LIB=$PWD/lib ./shakti python.ie
 ```
 
 Unsupported syntax exits nonzero with `file:line:col` diagnostics.
@@ -95,7 +95,7 @@ Unsupported syntax exits nonzero with `file:line:col` diagnostics.
 
 Also converts functions, one-argument lambdas, `if`/`elif`/`else`, `while`, `for`, break/continue/pass, lists/tuples/dicts, indexing/slices, attributes, calls, decorators, f-strings (without format specs), augmented `+= -= *= /=`, and `import name`.
 
-`example.py` demonstrates NumPy and pandas lowering. `numpy.array`/`asarray`
+`python.py` demonstrates NumPy and pandas lowering. `numpy.array`/`asarray`
 become native vectors or matrices; common reducers map to Shakti builtins;
 `pandas.Series` becomes a vector and `pandas.DataFrame({...})` becomes
 `table(...)`. Other NumPy/pandas calls fail with a source location.
@@ -351,6 +351,7 @@ k : ktable(a:1, b:2)
 - `listdir(path)`, `walk(path)`
 - `json_loads(s)`, `json_dumps(x)` — JSON subset (no comments or trailing commas)
 - `re_match`, `re_findall`, `re_sub`, `re_split` — POSIX regex on Unix/macOS
+- `argv` — script path plus remaining CLI args (set when running a script file)
 
 ## Tables from files
 

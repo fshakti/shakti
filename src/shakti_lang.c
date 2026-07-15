@@ -5795,6 +5795,14 @@ int shakti_lang_main(int argc, char **argv) {
         g_script_dir[sizeof(g_script_dir)-1] = 0;
         char *slash = strrchr(g_script_dir, '/');
         if(slash) *slash = 0; else { g_script_dir[0] = '.'; g_script_dir[1] = 0; }
+        {
+            /* Script argv[0..]: script path then remaining CLI args. */
+            int narg = argc - i;
+            V *av = v_list(narg);
+            for (int k = 0; k < narg; k++) av->L[k] = v_str(argv[i + k]);
+            env_set(global, "argv", av);
+            v_free(av);
+        }
         char *src = read_file(argv[i]);
         P(!src,1)
         Node *prog = parse(src);
