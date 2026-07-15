@@ -49,12 +49,6 @@ export SHAKTI_LIB=$PWD/lib
 | `import ipc` | `ipc_rdma_client.ie` | Client for `ipc_rdma.ie` |
 | `import rest` | `rest_demo.ie` | HTTP GET/POST client + local server |
 
-## Other
-
-| File | Description |
-|------|-------------|
-| `bridge.ie` | Bridge hand dealer / HCP filter (stdlib only) |
-
 ## Tools
 
 | Tool | Description |
@@ -985,9 +979,10 @@ Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree):
 Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 
-## Apple / Microsoft SDKs
+## Apple / Microsoft / Android SDKs
 
 macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses.
-Windows/Android tooling in the local-only tree is not part of the published release.
+
+The `android/` tree is a **published distribution target**. Building the Android app pulls AndroidX / Material and the Gradle Wrapper; see [NOTICE](NOTICE) for redistribution notes. Local-only media (benchmark WAV fixtures, synth screenshots under `docs/images/`) is gitignored and not redistributed.
 
 ---

@@ -63,7 +63,7 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
         snprintf(err, cap, "gfx_open: XCreateImage failed");
         return -1;
     }
-    g.img->data = (char *)malloc((size_t)960 * (size_t)540 * 4u);
+    g.img->data = (char *)malloc((size_t)g.img->bytes_per_line * (size_t)g.img->height);
     if (!g.img->data) {
         XDestroyImage(g.img);
         g.img = NULL;
@@ -80,10 +80,7 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
 void gfx_platform_shutdown(void) {
     if (g.dpy && g.win) XDestroyWindow(g.dpy, g.win);
     if (g.gc && g.dpy) XFreeGC(g.dpy, g.gc);
-    if (g.img) {
-        if (g.img->data) free(g.img->data);
-        XDestroyImage(g.img);
-    }
+    if (g.img) XDestroyImage(g.img);
     if (g.dpy) XCloseDisplay(g.dpy);
     memset(&g, 0, sizeof g);
 }
@@ -101,16 +98,17 @@ int gfx_platform_poll(void) {
             gfx_core_set_alive(0);
             return -1;
         case ConfigureNotify:
-            gfx_core_fb_resize(ev.xconfigure.width, ev.xconfigure.height);
-            if (g.img) {
-                if (g.img->data) free(g.img->data);
-                XDestroyImage(g.img);
+            if (gfx_core_fb_resize(ev.xconfigure.width, ev.xconfigure.height) != 0) break;
+            XImage *next = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, NULL,
+                                        ev.xconfigure.width, ev.xconfigure.height, 32, 0);
+            if (!next) break;
+            next->data = (char *)malloc((size_t)next->bytes_per_line * (size_t)next->height);
+            if (!next->data) {
+                XDestroyImage(next);
+                break;
             }
-            g.img = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, NULL,
-                                 ev.xconfigure.width, ev.xconfigure.height, 32, 0);
-            if (g.img) {
-                g.img->data = (char *)malloc((size_t)ev.xconfigure.width * (size_t)ev.xconfigure.height * 4u);
-            }
+            if (g.img) XDestroyImage(g.img);
+            g.img = next;
             gfx_core_mark_dirty();
             break;
         case ButtonPress:

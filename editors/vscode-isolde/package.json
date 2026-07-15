@@ -22,7 +22,7 @@
       {
         "language": "shakti",
         "scopeName": "source.shakti",
-        "path": "./syntaxes/shakti.tmLanguage.json"
+        "path": "./syntaxes/isolde.tmLanguage.json"
       }
     ]
   }

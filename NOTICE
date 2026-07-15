@@ -10,3 +10,28 @@ Third-party notices
 Linked system libraries (libexpat, X11, ALSA, Cocoa, Core Audio, OpenMP,
 optional RDMA stacks, etc.) are provided by the host OS or toolchain.
 See doc.md.
+
+## Isolde / vector kernels
+
+`src/vec_kernels.c` contains SIMD/OpenMP vector reductions ported from Isolde
+(`k.c`) under the same Apache License 2.0 terms as this project.
+
+## Android distribution
+
+The `android/` tree is part of the published distribution. Gradle Wrapper scripts
+and `android/gradle/wrapper/gradle-wrapper.jar` are Copyright the Gradle authors
+and licensed under the Apache License 2.0.
+
+Android app dependencies (resolved at build time from Maven Central / Google):
+
+- androidx.core:core-ktx
+- androidx.appcompat:appcompat
+- com.google.android.material:material
+- androidx.constraintlayout:constraintlayout
+
+These AndroidX / Material components are typically Apache-2.0; retain their
+notices when redistributing APKs or AABs.
+
+macOS builds use Apple system frameworks (Cocoa, Core Audio, Speech, etc.) under
+their respective platform licenses. Windows builds use the host toolchain under
+its terms.
