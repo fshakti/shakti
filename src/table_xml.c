@@ -60,13 +60,14 @@ V*table_xml_load(const char*path,V*columns_opt){
  XML_SetElementHandler(p,xml_start,NULL);
  XML_SetCharacterDataHandler(p,xml_ch);
  if(XML_Parse(p,buf,(int)got,1)==XML_STATUS_ERROR){
+  enum XML_Error code=XML_GetErrorCode(p);
   XML_ParserFree(p);
   free(buf);
   v_free(cb.tag);
   v_free(cb.id);
   v_free(cb.name);
   v_free(cb.text);
-  return v_errf("xml: parse: %s",XML_ErrorString(XML_GetErrorCode(p)));}
+  return v_errf("xml: parse: %s",XML_ErrorString(code));}
  XML_ParserFree(p);
  free(buf);
  V*kl=v_list(4);

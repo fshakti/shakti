@@ -1182,6 +1182,23 @@ static void skip_comment(Lexer *l) {
     W(l->pos < l->len && l->src[l->pos] != '\n',l->pos++)
 }
 static Token make_tok(int type) { Token t = {0}; t.type = type; return t; }
+static void lex_fail(Lexer *l, const char *message) {
+    if (!l->failed) {
+        l->failed = 1;
+        snprintf(l->error, sizeof l->error, "%s", message);
+    }
+    l->pos = l->len;
+    l->pending_dedents = 0;
+    l->emit_newline = 0;
+}
+static int lex_append(Lexer *l, Token *t, int *len, char ch) {
+    if ((size_t)*len >= sizeof t->sval - 1) {
+        lex_fail(l, "token text exceeds 8191 bytes");
+        return 0;
+    }
+    t->sval[(*len)++] = ch;
+    return 1;
+}
 
 /* Update noun_pos after emitting a token (kparser-style left context). */
 static void lex_note_token(Lexer *l, Token t) {
@@ -1299,31 +1316,41 @@ static Token lex_fstring(Lexer *l) {
     int qi = 0;
     while(p < l->len && s[p] != q) {
         if(s[p]=='{' && p+1<l->len && s[p+1]=='{') {
-            t.sval[qi++] = '{'; p += 2;
+            if(!lex_append(l, &t, &qi, '{')) return make_tok(T_EOF_);
+            p += 2;
         } else if(s[p]=='}' && p+1<l->len && s[p+1]=='}') {
-            t.sval[qi++] = '}'; p += 2;
+            if(!lex_append(l, &t, &qi, '}')) return make_tok(T_EOF_);
+            p += 2;
         } else if(s[p]=='{') {
-            t.sval[qi++] = '{'; p++;
+            if(!lex_append(l, &t, &qi, '{')) return make_tok(T_EOF_);
+            p++;
             int depth = 1;
             while(p < l->len && depth > 0) {
                 if(s[p]=='{') depth++;
                 else if(s[p]=='}') { depth--; if(depth==0) break; }
-                t.sval[qi++] = s[p]; p++;
+                if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
+                p++;
             }
-            if(p < l->len) { t.sval[qi++] = '}'; p++; }
+            if(p < l->len) {
+                if(!lex_append(l, &t, &qi, '}')) return make_tok(T_EOF_);
+                p++;
+            }
         } else if(s[p]=='\\' && p+1<l->len) {
             p++;
+            char escaped;
             switch(s[p]) {
-            case 'n': t.sval[qi++]='\n'; break;
-            case 't': t.sval[qi++]='\t'; break;
-            case '\\': t.sval[qi++]='\\'; break;
-            case '\'': t.sval[qi++]='\''; break;
-            case '"': t.sval[qi++]='"'; break;
-            default: t.sval[qi++]=s[p]; break;
+            case 'n': escaped='\n'; break;
+            case 't': escaped='\t'; break;
+            case '\\': escaped='\\'; break;
+            case '\'': escaped='\''; break;
+            case '"': escaped='"'; break;
+            default: escaped=s[p]; break;
             }
+            if(!lex_append(l, &t, &qi, escaped)) return make_tok(T_EOF_);
             p++;
         } else {
-            t.sval[qi++] = s[p]; p++;
+            if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
+            p++;
         }
     }
     t.sval[qi] = 0;
@@ -1359,6 +1386,10 @@ static Token lex_raw(Lexer *l) {
         P(l->paren_depth > 0,lex_raw(l))
         int cur = l->indent_stack[l->indent_top];
         if(indent > cur) {
+            if(l->indent_top + 1 >= SHAKTI_INDENT_STACK) {
+                lex_fail(l, "indentation nesting exceeds 255 levels");
+                return make_tok(T_EOF_);
+            }
             l->indent_stack[++l->indent_top] = indent;
             return make_tok(T_INDENT_);
         } else if(indent < cur) {
@@ -1373,7 +1404,11 @@ static Token lex_raw(Lexer *l) {
     W(p < l->len && s[p]==' ',p++)
     l->pos = p;
     if(p >= l->len) {
-        if(l->indent_top > 0) { l->indent_top--; l->pending_dedents = l->indent_top; return make_tok(T_DEDENT_); }
+        if(l->indent_top > 0) {
+            l->pending_dedents = l->indent_top - 1;
+            l->indent_top = 0;
+            return make_tok(T_DEDENT_);
+        }
         return make_tok(T_EOF_);
     }
     char c = s[p];
@@ -1390,13 +1425,15 @@ static Token lex_raw(Lexer *l) {
         while(p+2 < l->len && !(s[p]==q && s[p+1]==q && s[p+2]==q)) {
             if(s[p]=='\\' && p+1<l->len) {
                 p++;
+                char escaped;
                 switch(s[p]) {
-                case 'n': t.sval[qi++]='\n'; break;
-                case 't': t.sval[qi++]='\t'; break;
-                case '\\': t.sval[qi++]='\\'; break;
-                default: t.sval[qi++]=s[p]; break;
+                case 'n': escaped='\n'; break;
+                case 't': escaped='\t'; break;
+                case '\\': escaped='\\'; break;
+                default: escaped=s[p]; break;
                 }
-            } else t.sval[qi++] = s[p];
+                if(!lex_append(l, &t, &qi, escaped)) return make_tok(T_EOF_);
+            } else if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
             p++;
         }
         t.sval[qi] = 0;
@@ -1411,16 +1448,19 @@ static Token lex_raw(Lexer *l) {
             if(s[p]=='\\' && p+1<l->len) {
                 p++;
                 switch(s[p]) {
-                case 'n': t.sval[qi++]='\n'; break;
-                case 't': t.sval[qi++]='\t'; break;
-                case '\\': t.sval[qi++]='\\'; break;
-                case '\'': t.sval[qi++]='\''; break;
-                case '"': t.sval[qi++]='"'; break;
-                case 'r': t.sval[qi++]='\r'; break;
-                case '0': t.sval[qi++]='\0'; break;
-                default: t.sval[qi++]='\\'; t.sval[qi++]=s[p]; break;
+                case 'n': if(!lex_append(l,&t,&qi,'\n')) return make_tok(T_EOF_); break;
+                case 't': if(!lex_append(l,&t,&qi,'\t')) return make_tok(T_EOF_); break;
+                case '\\': if(!lex_append(l,&t,&qi,'\\')) return make_tok(T_EOF_); break;
+                case '\'': if(!lex_append(l,&t,&qi,'\'')) return make_tok(T_EOF_); break;
+                case '"': if(!lex_append(l,&t,&qi,'"')) return make_tok(T_EOF_); break;
+                case 'r': if(!lex_append(l,&t,&qi,'\r')) return make_tok(T_EOF_); break;
+                case '0': if(!lex_append(l,&t,&qi,'\0')) return make_tok(T_EOF_); break;
+                default:
+                    if(!lex_append(l,&t,&qi,'\\') || !lex_append(l,&t,&qi,s[p]))
+                        return make_tok(T_EOF_);
+                    break;
                 }
-            } else t.sval[qi++] = s[p];
+            } else if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
             p++;
         }
         t.sval[qi] = 0;
@@ -1487,7 +1527,10 @@ static Token lex_raw(Lexer *l) {
         if((c=='r'||c=='R') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
             Token t = {.type = T_STR_}; int qi = 0;
             p++; char q = s[p]; p++;
-            while(p < l->len && s[p] != q) { t.sval[qi++] = s[p]; p++; }
+            while(p < l->len && s[p] != q) {
+                if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
+                p++;
+            }
             t.sval[qi] = 0;
             if(p < l->len) p++;
             l->pos = p;
@@ -2587,6 +2630,10 @@ Node *parse(const char *src) {
         Node *s = parse_stmt(&l);
         if(s) node_add(prog, s);
     })
+    if(l.failed && !g_error) {
+        g_error = 1;
+        g_error_val = v_errf("lexer: %s", l.error[0] ? l.error : "invalid input");
+    }
     return prog;
 }
 

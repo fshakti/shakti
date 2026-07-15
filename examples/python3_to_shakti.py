@@ -291,7 +291,11 @@ class Converter(ast.NodeVisitor):
     def for_stmt(self, node: ast.For) -> str:
         if node.orelse:
             self.fail("for-else is unsupported", node)
-        target = self.target(node.target, allow_tuple=True)
+        if isinstance(node.target, (ast.Tuple, ast.List)):
+            # Shakti binds a single loop variable per iteration; destructuring
+            # targets (for a, b in ...) would emit code that does not run.
+            self.fail("tuple unpacking in for-loops is unsupported", node.target)
+        target = self.target(node.target)
         lines = self.pad([f"for {target} in {self.expr(node.iter)}:"])
         lines.extend(self.block(node.body, node))
         return "\n".join(lines)

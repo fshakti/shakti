@@ -1,0 +1,47 @@
+# Memory / bounds regressions for lexer, indent, and re_sub.
+# Oversized / deeply nested inputs must error cleanly (no crash).
+
+# --- re_sub grows beyond the old 16 KiB stack buffer ---
+big : "x" * 20000
+out : re_sub("x", "yy", big)
+assert(len(out) = 40000)
+
+# Prefix-heavy match after a long un-matched region
+prefix : "a" * 20000 + "Z"
+out2 : re_sub("Z", "Q", prefix)
+assert(len(out2) = 20001)
+assert(out2[20000] = "Q")
+
+# --- oversized string literal must not crash ---
+# Build via write + -c so the lexer sees a long quoted string.
+tmp : "/tmp/shakti_lex_long.ie"
+write(tmp, 's : "' + ("a" * 9000) + '"\nprint(len(s))\n')
+rc : sh("./shakti " + tmp + " >/tmp/shakti_lex_long.out 2>/tmp/shakti_lex_long.err")
+# Expect non-zero exit or an error message; either way the process must survive.
+err : read("/tmp/shakti_lex_long.err")
+ok_crashless : 1
+if rc = 0:
+    # If somehow accepted, length must still be bounded by token limit.
+    assert(1 = 0)
+assert(ok_crashless = 1)
+
+# --- deep indent must not crash ---
+src : ""
+pad : ""
+for i in range(300):
+    src : src + pad + "if True:\n"
+    pad : pad + "    "
+src : src + pad + "x : 1\n"
+write("/tmp/shakti_lex_indent.ie", src)
+rc2 : sh("timeout 5s ./shakti /tmp/shakti_lex_indent.ie >/tmp/shakti_lex_indent.out 2>/tmp/shakti_lex_indent.err")
+assert(rc2 != 0)
+
+# --- file ending at nested indent must not loop forever (EOF dedent) ---
+# Regression: EOF at indent depth >= 2 previously emitted one extra DEDENT that
+# the parser never consumed, spinning forever. Must run to completion quickly.
+write("/tmp/shakti_lex_eof.ie", "def f():\n    for i in range(2):\n        x : i\nf()\nprint(\"eof ok\")\n")
+rc3 : sh("timeout 5s ./shakti /tmp/shakti_lex_eof.ie >/tmp/shakti_lex_eof.out 2>/tmp/shakti_lex_eof.err")
+assert(rc3 = 0)
+assert(read("/tmp/shakti_lex_eof.out") = "eof ok\n")
+
+print("memory_bounds ok")

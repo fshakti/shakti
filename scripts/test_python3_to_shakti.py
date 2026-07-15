@@ -173,6 +173,48 @@ def main() -> int:
         'while i < 3:\n    i += 1\n',
         'while (i < 3):\n    i += 1\n',
     )
+    expect_transpile(
+        mod,
+        "import numpy as np\n"
+        "m = np.mean(v)\n"
+        "lo = np.min(v)\n"
+        "hi = np.max(v)\n"
+        "r = np.sqrt(v)\n",
+        "m : avg(v)\n"
+        "lo : min(v)\n"
+        "hi : max(v)\n"
+        "r : sqrt(v)\n",
+    )
+    expect_transpile(
+        mod,
+        "import pandas as pd\ns = pd.Series([1, 2, 3])\n",
+        "s : [1, 2, 3]\n",
+    )
+    expect_transpile(
+        mod,
+        "x = 10\nx /= 2\n",
+        "x : 10\nx /= 2\n",
+    )
+    expect_transpile(
+        mod,
+        "for p in enumerate(xs):\n    print(p)\n",
+        "for p in enumerate(xs):\n    print(p)\n",
+    )
+    expect_transpile(
+        mod,
+        "def outer(x):\n    def inner(y):\n        return y + 1\n    return inner(x)\n",
+        "def outer(x):\n    def inner(y):\n        return (y + 1)\n    return inner(x)\n",
+    )
+    expect_transpile(
+        mod,
+        "a = -x\nb = not y\n",
+        "a : (-x)\nb : (not y)\n",
+    )
+    expect_transpile(
+        mod,
+        "r = a // b % c\n",
+        "r : ((a // b) % c)\n",
+    )
 
     expect_error(mod, "x = y = 1\n", "chained assignment")
     expect_error(mod, "if 1 < 2 < 3:\n    pass\n", "chained comparisons")
@@ -184,6 +226,12 @@ def main() -> int:
     expect_error(mod, "g = lambda a, b: a + b\n", "multi-argument lambdas")
     expect_error(mod, "x: int = 1\n", "annotated assignment")
     expect_error(mod, "if a is None:\n    pass\n", "comparison")
+    expect_error(mod, "async def f():\n    pass\n", "async")
+    expect_error(mod, "with open('x') as f:\n    pass\n", "With is unsupported")
+    expect_error(mod, "def f():\n    yield 1\n", "Yield is unsupported")
+    expect_error(mod, "import numpy as np\nx = np.fft(v)\n", "numpy.fft is unsupported")
+    expect_error(mod, "import pandas as pd\nx = pd.read_csv('f')\n", "pandas.read_csv is unsupported")
+    expect_error(mod, "for i, v in enumerate(xs):\n    print(v)\n", "tuple unpacking in for-loops")
 
     out = run_generated(
         mod,
@@ -253,6 +301,36 @@ print("decorator ok")
     )
     if "decorator ok" not in out2:
         raise AssertionError(f"decorator runtime failed: {out2!r}")
+
+    # NumPy lowering + nested functions + enumerate unpack, end-to-end
+    out3 = run_generated(
+        mod,
+        """
+import numpy as np
+
+data = np.array([2, 4, 6, 8])
+assert(np.sum(data) == 20)
+assert(np.min(data) == 2)
+assert(np.max(data) == 8)
+
+def outer(x):
+    def inner(y):
+        return y + 1
+    return inner(x) + 1
+
+assert(outer(3) == 5)
+
+acc = 0
+xs = [10, 20, 30]
+for i in range(len(xs)):
+    acc = acc + i + xs[i]
+
+assert(acc == 63)
+print("numpy runtime ok")
+""",
+    )
+    if "numpy runtime ok" not in out3:
+        raise AssertionError(f"numpy runtime failed: {out3!r}")
 
     example_source = (ROOT / "example.py").read_text(encoding="utf-8")
     example_output = run_generated(mod, example_source)

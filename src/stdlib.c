@@ -2,6 +2,7 @@
 #include "json_parse.h"
 #include <errno.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -417,22 +418,53 @@ V *bi_re_sub(V **a, in) {
     const char *s = a[2]->s;
     const char *rep = a[1]->s;
     regmatch_t m[1];
-    char buf[16384];
-    size_t o = 0;
-    buf[0] = 0;
-    int off = 0;
-    while (o < sizeof(buf) - 1 && regexec(&rx, s + off, 1, m, 0) == 0) {
+    size_t cap = strlen(s) + 1;
+    if (cap < 64) cap = 64;
+    char *buf = malloc(cap);
+    if (!buf) { regfree(&rx); return v_err("re_sub: oom"); }
+    size_t o = 0, off = 0;
+    while (regexec(&rx, s + off, 1, m, 0) == 0) {
         size_t prefix = (size_t)m[0].rm_so;
-        strncat(buf, s + off, prefix);
-        o = strlen(buf);
-        strncat(buf, rep, sizeof(buf) - o - 1);
-        o = strlen(buf);
-        off += (int)m[0].rm_eo;
+        size_t rep_len = strlen(rep);
+        if (prefix > SIZE_MAX - rep_len || o > SIZE_MAX - prefix - rep_len - 1) {
+            free(buf);
+            regfree(&rx);
+            return v_err("re_sub: result too large");
+        }
+        size_t need = o + prefix + rep_len + 1;
+        if (need > cap) {
+            size_t next = cap;
+            while (next < need) {
+                if (next > SIZE_MAX / 2) { next = need; break; }
+                next *= 2;
+            }
+            char *grown = realloc(buf, next);
+            if (!grown) { free(buf); regfree(&rx); return v_err("re_sub: oom"); }
+            buf = grown;
+            cap = next;
+        }
+        memcpy(buf + o, s + off, prefix);
+        o += prefix;
+        memcpy(buf + o, rep, rep_len);
+        o += rep_len;
+        off += (size_t)m[0].rm_eo;
         if (m[0].rm_eo == 0) break;
     }
-    strncat(buf, s + off, sizeof(buf) - strlen(buf) - 1);
+    size_t suffix = strlen(s + off);
+    if (o > SIZE_MAX - suffix - 1) {
+        free(buf);
+        regfree(&rx);
+        return v_err("re_sub: result too large");
+    }
+    size_t need = o + suffix + 1;
+    if (need > cap) {
+        char *grown = realloc(buf, need);
+        if (!grown) { free(buf); regfree(&rx); return v_err("re_sub: oom"); }
+        buf = grown;
+    }
+    memcpy(buf + o, s + off, suffix + 1);
     regfree(&rx);
-    return v_str(buf);
+    return v_str_take(buf);
 }
 V *bi_re_match(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("re_match"))
