@@ -72,15 +72,20 @@ export SHAKTI_LIB=$PWD/lib
 
 # Python 3 → Shakti converter
 
-Strict subset converter written in Shakti. Emits `.ie` source.
+Strict subset converter written in Shakti. Embedded in the executable for
+direct runs, and still available as `s2p.ie` for emit-only conversion.
 
 ```bash
+./shakti file.py                 # transpile + run (supported subset)
+./shakti python.py
 ./shakti s2p.ie input.py -o out.ie
 ./shakti s2p.ie python.py -o python.ie
-SHAKTI_LIB=$PWD/lib ./shakti python.ie
+SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
 
-Unsupported syntax exits nonzero with `file:line:col` diagnostics.
+`./shakti file.py` is not CPython: it lowers the supported subset to Shakti
+and evaluates that. Unsupported syntax exits nonzero with `file:line:col`
+diagnostics (original `.py` path preserved).
 
 ## Rewrites
 
