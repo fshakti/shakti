@@ -38,22 +38,12 @@ shakti-standalone
 # env
 .env
 .env.*
-**/.venv/
-.venv/
-
-# local media (generate/capture locally; not redistributed)
-/docs/images/
-/benchmarks/fixtures/*.wav
-/benchmarks/fixtures/*.png
 
 # local scripts
 vuln_scan.sh
 
 # local workspace notes (never publish)
 CONTEXT.md
-
-# local audio sample library (large; not redistributed)
-/samples/
 
 # static analyzer / stray local artifacts
 /*.plist

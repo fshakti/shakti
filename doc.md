@@ -53,7 +53,7 @@ export SHAKTI_LIB=$PWD/lib
 
 | Tool | Description |
 |------|-------------|
-| `examples/s2p.ie` | Strict Python 3 → Shakti converter |
+| `s2p.ie` | Strict Python 3 → Shakti converter |
 
 ## Module docs
 
@@ -75,8 +75,8 @@ export SHAKTI_LIB=$PWD/lib
 Strict subset converter written in Shakti. Emits `.ie` source.
 
 ```bash
-./shakti examples/s2p.ie input.py -o out.ie
-./shakti examples/s2p.ie python.py -o python.ie
+./shakti s2p.ie input.py -o out.ie
+./shakti s2p.ie python.py -o python.ie
 SHAKTI_LIB=$PWD/lib ./shakti python.ie
 ```
 

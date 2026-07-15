@@ -1,2 +1,0 @@
-# Shakti smoke (optional `make test` from shakti/)
-print([1, 2, 3])
