@@ -33,6 +33,7 @@ Thumbs.db
 *.bundle
 shakti
 shakti-standalone
+bin_bench
 **/build-static-test/
 
 # env
@@ -45,7 +46,17 @@ vuln_scan.sh
 # local workspace notes (never publish)
 CONTEXT.md
 /PYTHON_VS_SHAKTI_BENCHMARK.md
+
+# local-only workspace trees (not in published repo)
 tests/
+scripts/
+internal-bench/
+samples/
+android/
+cmake/
+editors/
+examples/
+docs/
 
 # static analyzer / stray local artifacts
 /*.plist
