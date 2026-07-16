@@ -141,7 +141,7 @@ extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "sort","reverse","zip","enumerate","map","filter",
+    "bin","asof_sort","asof_bin","sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
     "load","save","input","readline","wait","repr","clock","timer",
@@ -569,6 +569,161 @@ static V *bi_sort(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_copy(v);qsort(r->J,r->n,8,cmp_i64);return r;}
     if(v->t==T_FVEC){V*r=v_copy(v);qsort(r->F,r->n,8,cmp_f64);return r;}
     return v_copy(v);}
+/* q-compatible bin(keys, query): last i with keys[i] <= query; -1 below range. */
+static V *bi_bin(V**a,in){
+    P(n<2,v_err("bin(keys, query)"))
+    V *keys=a[0], *q=a[1];
+    if((keys->t==T_LIST||keys->t==T_IVEC||keys->t==T_FVEC)&&keys->n==0){
+        if(q->t==T_INT||q->t==T_FLOAT) return v_int(-1);
+        if(q->t==T_IVEC||q->t==T_FVEC){V*r=v_ivec(q->n);for(int64_t i=0;i<q->n;i++)r->J[i]=-1;return r;}
+        return v_err("bin: empty keys need scalar or vector query");
+    }
+    if(keys->t==T_IVEC){
+        if(q->t==T_INT) return v_int(shakti_bin_i64(keys->J,keys->n,q->j));
+        if(q->t==T_IVEC){
+            V *r=v_ivec(q->n);
+            shakti_bin_i64_batch(keys->J,keys->n,q->J,q->n,r->J);
+            return r;
+        }
+        return v_err("bin: int keys need int/ivec query");
+    }
+    if(keys->t==T_FVEC){
+        if(q->t==T_FLOAT) return v_int(shakti_bin_f64(keys->F,keys->n,q->f));
+        if(q->t==T_INT) return v_int(shakti_bin_f64(keys->F,keys->n,(double)q->j));
+        if(q->t==T_FVEC){
+            V *r=v_ivec(q->n);
+            shakti_bin_f64_batch(keys->F,keys->n,q->F,q->n,r->J);
+            return r;
+        }
+        return v_err("bin: float keys need float/fvec query");
+    }
+    return v_err("bin: keys must be ivec or fvec");
+}
+
+static int asof_time_key_name(const char *s){
+    return s && (!strcmp(s,"time") || !strcmp(s,"time_ns"));
+}
+static int asof_col_named(V *tbl,const char *name){
+    if(!tbl||tbl->t!=T_TABLE||!name)return 0;
+    for(int64_t i=0;i<tbl->keys->n;i++)
+        if(tbl->keys->L[i]->t==T_STR&&!strcmp(tbl->keys->L[i]->s,name))return 1;
+    return 0;
+}
+static int asof_ascending_i64(V *v){
+    if(!v||v->t!=T_IVEC)return 0;
+    for(int64_t i=1;i<v->n;i++)if(v->J[i]<v->J[i-1])return 0;
+    return 1;
+}
+static V *asof_cell(V *col,int64_t row){
+    if(row<0)return v_nil();
+    if(col->t==T_IVEC)return v_int(col->J[row]);
+    if(col->t==T_FVEC)return v_float(col->F[row]);
+    if(col->t==T_BVEC)return v_bool(col->B[row]);
+    if(col->t==T_LIST)return v_ref(col->L[row]);
+    if(col->t==T_IMAT||col->t==T_FMAT||col->t==T_BMAT)return v_mat_row(col,row);
+    return v_ref(col);
+}
+static V *asof_gather_col(V *col,const int64_t *idx,int64_t n){
+    int miss=0;
+    for(int64_t i=0;i<n;i++)if(idx[i]<0){miss=1;break;}
+    if(!miss&&col->t==T_IVEC){
+        V *r=v_ivec(n);for(int64_t i=0;i<n;i++)r->J[i]=col->J[idx[i]];return r;
+    }
+    if(!miss&&col->t==T_FVEC){
+        V *r=v_fvec(n);for(int64_t i=0;i<n;i++)r->F[i]=col->F[idx[i]];return r;
+    }
+    if(!miss&&col->t==T_BVEC){
+        V *r=v_bvec(n);for(int64_t i=0;i<n;i++)r->B[i]=col->B[idx[i]];return r;
+    }
+    V *r=v_list(n);
+    for(int64_t i=0;i<n;i++)r->L[i]=asof_cell(col,idx[i]);
+    return r;
+}
+/* Dyadic comma is currently reserved for this one join shape only:
+ * left,right where both tables' first column is the same ascending integer
+ * time key. SQL JOIN and all other join forms remain unimplemented. */
+V *table_asof_comma_join(V *left,V *right){
+    if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
+        return v_err(",: asof join requires two tables");
+    if(left->keys->n<1||right->keys->n<1)
+        return v_err(",: both tables must be keyed by time");
+    V *lk=left->keys->L[0],*rk=right->keys->L[0];
+    if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))
+        return v_err(",: first column of both tables must be the same time/time_ns key");
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    if(lt->t!=T_IVEC||rt->t!=T_IVEC)
+        return v_err(",: time keys must be integer vectors");
+    if(!asof_ascending_i64(lt)||!asof_ascending_i64(rt))
+        return v_err(",: both time keys must be sorted ascending");
+    for(int64_t c=1;c<right->keys->n;c++){
+        V *name=right->keys->L[c];
+        if(name->t!=T_STR)return v_err(",: right column name must be string");
+        if(asof_col_named(left,name->s))
+            return v_errf(",: duplicate payload column '%s'",name->s);
+    }
+    int64_t *idx=malloc((size_t)(left->n?left->n:1)*sizeof(int64_t));
+    if(!idx)return v_err(",: allocation failed");
+    shakti_bin_i64_batch(rt->J,rt->n,lt->J,left->n,idx);
+    int64_t nc=left->keys->n+right->keys->n-1;
+    V *keys=v_list(nc),*data=v_list(nc);
+    int64_t out=0;
+    for(int64_t c=0;c<left->keys->n;c++,out++){
+        keys->L[out]=v_ref(left->keys->L[c]);
+        data->L[out]=v_ref(left->vals->L[c]);
+    }
+    for(int64_t c=1;c<right->keys->n;c++,out++){
+        keys->L[out]=v_ref(right->keys->L[c]);
+        data->L[out]=asof_gather_col(right->vals->L[c],idx,left->n);
+    }
+    free(idx);
+    V *r=v_table(keys,data);
+    v_free(keys);v_free(data);
+    return r;
+}
+/* Sort (eq,time) → list [eq_sorted, time_sorted] for asof_bin. */
+static V *bi_asof_sort(V**a,in){
+    P(n<2||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,v_err("asof_sort(eq, time)"))
+    P(a[0]->n!=a[1]->n,v_err("asof_sort: length mismatch"))
+    V *eq=v_ivec(a[0]->n), *tm=v_ivec(a[1]->n);
+    shakti_asof_sort_i64(a[0]->J,a[1]->J,a[0]->n,eq->J,tm->J);
+    V *r=v_list(2); r->L[0]=eq; r->L[1]=tm; return r;
+}
+/* Coerce list[int] → owned ivec (or NULL on type error). */
+static V *as_ivec_arg(V *v, const char *ctx){
+    if(v->t==T_IVEC) return v_ref(v);
+    if(v->t!=T_LIST) return NULL;
+    V *r=v_ivec(v->n);
+    for(int64_t i=0;i<v->n;i++){
+        if(!v->L[i]||v->L[i]->t!=T_INT){v_free(r);return NULL;}
+        r->J[i]=v->L[i]->j;
+    }
+    (void)ctx;
+    return r;
+}
+/* Grouped asof index: right side sorted by (eq,time). */
+static V *bi_asof_bin(V**a,in){
+    P(n<4,v_err("asof_bin(eq, time, query_eq, query_time)"))
+    P(a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,v_err("asof_bin: eq/time must be ivec"))
+    P(a[0]->n!=a[1]->n,v_err("asof_bin: eq/time length mismatch"))
+    V *qeq=as_ivec_arg(a[2],"query_eq");
+    if(!qeq) return v_err("asof_bin: query_eq must be ivec or list[int]");
+    const int64_t *qtm=NULL; int64_t scalar=0; V *qtm_own=NULL;
+    if(a[3]->t==T_IVEC){
+        if(a[3]->n!=qeq->n){v_free(qeq);return v_err("asof_bin: query length mismatch");}
+        qtm=a[3]->J;
+    }else if(a[3]->t==T_LIST){
+        qtm_own=as_ivec_arg(a[3],"query_time");
+        if(!qtm_own){v_free(qeq);return v_err("asof_bin: query_time must be int or ivec/list[int]");}
+        if(qtm_own->n!=qeq->n){v_free(qeq);v_free(qtm_own);return v_err("asof_bin: query length mismatch");}
+        qtm=qtm_own->J;
+    }else if(a[3]->t==T_INT){
+        scalar=a[3]->j;
+    }else{v_free(qeq);return v_err("asof_bin: query_time must be int or ivec");}
+    V *r=v_ivec(qeq->n);
+    shakti_asof_bin_i64(a[0]->J,a[1]->J,a[0]->n,qeq->J,qtm,qeq->n,scalar,r->J);
+    v_free(qeq); if(qtm_own) v_free(qtm_own);
+    return r;
+}
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
@@ -863,6 +1018,7 @@ BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
+BI0(bin) BI0(asof_sort) BI0(asof_bin)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -928,7 +1084,10 @@ static const BiEntry bi_tab[] = {
     {"all", bi_w_all},
     {"any", bi_w_any},
     {"append", bi_w_append},
+    {"asof_bin", bi_w_asof_bin},
+    {"asof_sort", bi_w_asof_sort},
     {"avg", bi_w_avg},
+    {"bin", bi_w_bin},
     {"bool", bi_w_bool},
     {"ceil", bi_w_ceil},
     {"chr", bi_w_chr},

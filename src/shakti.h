@@ -266,6 +266,7 @@ enum {
     OP_OR = 16,
     OP_POW = 17,
     OP_SUB = 18,
+    OP_ASOF_COMMA = 19,
 };
 
 void lex_init(Lexer *l, const char *src);
@@ -345,6 +346,7 @@ V *table_sql_delete(V *from, V *cols, V *where);
 V *table_sql_create_table(V *name, V *cols);
 V *table_sql_insert(V *table, V *cols, V *vals);
 V *table_sql_join(V *left, V *right, V *on_col);
+V *table_asof_comma_join(V *left, V *right);
 int is_builtin(const char *name);
 void builtin_register(Env *e);
 
