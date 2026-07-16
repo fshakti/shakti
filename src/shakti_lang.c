@@ -1655,6 +1655,7 @@ static Node *parse_stmt(Lexer *l);
 static Node *parse_block(Lexer *l);
 static Node *parse_or(Lexer *l);
 static Node *parse_ternary(Lexer *l);
+static Node *parse_asof_comma(Lexer *l);
 static Node *parse_query(Lexer *l);
 static Node *parse_create_table(Lexer *l);
 static Node *parse_insert(Lexer *l);
@@ -2255,6 +2256,18 @@ static Node *parse_join(Lexer *l, Node *left) {
 static Node *parse_expr(Lexer *l) {
     return parse_ternary(l);
 }
+static Node *parse_asof_comma(Lexer *l) {
+    Node *n=parse_ternary(l);
+    while(lex_peek(l).type==T_COMMA_){
+        lex_next(l);
+        Node *r=node_new(N_BINOP);
+        r->op=OP_ASOF_COMMA;
+        node_add(r,n);
+        node_add(r,parse_ternary(l));
+        n=r;
+    }
+    return n;
+}
 static Node *parse_block(Lexer *l) {
     expect(l, T_INDENT_);
     Node *block = node_new(N_BLOCK);
@@ -2507,7 +2520,7 @@ static Node *parse_stmt(Lexer *l) {
         lex_next(l);
         Node *n = node_new(N_RETURN);
         if(lex_peek(l).type != T_NEWLINE_ && lex_peek(l).type != T_EOF_ && lex_peek(l).type != T_DEDENT_)
-            node_add(n, parse_expr(l));
+            node_add(n, parse_asof_comma(l));
         W(lex_peek(l).type == T_NEWLINE_,lex_next(l))
         return n;
     }
@@ -2592,19 +2605,35 @@ static Node *parse_stmt(Lexer *l) {
         })
         if(lex_peek(l).type == T_COLON_) {
             lex_next(l);
-            Node *val = parse_expr(l);
+            Node *val = parse_asof_comma(l);
             Node *n = node_new(N_ASSIGN);
             node_add(n, targets);
             node_add(n, val);
             W(lex_peek(l).type == T_NEWLINE_,lex_next(l))
             return n;
         }
+        Node *joined=targets->ch[0];
+        for(int i=1;i<targets->nch;i++){
+            Node *r=node_new(N_BINOP);r->op=OP_ASOF_COMMA;
+            node_add(r,joined);node_add(r,targets->ch[i]);joined=r;
+        }
+        free(targets->ch);targets->ch=NULL;targets->nch=0;node_free(targets);
         W(lex_peek(l).type == T_NEWLINE_,lex_next(l))
-        return targets;
+        return joined;
+    }
+    if(pk.type == T_COMMA_) {
+        Node *joined=expr;
+        while(lex_peek(l).type==T_COMMA_){
+            lex_next(l);
+            Node *r=node_new(N_BINOP);r->op=OP_ASOF_COMMA;
+            node_add(r,joined);node_add(r,parse_ternary(l));joined=r;
+        }
+        W(lex_peek(l).type == T_NEWLINE_,lex_next(l))
+        return joined;
     }
     if(pk.type == T_COLON_) {
         lex_next(l);
-        Node *val = parse_expr(l);
+        Node *val = parse_asof_comma(l);
         Node *n = node_new(N_ASSIGN);
         node_add(n, expr);
         node_add(n, val);
@@ -4553,6 +4582,15 @@ V *eval(Node *n, Env *e) {
         return r;
     }
     case N_BINOP: {
+        if(n->op == OP_ASOF_COMMA) {
+            V *a=eval(n->ch[0],e);
+            V *b=eval(n->ch[1],e);
+            P(a->t==T_ERR,(v_free(b),a))
+            P(b->t==T_ERR,(v_free(a),b))
+            V *r=table_asof_comma_join(a,b);
+            v_free(a);v_free(b);
+            return r;
+        }
         if(n->op == OP_AND) {
             V *a = eval(n->ch[0], e);
             P(a->t==T_ERR,a)

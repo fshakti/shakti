@@ -262,8 +262,17 @@ test-mac:
 	@echo "test-mac: skipped (Darwin only)"
 endif
 
+bin_bench: src/bin_bench.c src/vec_kernels.c src/vec_kernels.h src/a.h
+	$(CC) $(CFLAGS) -Isrc -O3 -DNDEBUG -o bin_bench src/bin_bench.c src/vec_kernels.c $(LDFLAGS)
+
+bench-bin: bin_bench
+	./bin_bench
+
+bench-asof-comma: shakti
+	./shakti benchmarks/asof_comma.ie
+
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
+	rm -f shakti shakti-standalone bin_bench *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/shakti_s2p_embed.h $(BUILD)/macros_smoke
 	rm -rf build/ shakti/ *.dSYM shakti.zip
 
@@ -347,4 +356,4 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: test test-macros test-parse test-mac bench bench-update bench-report clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps
+.PHONY: test test-macros test-parse test-mac bench bench-update bench-report bench-bin bench-asof-comma clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps

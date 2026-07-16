@@ -2,8 +2,18 @@
 #include "vec_kernels.h"
 #include "a.h"
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #ifdef _OPENMP
 #include <omp.h>
+#endif
+
+/* OpenMP over query needles — far cheaper than binary search itself below this. */
+#ifndef SHAKTI_BIN_OMP_MIN
+#define SHAKTI_BIN_OMP_MIN 4096
+#endif
+#ifndef SHAKTI_BIN_OMP_MAX_THREADS
+#define SHAKTI_BIN_OMP_MAX_THREADS 16
 #endif
 #if defined(__x86_64__) && defined(__AVX512F__)
 #include <immintrin.h>
@@ -202,4 +212,166 @@ double shakti_dot_numeric(const int64_t *aj, const double *af, int a_fvec,
         r += x * y;
     }
     return r;
+}
+
+/* ── q-compatible predecessor search (bin) ───────────────────────────── */
+
+int64_t shakti_bin_i64(const int64_t *keys, int64_t n, int64_t q) {
+    if (!keys || n <= 0) return -1;
+    int64_t lo = 0, hi = n;
+    while (lo < hi) {
+        int64_t mid = lo + ((hi - lo) >> 1);
+        if (keys[mid] <= q) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo - 1;
+}
+
+static int shakti_i64_ascending(const int64_t *a, int64_t n) {
+    for (int64_t i = 1; i < n; i++)
+        if (a[i] < a[i - 1]) return 0;
+    return 1;
+}
+
+void shakti_bin_i64_batch(const int64_t *keys, int64_t n,
+                          const int64_t *qs, int64_t m, int64_t *out) {
+    if (!out) return;
+    if (!keys || n <= 0 || !qs || m <= 0) {
+        for (int64_t j = 0; j < m; j++) out[j] = -1;
+        return;
+    }
+    /* Sorted needles → O(n+m) two-pointer merge (MKTSNAP request tables). */
+    if (m >= 2 && shakti_i64_ascending(qs, m)) {
+        int64_t i = 0;
+        for (int64_t j = 0; j < m; j++) {
+            while (i < n && keys[i] <= qs[j]) i++;
+            out[j] = i - 1;
+        }
+        return;
+    }
+#ifdef _OPENMP
+    int max = omp_get_max_threads();
+    int nt = 1;
+    if (max > 1 && m >= SHAKTI_BIN_OMP_MIN) {
+        nt = (int)(m / (SHAKTI_BIN_OMP_MIN / 4));
+        if (nt < 1) nt = 1;
+        if (nt > max) nt = max;
+        if (nt > SHAKTI_BIN_OMP_MAX_THREADS) nt = SHAKTI_BIN_OMP_MAX_THREADS;
+    }
+    #pragma omp parallel for schedule(static) if (m >= SHAKTI_BIN_OMP_MIN) num_threads(nt)
+#endif
+    for (int64_t j = 0; j < m; j++)
+        out[j] = shakti_bin_i64(keys, n, qs[j]);
+}
+
+int64_t shakti_bin_f64(const double *keys, int64_t n, double q) {
+    /* NaN query is incomparable; treat as below range. */
+    if (!keys || n <= 0 || isnan(q)) return -1;
+    int64_t lo = 0, hi = n;
+    while (lo < hi) {
+        int64_t mid = lo + ((hi - lo) >> 1);
+        if (keys[mid] <= q) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo - 1;
+}
+
+static int shakti_f64_ascending(const double *a, int64_t n) {
+    for (int64_t i = 1; i < n; i++)
+        if (a[i] < a[i - 1]) return 0;
+    return 1;
+}
+
+void shakti_bin_f64_batch(const double *keys, int64_t n,
+                          const double *qs, int64_t m, int64_t *out) {
+    if (!out) return;
+    if (!keys || n <= 0 || !qs || m <= 0) {
+        for (int64_t j = 0; j < m; j++) out[j] = -1;
+        return;
+    }
+    if (m >= 2 && shakti_f64_ascending(qs, m)) {
+        int64_t i = 0;
+        for (int64_t j = 0; j < m; j++) {
+            if (isnan(qs[j])) { out[j] = -1; continue; }
+            while (i < n && keys[i] <= qs[j]) i++;
+            out[j] = i - 1;
+        }
+        return;
+    }
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static) if (m >= SHAKTI_BIN_OMP_MIN)
+#endif
+    for (int64_t j = 0; j < m; j++)
+        out[j] = shakti_bin_f64(keys, n, qs[j]);
+}
+
+typedef struct { int64_t eq, tm; } ShaktiEt;
+
+static int shakti_cmp_et(const void *a, const void *b) {
+    const ShaktiEt *x = (const ShaktiEt *)a, *y = (const ShaktiEt *)b;
+    if (x->eq < y->eq) return -1;
+    if (x->eq > y->eq) return 1;
+    if (x->tm < y->tm) return -1;
+    if (x->tm > y->tm) return 1;
+    return 0;
+}
+
+void shakti_asof_sort_i64(const int64_t *eq, const int64_t *tm, int64_t n,
+                          int64_t *eq_out, int64_t *tm_out) {
+    if (!eq_out || !tm_out) return;
+    if (!eq || !tm || n <= 0) return;
+    ShaktiEt *buf = (ShaktiEt *)malloc((size_t)n * sizeof(ShaktiEt));
+    if (!buf) return;
+    for (int64_t i = 0; i < n; i++) {
+        buf[i].eq = eq[i];
+        buf[i].tm = tm[i];
+    }
+    qsort(buf, (size_t)n, sizeof(ShaktiEt), shakti_cmp_et);
+    for (int64_t i = 0; i < n; i++) {
+        eq_out[i] = buf[i].eq;
+        tm_out[i] = buf[i].tm;
+    }
+    free(buf);
+}
+
+static int64_t shakti_group_start(const int64_t *eq, int64_t n, int64_t key) {
+    int64_t lo = 0, hi = n;
+    while (lo < hi) {
+        int64_t mid = lo + ((hi - lo) >> 1);
+        if (eq[mid] < key) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo >= n || eq[lo] != key) return -1;
+    return lo;
+}
+
+static int64_t shakti_group_end(const int64_t *eq, int64_t n, int64_t key, int64_t start) {
+    int64_t lo = start, hi = n;
+    while (lo < hi) {
+        int64_t mid = lo + ((hi - lo) >> 1);
+        if (eq[mid] <= key) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+void shakti_asof_bin_i64(const int64_t *eq, const int64_t *tm, int64_t n,
+                         const int64_t *query_eq, const int64_t *query_tm,
+                         int64_t m, int64_t scalar_tm, int64_t *out) {
+    if (!out) return;
+    if (!eq || !tm || n <= 0 || !query_eq || m <= 0) {
+        for (int64_t j = 0; j < m; j++) out[j] = -1;
+        return;
+    }
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static) if (m >= SHAKTI_BIN_OMP_MIN)
+#endif
+    for (int64_t j = 0; j < m; j++) {
+        int64_t start = shakti_group_start(eq, n, query_eq[j]);
+        if (start < 0) { out[j] = -1; continue; }
+        int64_t end = shakti_group_end(eq, n, query_eq[j], start);
+        int64_t qtm = query_tm ? query_tm[j] : scalar_tm;
+        int64_t rel = shakti_bin_i64(tm + start, end - start, qtm);
+        out[j] = (rel < 0) ? -1 : (start + rel);
+    }
 }
