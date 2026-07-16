@@ -45,13 +45,13 @@ vuln_scan.sh
 # local workspace notes (never publish)
 CONTEXT.md
 /PYTHON_VS_SHAKTI_BENCHMARK.md
+tests/
 
 # static analyzer / stray local artifacts
 /*.plist
 stluRITA
 
-# Published bin/asof verification artifacts (override local info/exclude).
-!/tests/asof_comma.ie
+# Published benchmark artifacts (override local info/exclude).
 !/benchmarks/
 !/benchmarks/asof_comma.ie
 
