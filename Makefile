@@ -151,9 +151,9 @@ $(BUILD)/shakti_version.h: src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
-$(BUILD)/shakti_s2p_embed.h: s2p.ie scripts/embed_text.py
+$(BUILD)/shakti_s2p_embed.h: s2p.ie tools/embed_text.py
 	@mkdir -p $(BUILD)
-	python3 scripts/embed_text.py s2p.ie shakti_s2p_source $@
+	python3 tools/embed_text.py s2p.ie shakti_s2p_source $@
 
 ifeq ($(SHAKTI_TALK),1)
 talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
@@ -202,65 +202,6 @@ shakti: $(BUILD)/shakti_version.h $(BUILD)/shakti_s2p_embed.h src/a.h $(LANG_STA
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
-SHAKTI_TESTS := $(wildcard tests/*.ie)
-
-ifneq ($(SHAKTI_TESTS),)
-test: shakti
-	@for f in $(SHAKTI_TESTS); do \
-	  echo "Running $$f..."; case "$$f" in \
-	    *synth*) SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) SHAKTI_SYNTH_HEADLESS=1 ./shakti "$$f" || exit 1 ;; \
-	    *) SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti "$$f" || exit 1 ;; \
-	  esac; \
-	done
-endif
-
-MEMORY_STRESS_FRACTION ?= 0.25
-MEMORY_STRESS_MAX_GIB ?= 16
-ifneq ($(wildcard scripts/test_memory_stress.py),)
-test-memory-stress: shakti
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/test_memory_stress.py \
-		--fraction $(MEMORY_STRESS_FRACTION) --max-gib $(MEMORY_STRESS_MAX_GIB)
-endif
-
-ifneq ($(wildcard scripts/bench_check.py),)
-bench: prod
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --check
-
-bench-update: prod
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --update
-
-bench-report: shakti
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_check.py --report
-endif
-
-ifneq ($(wildcard scripts/bench_python3_to_shakti.py),)
-bench-transpile:
-	python3 scripts/bench_python3_to_shakti.py
-endif
-
-ifneq ($(wildcard scripts/bench_python_vs_shakti.py),)
-bench-python: shakti
-	SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) python3 scripts/bench_python_vs_shakti.py
-endif
-
-ifneq ($(wildcard tests/macros_smoke.c),)
-test-macros: src/a.h
-	gcc $(CFLAGS) -I$(BUILD) -o $(BUILD)/macros_smoke tests/macros_smoke.c
-	$(BUILD)/macros_smoke
-endif
-
-ifneq ($(wildcard scripts/parse_golden.sh),)
-test-parse: shakti
-	@bash scripts/parse_golden.sh
-endif
-
-ifeq ($(UNAME_S),Darwin)
-test-mac: prod test test-parse
-	@echo "test-mac: all macOS checks passed"
-else
-test-mac:
-	@echo "test-mac: skipped (Darwin only)"
-endif
 
 bin_bench: src/bin_bench.c src/vec_kernels.c src/vec_kernels.h src/a.h
 	$(CC) $(CFLAGS) -Isrc -O3 -DNDEBUG -o bin_bench src/bin_bench.c src/vec_kernels.c $(LDFLAGS)
@@ -326,17 +267,6 @@ prod-speed: clean-shakti-artifacts shakti
 clean-shakti-artifacts:
 	rm -f shakti talk.o synth.o synth_mac.o
 
-ifneq ($(wildcard scripts/size_check.py),)
-size-check: prod
-	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --check
-
-size-update: prod
-	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --update
-
-size-report: prod
-	SHAKTI_SYNTH=1 SHAKTI_TALK=0 python3 scripts/size_check.py --report
-endif
-
 check-deps:
 ifeq ($(UNAME_S),Darwin)
 	@missing=; \
@@ -356,4 +286,4 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: test test-macros test-parse test-mac bench bench-update bench-report bench-bin bench-asof-comma clean prod prod-size prod-speed clean-shakti-artifacts shakti size-check size-update size-report check-deps
+.PHONY: bench-bin bench-asof-comma clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps
