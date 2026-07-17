@@ -207,14 +207,8 @@ shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/a.h $(LANG_STANDALO
 
 SHAKTI_LIB_DIR := lib
 
-bin_bench: src/bin_bench.c src/vec_kernels.c src/vec_kernels.h src/a.h
-	$(CC) $(CFLAGS) -Isrc -O3 -DNDEBUG -o bin_bench src/bin_bench.c src/vec_kernels.c $(LDFLAGS)
-
-bench-bin: bin_bench
-	./bin_bench
-
 clean:
-	rm -f shakti shakti-standalone bin_bench *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
+	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
 	rm -rf build/ shakti/ *.dSYM shakti.zip
 
@@ -287,4 +281,4 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: bench-bin clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps
+.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps

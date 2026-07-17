@@ -2106,6 +2106,12 @@ static Node *parse_by_cols(Lexer *l) {
         node_add(n, name);
         if (lex_peek(l).type == T_COMMA_) {
             lex_next(l);
+            /* Trailing comma before from/where/newline is a syntax error. */
+            if (lex_peek(l).type != T_NAME_) {
+                fprintf(stderr, "parse error: trailing comma in by clause\n");
+                node_free(n);
+                return NULL;
+            }
             continue;
         }
         break;
@@ -2134,12 +2140,19 @@ static Node *parse_query(Lexer *l) {
         while (lex_peek(l).type != T_FROM_ && lex_peek(l).type != T_WHERE_ &&
                lex_peek(l).type != T_NEWLINE_ && lex_peek(l).type != T_EOF_) {
             if (lex_peek(l).type == T_BY_) {
-                if (kw.type == T_SELECT_ || kw.type == T_UPDATE_ || kw.type == T_DELETE_) {
-                    lex_next(l);
-                    node_free(by);
-                    by = parse_by_cols(l);
-                    continue;
+                if (kw.type != T_SELECT_) {
+                    fprintf(stderr, "parse error: by is only supported on select\n");
+                    node_free(n); node_free(cols); node_free(by); node_free(from); node_free(where);
+                    return node_new(N_NONE);
                 }
+                lex_next(l);
+                node_free(by);
+                by = parse_by_cols(l);
+                if (!by) {
+                    node_free(n); node_free(cols); node_free(from); node_free(where);
+                    return node_new(N_NONE);
+                }
+                continue;
             }
             if (kw.type == T_UPDATE_ && lex_peek(l).type == T_NAME_) {
                 Token nm = lex_next(l);
@@ -4633,6 +4646,68 @@ V *eval(Node *n, Env *e) {
         P(a->t==T_ERR,(v_free(b),a))
         P(b->t==T_ERR,(v_free(a),b))
         if(n->op == OP_IN || n->op == OP_NOT_IN) {
+            /* Vector membership: ivec in ivec|list[int] → bvec (dense bitset). */
+            if (a->t == T_IVEC && (b->t == T_IVEC || b->t == T_LIST)) {
+                int64_t bn = b->n;
+                int64_t *needles = NULL;
+                int64_t nneed = 0;
+                if (b->t == T_IVEC) {
+                    needles = b->J;
+                    nneed = bn;
+                } else {
+                    needles = malloc((size_t)bn * sizeof(int64_t));
+                    if (!needles) {
+                        v_free(a); v_free(b);
+                        return v_err("out of memory");
+                    }
+                    for (int64_t i = 0; i < bn; i++) {
+                        if (!b->L[i] || b->L[i]->t != T_INT) {
+                            free(needles);
+                            v_free(a); v_free(b);
+                            return v_err("in: list members must be int");
+                        }
+                        needles[i] = b->L[i]->j;
+                    }
+                    nneed = bn;
+                }
+                int64_t bmin = INT64_MAX, bmax = INT64_MIN;
+                for (int64_t i = 0; i < nneed; i++) {
+                    if (needles[i] < bmin) bmin = needles[i];
+                    if (needles[i] > bmax) bmax = needles[i];
+                }
+                V *r = v_bvec(a->n);
+                int invert = (n->op == OP_NOT_IN);
+                if (nneed == 0) {
+                    for (int64_t i = 0; i < a->n; i++) r->B[i] = invert ? 1 : 0;
+                } else if (bmin >= 0 && bmax < 1000000 && bmax >= bmin) {
+                    unsigned char *pres = calloc((size_t)bmax + 1, 1);
+                    if (!pres) {
+                        if (b->t == T_LIST) free(needles);
+                        v_free(r); v_free(a); v_free(b);
+                        return v_err("out of memory");
+                    }
+                    for (int64_t i = 0; i < nneed; i++) pres[needles[i]] = 1;
+                    for (int64_t i = 0; i < a->n; i++) {
+                        int64_t v = a->J[i];
+                        int hit = (v >= 0 && v <= bmax && pres[v]);
+                        r->B[i] = invert ? !hit : hit;
+                    }
+                    free(pres);
+                } else {
+                    /* Fallback: linear scan per element (small needle sets). */
+                    for (int64_t i = 0; i < a->n; i++) {
+                        int hit = 0;
+                        int64_t v = a->J[i];
+                        for (int64_t j = 0; j < nneed; j++) {
+                            if (needles[j] == v) { hit = 1; break; }
+                        }
+                        r->B[i] = invert ? !hit : hit;
+                    }
+                }
+                if (b->t == T_LIST) free(needles);
+                v_free(a); v_free(b);
+                return r;
+            }
             int found = 0;
             if(b->t==T_LIST) {
                 for(int64_t i=0;i<b->n;i++) {
