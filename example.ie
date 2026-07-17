@@ -192,7 +192,7 @@ print(tsv_short)
 # =============================================================================
 # In-memory table SQL — requires `import sql` before statement syntax.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti sql_demo.ie
+#   ./shakti example.ie  # section: sql_demo.ie
 
 import sql
 
@@ -228,7 +228,7 @@ print(roster)
 # =============================================================================
 # Knowledge graph demo — subject/predicate/object triples.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti graph_demo.ie
+#   ./shakti example.ie  # section: graph_demo.ie
 
 import graph
 
@@ -265,8 +265,8 @@ print(graph.query("*", "knows", "Grace"))
 # =============================================================================
 # Terminal + event-hub input demo (no synth window).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti input_demo.ie
-#   echo hello | ./shakti input_demo.ie   # readline path
+#   ./shakti example.ie  # section: input_demo.ie
+#   echo hello | ./shakti example.ie   # readline path (same section)
 
 import input
 
@@ -312,7 +312,7 @@ print("steps:", synth.steps())
 # Usage (from repo root, with X11 + ALSA):
 #   SHAKTI_SYNTH:1 make shakti
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti synth_song.ie
+#   ./shakti example.ie  # section: synth_song.ie
 
 import synth
 
@@ -382,7 +382,7 @@ while synth.alive():
 # Synth + unified input jam demo (Linux/macOS with synth build).
 #
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti synth_input.ie
+#   ./shakti example.ie  # section: synth_input.ie
 #
 # Maps QWERTY keys to synth notes via input(2) key up/down stream.
 # Close the synth window or press Ctrl+C to exit.
@@ -420,7 +420,7 @@ print("Done")
 # Compare with 12-TET by toggling tuning while holding notes.
 #
 #   export SHAKTI_LIB=$PWD/lib
-#   SHAKTI_SYNTH_HEADLESS=1 ./shakti synth_just_intonation.ie
+#   SHAKTI_SYNTH_HEADLESS=1 ./shakti example.ie  # section: synth_just_intonation.ie
 
 import synth
 
@@ -452,7 +452,7 @@ print("done")
 # =============================================================================
 # Speech-to-text demo (macOS only; requires microphone + Speech Recognition permission).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti talk_demo.ie
+#   ./shakti example.ie  # section: talk_demo.ie
 
 import talk
 
@@ -466,8 +466,9 @@ print("transcript:", text)
 # ipc_echo.ie
 # =============================================================================
 # Local IPC echo server — Unix domain socket on localhost (default port 19090).
-# Run in one terminal:  ./shakti ipc_echo.ie
-# Run in another:       ./shakti ipc_echo_client.ie
+# Copy the ipc_echo / ipc_echo_client sections into separate files, then:
+#   Terminal 1: ./shakti ipc_echo.ie
+#   Terminal 2: ./shakti ipc_echo_client.ie
 
 import ipc
 
@@ -500,8 +501,9 @@ ipc.close(c)
 # ipc_rdma.ie
 # =============================================================================
 # RDMA/RoCE IPC example — requires RDMA-capable NIC and rdma-core dev libraries.
-# Server:  ./shakti ipc_rdma.ie
-# Client:  ./shakti ipc_rdma_client.ie  (set host/port to match)
+# Copy the ipc_rdma / ipc_rdma_client sections into separate files, then:
+#   Server: ./shakti ipc_rdma.ie
+#   Client: ./shakti ipc_rdma_client.ie  (set host/port to match)
 
 import ipc
 
@@ -540,28 +542,29 @@ else:
 # =============================================================================
 # REST client + local server demo
 #
-#   ./shakti rest_demo.ie
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: rest_demo.ie
 #
 # Optional live API (needs network):
 #   resp : rest.get("https://httpbin.org/get")
 
 import rest
 
-sh("./shakti tests/fixtures/rest_demo_server.ie &")
+sh("./shakti benchmarks/fixtures/rest_ping_server.ie &")
 sh("sleep 0.5")
 
 print("GET /ping")
-resp : rest.get("http://127.0.0.1:19091/ping")
+resp : rest.get("http://127.0.0.1:29878/ping")
 if rest.ok(resp):
     print("status:", rest.status(resp), "body:", rest.text(resp))
 else:
     print("error status:", rest.status(resp))
 
-sh("./shakti tests/fixtures/rest_demo_server.ie &")
+sh("./shakti benchmarks/fixtures/rest_ping_server.ie &")
 sh("sleep 0.5")
 
 print("POST /echo")
-resp2 : rest.post_json("http://127.0.0.1:19091/echo", {"msg": "hello"})
+resp2 : rest.post_json("http://127.0.0.1:29878/echo", {"msg": "hello"})
 if rest.ok(resp2):
     print("echo:", rest.json(resp2))
 else:
