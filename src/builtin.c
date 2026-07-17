@@ -323,12 +323,16 @@ static V *vec_reduce_min(V *v) {
     }
     if (v->t == T_IVEC) {
         P(v->n == 0,v_nil())
+        if (v->n >= ISL_OMP_VEC_MIN)
+            return v_int(shakti_min_i64(v->J, v->n));
         int64_t m = v->J[0];
         for (int64_t i = 1; i < v->n; i++) if (v->J[i] < m) m = v->J[i];
         return v_int(m);
     }
     if (v->t == T_FVEC) {
         P(v->n == 0,v_nil())
+        if (v->n >= ISL_OMP_VEC_MIN)
+            return v_float(shakti_min_f64(v->F, v->n));
         double m = v->F[0];
         for (int64_t i = 1; i < v->n; i++) if (v->F[i] < m) m = v->F[i];
         return v_float(m);
@@ -363,12 +367,16 @@ static V *vec_reduce_max(V *v) {
     }
     if (v->t == T_IVEC) {
         P(v->n == 0,v_nil())
+        if (v->n >= ISL_OMP_VEC_MIN)
+            return v_int(shakti_max_i64(v->J, v->n));
         int64_t m = v->J[0];
         for (int64_t i = 1; i < v->n; i++) if (v->J[i] > m) m = v->J[i];
         return v_int(m);
     }
     if (v->t == T_FVEC) {
         P(v->n == 0,v_nil())
+        if (v->n >= ISL_OMP_VEC_MIN)
+            return v_float(shakti_max_f64(v->F, v->n));
         double m = v->F[0];
         for (int64_t i = 1; i < v->n; i++) if (v->F[i] > m) m = v->F[i];
         return v_float(m);

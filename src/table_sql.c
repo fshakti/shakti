@@ -1,11 +1,23 @@
 #include "shakti.h"
 #include "mat_simd.h"
+#include "vec_kernels.h"
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef _OPENMP
 #include <omp.h>
+#endif
+#ifndef SQL_DENSE_CAP
+#define SQL_DENSE_CAP 1000000
+#endif
+#ifndef SQL_RADIX_MIN_ROWS
+#define SQL_RADIX_MIN_ROWS 100000
+#endif
+#ifndef SQL_OMP_GROUP_MIN
+#define SQL_OMP_GROUP_MIN 50000
 #endif
 static inline double sql_to_float(V*v){return !v?0.:v->t==T_INT?(double)v->j:v->t==T_FLOAT?v->f:v->t==T_BOOL?v->b?1.:0.:0.;}
 enum {
@@ -25,19 +37,23 @@ static int is_agg_kw(ss){static const char*kws[]={"count","sum","avg","min","max
 static int tbl_col_idx(V*tbl,const g0*name){int64_t k;P(!tbl||tbl->t!=T_TABLE||!name,-1)for(k=0;k<tbl->keys->n;k++)if(!strcmp(tbl->keys->L[k]->s,name))return(int)k;return-1;}
 static inline V*tbl_col(V*tbl,int idx){return(!tbl||tbl->t!=T_TABLE||idx<0||idx>=tbl->keys->n)?NULL:tbl->vals->L[idx];}
 static inline double cell_float(V*col,int64_t row){return !col?0.:col->t==T_IVEC?row<col->n?(double)col->J[row]:0.:col->t==T_FVEC?row<col->n?col->F[row]:0.:col->t==T_BVEC?row<col->n?col->B[row]?1.:0.:0.:col->t==T_IMAT&&row<col->n?(double)col->J[mat_idx(col,row,0)]:col->t==T_FMAT&&row<col->n?col->F[mat_idx(col,row,0)]:0.;}
+static void fmt_f64_bits(char*buf,size_t cap,double x){
+ union{double d;uint64_t u;}u;u.d=x;
+ snprintf(buf,cap,"%016llx",(unsigned long long)u.u);}
 static void cell_key(V*col,int64_t row,char*buf,size_t cap){
  if(!col||!buf||!cap)return;
  buf[0]=0;
  if(col->t==T_STR)snprintf(buf,cap,"%s",col->s);
  else if(col->t==T_LIST&&row<col->n&&col->L[row]){char*t=v_to_str(col->L[row]);snprintf(buf,cap,"%s",t?t:"");free(t);}
  else if(col->t==T_INT)snprintf(buf,cap,"%lld",(long long)col->j);
- else if(col->t==T_FLOAT)snprintf(buf,cap,"%g",col->f);
+ else if(col->t==T_FLOAT)fmt_f64_bits(buf,cap,col->f);
  else if(col->t==T_IVEC&&row<col->n)snprintf(buf,cap,"%lld",(long long)col->J[row]);
- else if(col->t==T_FVEC&&row<col->n)snprintf(buf,cap,"%g",col->F[row]);
+ else if(col->t==T_FVEC&&row<col->n)fmt_f64_bits(buf,cap,col->F[row]);
+ else if(col->t==T_BVEC&&row<col->n)snprintf(buf,cap,"%s",col->B[row]?"true":"false");
  else if(col->t==T_IMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
  else if(col->t==T_FMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
  else if(col->t==T_BMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
- else if(col->t==T_BOOL&&row<col->n)snprintf(buf,cap,"%s",col->B[row]?"true":"false");}
+ else if(col->t==T_BOOL)snprintf(buf,cap,"%s",col->b?"true":"false");}
 static V*where_mask(V*tbl,V*where){
  if(!where||where->t==T_NIL){V*all=v_bvec(tbl->n);for(int64_t i=0;i<tbl->n;i++)all->B[i]=1;return all;}
  if(where->t==T_BVEC){P(where->n!=tbl->n,v_err("where: mask length mismatch"))return v_copy(where);}
@@ -54,6 +70,10 @@ static V*tbl_filter_mask(V*tbl,V*mask){
 #endif
     for (i = 0; i < nr; i++) {
         if (B[i]) count++;
+    }
+    /* Identity mask: skip column compress. */
+    if (count == nr) {
+        return v_ref(tbl);
     }
     int nc = (int)tbl->keys->n;
     V *new_data = v_list(nc);
@@ -207,6 +227,29 @@ static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
         n++;
         i++;
     }
+    /* Rename colliding aggregate output names (e.g. min price, max price). */
+    {
+        int mark[64];
+        memset(mark, 0, sizeof mark);
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                if (!strcmp(specs[i].name, specs[j].name)) {
+                    mark[i] = mark[j] = 1;
+                }
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            if (!mark[i] || specs[i].kind == COL_NAME) continue;
+            if (specs[i].kind == COL_COUNT && !specs[i].src[0]) continue;
+            const char *pfx = specs[i].kind == COL_SUM ? "sum" :
+                              specs[i].kind == COL_AVG ? "avg" :
+                              specs[i].kind == COL_MIN ? "min" :
+                              specs[i].kind == COL_MAX ? "max" : "count";
+            char tmp[128];
+            snprintf(tmp, sizeof tmp, "%s_%s", pfx, specs[i].src[0] ? specs[i].src : "x");
+            snprintf(specs[i].name, sizeof specs[i].name, "%s", tmp);
+        }
+    }
     return n;
 }
 static V*cell_as_v(V*col,int64_t row){
@@ -248,7 +291,7 @@ static int compare_v(const V *a, const V *b) {
     free(sb);
     return c;
 }
-static void composite_key(V *tbl, const int *by_idx, int nby, int64_t row, char *buf, size_t cap) {
+static int composite_key(V *tbl, const int *by_idx, int nby, int64_t row, char *buf, size_t cap) {
     size_t pos = 0;
     buf[0] = 0;
     for (int i = 0; i < nby; i++) {
@@ -256,7 +299,7 @@ static void composite_key(V *tbl, const int *by_idx, int nby, int64_t row, char 
         cell_key(tbl_col(tbl, by_idx[i]), row, part, sizeof part);
         size_t plen = strlen(part);
         if (pos + plen + 2 >= cap) {
-            return;
+            return -1;
         }
         if (i > 0) {
             buf[pos++] = '\1';
@@ -265,13 +308,26 @@ static void composite_key(V *tbl, const int *by_idx, int nby, int64_t row, char 
         pos += plen;
     }
     buf[pos] = 0;
+    return 0;
 }
 static inline uint32_t sql_hash_key(const char*s){uint32_t h=2166136261u;const char*p=s;W(p&&*p,h^=(unsigned char)*p,h*=16777619u,p++)return h?h:1u;}
+static inline uint64_t sql_hash_iparts(const int64_t *p, int n) {
+    uint64_t h = 14695981039346656037ull;
+    for (int i = 0; i < n; i++) {
+        uint64_t x = (uint64_t)p[i];
+        h ^= x;
+        h *= 1099511628211ull;
+    }
+    return h ? h : 1ull;
+}
 #define GH_EMPTY (-1)
 typedef struct {
     char key[512];
+    int64_t iparts[32];
+    int use_int;
     int nby;
     int64_t nrows;
+    int name_row;
     V **by_cell;
     V *name_val[64];
     double sum[64];
@@ -286,6 +342,9 @@ typedef struct {
     int nslots;
 } GhTab;
 static inline uint32_t gh_hash_key(const char*key){return sql_hash_key(key);}
+static inline uint32_t gh_hash_iparts(const int64_t *p, int n) {
+    return (uint32_t)sql_hash_iparts(p, n);
+}
 static void gh_init(GhTab *t, int cap) {
     if (cap < 16) {
         cap = 16;
@@ -325,8 +384,68 @@ static void gh_free(GhTab *t) {
     t->nslots = 0;
 }
 static void gh_resize(GhTab *t);
-static int gh_find_or_insert(GhTab *t, const char *key, V *tbl, const int *by_idx, int nby,
-                              int64_t row, ColSpec *specs, int nspecs) {
+static void gh_slot_init_aggs(GhSlot *s, V *tbl, const int *by_idx, int nby,
+                              int64_t row, ColSpec *specs, int nspecs, int use_int,
+                              const int64_t *iparts) {
+    memset(s, 0, sizeof(*s));
+    s->nby = nby;
+    s->use_int = use_int;
+    s->name_row = (int)row;
+    s->nrows = 1;
+    if (use_int) {
+        memcpy(s->iparts, iparts, (size_t)nby * sizeof(int64_t));
+        s->by_cell = calloc((size_t)nby, sizeof(V *));
+        for (int b = 0; b < nby; b++) {
+            s->by_cell[b] = v_int(iparts[b]);
+        }
+    } else {
+        s->by_cell = calloc((size_t)nby, sizeof(V *));
+        for (int b = 0; b < nby; b++) {
+            s->by_cell[b] = cell_as_v(tbl_col(tbl, by_idx[b]), row);
+        }
+    }
+    for (int sp = 0; sp < nspecs; sp++) {
+        if (specs[sp].kind == COL_NAME) {
+            int idx = tbl_col_idx(tbl, specs[sp].name);
+            if (idx >= 0) {
+                s->name_val[sp] = cell_as_v(tbl_col(tbl, idx), row);
+            }
+        } else if (specs[sp].kind != COL_COUNT) {
+            int idx = specs[sp].src[0] ? tbl_col_idx(tbl, specs[sp].src) : -1;
+            V *col = idx >= 0 ? tbl_col(tbl, idx) : NULL;
+            double x = cell_float(col, row);
+            s->sum[sp] = x;
+            s->minv[sp] = s->maxv[sp] = x;
+            s->have_mm[sp] = 1;
+        }
+    }
+}
+static void gh_slot_accum(GhSlot *s, int64_t row,
+                          V **sp_col, const int *col_t, const int *agg_sp, int n_agg) {
+    s->nrows++;
+    for (int k = 0; k < n_agg; k++) {
+        int sp = agg_sp[k];
+        V *col = sp_col[sp];
+        double x = 0;
+        if (col) {
+            int ct = col_t[sp];
+            if (ct == T_IVEC) x = (double)col->J[row];
+            else if (ct == T_FVEC) x = col->F[row];
+            else x = cell_float(col, row);
+        }
+        s->sum[sp] += x;
+        if (!s->have_mm[sp]) {
+            s->minv[sp] = s->maxv[sp] = x;
+            s->have_mm[sp] = 1;
+        } else {
+            if (x < s->minv[sp]) s->minv[sp] = x;
+            if (x > s->maxv[sp]) s->maxv[sp] = x;
+        }
+    }
+}
+static int gh_find_or_insert_str(GhTab *t, const char *key, V *tbl, const int *by_idx, int nby,
+                                 int64_t row, ColSpec *specs, int nspecs,
+                                 V **sp_col, const int *col_t, const int *agg_sp, int n_agg) {
     if (t->nslots * 10 > t->cap * 7) {
         gh_resize(t);
     }
@@ -338,60 +457,40 @@ static int gh_find_or_insert(GhTab *t, const char *key, V *tbl, const int *by_id
         if (si == GH_EMPTY) {
             si = t->nslots++;
             GhSlot *s = &t->slots[si];
-            memset(s, 0, sizeof(*s));
+            gh_slot_init_aggs(s, tbl, by_idx, nby, row, specs, nspecs, 0, NULL);
             snprintf(s->key, sizeof s->key, "%s", key);
-            s->nby = nby;
-            s->by_cell = calloc((size_t)nby, sizeof(V *));
-            for (int b = 0; b < nby; b++) {
-                s->by_cell[b] = cell_as_v(tbl_col(tbl, by_idx[b]), row);
-            }
-            for (int sp = 0; sp < nspecs; sp++) {
-                if (specs[sp].kind == COL_NAME) {
-                    int idx = tbl_col_idx(tbl, specs[sp].name);
-                    if (idx < 0) {
-                        return -1;
-                    }
-                    s->name_val[sp] = cell_as_v(tbl_col(tbl, idx), row);
-                } else if (specs[sp].kind != COL_COUNT) {
-                    int idx = specs[sp].src[0] ? tbl_col_idx(tbl, specs[sp].src) : -1;
-                    V *col = idx >= 0 ? tbl_col(tbl, idx) : NULL;
-                    double x = cell_float(col, row);
-                    s->sum[sp] = x;
-                    s->minv[sp] = s->maxv[sp] = x;
-                    s->have_mm[sp] = 1;
-                }
-            }
-            s->nrows = 1;
             t->map[i] = si;
             return si;
         }
-        if (!strcmp(t->slots[si].key, key)) {
+        if (!t->slots[si].use_int && !strcmp(t->slots[si].key, key)) {
+            gh_slot_accum(&t->slots[si], row, sp_col, col_t, agg_sp, n_agg);
+            return si;
+        }
+        i = (i + 1) & (cap - 1);
+    }
+}
+static int gh_find_or_insert_int(GhTab *t, const int64_t *iparts, int nby, V *tbl,
+                                 const int *by_idx, int64_t row, ColSpec *specs, int nspecs,
+                                 V **sp_col, const int *col_t, const int *agg_sp, int n_agg) {
+    if (t->nslots * 10 > t->cap * 7) {
+        gh_resize(t);
+    }
+    uint32_t h = gh_hash_iparts(iparts, nby);
+    int cap = t->cap;
+    int i = (int)(h & (uint32_t)(cap - 1));
+    for (;;) {
+        int si = t->map[i];
+        if (si == GH_EMPTY) {
+            si = t->nslots++;
             GhSlot *s = &t->slots[si];
-            s->nrows++;
-            for (int sp = 0; sp < nspecs; sp++) {
-                if (specs[sp].kind == COL_COUNT) {
-                    continue;
-                }
-                int idx = specs[sp].src[0] ? tbl_col_idx(tbl, specs[sp].src) :
-                          specs[sp].kind == COL_NAME ? tbl_col_idx(tbl, specs[sp].name) : -1;
-                V *col = idx >= 0 ? tbl_col(tbl, idx) : NULL;
-                double x = cell_float(col, row);
-                if (specs[sp].kind == COL_NAME) {
-                    continue;
-                }
-                s->sum[sp] += x;
-                if (!s->have_mm[sp]) {
-                    s->minv[sp] = s->maxv[sp] = x;
-                    s->have_mm[sp] = 1;
-                } else {
-                    if (x < s->minv[sp]) {
-                        s->minv[sp] = x;
-                    }
-                    if (x > s->maxv[sp]) {
-                        s->maxv[sp] = x;
-                    }
-                }
-            }
+            gh_slot_init_aggs(s, tbl, by_idx, nby, row, specs, nspecs, 1, iparts);
+            t->map[i] = si;
+            return si;
+        }
+        GhSlot *s = &t->slots[si];
+        if (s->use_int && s->nby == nby &&
+            !memcmp(s->iparts, iparts, (size_t)nby * sizeof(int64_t))) {
+            gh_slot_accum(s, row, sp_col, col_t, agg_sp, n_agg);
             return si;
         }
         i = (i + 1) & (cap - 1);
@@ -402,7 +501,7 @@ static void gh_resize(GhTab *t) {
     gh_init(t, old.cap * 2);
     for (int i = 0; i < old.nslots; i++) {
         GhSlot *s = &old.slots[i];
-        uint32_t h = gh_hash_key(s->key);
+        uint32_t h = s->use_int ? gh_hash_iparts(s->iparts, s->nby) : gh_hash_key(s->key);
         int cap = t->cap;
         int j = (int)(h & (uint32_t)(cap - 1));
         for (;;) {
@@ -418,10 +517,74 @@ static void gh_resize(GhTab *t) {
     free(old.slots);
     free(old.map);
 }
+static void gh_merge_slot(GhTab *dst, GhSlot *src, ColSpec *specs, int nspecs) {
+    if (dst->nslots * 10 > dst->cap * 7) {
+        gh_resize(dst);
+    }
+    uint32_t h = src->use_int ? gh_hash_iparts(src->iparts, src->nby) : gh_hash_key(src->key);
+    int cap = dst->cap;
+    int i = (int)(h & (uint32_t)(cap - 1));
+    for (;;) {
+        int si = dst->map[i];
+        if (si == GH_EMPTY) {
+            si = dst->nslots++;
+            dst->slots[si] = *src;
+            memset(src, 0, sizeof(*src));
+            dst->map[i] = si;
+            return;
+        }
+        GhSlot *d = &dst->slots[si];
+        int same = 0;
+        if (src->use_int && d->use_int && d->nby == src->nby &&
+            !memcmp(d->iparts, src->iparts, (size_t)src->nby * sizeof(int64_t))) {
+            same = 1;
+        } else if (!src->use_int && !d->use_int && !strcmp(d->key, src->key)) {
+            same = 1;
+        }
+        if (same) {
+            d->nrows += src->nrows;
+            for (int sp = 0; sp < nspecs; sp++) {
+                if (specs[sp].kind == COL_COUNT || specs[sp].kind == COL_NAME) continue;
+                d->sum[sp] += src->sum[sp];
+                if (src->have_mm[sp]) {
+                    if (!d->have_mm[sp]) {
+                        d->minv[sp] = src->minv[sp];
+                        d->maxv[sp] = src->maxv[sp];
+                        d->have_mm[sp] = 1;
+                    } else {
+                        if (src->minv[sp] < d->minv[sp]) d->minv[sp] = src->minv[sp];
+                        if (src->maxv[sp] > d->maxv[sp]) d->maxv[sp] = src->maxv[sp];
+                    }
+                }
+            }
+            /* Free duplicate slot resources owned by src */
+            if (src->by_cell) {
+                for (int b = 0; b < src->nby; b++) if (src->by_cell[b]) v_free(src->by_cell[b]);
+                free(src->by_cell);
+                src->by_cell = NULL;
+            }
+            for (int j = 0; j < 64; j++) {
+                if (src->name_val[j]) {
+                    v_free(src->name_val[j]);
+                    src->name_val[j] = NULL;
+                }
+            }
+            return;
+        }
+        i = (i + 1) & (cap - 1);
+    }
+}
 static int gh_sort_nby;
 static int gh_sort_cmp(const void *a, const void *b) {
     const GhSlot *sa = (const GhSlot *)a;
     const GhSlot *sb = (const GhSlot *)b;
+    if (sa->use_int && sb->use_int) {
+        for (int i = 0; i < gh_sort_nby; i++) {
+            if (sa->iparts[i] < sb->iparts[i]) return -1;
+            if (sa->iparts[i] > sb->iparts[i]) return 1;
+        }
+        return 0;
+    }
     for (int i = 0; i < gh_sort_nby; i++) {
         int c = compare_v(sa->by_cell[i], sb->by_cell[i]);
         if (c) {
@@ -462,7 +625,529 @@ static int parse_by_names(V *by, const char **names, int max_names) {
     }
     return (int)by->n;
 }
-static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by) {
+static void prep_agg_cols(V *tbl, ColSpec *specs, int nspecs,
+                          V **sp_col, int *col_t, int *name_idx, int *agg_sp, int *n_agg) {
+    *n_agg = 0;
+    for (int sp = 0; sp < nspecs; sp++) {
+        int idx = specs[sp].src[0] ? tbl_col_idx(tbl, specs[sp].src) : -1;
+        sp_col[sp] = idx >= 0 ? tbl_col(tbl, idx) : NULL;
+        name_idx[sp] = specs[sp].kind == COL_NAME ? tbl_col_idx(tbl, specs[sp].name) : -1;
+        col_t[sp] = sp_col[sp] ? sp_col[sp]->t : 0;
+        if (specs[sp].kind != COL_COUNT && specs[sp].kind != COL_NAME) {
+            agg_sp[(*n_agg)++] = sp;
+        }
+    }
+}
+static inline double row_measure(V *col, int ct, int64_t row) {
+    if (!col) return 0;
+    if (ct == T_IVEC) return (double)col->J[row];
+    if (ct == T_FVEC) return col->F[row];
+    return cell_float(col, row);
+}
+static void dense_accum_row(int key_val, int64_t row, int *s_nrows, int *s_name_row,
+                            int n_agg, const int *agg_sp, V **sp_col, const int *col_t,
+                            double **s_sum, double **s_minv, double **s_maxv, int **s_have_mm) {
+    if (s_nrows[key_val] == 0) {
+        s_name_row[key_val] = (int)row;
+    }
+    s_nrows[key_val]++;
+    for (int k = 0; k < n_agg; k++) {
+        int sp = agg_sp[k];
+        double x = row_measure(sp_col[sp], col_t[sp], row);
+        s_sum[k][key_val] += x;
+        if (!s_have_mm[k][key_val]) {
+            s_minv[k][key_val] = s_maxv[k][key_val] = x;
+            s_have_mm[k][key_val] = 1;
+        } else {
+            if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
+            if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
+        }
+    }
+}
+static void dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *dims,
+                           int *s_nrows, int *s_name_row, V *tbl, const int *name_idx, int nspecs,
+                           int n_agg, const int *agg_sp,
+                           double **s_sum, double **s_minv, double **s_maxv, int **s_have_mm) {
+    int nactive = 0;
+    for (int i = 0; i < slots_cap; i++) {
+        if (s_nrows[i] > 0) nactive++;
+    }
+    tab->nslots = nactive;
+    tab->slots = malloc((size_t)nactive * sizeof(GhSlot));
+    tab->map = NULL;
+    int aidx = 0;
+    for (int i = 0; i < slots_cap; i++) {
+        if (s_nrows[i] <= 0) continue;
+        GhSlot *s = &tab->slots[aidx++];
+        memset(s, 0, sizeof(GhSlot));
+        s->nrows = s_nrows[i];
+        s->nby = nby;
+        s->use_int = 1;
+        s->name_row = s_name_row[i];
+        s->by_cell = calloc((size_t)nby, sizeof(V *));
+        int64_t flat = i;
+        for (int b = nby - 1; b >= 0; b--) {
+            s->iparts[b] = flat % dims[b];
+            flat /= dims[b];
+            s->by_cell[b] = v_int(s->iparts[b]);
+        }
+        for (int sp = 0; sp < nspecs; sp++) {
+            if (name_idx[sp] >= 0) {
+                s->name_val[sp] = cell_as_v(tbl_col(tbl, name_idx[sp]), s_name_row[i]);
+            }
+        }
+        for (int k = 0; k < n_agg; k++) {
+            int sp = agg_sp[k];
+            s->sum[sp] = s_sum[k][i];
+            s->minv[sp] = s_minv[k][i];
+            s->maxv[sp] = s_maxv[k][i];
+            s->have_mm[sp] = s_have_mm[k][i];
+        }
+    }
+}
+/* LSD radix argsort of indices by uint64 keys (stable). */
+static void radix_argsort_u64(uint64_t *keys, int64_t *idx, int64_t n) {
+    if (n <= 1) return;
+    int64_t *tmp = malloc((size_t)n * sizeof(int64_t));
+    uint64_t *ktmp = malloc((size_t)n * sizeof(uint64_t));
+    int counts[256];
+    for (int pass = 0; pass < 8; pass++) {
+        memset(counts, 0, sizeof counts);
+        int shift = pass * 8;
+        for (int64_t i = 0; i < n; i++) {
+            counts[(keys[i] >> shift) & 0xff]++;
+        }
+        int sum = 0;
+        for (int c = 0; c < 256; c++) {
+            int v = counts[c];
+            counts[c] = sum;
+            sum += v;
+        }
+        for (int64_t i = 0; i < n; i++) {
+            int b = (int)((keys[i] >> shift) & 0xff);
+            int dest = counts[b]++;
+            tmp[dest] = idx[i];
+            ktmp[dest] = keys[i];
+        }
+        memcpy(idx, tmp, (size_t)n * sizeof(int64_t));
+        memcpy(keys, ktmp, (size_t)n * sizeof(uint64_t));
+    }
+    free(tmp);
+    free(ktmp);
+}
+static void run_reduce_into_slot(GhSlot *s, V **bcols, int nby, int64_t *idx, int64_t start, int64_t len,
+                                 V *tbl, ColSpec *specs, int nspecs, const int *name_idx,
+                                 int n_agg, const int *agg_sp, V **sp_col, const int *col_t) {
+    int64_t first = idx[start];
+    memset(s, 0, sizeof(*s));
+    s->nby = nby;
+    s->use_int = 1;
+    s->nrows = len;
+    s->name_row = (int)first;
+    s->by_cell = calloc((size_t)nby, sizeof(V *));
+    for (int b = 0; b < nby; b++) {
+        s->iparts[b] = bcols[b]->J[first];
+        s->by_cell[b] = v_int(s->iparts[b]);
+    }
+    for (int sp = 0; sp < nspecs; sp++) {
+        if (name_idx[sp] >= 0) {
+            s->name_val[sp] = cell_as_v(tbl_col(tbl, name_idx[sp]), first);
+        }
+    }
+    for (int k = 0; k < n_agg; k++) {
+        int sp = agg_sp[k];
+        V *col = sp_col[sp];
+        int ct = col_t[sp];
+        double sum = 0, mn = 0, mx = 0;
+        int have = 0;
+        /* Contiguous gather + SIMD reduce for large float runs. */
+        if (col && ct == T_FVEC && len >= 64) {
+            double *tmp = malloc((size_t)len * sizeof(double));
+            for (int64_t i = 0; i < len; i++) tmp[i] = col->F[idx[start + i]];
+            sum = shakti_sum_f64(tmp, len);
+            mn = shakti_min_f64(tmp, len);
+            mx = shakti_max_f64(tmp, len);
+            have = 1;
+            free(tmp);
+        } else if (col && ct == T_IVEC && len >= 64 &&
+                   (specs[sp].kind == COL_MIN || specs[sp].kind == COL_MAX)) {
+            int64_t *tmp = malloc((size_t)len * sizeof(int64_t));
+            for (int64_t i = 0; i < len; i++) tmp[i] = col->J[idx[start + i]];
+            if (specs[sp].kind == COL_MIN || specs[sp].kind == COL_AVG || specs[sp].kind == COL_SUM) {
+                /* still need sum for avg/sum via float path below if needed */
+            }
+            for (int64_t i = 0; i < len; i++) sum += (double)tmp[i];
+            mn = (double)shakti_min_i64(tmp, len);
+            mx = (double)shakti_max_i64(tmp, len);
+            have = 1;
+            free(tmp);
+        } else {
+            for (int64_t i = 0; i < len; i++) {
+                double x = row_measure(col, ct, idx[start + i]);
+                sum += x;
+                if (!have) {
+                    mn = mx = x;
+                    have = 1;
+                } else {
+                    if (x < mn) mn = x;
+                    if (x > mx) mx = x;
+                }
+            }
+        }
+        s->sum[sp] = sum;
+        s->minv[sp] = mn;
+        s->maxv[sp] = mx;
+        s->have_mm[sp] = have;
+    }
+}
+static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int nspecs,
+                                GhTab *tab, const unsigned char *MB) {
+    int64_t nr = tbl->n;
+    if (nr <= 0) return 0;
+    int64_t mins[32], maxs[32], dims[32];
+    for (int b = 0; b < nby; b++) {
+        mins[b] = INT64_MAX;
+        maxs[b] = -1;
+    }
+    for (int64_t r = 0; r < nr; r++) {
+        if (MB && !MB[r]) continue;
+        for (int b = 0; b < nby; b++) {
+            int64_t v = bcols[b]->J[r];
+            if (v < mins[b]) mins[b] = v;
+            if (v > maxs[b]) maxs[b] = v;
+        }
+    }
+    int64_t product = 1;
+    for (int b = 0; b < nby; b++) {
+        if (mins[b] < 0) return 0;
+        dims[b] = maxs[b] + 1;
+        if (dims[b] <= 0) return 0;
+        if (product > SQL_DENSE_CAP / dims[b]) return 0;
+        product *= dims[b];
+    }
+    if (product > SQL_DENSE_CAP) return 0;
+    int slots_cap = (int)product;
+    int *s_nrows = calloc((size_t)slots_cap, sizeof(int));
+    int *s_name_row = malloc((size_t)slots_cap * sizeof(int));
+    for (int i = 0; i < slots_cap; i++) s_name_row[i] = -1;
+    int name_idx[64], agg_sp[64], col_t[64];
+    V *sp_col[64];
+    int n_agg = 0;
+    prep_agg_cols(tbl, specs, nspecs, sp_col, col_t, name_idx, agg_sp, &n_agg);
+    double *s_sum[64] = {0}, *s_minv[64] = {0}, *s_maxv[64] = {0};
+    int *s_have_mm[64] = {0};
+    for (int k = 0; k < n_agg; k++) {
+        s_sum[k] = calloc((size_t)slots_cap, sizeof(double));
+        s_minv[k] = malloc((size_t)slots_cap * sizeof(double));
+        s_maxv[k] = malloc((size_t)slots_cap * sizeof(double));
+        s_have_mm[k] = calloc((size_t)slots_cap, sizeof(int));
+    }
+    /* Tight inlined scans for the common 1- and 2-key cases. */
+    if (nby == 1) {
+        const int64_t *k0 = bcols[0]->J;
+        for (int64_t r = 0; r < nr; r++) {
+            if (MB && !MB[r]) continue;
+            int key_val = (int)k0[r];
+            if (s_nrows[key_val] == 0) s_name_row[key_val] = (int)r;
+            s_nrows[key_val]++;
+            for (int k = 0; k < n_agg; k++) {
+                int sp = agg_sp[k];
+                double x = row_measure(sp_col[sp], col_t[sp], r);
+                s_sum[k][key_val] += x;
+                if (!s_have_mm[k][key_val]) {
+                    s_minv[k][key_val] = s_maxv[k][key_val] = x;
+                    s_have_mm[k][key_val] = 1;
+                } else {
+                    if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
+                    if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
+                }
+            }
+        }
+    } else if (nby == 2) {
+        const int64_t *k0 = bcols[0]->J;
+        const int64_t *k1 = bcols[1]->J;
+        int64_t d1 = dims[1];
+        for (int64_t r = 0; r < nr; r++) {
+            if (MB && !MB[r]) continue;
+            int key_val = (int)(k0[r] * d1 + k1[r]);
+            if (s_nrows[key_val] == 0) s_name_row[key_val] = (int)r;
+            s_nrows[key_val]++;
+            for (int k = 0; k < n_agg; k++) {
+                int sp = agg_sp[k];
+                double x = row_measure(sp_col[sp], col_t[sp], r);
+                s_sum[k][key_val] += x;
+                if (!s_have_mm[k][key_val]) {
+                    s_minv[k][key_val] = s_maxv[k][key_val] = x;
+                    s_have_mm[k][key_val] = 1;
+                } else {
+                    if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
+                    if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
+                }
+            }
+        }
+    } else {
+        for (int64_t r = 0; r < nr; r++) {
+            if (MB && !MB[r]) continue;
+            int64_t flat = 0;
+            for (int b = 0; b < nby; b++) {
+                flat = flat * dims[b] + bcols[b]->J[r];
+            }
+            dense_accum_row((int)flat, r, s_nrows, s_name_row, n_agg, agg_sp, sp_col, col_t,
+                            s_sum, s_minv, s_maxv, s_have_mm);
+        }
+    }
+    dense_to_slots(tab, slots_cap, nby, dims, s_nrows, s_name_row, tbl, name_idx, nspecs,
+                   n_agg, agg_sp, s_sum, s_minv, s_maxv, s_have_mm);
+    free(s_nrows);
+    free(s_name_row);
+    for (int k = 0; k < n_agg; k++) {
+        free(s_sum[k]);
+        free(s_minv[k]);
+        free(s_maxv[k]);
+        free(s_have_mm[k]);
+    }
+    return 1;
+}
+static int try_radix_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int nspecs,
+                                GhTab *tab, const unsigned char *MB) {
+    int64_t nr = tbl->n;
+    if (nr < SQL_RADIX_MIN_ROWS) return 0;
+    /* Pack keys into uint64 when domains fit; else hash-mix (equality via parts scan). */
+    int64_t mins[32], maxs[32], dims[32];
+    for (int b = 0; b < nby; b++) {
+        mins[b] = INT64_MAX;
+        maxs[b] = INT64_MIN;
+    }
+    for (int64_t r = 0; r < nr; r++) {
+        if (MB && !MB[r]) continue;
+        for (int b = 0; b < nby; b++) {
+            int64_t v = bcols[b]->J[r];
+            if (v < mins[b]) mins[b] = v;
+            if (v > maxs[b]) maxs[b] = v;
+        }
+    }
+    int can_pack = 1;
+    uint64_t product = 1;
+    for (int b = 0; b < nby; b++) {
+        if (mins[b] < 0 || mins[b] == INT64_MAX) {
+            can_pack = 0;
+            break;
+        }
+        dims[b] = maxs[b] - mins[b] + 1;
+        if (dims[b] <= 0 || product > UINT64_MAX / (uint64_t)dims[b]) {
+            can_pack = 0;
+            break;
+        }
+        product *= (uint64_t)dims[b];
+    }
+    if (!can_pack) return 0; /* hash-sorted keys are not equality-safe for run grouping */
+    /* Compact to masked rows so radix never sees filtered-out keys. */
+    int64_t nkeep = 0;
+    if (MB) {
+        for (int64_t r = 0; r < nr; r++) if (MB[r]) nkeep++;
+    } else {
+        nkeep = nr;
+    }
+    if (nkeep == 0) {
+        tab->nslots = 0;
+        tab->slots = NULL;
+        tab->map = NULL;
+        return 1;
+    }
+    uint64_t *keys = malloc((size_t)nkeep * sizeof(uint64_t));
+    int64_t *idx = malloc((size_t)nkeep * sizeof(int64_t));
+    int64_t w = 0;
+    for (int64_t r = 0; r < nr; r++) {
+        if (MB && !MB[r]) continue;
+        idx[w] = r;
+        uint64_t flat = 0;
+        for (int b = 0; b < nby; b++) {
+            flat = flat * (uint64_t)dims[b] + (uint64_t)(bcols[b]->J[r] - mins[b]);
+        }
+        keys[w] = flat;
+        w++;
+    }
+    radix_argsort_u64(keys, idx, nkeep);
+    int name_idx[64], agg_sp[64], col_t[64];
+    V *sp_col[64];
+    int n_agg = 0;
+    prep_agg_cols(tbl, specs, nspecs, sp_col, col_t, name_idx, agg_sp, &n_agg);
+    /* Count groups */
+    int ngrp = 0;
+    for (int64_t i = 0; i < nkeep; ) {
+        int64_t j = i + 1;
+        while (j < nkeep && keys[j] == keys[i]) j++;
+        ngrp++;
+        i = j;
+    }
+    tab->nslots = ngrp;
+    tab->slots = malloc((size_t)ngrp * sizeof(GhSlot));
+    tab->map = NULL;
+    int g = 0;
+    for (int64_t i = 0; i < nkeep; ) {
+        int64_t j = i + 1;
+        while (j < nkeep && keys[j] == keys[i]) j++;
+        run_reduce_into_slot(&tab->slots[g], bcols, nby, idx, i, j - i, tbl, specs, nspecs,
+                             name_idx, n_agg, agg_sp, sp_col, col_t);
+        for (int b = 0; b < nby; b++) {
+            tab->slots[g].iparts[b] = bcols[b]->J[idx[i]];
+            if (tab->slots[g].by_cell[b]) {
+                v_free(tab->slots[g].by_cell[b]);
+                tab->slots[g].by_cell[b] = v_int(tab->slots[g].iparts[b]);
+            }
+        }
+        g++;
+        i = j;
+    }
+    free(keys);
+    free(idx);
+    return 1;
+}
+static void typed_int_hash_group(V *tbl, V **bcols, int nby, const int *by_idx,
+                                 ColSpec *specs, int nspecs, GhTab *tab,
+                                 const unsigned char *MB) {
+    int64_t nr = tbl->n;
+    int name_idx[64], agg_sp[64], col_t[64];
+    V *sp_col[64];
+    int n_agg = 0;
+    prep_agg_cols(tbl, specs, nspecs, sp_col, col_t, name_idx, agg_sp, &n_agg);
+#ifdef _OPENMP
+    int nt = 1;
+    if (nr >= SQL_OMP_GROUP_MIN) {
+        nt = omp_get_max_threads();
+        if (nt > 16) nt = 16;
+        if (nt < 1) nt = 1;
+    }
+    if (nt > 1) {
+        GhTab *locals = calloc((size_t)nt, sizeof(GhTab));
+        for (int t = 0; t < nt; t++) {
+            gh_init(&locals[t], 256);
+        }
+        #pragma omp parallel num_threads(nt)
+        {
+            int tid = omp_get_thread_num();
+            GhTab *lt = &locals[tid];
+            #pragma omp for schedule(static)
+            for (int64_t row = 0; row < nr; row++) {
+                if (MB && !MB[row]) continue;
+                int64_t parts[32];
+                for (int b = 0; b < nby; b++) parts[b] = bcols[b]->J[row];
+                gh_find_or_insert_int(lt, parts, nby, tbl, by_idx, row, specs, nspecs,
+                                      sp_col, col_t, agg_sp, n_agg);
+            }
+        }
+        gh_init(tab, 256);
+        for (int t = 0; t < nt; t++) {
+            for (int i = 0; i < locals[t].nslots; i++) {
+                gh_merge_slot(tab, &locals[t].slots[i], specs, nspecs);
+            }
+            free(locals[t].slots);
+            free(locals[t].map);
+        }
+        free(locals);
+        return;
+    }
+#endif
+    gh_init(tab, 256);
+    for (int64_t row = 0; row < nr; row++) {
+        if (MB && !MB[row]) continue;
+        int64_t parts[32];
+        for (int b = 0; b < nby; b++) parts[b] = bcols[b]->J[row];
+        gh_find_or_insert_int(tab, parts, nby, tbl, by_idx, row, specs, nspecs,
+                              sp_col, col_t, agg_sp, n_agg);
+    }
+}
+static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
+                             const char **by_names, const int *by_idx, int nby) {
+    int include_by[32];
+    for (int i = 0; i < nby; i++) include_by[i] = 1;
+    for (int s = 0; s < nspecs; s++) {
+        if (specs[s].kind != COL_NAME) continue;
+        for (int i = 0; i < nby; i++) {
+            if (!strcmp(specs[s].name, by_names[i])) include_by[i] = 0;
+        }
+    }
+    int out_cols = 0;
+    for (int i = 0; i < nby; i++) if (include_by[i]) out_cols++;
+    out_cols += nspecs;
+    if (nspecs == 0) out_cols = nby;
+    V *keys = v_list(out_cols);
+    V *data = v_list(out_cols);
+    int c = 0;
+    int all_int_keys = tab->nslots == 0 || (tab->slots[0].use_int);
+    if (nspecs == 0) {
+        for (int i = 0; i < nby; i++) {
+            keys->L[c] = v_ref(tbl->keys->L[by_idx[i]]);
+            data->L[c] = all_int_keys ? v_ivec(tab->nslots) : v_list(tab->nslots);
+            c++;
+        }
+    } else {
+        for (int i = 0; i < nby; i++) {
+            if (!include_by[i]) continue;
+            keys->L[c] = v_ref(tbl->keys->L[by_idx[i]]);
+            data->L[c] = all_int_keys ? v_ivec(tab->nslots) : v_list(tab->nslots);
+            c++;
+        }
+        for (int s = 0; s < nspecs; s++) {
+            keys->L[c] = v_str(specs[s].kind == COL_COUNT && specs[s].src[0] == 0 ? "count" : specs[s].name);
+            if (specs[s].kind == COL_COUNT) {
+                data->L[c] = v_ivec(tab->nslots);
+            } else if (specs[s].kind == COL_NAME) {
+                data->L[c] = v_list(tab->nslots);
+            } else {
+                data->L[c] = v_fvec(tab->nslots);
+            }
+            c++;
+        }
+    }
+    for (int g = 0; g < tab->nslots; g++) {
+        GhSlot *slot = &tab->slots[g];
+        int col = 0;
+        if (nspecs == 0) {
+            for (int i = 0; i < nby; i++) {
+                if (data->L[col]->t == T_IVEC) {
+                    data->L[col]->J[g] = slot->use_int ? slot->iparts[i] :
+                        (slot->by_cell[i] && slot->by_cell[i]->t == T_INT ? slot->by_cell[i]->j : 0);
+                } else {
+                    data->L[col]->L[g] = slot->by_cell[i] ? v_ref(slot->by_cell[i]) : v_nil();
+                }
+                col++;
+            }
+        } else {
+            for (int i = 0; i < nby; i++) {
+                if (!include_by[i]) continue;
+                if (data->L[col]->t == T_IVEC) {
+                    data->L[col]->J[g] = slot->use_int ? slot->iparts[i] :
+                        (slot->by_cell[i] && slot->by_cell[i]->t == T_INT ? slot->by_cell[i]->j : 0);
+                } else {
+                    data->L[col]->L[g] = slot->by_cell[i] ? v_ref(slot->by_cell[i]) : v_nil();
+                }
+                col++;
+            }
+            for (int s = 0; s < nspecs; s++) {
+                V *colv = data->L[col];
+                if (colv->t == T_IVEC) {
+                    colv->J[g] = slot->nrows;
+                } else if (colv->t == T_FVEC) {
+                    if (specs[s].kind == COL_SUM) colv->F[g] = slot->sum[s];
+                    else if (specs[s].kind == COL_AVG)
+                        colv->F[g] = slot->nrows > 0 ? slot->sum[s] / (double)slot->nrows : 0.0;
+                    else if (specs[s].kind == COL_MIN)
+                        colv->F[g] = slot->have_mm[s] ? slot->minv[s] : 0.0;
+                    else
+                        colv->F[g] = slot->have_mm[s] ? slot->maxv[s] : 0.0;
+                } else {
+                    colv->L[g] = slot_agg_value(slot, &specs[s], s);
+                }
+                col++;
+            }
+        }
+    }
+    return v_table(keys, data);
+}
+static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by, V *row_mask) {
+    /* row_mask: optional T_BVEC; when set, only rows with mask[r] participate (no materialize). */
+    const unsigned char *MB = (row_mask && row_mask->t == T_BVEC) ? row_mask->B : NULL;
     const char *by_names[32];
     int nby = parse_by_names(by, by_names, 32);
     if (nby < 0) {
@@ -479,198 +1164,53 @@ static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by) {
         }
     }
     GhTab tab;
-    // Fast path: nby == 1 and group column is T_IVEC
-    V *bcol = tbl_col(tbl, by_idx[0]);
-    if (nby == 1 && bcol && bcol->t == T_IVEC && tbl->n > 0) {
-        int64_t max_val = -1;
-        int64_t min_val = INT64_MAX;
-        for (int64_t r = 0; r < tbl->n; r++) {
-            if (bcol->J[r] > max_val) max_val = bcol->J[r];
-            if (bcol->J[r] < min_val) min_val = bcol->J[r];
+    memset(&tab, 0, sizeof tab);
+    V *bcols[32];
+    int all_ivec = 1;
+    for (int i = 0; i < nby; i++) {
+        bcols[i] = tbl_col(tbl, by_idx[i]);
+        if (!bcols[i] || bcols[i]->t != T_IVEC) {
+            all_ivec = 0;
+            break;
         }
-        /* tbl->n > 0 guaranteed above, so min_val/max_val are real data
-         * values here and slots_cap = max_val + 1 >= 1 (never a zero-size
-         * allocation). Empty tables fall through to the general hash path. */
-        if (min_val >= 0 && max_val < 1000000) {
-            int slots_cap = (int)max_val + 1;
-            int *s_nrows = calloc((size_t)slots_cap, sizeof(int));
-            int *s_name_row = malloc((size_t)slots_cap * sizeof(int));
-            for(int i=0; i<slots_cap; i++) s_name_row[i] = -1;
-            int name_idx[64];
-            int agg_sp[64];
-            int col_t[64];
-            V *sp_col[64];
-            int n_agg = 0;
-            for (int sp = 0; sp < nspecs; sp++) {
-                int idx = specs[sp].src[0] ? tbl_col_idx(tbl, specs[sp].src) : -1;
-                sp_col[sp] = idx >= 0 ? tbl_col(tbl, idx) : NULL;
-                name_idx[sp] = specs[sp].kind == COL_NAME ? tbl_col_idx(tbl, specs[sp].name) : -1;
-                col_t[sp] = sp_col[sp] ? sp_col[sp]->t : 0;
-                if (specs[sp].kind != COL_COUNT && specs[sp].kind != COL_NAME) {
-                    agg_sp[n_agg++] = sp;
-                }
-            }
-            double *s_sum[64] = {0};
-            double *s_minv[64] = {0};
-            double *s_maxv[64] = {0};
-            int *s_have_mm[64] = {0};
-            for (int k = 0; k < n_agg; k++) {
-                s_sum[k] = calloc((size_t)slots_cap, sizeof(double));
-                s_minv[k] = malloc((size_t)slots_cap * sizeof(double));
-                s_maxv[k] = malloc((size_t)slots_cap * sizeof(double));
-                s_have_mm[k] = calloc((size_t)slots_cap, sizeof(int));
-            }
-            int64_t nr = tbl->n;
-            i(nr, {
-                int64_t key_val = bcol->J[i];
-                if (s_nrows[key_val] == 0) {
-                    s_name_row[key_val] = (int)i;
-                }
-                s_nrows[key_val]++;
-                for (int k = 0; k < n_agg; k++) {
-                    int sp = agg_sp[k];
-                    V *col = sp_col[sp];
-                    double x = 0;
-                    if (col) {
-                        int ct = col_t[sp];
-                        if (ct == T_IVEC) x = (double)col->J[i];
-                        else if (ct == T_FVEC) x = col->F[i];
-                        else x = cell_float(col, i);
-                    }
-                    s_sum[k][key_val] += x;
-                    if (!s_have_mm[k][key_val]) {
-                        s_minv[k][key_val] = s_maxv[k][key_val] = x;
-                        s_have_mm[k][key_val] = 1;
-                    } else {
-                        if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
-                        if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
-                    }
-                }
-            })
-            int nactive = 0;
-            for (int i = 0; i < slots_cap; i++) {
-                if (s_nrows[i] > 0) nactive++;
-            }
-            tab.nslots = nactive;
-            tab.slots = malloc((size_t)nactive * sizeof(GhSlot));
-            int aidx = 0;
-            for (int i = 0; i < slots_cap; i++) {
-                if (s_nrows[i] > 0) {
-                    GhSlot *s = &tab.slots[aidx++];
-                    memset(s, 0, sizeof(GhSlot));
-                    s->nrows = s_nrows[i];
-                    s->nby = 1;
-                    s->by_cell = calloc(1, sizeof(V*));
-                    s->by_cell[0] = v_int(i);
-                    for (int sp = 0; sp < nspecs; sp++) {
-                        if (name_idx[sp] >= 0) {
-                            s->name_val[sp] = cell_as_v(tbl_col(tbl, name_idx[sp]), s_name_row[i]);
-                        }
-                    }
-                    for (int k = 0; k < n_agg; k++) {
-                        int sp = agg_sp[k];
-                        s->sum[sp] = s_sum[k][i];
-                        s->minv[sp] = s_minv[k][i];
-                        s->maxv[sp] = s_maxv[k][i];
-                        s->have_mm[sp] = s_have_mm[k][i];
-                    }
-                }
-            }
-            free(s_nrows);
-            free(s_name_row);
-            for (int k = 0; k < n_agg; k++) {
-                free(s_sum[k]);
-                free(s_minv[k]);
-                free(s_maxv[k]);
-                free(s_have_mm[k]);
-            }
-            tab.map = NULL; 
-            /* Already sorted since we iterated 0..slots_cap-1 */
+    }
+    if (all_ivec && tbl->n > 0) {
+        if (try_dense_ivec_group(tbl, bcols, nby, specs, nspecs, &tab, MB)) {
             goto build_table;
         }
-    }
-    gh_init(&tab, 256);
-    char key[512];
-    for (int64_t row = 0; row < tbl->n; row++) {
-        composite_key(tbl, by_idx, nby, row, key, sizeof key);
-        if (gh_find_or_insert(&tab, key, tbl, by_idx, nby, row, specs, nspecs) < 0) {
-            gh_free(&tab);
-            return v_errf("select: unknown column in projection");
+        if (try_radix_ivec_group(tbl, bcols, nby, specs, nspecs, &tab, MB)) {
+            goto build_table;
         }
+        typed_int_hash_group(tbl, bcols, nby, by_idx, specs, nspecs, &tab, MB);
+        gh_sort_nby = nby;
+        qsort(tab.slots, (size_t)tab.nslots, sizeof(GhSlot), gh_sort_cmp);
+        goto build_table;
     }
-    gh_sort_nby = nby;
-    qsort(tab.slots, (size_t)tab.nslots, sizeof(GhSlot), gh_sort_cmp);
+    /* String / mixed-key fallback */
+    {
+        int name_idx[64], agg_sp[64], col_t[64];
+        V *sp_col[64];
+        int n_agg = 0;
+        prep_agg_cols(tbl, specs, nspecs, sp_col, col_t, name_idx, agg_sp, &n_agg);
+        gh_init(&tab, 256);
+        char key[512];
+        for (int64_t row = 0; row < tbl->n; row++) {
+            if (MB && !MB[row]) continue;
+            if (composite_key(tbl, by_idx, nby, row, key, sizeof key) < 0) {
+                gh_free(&tab);
+                return v_err("select: group key too long");
+            }
+            gh_find_or_insert_str(&tab, key, tbl, by_idx, nby, row, specs, nspecs,
+                                  sp_col, col_t, agg_sp, n_agg);
+        }
+        gh_sort_nby = nby;
+        qsort(tab.slots, (size_t)tab.nslots, sizeof(GhSlot), gh_sort_cmp);
+    }
 build_table:;
-    int include_by[32];
-    for (int i = 0; i < nby; i++) {
-        include_by[i] = 1;
-    }
-    for (int s = 0; s < nspecs; s++) {
-        if (specs[s].kind != COL_NAME) {
-            continue;
-        }
-        for (int i = 0; i < nby; i++) {
-            if (!strcmp(specs[s].name, by_names[i])) {
-                include_by[i] = 0;
-            }
-        }
-    }
-    int out_cols = 0;
-    for (int i = 0; i < nby; i++) {
-        if (include_by[i]) {
-            out_cols++;
-        }
-    }
-    out_cols += nspecs;
-    if (nspecs == 0) {
-        out_cols = nby;
-    }
-    V *keys = v_list(out_cols);
-    V *data = v_list(out_cols);
-    int c = 0;
-    if (nspecs == 0) {
-        for (int i = 0; i < nby; i++) {
-            keys->L[c] = v_ref(tbl->keys->L[by_idx[i]]);
-            data->L[c] = v_list(tab.nslots);
-            c++;
-        }
+    V *result = build_group_result(tbl, &tab, specs, nspecs, by_names, by_idx, nby);
+    if (tab.map) {
+        gh_free(&tab);
     } else {
-        for (int i = 0; i < nby; i++) {
-            if (include_by[i]) {
-                keys->L[c] = v_ref(tbl->keys->L[by_idx[i]]);
-                data->L[c] = v_list(tab.nslots);
-                c++;
-            }
-        }
-        for (int s = 0; s < nspecs; s++) {
-            keys->L[c] = v_str(specs[s].kind == COL_COUNT && specs[s].src[0] == 0 ? "count" : specs[s].name);
-            data->L[c] = v_list(tab.nslots);
-            c++;
-        }
-    }
-    for (int g = 0; g < tab.nslots; g++) {
-        GhSlot *slot = &tab.slots[g];
-        int col = 0;
-        if (nspecs == 0) {
-            for (int i = 0; i < nby; i++) {
-                data->L[col]->L[g] = slot->by_cell[i] ? v_ref(slot->by_cell[i]) : v_nil();
-                col++;
-            }
-        } else {
-            for (int i = 0; i < nby; i++) {
-                if (include_by[i]) {
-                    data->L[col]->L[g] = slot->by_cell[i] ? v_ref(slot->by_cell[i]) : v_nil();
-                    col++;
-                }
-            }
-            for (int s = 0; s < nspecs; s++) {
-                data->L[col]->L[g] = slot_agg_value(slot, &specs[s], s);
-                col++;
-            }
-        }
-    }
-    if (tab.map) gh_free(&tab);
-    else {
         for (int i = 0; i < tab.nslots; i++) {
             GhSlot *s = &tab.slots[i];
             if (s->by_cell) {
@@ -681,7 +1221,7 @@ build_table:;
         }
         free(tab.slots);
     }
-    return v_table(keys, data);
+    return result;
 }
 V *table_sql_select(V *from, V *cols, V *by, V *where) {
     if (!from || from->t == T_ERR) {
@@ -690,31 +1230,42 @@ V *table_sql_select(V *from, V *cols, V *by, V *where) {
     if (from->t != T_TABLE) {
         return v_err("select: need table");
     }
-    V *mask = where_mask(from, where);
-    if (mask->t == T_ERR) {
-        return mask;
-    }
-    V *filtered = tbl_filter_mask(from, mask);
-    v_free(mask);
-    if (filtered->t == T_ERR) {
-        return filtered;
-    }
     const char *by_names[32];
     int nby = parse_by_names(by, by_names, 32);
     if (nby < 0) {
-        v_free(filtered);
         return v_err("select: bad by column list");
     }
     ColSpec specs[64];
     int nspecs = parse_col_specs(cols, specs, 64);
     if (nspecs < 0) {
-        v_free(filtered);
         return v_err("select: bad column list");
     }
-    V *result;
+    V *mask = NULL;
+    if (where && where->t != T_NIL) {
+        mask = where_mask(from, where);
+        if (mask->t == T_ERR) {
+            return mask;
+        }
+    }
+    /* Grouped aggregates: fuse WHERE into the group scan (no full-table materialize). */
     if (nby > 0) {
-        result = tbl_group_select(filtered, specs, nspecs, by);
-    } else if (nspecs == 0) {
+        V *result = tbl_group_select(from, specs, nspecs, by, mask);
+        if (mask) v_free(mask);
+        return result;
+    }
+    /* Project / filter-only: still materialize matching rows. */
+    V *filtered = from;
+    int free_filtered = 0;
+    if (mask) {
+        filtered = tbl_filter_mask(from, mask);
+        v_free(mask);
+        free_filtered = 1;
+        if (filtered->t == T_ERR) {
+            return filtered;
+        }
+    }
+    V *result;
+    if (nspecs == 0) {
         result = v_ref(filtered);
     } else {
         int has_agg = 0;
@@ -725,7 +1276,7 @@ V *table_sql_select(V *from, V *cols, V *by, V *where) {
             }
         }
         if (has_agg) {
-            v_free(filtered);
+            if (free_filtered) v_free(filtered);
             return v_err("select: aggregates require by");
         }
         V *names = v_list(nspecs);
@@ -735,7 +1286,7 @@ V *table_sql_select(V *from, V *cols, V *by, V *where) {
         result = tbl_project_names(filtered, names);
         v_free(names);
     }
-    v_free(filtered);
+    if (free_filtered) v_free(filtered);
     return result;
 }
 static V *merge_update_col(V *old_col, V *new_col, V *mask) {
