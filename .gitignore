@@ -42,6 +42,8 @@ bin_bench
 
 # local scripts
 vuln_scan.sh
+record_gfx_tests.sh
+gfx_tests_terminal.mp4
 
 # local workspace notes (never publish)
 CONTEXT.md
