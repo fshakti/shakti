@@ -33,7 +33,6 @@ Thumbs.db
 *.bundle
 shakti
 shakti-standalone
-bin_bench
 **/build-static-test/
 
 # env
