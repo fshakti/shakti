@@ -567,7 +567,7 @@ See also [syntax and builtins](#syntax-and-builtins) for the `table()` construct
 
 # `gfx` module
 
-Standalone **pixel window** with a fixed 960×540 design buffer and letterboxed present scaling (X11 on Linux, Cocoa on macOS). Built by default (`SHAKTI_GFX=1`).
+Standalone **pixel window** with a fixed 960×540 design buffer, presented at 1920×1080 with letterboxed scaling (X11 on Linux, Cocoa on macOS). Built by default (`SHAKTI_GFX=1`).
 
 Build from the repo root (`make prod`; see [README](README.md)), then:
 

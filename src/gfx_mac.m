@@ -6,8 +6,9 @@
 #undef in
 #undef st
 
-#define GFX_MAC_W 960
-#define GFX_MAC_H 540
+/* Present at 2× design (960×540 → 1920×1080); letterbox scales the design buffer. */
+#define GFX_MAC_W 1920
+#define GFX_MAC_H 1080
 
 @interface GfxView : NSView {
     NSBitmapImageRep *_rep;

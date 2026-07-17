@@ -60,18 +60,19 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
         return -1;
     }
     g.scr = DefaultScreen(g.dpy);
-    g.win = XCreateSimpleWindow(g.dpy, RootWindow(g.dpy, g.scr), 100, 100, 960, 540, 1,
+    /* Present at 2× design (960×540 → 1920×1080); letterbox scales the design buffer. */
+    g.win = XCreateSimpleWindow(g.dpy, RootWindow(g.dpy, g.scr), 100, 100, 1920, 1080, 1,
                                 BlackPixel(g.dpy, g.scr), BlackPixel(g.dpy, g.scr));
     g.gc = XCreateGC(g.dpy, g.win, 0, NULL);
     if (title) XStoreName(g.dpy, g.win, title);
     swa.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask |
                      ButtonReleaseMask | StructureNotifyMask;
     XSelectInput(g.dpy, g.win, swa.event_mask);
-    if (gfx_core_fb_resize(960, 540) != 0) {
+    if (gfx_core_fb_resize(1920, 1080) != 0) {
         snprintf(err, cap, "gfx_open: framebuffer init failed");
         return -1;
     }
-    g.img = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, NULL, 960, 540, 32, 0);
+    g.img = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, NULL, 1920, 1080, 32, 0);
     if (!g.img) {
         snprintf(err, cap, "gfx_open: XCreateImage failed");
         return -1;
