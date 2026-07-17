@@ -9,6 +9,7 @@
 - [Python 3 → Shakti converter](#python-3-shakti-converter)
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
+- [`gfx` module](#gfx-module)
 - [`input` module](#input-module)
 - [IPC module](#ipc-module)
 - [REST module](#rest-module)
@@ -20,14 +21,14 @@
 
 # Examples index
 
-All demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Run from the repo root with:
+Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally.
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
 ./shakti example.ie  # section: <name>.ie
 ```
 
-Copy a section into its own file if you need to run it alone (for example IPC server + client).
+Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`.
 
 ## By module
 
@@ -39,6 +40,9 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` (numeric + string columns) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
+| `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/gfx_demo.ie`) |
+| `import gfx` | `examples/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
+| `import gfx` | `examples/gfx_movie.ie` | Animated redraw demo (standalone) |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
@@ -63,6 +67,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 |--------|-----|
 | `sql` | [sql module](#sql-module) |
 | `graph` | [graph module](#graph-module) |
+| `gfx` | [gfx module](#gfx-module) |
 | `input` | [input module](#input-module) |
 | `synth` | [synth module](#synth-module) |
 | `talk` | [talk module](#talk-module-macos) |
@@ -427,10 +432,13 @@ delete from u where id = 2
 | Module | Doc | Example |
 |--------|-----|---------|
 | `sql` | [sql module](#sql-module) | `sql_demo.ie` |
+| `graph` | [graph module](#graph-module) | `graph_demo.ie` |
+| `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` / `examples/gfx_demo.ie` |
 | `input` | [input module](#input-module) | `input_demo.ie` |
 | `synth` | [synth module](#synth-module) | `synth_demo.ie` |
 | `talk` | [talk module](#talk-module-macos) | `talk_demo.ie` |
 | `ipc` | [IPC module](#ipc-module) | `ipc_echo.ie` |
+| `rest` | [REST module](#rest-module) | `rest_demo.ie` |
 
 Index: [examples index](#examples-index).
 
@@ -554,6 +562,77 @@ Lower-level C builtins (handle id as first argument):
 `import graph` complements [`import sql`](#sql): use tables for structured rows, then `graph.from_table` to link entities by relationship.
 
 See also [syntax and builtins](#syntax-and-builtins) for the `table()` constructor and [examples index](#examples-index).
+
+---
+
+# `gfx` module
+
+Standalone **pixel window** with a fixed 960×540 design buffer and letterboxed present scaling (X11 on Linux, Cocoa on macOS). Built by default (`SHAKTI_GFX=1`).
+
+Build from the repo root (`make prod`; see [README](README.md)), then:
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: gfx_demo.ie
+# or: ./shakti examples/gfx_demo.ie
+```
+
+Linux needs `libx11-dev`. Disable at build time with `SHAKTI_GFX=0 make prod`.
+
+## Example
+
+`gfx_demo.ie`:
+
+```ie
+import gfx
+
+if not gfx.available():
+    print("gfx not available")
+else:
+    gfx.open("Shakti GFX")
+    gfx.clear(0x0a0a12)
+    gfx.fill_rect(80, 60, 800, 40, 0x2244aa)
+    gfx.fill_circle(640, 300, 90, 0x44dd88)
+    gfx.line(40, 500, 920, 40, 0xffffff)
+    while gfx.alive():
+        if gfx.click_pending():
+            gfx.fill_circle(gfx.click_x(), gfx.click_y(), 12, 0xffcc00)
+            gfx.consume_click()
+        gfx.tick()
+    gfx.close()
+```
+
+## Examples
+
+| File | Description |
+|------|-------------|
+| `gfx_demo.ie` | Minimal open/draw/click loop ([`example.ie`](example.ie) section; also `examples/gfx_demo.ie`) |
+| `examples/gfx_demo_timed.ie` | Reports open/draw/tick timing |
+| `examples/gfx_movie.ie` | Animated redraw stress demo |
+| `tests/gfx_api.ie` | Smoke test for API and reopen/close behavior |
+
+## API
+
+Module `lib/gfx.ie`.
+
+| Form | Meaning |
+|------|---------|
+| `gfx.open([title])` | Open the window; returns an error value on failure |
+| `gfx.close()` | Close the window |
+| `gfx.alive()` | `1` while the window is open |
+| `gfx.available()` | `1` when built with a GUI backend |
+| `gfx.tick()` | Poll events and present the framebuffer if dirty |
+| `gfx.sync_keys()` | Refresh GUI-owned key state into the input hub |
+| `gfx.clear(color)` | Fill the full design buffer with `0xRRGGBB` |
+| `gfx.fill_rect(x, y, w, h, color)` | Filled rectangle |
+| `gfx.line(x0, y0, x1, y1, color)` | Bresenham line |
+| `gfx.fill_circle(cx, cy, r, color)` | Filled circle |
+| `gfx.click_pending()` | `1` when a click is waiting |
+| `gfx.click_x()` | Last click X in design coordinates |
+| `gfx.click_y()` | Last click Y in design coordinates |
+| `gfx.consume_click()` | Clear the pending click |
+
+Colors are packed as `0xRRGGBB`. Clicks are reported in design-buffer coordinates (not raw window pixels).
 
 ---
 
@@ -957,8 +1036,8 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | Library | Purpose | Platform |
 |---------|---------|----------|
 | libexpat | XML table loading (`load("file.xml")`) | Linux, macOS |
-| libX11, libasound | Synth UI | Linux |
-| Cocoa, Core Audio, Core Foundation | Synth UI | macOS |
+| libX11, libasound | GFX + synth UI | Linux |
+| Cocoa, Core Audio, Core Foundation | GFX + synth UI | macOS |
 | Speech, AVFoundation | `import talk` | macOS |
 | librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
 | libgomp | OpenMP (matrix `mmul`, large `ivec` `+`/`-`/`*`, vector `dot` / large `sum`) | Linux (default with GCC) |
@@ -969,7 +1048,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it.
 
-Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
+Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 
 ## Platform SDKs
