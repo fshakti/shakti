@@ -224,6 +224,35 @@ print("roster after delete:")
 print(roster)
 
 # =============================================================================
+# gfx_demo.ie
+# =============================================================================
+# Standalone pixel window (960x540 design buffer). Close the window to exit.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: gfx_demo.ie
+# Also: examples/gfx_demo.ie, examples/gfx_demo_timed.ie, examples/gfx_movie.ie
+
+import gfx
+
+if not gfx.available():
+    print("gfx not available")
+else:
+    gfx.open("Shakti GFX")
+    gfx.clear(0x0a0a12)
+    gfx.fill_rect(80, 60, 800, 40, 0x2244aa)
+    gfx.fill_rect(120, 160, 200, 200, 0xff6644)
+    gfx.fill_circle(640, 300, 90, 0x44dd88)
+    gfx.line(40, 500, 920, 40, 0xffffff)
+    while gfx.alive():
+        if gfx.click_pending():
+            x : gfx.click_x()
+            y : gfx.click_y()
+            gfx.fill_circle(x, y, 12, 0xffcc00)
+            gfx.consume_click()
+        gfx.tick()
+    gfx.close()
+    print("done")
+
+# =============================================================================
 # graph_demo.ie
 # =============================================================================
 # Knowledge graph demo — subject/predicate/object triples.

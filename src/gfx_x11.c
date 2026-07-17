@@ -25,12 +25,25 @@ static void gfx_x11_blit(void) {
     w = gfx_core_present_width();
     h = gfx_core_present_height();
     if (!px || w <= 0 || h <= 0) return;
-    for (y = 0; y < h; y++) {
-        const uint32_t *src = px + (size_t)y * (size_t)w;
-        for (x = 0; x < w; x++) {
-            uint32_t c = src[x];
-            unsigned long rgb = ((c >> 16) & 255u) << 16 | ((c >> 8) & 255u) << 8 | (c & 255u);
-            XPutPixel(g.img, x, y, rgb);
+    /* Fast path: 32bpp LSB host-order matches our 0x00RRGGBB packing. */
+    if (g.img->bits_per_pixel == 32 && g.img->byte_order == LSBFirst &&
+        g.img->bitmap_pad >= 32 && g.img->data) {
+        for (y = 0; y < h; y++) {
+            const uint32_t *src = px + (size_t)y * (size_t)w;
+            uint32_t *dst = (uint32_t *)(g.img->data + (size_t)y * (size_t)g.img->bytes_per_line);
+            for (x = 0; x < w; x++) {
+                uint32_t c = src[x];
+                dst[x] = ((c >> 16) & 255u) << 16 | ((c >> 8) & 255u) << 8 | (c & 255u);
+            }
+        }
+    } else {
+        for (y = 0; y < h; y++) {
+            const uint32_t *src = px + (size_t)y * (size_t)w;
+            for (x = 0; x < w; x++) {
+                uint32_t c = src[x];
+                unsigned long rgb = ((c >> 16) & 255u) << 16 | ((c >> 8) & 255u) << 8 | (c & 255u);
+                XPutPixel(g.img, x, y, rgb);
+            }
         }
     }
     XPutImage(g.dpy, g.win, g.gc, g.img, 0, 0, 0, 0, w, h);

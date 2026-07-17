@@ -16,6 +16,7 @@
 #define GFX_DESIGN_W 960
 #define GFX_DESIGN_H 540
 #define GFX_MAX_WINDOW_DIM 16384
+#define GFX_LETTERBOX 0x0a0a12u
 
 typedef struct GfxState {
     uint32_t *fb;
@@ -62,14 +63,14 @@ static void gfx_letterbox(void) {
         uint32_t *dst = g.present + (size_t)y * (size_t)g.win_w;
         dy = (int)((y - g.off_y) / g.ui_scale);
         if (dy < 0 || dy >= GFX_DESIGN_H) {
-            for (x = 0; x < g.win_w; x++) dst[x] = 0x0a0a12;
+            for (x = 0; x < g.win_w; x++) dst[x] = GFX_LETTERBOX;
             continue;
         }
         {
             const uint32_t *src = g.fb + (size_t)dy * (size_t)GFX_DESIGN_W;
             for (x = 0; x < g.win_w; x++) {
                 dx = (int)((x - g.off_x) / g.ui_scale);
-                if (dx < 0 || dx >= GFX_DESIGN_W) dst[x] = 0x0a0a12;
+                if (dx < 0 || dx >= GFX_DESIGN_W) dst[x] = GFX_LETTERBOX;
                 else dst[x] = src[dx];
             }
         }
@@ -272,7 +273,12 @@ V *bi_gfx_available(V **a, int n) { (void)a;(void)n; return v_int(gfx_available(
 V *bi_gfx_tick(V **a, int n) { char err[512]; (void)a;(void)n; err[0]=0; gfx_tick(err,sizeof err); return v_nil(); }
 V *bi_gfx_sync_keys(V **a, int n) {
     (void)a;(void)n;
+#if defined(SHAKTI_HAVE_GFX) && ( \
+    (defined(__linux__) && __has_include(<X11/Xlib.h>)) || \
+    (defined(__APPLE__) && !defined(__IOS__)) \
+)
     if (input_own_gui()) gfx_platform_sync_keys();
+#endif
     return v_nil();
 }
 V *bi_gfx_clear(V **a, int n) {
