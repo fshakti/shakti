@@ -1,5 +1,7 @@
 # shakti
 
+[Discord](https://discord.gg/PkKwUk9Tf)
+
 Small interpreted language (0.10.0) with vectors, matrices, tables, decorators,
 each (`f@`), and optional SQL, graph, IPC, REST, synth, and input modules.
 
