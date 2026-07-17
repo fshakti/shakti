@@ -5,8 +5,8 @@
 - [Examples index](#examples-index)
 - [Syntax and builtins](#syntax-and-builtins)
 - [Decorators](#decorators)
-- [Each (`@`)](#each-)
-- [Python 3 → Shakti converter](#python-3--shakti-converter)
+- [Each (`@`)](#each)
+- [Python 3 → Shakti converter](#python-3-shakti-converter)
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
 - [`input` module](#input-module)
@@ -20,16 +20,18 @@
 
 # Examples index
 
-Run from the repo root with:
+All demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Run from the repo root with:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: <file>.ie
+./shakti example.ie  # section: <name>.ie
 ```
+
+Copy a section into its own file if you need to run it alone (for example IPC server + client).
 
 ## By module
 
-| Module | Example | Description |
+| Module | Section | Description |
 |--------|---------|-------------|
 | *(core)* | `decorators.ie` | Function, class, stacked, factory, and assignment decorators |
 | *(core)* | `each.ie` | `f@ xs` / `xs f@ ys` each |
@@ -446,7 +448,7 @@ Index: [examples index](#examples-index).
 
 Enables in-memory **table SQL** statement syntax after `import sql`.
 
-Build from the repo root (`make prod`; see [README](#README)), then:
+Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -491,9 +493,11 @@ See also [syntax and builtins](#syntax-and-builtins) for tables, `load("file.csv
 
 ---
 
-# graph module — in-memory knowledge graph (subject–predicate–object triples).
+# graph module
 
-Run from the repo root (`make prod`; see [README](#README)), then:
+In-memory knowledge graph (subject–predicate–object triples).
+
+Run from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -564,7 +568,7 @@ Lower-level C builtins (handle id as first argument):
 
 ## With SQL tables
 
-`import graph` complements [`import sql`](#SQL): use tables for structured rows, then `graph.from_table` to link entities by relationship.
+`import graph` complements [`import sql`](#sql): use tables for structured rows, then `graph.from_table` to link entities by relationship.
 
 See also [syntax and builtins](#syntax-and-builtins) for the `table()` constructor and [examples index](#examples-index).
 
@@ -574,7 +578,7 @@ See also [syntax and builtins](#syntax-and-builtins) for the `table()` construct
 
 Unified **terminal and GUI event hub** — keyboard, mouse, wheel, and line input in one poll API. Used by the synth UI and REPL.
 
-Build from the repo root (`make prod`; see [README](#README)), then:
+Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -624,9 +628,9 @@ Side-channel state on the module: `input.x`, `input.y`, `input.wheel`, `input.qw
 
 ---
 
-# IPC module (`import ipc`)
+# IPC module
 
-Sync and poll-based async message passing between shakti processes. Messages are length-prefixed strings (4-byte big-endian header + payload, max 1 MiB).
+Sync and poll-based async message passing between shakti processes (`import ipc`). Messages are length-prefixed strings (4-byte big-endian header + payload, max 1 MiB).
 
 ## Transport selection
 
@@ -731,9 +735,9 @@ See [examples index](#examples-index). IPC-specific:
 
 ---
 
-# REST (`import rest`)
+# REST module
 
-HTTP **client** (via `curl` on `PATH`) and a minimal in-process **HTTP/1.1 server** (TCP).
+HTTP **client** (via `curl` on `PATH`) and a minimal in-process **HTTP/1.1 server** (TCP) after `import rest`.
 
 ## Requirements
 
@@ -827,7 +831,7 @@ rest.close(srv)
 
 Desktop synth UI (Linux: X11 + ALSA; macOS: Cocoa + Core Audio).
 
-Build from the repo root (`make prod`; see [README](#README)), then:
+Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -925,7 +929,7 @@ Speech-to-text from the microphone. Built by default on macOS (`SHAKTI_TALK=1`).
 
 Grant **Microphone** and **Speech Recognition** to your terminal in System Settings.
 
-Build from the repo root (`make prod`; see [README](#README)), then:
+Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -985,10 +989,10 @@ Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree):
 Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 
-## Apple / Microsoft / Android SDKs
+## Platform SDKs
 
-macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses.
+macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses. Windows builds use the host toolchain under its terms.
 
-The `android/` tree is a **published distribution target**. Building the Android app pulls AndroidX / Material and the Gradle Wrapper; see [NOTICE](NOTICE) for redistribution notes. Local-only media (benchmark WAV fixtures, synth screenshots under `docs/images/`) is gitignored and not redistributed.
+Published optional media for benchmarks (for example WAV fixtures) lives under `benchmarks/fixtures/` and is part of this repository.
 
 ---
