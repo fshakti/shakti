@@ -320,16 +320,8 @@ On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `mmu
 
 The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (AVX-512/NEON when `prod-speed` enables those ISAs). There is no GPU backend in the standalone binary.
 
-Benchmark baselines depend on the host CPU and OpenMP thread count. Keep
-`OMP_NUM_THREADS` fixed when creating and checking a local baseline. On
-many-core hosts, a modest value can avoid thread startup and synchronization
-overhead dominating short vector benchmarks:
-
-```bash
-OMP_NUM_THREADS=4 make bench-update
-OMP_NUM_THREADS=4 make bench
-OMP_NUM_THREADS=4 make bench-report
-```
+OpenMP thread count affects short vector timings. Keep `OMP_NUM_THREADS`
+fixed when comparing local runs.
 
 Example: `matrix.ie`.
 
@@ -502,15 +494,6 @@ Run from the repo root (`make prod`; see [README](README.md)), then:
 ```bash
 export SHAKTI_LIB=$PWD/lib
 ./shakti example.ie  # section: graph_demo.ie
-```
-
-Benchmarks (from repo root):
-
-```bash
-export SHAKTI_LIB=$PWD/lib
-cd benchmarks && ../shakti run_graph.ie
-# or graph lines only from the full suite:
-SHAKTI_SYNTH_HEADLESS=1 ../shakti run.ie | grep 'BENCH.*graph'
 ```
 
 ## Example
@@ -992,7 +975,5 @@ Disable optional components at build time: `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `S
 ## Platform SDKs
 
 macOS builds use system frameworks (Cocoa, Core Audio, Speech, etc.) under their respective platform licenses. Windows builds use the host toolchain under its terms.
-
-Published optional media for benchmarks (for example WAV fixtures) lives under `benchmarks/fixtures/` and is part of this repository.
 
 ---
