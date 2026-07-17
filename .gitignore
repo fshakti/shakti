@@ -63,7 +63,3 @@ Makefile.local
 /*.plist
 stluRITA
 
-# Published benchmark artifacts (override local info/exclude).
-!/benchmarks/
-!/benchmarks/asof_comma.ie
-
