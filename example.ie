@@ -226,7 +226,7 @@ print(roster)
 # =============================================================================
 # gfx_demo.ie
 # =============================================================================
-# Standalone pixel window (960x540 design buffer). Close the window to exit.
+# Standalone pixel window (960x540 design, presented at 1920x1080). Close the window to exit.
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti example.ie  # section: gfx_demo.ie
 # Also: examples/gfx_demo.ie, examples/gfx_demo_timed.ie, examples/gfx_movie.ie
