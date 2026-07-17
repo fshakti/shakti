@@ -50,6 +50,7 @@ CONTEXT.md
 # local-only workspace trees (not in published repo)
 tests/
 scripts/
+benchmarks/
 internal-bench/
 samples/
 android/

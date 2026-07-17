@@ -3,7 +3,7 @@
 [Discord](https://discord.gg/PkKwUk9Tf)
 
 Small interpreted language (0.10.0) with vectors, matrices, tables, decorators,
-each (`f@`), and optional SQL, graph, IPC, REST, synth, and input modules.
+each (`f@`), and optional SQL, graph, IPC, REST, gfx, synth, and input modules.
 
 ## grammar
 
@@ -44,6 +44,8 @@ export SHAKTI_LIB=$PWD/lib
 ```
 
 More detail: [doc.md](doc.md). Examples: [example.ie](example.ie).
+
+Optional GUI pixel window: `import gfx` — see [gfx module](doc.md#gfx-module).
 
 ## license
 
