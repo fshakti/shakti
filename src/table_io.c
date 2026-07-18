@@ -37,7 +37,7 @@ int table_save(V *table, const char *path) {
 }
 
 /* Upper bound on a single CSV/TSV file read fully into memory.
- * Override with SHAKTI_CSV_MAX_BYTES (e.g. for STAC-M3 medium TAQ loads). */
+ * Override with SHAKTI_CSV_MAX_BYTES. */
 static unsigned long csv_max_file_bytes(void) {
     const char *env = getenv("SHAKTI_CSV_MAX_BYTES");
     if (env && env[0]) {

@@ -144,9 +144,9 @@ extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "bin","asof_sort","asof_bin","shakti_volcurv_index","shakti_volcurv_query",
+    "bin","asof_sort","asof_bin","shakti_winavg_index","shakti_winavg_query",
     "shakti_stats_index","shakti_stats_agg","shakti_stats_ui",
-    "shakti_vwab","shakti_vwab_index",
+    "shakti_vwbid","shakti_vwbid_index",
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
@@ -744,14 +744,14 @@ typedef struct {
     int64_t sym;
     int64_t time;
     double value;
-} VolcurvRow;
-static int volcurv_row_cmp(const void *va,const void *vb){
-    const VolcurvRow *a=va,*b=vb;
+} WinavgRow;
+static int winavg_row_cmp(const void *va,const void *vb){
+    const WinavgRow *a=va,*b=vb;
     if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
     if(a->time<b->time)return -1;if(a->time>b->time)return 1;
     return 0;
 }
-static int volcurv_value_at(V *v,int64_t i,double *out){
+static int numeric_value_at(V *v,int64_t i,double *out){
     if(v->t==T_IVEC){*out=(double)v->J[i];return 1;}
     if(v->t==T_FVEC){*out=v->F[i];return 1;}
     if(v->t==T_LIST&&v->L[i]){
@@ -760,26 +760,26 @@ static int volcurv_value_at(V *v,int64_t i,double *out){
     }
     return 0;
 }
-/* Load-time VOLCURV index: [sorted sym, sorted time, dense starts,
+/* Load-time windowed-average index: [sorted sym, sorted time, dense starts,
  * global prefix sums, global prefix counts]. */
-static V *bi_shakti_volcurv_index(V**a,in){
+static V *bi_shakti_winavg_index(V**a,in){
     P(n<3||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
-      v_err("shakti_volcurv_index(sym_id, time_ns, size)"))
+      v_err("shakti_winavg_index(sym_id, time_ns, size)"))
     int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_volcurv_index: length mismatch"))
-    VolcurvRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("shakti_volcurv_index: allocation failed");
+    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_winavg_index: length mismatch"))
+    WinavgRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
+    if(!tmp)return v_err("shakti_winavg_index: allocation failed");
     for(int64_t i=0;i<rows;i++){
         tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0||!volcurv_value_at(a[2],i,&tmp[i].value)){
+        if(tmp[i].sym<0||!numeric_value_at(a[2],i,&tmp[i].value)){
             int bad_sym=tmp[i].sym<0;free(tmp);
-            return v_err(bad_sym?"shakti_volcurv_index: sym_id must be nonnegative":
-                         "shakti_volcurv_index: size must be numeric");
+            return v_err(bad_sym?"shakti_winavg_index: sym_id must be nonnegative":
+                         "shakti_winavg_index: size must be numeric");
         }
     }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),volcurv_row_cmp);
+    qsort(tmp,(size_t)rows,sizeof(*tmp),winavg_row_cmp);
     int64_t max_key=rows?tmp[rows-1].sym:-1;
-    if(max_key>rows){free(tmp);return v_err("shakti_volcurv_index: sym_id range is not dense");}
+    if(max_key>rows){free(tmp);return v_err("shakti_winavg_index: sym_id range is not dense");}
     V *sym=v_ivec(rows),*tm=v_ivec(rows),*starts=v_ivec(max_key+2);
     V *sums=v_fvec(rows+1),*counts=v_ivec(rows+1);
     for(int64_t i=0;i<rows;i++){
@@ -796,32 +796,32 @@ static V *bi_shakti_volcurv_index(V**a,in){
     V *r=v_list(5);r->L[0]=sym;r->L[1]=tm;r->L[2]=starts;r->L[3]=sums;r->L[4]=counts;
     return r;
 }
-static int64_t volcurv_lower_bound(const int64_t *v,int64_t n,int64_t x){
+static int64_t ivec_lower_bound(const int64_t *v,int64_t n,int64_t x){
     int64_t lo=0,hi=n;
     while(lo<hi){int64_t mid=lo+(hi-lo)/2;if(v[mid]<x)lo=mid+1;else hi=mid;}
     return lo;
 }
-static V *volcurv_result_table(V *sym,V *avg){
+static V *winavg_result_table(V *sym,V *avg){
     V *keys=v_list(2),*data=v_list(2);
     keys->L[0]=v_str("sym_id");keys->L[1]=v_str("avg_size");
     data->L[0]=sym;data->L[1]=avg;
     V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
 }
 /* Query every requested window and retain the final grouped-average table. */
-static V *bi_shakti_volcurv_query(V**a,in){
+static V *bi_shakti_winavg_query(V**a,in){
     P(n<4||a[0]->t!=T_LIST||a[0]->n<5,
-      v_err("shakti_volcurv_query(index, basket, starts, window_ns)"))
+      v_err("shakti_winavg_query(index, basket, starts, window_ns)"))
     V *idx=a[0],*sym=idx->L[0],*tm=idx->L[1],*bounds=idx->L[2],
       *sums=idx->L[3],*counts=idx->L[4];
     P(!sym||!tm||!bounds||!sums||!counts||sym->t!=T_IVEC||tm->t!=T_IVEC||
       bounds->t!=T_IVEC||sums->t!=T_FVEC||counts->t!=T_IVEC||
       sym->n!=tm->n||sums->n!=sym->n+1||counts->n!=sym->n+1,
-      v_err("shakti_volcurv_query: invalid index"))
+      v_err("shakti_winavg_query: invalid index"))
     V *basket=as_ivec_arg(a[1],"basket"),*starts=as_ivec_arg(a[2],"starts");
     if(!basket||!starts){if(basket)v_free(basket);if(starts)v_free(starts);
-        return v_err("shakti_volcurv_query: basket and starts must contain ints");}
+        return v_err("shakti_winavg_query: basket and starts must contain ints");}
     if(a[3]->t!=T_INT){v_free(basket);v_free(starts);
-        return v_err("shakti_volcurv_query: window_ns must be int");}
+        return v_err("shakti_winavg_query: window_ns must be int");}
     if(starts->n==0){v_free(basket);v_free(starts);return v_nil();}
     V *last=NULL;
     for(int64_t w=0;w<starts->n;w++){
@@ -832,8 +832,8 @@ static V *bi_shakti_volcurv_query(V**a,in){
             int wanted=0;for(int64_t j=0;j<basket->n;j++)if(basket->J[j]==key){wanted=1;break;}
             if(!wanted)continue;
             int64_t begin=bounds->J[key],end=bounds->J[key+1];
-            int64_t lo=begin+volcurv_lower_bound(tm->J+begin,end-begin,t0);
-            int64_t hi=begin+volcurv_lower_bound(tm->J+begin,end-begin,t1);
+            int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,t0);
+            int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,t1);
             if(counts->J[hi]-counts->J[lo]>0)ng++;
         }
         V *out_sym=v_ivec(ng),*out_avg=v_fvec(ng);int64_t out=0;
@@ -841,12 +841,12 @@ static V *bi_shakti_volcurv_query(V**a,in){
             int wanted=0;for(int64_t j=0;j<basket->n;j++)if(basket->J[j]==key){wanted=1;break;}
             if(!wanted)continue;
             int64_t begin=bounds->J[key],end=bounds->J[key+1];
-            int64_t lo=begin+volcurv_lower_bound(tm->J+begin,end-begin,t0);
-            int64_t hi=begin+volcurv_lower_bound(tm->J+begin,end-begin,t1);
+            int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,t0);
+            int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,t1);
             int64_t count=counts->J[hi]-counts->J[lo];
             if(count>0){out_sym->J[out]=key;out_avg->F[out]=(sums->F[hi]-sums->F[lo])/(double)count;out++;}
         }
-        V *current=volcurv_result_table(out_sym,out_avg);
+        V *current=winavg_result_table(out_sym,out_avg);
         if(last)v_free(last);last=current;
     }
     v_free(basket);v_free(starts);return last;
@@ -856,37 +856,37 @@ typedef struct {
     int64_t time;
     double notional;
     double bsize;
-} VwabRow;
-static int vwab_row_cmp(const void *va,const void *vb){
-    const VwabRow *a=va,*b=vb;
+} VwbidRow;
+static int vwbid_row_cmp(const void *va,const void *vb){
+    const VwbidRow *a=va,*b=vb;
     if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
     if(a->time<b->time)return -1;if(a->time>b->time)return 1;
     return 0;
 }
-/* Load-time VWAB index: [sorted time, notional prefix, bsize prefix,
+/* Load-time volume-weighted bid index: [sorted time, notional prefix, bsize prefix,
  * dense symbol starts]. */
-static V *bi_shakti_vwab_index(V**a,in){
+static V *bi_shakti_vwbid_index(V**a,in){
     P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
-      v_err("shakti_vwab_index(sym_id, time_ns, bid, bsize)"))
+      v_err("shakti_vwbid_index(sym_id, time_ns, bid, bsize)"))
     int64_t rows=a[0]->n;
     P(a[1]->n!=rows||a[2]->n!=rows||a[3]->n!=rows,
-      v_err("shakti_vwab_index: length mismatch"))
-    VwabRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("shakti_vwab_index: allocation failed");
+      v_err("shakti_vwbid_index: length mismatch"))
+    VwbidRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
+    if(!tmp)return v_err("shakti_vwbid_index: allocation failed");
     for(int64_t i=0;i<rows;i++){
         double bid,bsize;
         tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0||!volcurv_value_at(a[2],i,&bid)||
-           !volcurv_value_at(a[3],i,&bsize)){
+        if(tmp[i].sym<0||!numeric_value_at(a[2],i,&bid)||
+           !numeric_value_at(a[3],i,&bsize)){
             int bad_sym=tmp[i].sym<0;free(tmp);
-            return v_err(bad_sym?"shakti_vwab_index: sym_id must be nonnegative":
-                         "shakti_vwab_index: bid and bsize must be numeric");
+            return v_err(bad_sym?"shakti_vwbid_index: sym_id must be nonnegative":
+                         "shakti_vwbid_index: bid and bsize must be numeric");
         }
         tmp[i].notional=bid*bsize;tmp[i].bsize=bsize;
     }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),vwab_row_cmp);
+    qsort(tmp,(size_t)rows,sizeof(*tmp),vwbid_row_cmp);
     int64_t max_key=rows?tmp[rows-1].sym:-1;
-    if(max_key>rows){free(tmp);return v_err("shakti_vwab_index: sym_id range is not dense");}
+    if(max_key>rows){free(tmp);return v_err("shakti_vwbid_index: sym_id range is not dense");}
     V *tm=v_ivec(rows),*notionals=v_fvec(rows+1),*bsizes=v_fvec(rows+1),
       *bounds=v_ivec(max_key+2);
     notionals->F[0]=0.0;bsizes->F[0]=0.0;
@@ -904,23 +904,23 @@ static V *bi_shakti_vwab_index(V**a,in){
     V *r=v_list(4);r->L[0]=tm;r->L[1]=notionals;r->L[2]=bsizes;r->L[3]=bounds;
     return r;
 }
-static V *bi_shakti_vwab(V**a,in){
+static V *bi_shakti_vwbid(V**a,in){
     P(n<4||a[0]->t!=T_LIST||a[0]->n<4,
-      v_err("shakti_vwab(index, basket, t0, t1)"))
+      v_err("shakti_vwbid(index, basket, t0, t1)"))
     V *idx=a[0],*tm=idx->L[0],*notionals=idx->L[1],*bsizes=idx->L[2],
       *bounds=idx->L[3];
     P(!tm||!notionals||!bsizes||!bounds||tm->t!=T_IVEC||
       notionals->t!=T_FVEC||bsizes->t!=T_FVEC||bounds->t!=T_IVEC||
       notionals->n!=tm->n+1||bsizes->n!=tm->n+1||bounds->n<1||
       bounds->J[0]!=0||bounds->J[bounds->n-1]!=tm->n,
-      v_err("shakti_vwab: invalid index"))
+      v_err("shakti_vwbid: invalid index"))
     for(int64_t i=1;i<bounds->n;i++)
         P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
-          v_err("shakti_vwab: invalid index"))
+          v_err("shakti_vwbid: invalid index"))
     V *basket=as_ivec_arg(a[1],"basket");
-    if(!basket)return v_err("shakti_vwab: basket must be ivec or list[int]");
+    if(!basket)return v_err("shakti_vwbid: basket must be ivec or list[int]");
     if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(basket);
-        return v_err("shakti_vwab: t0 and t1 must be int");}
+        return v_err("shakti_vwbid: t0 and t1 must be int");}
     if(basket->n==0||a[2]->j>=a[3]->j){v_free(basket);return v_float(0.0);}
     V *sorted=v_ivec(basket->n);
     memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
@@ -933,8 +933,8 @@ static V *bi_shakti_vwab(V**a,in){
         previous=key;
         if(key<0||key+1>=bounds->n)continue;
         int64_t begin=bounds->J[key],end=bounds->J[key+1];
-        int64_t lo=begin+volcurv_lower_bound(tm->J+begin,end-begin,a[2]->j);
-        int64_t hi=begin+volcurv_lower_bound(tm->J+begin,end-begin,a[3]->j);
+        int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,a[2]->j);
+        int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,a[3]->j);
         if(lo>=hi)continue;
         num+=notionals->F[hi]-notionals->F[lo];
         den+=bsizes->F[hi]-bsizes->F[lo];
@@ -1034,7 +1034,7 @@ static V *bi_shakti_stats_index(V**a,in){
     if(!tmp)return v_err("shakti_stats_index: allocation failed");
     for(int64_t i=0;i<rows;i++){
         tmp[i].exchange=a[0]->J[i];tmp[i].time=a[1]->J[i];tmp[i].sym=a[2]->J[i];
-        if(tmp[i].exchange<0||tmp[i].sym<0||!volcurv_value_at(a[3],i,&tmp[i].price)){
+        if(tmp[i].exchange<0||tmp[i].sym<0||!numeric_value_at(a[3],i,&tmp[i].price)){
             int bad_ex=tmp[i].exchange<0,bad_sym=tmp[i].sym<0;free(tmp);
             return v_err(bad_ex?"shakti_stats_index: exchange must be nonnegative":
                          bad_sym?"shakti_stats_index: sym_id must be nonnegative":
@@ -1405,9 +1405,9 @@ BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
-BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(shakti_volcurv_index) BI0(shakti_volcurv_query)
+BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
 BI0(shakti_stats_index) BI0(shakti_stats_agg) BI0(shakti_stats_ui)
-BI0(shakti_vwab) BI0(shakti_vwab_index)
+BI0(shakti_vwbid) BI0(shakti_vwbid_index)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -1649,10 +1649,10 @@ static const BiEntry bi_tab[] = {
     {"shakti_stats_agg", bi_w_shakti_stats_agg},
     {"shakti_stats_index", bi_w_shakti_stats_index},
     {"shakti_stats_ui", bi_w_shakti_stats_ui},
-    {"shakti_volcurv_index", bi_w_shakti_volcurv_index},
-    {"shakti_volcurv_query", bi_w_shakti_volcurv_query},
-    {"shakti_vwab", bi_w_shakti_vwab},
-    {"shakti_vwab_index", bi_w_shakti_vwab_index},
+    {"shakti_winavg_index", bi_w_shakti_winavg_index},
+    {"shakti_winavg_query", bi_w_shakti_winavg_query},
+    {"shakti_vwbid", bi_w_shakti_vwbid},
+    {"shakti_vwbid_index", bi_w_shakti_vwbid_index},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
     {"sort", bi_w_sort},
