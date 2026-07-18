@@ -8,6 +8,7 @@
 - [Each (`@`)](#each)
 - [Python 3 → Shakti converter](#python-3-shakti-converter)
 - [C# → Shakti converter](#c-shakti-converter)
+- [Java → Shakti converter](#java-shakti-converter)
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
 - [`gfx` module](#gfx-module)
@@ -62,8 +63,9 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 |------|-------------|
 | `s2p.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
 | `cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter)) |
+| `j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
 | `python.py` / `csharp.cs` | Tiny NumPy/pandas-style demos for each converter |
-| `example.py` / `example.cs` | Broader subset demos (`./shakti example.py` / `example.cs`) |
+| `example.py` / `example.cs` / `example.java` | Broader subset demos (`./shakti example.py` / `example.cs` / `example.java`) |
 
 ## Module docs
 
@@ -179,6 +181,66 @@ Classes/structs/interfaces/enums/records/namespaces, `try`/`catch`/`switch`/
 format specs in interpolations, bitwise ops, unary `+`, prefix `++`/`--`,
 generics beyond ignored type arguments on declarations/calls, and arbitrary
 .NET library APIs outside the mapped `Console`/`Np`/`Pd` surface.
+
+`//` comments become `#` comments.
+
+---
+
+# Java → Shakti converter
+
+Strict subset converter written in Shakti. Embedded in the executable for
+direct runs, and still available as `j2s.ie` for emit-only conversion.
+
+One top-level class is accepted as a non-runtime shell for `static` fields and
+methods. If `main` is present, the converter appends `main(argv[1:])` so CLI
+arguments match Java (no program name).
+
+```bash
+./shakti file.java               # transpile + run (supported subset)
+./shakti example.java
+./shakti j2s.ie input.java -o out.ie
+./shakti j2s.ie example.java -o example.ie
+SHAKTI_LIB=$PWD/lib ./shakti out.ie
+```
+
+`./shakti file.java` is not the JVM: it lowers the supported subset to Shakti
+and evaluates that. Unsupported syntax exits nonzero with `file:line:col`
+diagnostics (original `.java` path preserved).
+
+## Rewrites
+
+| Java | Shakti |
+|------|--------|
+| `int x = 1;` | `x : 1` |
+| `x == 1` | `x = 1` |
+| `static int f(int n) { ... }` | `def f(n): ...` |
+| `System.out.println(...)` | `print(...)` |
+| `xs.length` / `xs.size()` | `len(xs)` |
+| `true` / `false` / `null` | `True` / `False` / `None` |
+| `&&` / `\|\|` / `!` | `and` / `or` / `not` |
+| `x -> x + 1` | `lambda x: (x + 1)` |
+| `for (int i = 0; i < n; i++)` | `i : 0` + `while (i < n): ...; i += 1` |
+| `for (int x : xs)` | `for x in xs:` |
+| `new int[]{1, 2}` | `[1, 2]` |
+| `List.of(1, 2)` | `[1, 2]` |
+| `Map.of("k", v)` | `{"k": v}` |
+| `m.get(k)` | `m[k]` |
+| `"hi " + n` | `"hi " + str(n)` |
+| `Math.max(a, b)` | `max(a, b)` |
+| `package ...;` / `import ...;` | erased |
+| class shell + `main` | static members + trailing `main(argv[1:])` |
+
+Also converts `if`/`else if`/`else`, `while`, break/continue, indexing,
+attributes, calls, augmented `+= -= *= /=`, postfix `++`/`--` (as `+= 1` /
+`-= 1`), and one-argument expression lambdas.
+
+## Rejected
+
+Inheritance/`implements`, constructors, instance fields/methods, nested types,
+overloading, `try`/`catch`/`switch`/`do`/`throw`/`synchronized`/`assert`,
+multi-argument/block lambdas, sized arrays `new T[n]`, bitwise ops, unary `+`,
+prefix `++`/`--`, generics beyond ignored type arguments, and arbitrary JDK
+APIs outside the mapped `System.out` / `Math` / `List.of` / `Map.of` surface.
 
 `//` comments become `#` comments.
 
