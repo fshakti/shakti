@@ -137,9 +137,17 @@ int gfx_platform_poll(void) {
             break;
         case KeyPress:
         case KeyRelease: {
-            KeySym ks = XLookupKeysym(&ev.xkey, 0);
+            KeySym ks = NoSymbol;
+            int n;
             utf8[0] = 0;
-            if (ks >= 32 && ks < 127) { utf8[0] = (char)ks; utf8[1] = 0; }
+            /* XLookupString applies Shift/Caps so '+' comes from Shift+'='.
+             * XLookupKeysym(..., 0) always returns the unshifted keysym. */
+            n = XLookupString(&ev.xkey, utf8, (int)sizeof(utf8) - 1, &ks, NULL);
+            if (n < 0) n = 0;
+            if (n > (int)sizeof(utf8) - 1) n = (int)sizeof(utf8) - 1;
+            utf8[n] = 0;
+            if (ks == NoSymbol)
+                ks = XLookupKeysym(&ev.xkey, 0);
             input_hub_inject_key((int)ks, (int)ev.xkey.state, utf8, ev.type == KeyPress);
             break;
         }
