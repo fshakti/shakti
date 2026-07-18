@@ -384,9 +384,18 @@ static void gh_free(GhTab *t) {
     t->nslots = 0;
 }
 static void gh_resize(GhTab *t);
+static inline int agg_needs_sum(int kind) {
+    return kind == COL_SUM || kind == COL_AVG;
+}
+static inline int agg_needs_min(int kind) {
+    return kind == COL_MIN;
+}
+static inline int agg_needs_max(int kind) {
+    return kind == COL_MAX;
+}
 static void gh_slot_init_aggs(GhSlot *s, V *tbl, const int *by_idx, int nby,
                               int64_t row, ColSpec *specs, int nspecs, int use_int,
-                              const int64_t *iparts) {
+                              const int64_t *iparts, V **sp_col) {
     memset(s, 0, sizeof(*s));
     s->nby = nby;
     s->use_int = use_int;
@@ -404,6 +413,8 @@ static void gh_slot_init_aggs(GhSlot *s, V *tbl, const int *by_idx, int nby,
             s->by_cell[b] = cell_as_v(tbl_col(tbl, by_idx[b]), row);
         }
     }
+    V *last_col = NULL;
+    double last_x = 0;
     for (int sp = 0; sp < nspecs; sp++) {
         if (specs[sp].kind == COL_NAME) {
             int idx = tbl_col_idx(tbl, specs[sp].name);
@@ -411,35 +422,52 @@ static void gh_slot_init_aggs(GhSlot *s, V *tbl, const int *by_idx, int nby,
                 s->name_val[sp] = cell_as_v(tbl_col(tbl, idx), row);
             }
         } else if (specs[sp].kind != COL_COUNT) {
-            int idx = specs[sp].src[0] ? tbl_col_idx(tbl, specs[sp].src) : -1;
-            V *col = idx >= 0 ? tbl_col(tbl, idx) : NULL;
-            double x = cell_float(col, row);
-            s->sum[sp] = x;
-            s->minv[sp] = s->maxv[sp] = x;
-            s->have_mm[sp] = 1;
+            V *col = sp_col[sp];
+            double x = col == last_col && col ? last_x : cell_float(col, row);
+            last_col = col;
+            last_x = x;
+            int kind = specs[sp].kind;
+            if (agg_needs_sum(kind)) {
+                s->sum[sp] = x;
+            } else if (agg_needs_min(kind)) {
+                s->minv[sp] = x;
+                s->have_mm[sp] = 1;
+            } else if (agg_needs_max(kind)) {
+                s->maxv[sp] = x;
+                s->have_mm[sp] = 1;
+            }
         }
     }
 }
 static void gh_slot_accum(GhSlot *s, int64_t row,
-                          V **sp_col, const int *col_t, const int *agg_sp, int n_agg) {
+                          ColSpec *specs, V **sp_col, const int *col_t,
+                          const int *agg_sp, int n_agg) {
     s->nrows++;
+    V *last_col = NULL;
+    double last_x = 0;
     for (int k = 0; k < n_agg; k++) {
         int sp = agg_sp[k];
         V *col = sp_col[sp];
-        double x = 0;
-        if (col) {
+        double x;
+        if (col == last_col && col) {
+            x = last_x;
+        } else if (col) {
             int ct = col_t[sp];
             if (ct == T_IVEC) x = (double)col->J[row];
             else if (ct == T_FVEC) x = col->F[row];
             else x = cell_float(col, row);
-        }
-        s->sum[sp] += x;
-        if (!s->have_mm[sp]) {
-            s->minv[sp] = s->maxv[sp] = x;
-            s->have_mm[sp] = 1;
         } else {
-            if (x < s->minv[sp]) s->minv[sp] = x;
-            if (x > s->maxv[sp]) s->maxv[sp] = x;
+            x = 0;
+        }
+        last_col = col;
+        last_x = x;
+        int kind = specs[sp].kind;
+        if (agg_needs_sum(kind)) {
+            s->sum[sp] += x;
+        } else if (agg_needs_min(kind) && x < s->minv[sp]) {
+            s->minv[sp] = x;
+        } else if (agg_needs_max(kind) && x > s->maxv[sp]) {
+            s->maxv[sp] = x;
         }
     }
 }
@@ -457,13 +485,13 @@ static int gh_find_or_insert_str(GhTab *t, const char *key, V *tbl, const int *b
         if (si == GH_EMPTY) {
             si = t->nslots++;
             GhSlot *s = &t->slots[si];
-            gh_slot_init_aggs(s, tbl, by_idx, nby, row, specs, nspecs, 0, NULL);
+            gh_slot_init_aggs(s, tbl, by_idx, nby, row, specs, nspecs, 0, NULL, sp_col);
             snprintf(s->key, sizeof s->key, "%s", key);
             t->map[i] = si;
             return si;
         }
         if (!t->slots[si].use_int && !strcmp(t->slots[si].key, key)) {
-            gh_slot_accum(&t->slots[si], row, sp_col, col_t, agg_sp, n_agg);
+            gh_slot_accum(&t->slots[si], row, specs, sp_col, col_t, agg_sp, n_agg);
             return si;
         }
         i = (i + 1) & (cap - 1);
@@ -483,14 +511,14 @@ static int gh_find_or_insert_int(GhTab *t, const int64_t *iparts, int nby, V *tb
         if (si == GH_EMPTY) {
             si = t->nslots++;
             GhSlot *s = &t->slots[si];
-            gh_slot_init_aggs(s, tbl, by_idx, nby, row, specs, nspecs, 1, iparts);
+            gh_slot_init_aggs(s, tbl, by_idx, nby, row, specs, nspecs, 1, iparts, sp_col);
             t->map[i] = si;
             return si;
         }
         GhSlot *s = &t->slots[si];
         if (s->use_int && s->nby == nby &&
             !memcmp(s->iparts, iparts, (size_t)nby * sizeof(int64_t))) {
-            gh_slot_accum(s, row, sp_col, col_t, agg_sp, n_agg);
+            gh_slot_accum(s, row, specs, sp_col, col_t, agg_sp, n_agg);
             return si;
         }
         i = (i + 1) & (cap - 1);
@@ -545,14 +573,17 @@ static void gh_merge_slot(GhTab *dst, GhSlot *src, ColSpec *specs, int nspecs) {
             d->nrows += src->nrows;
             for (int sp = 0; sp < nspecs; sp++) {
                 if (specs[sp].kind == COL_COUNT || specs[sp].kind == COL_NAME) continue;
-                d->sum[sp] += src->sum[sp];
-                if (src->have_mm[sp]) {
+                int kind = specs[sp].kind;
+                if (agg_needs_sum(kind)) {
+                    d->sum[sp] += src->sum[sp];
+                } else if (src->have_mm[sp]) {
                     if (!d->have_mm[sp]) {
-                        d->minv[sp] = src->minv[sp];
-                        d->maxv[sp] = src->maxv[sp];
+                        if (agg_needs_min(kind)) d->minv[sp] = src->minv[sp];
+                        else d->maxv[sp] = src->maxv[sp];
                         d->have_mm[sp] = 1;
-                    } else {
+                    } else if (agg_needs_min(kind)) {
                         if (src->minv[sp] < d->minv[sp]) d->minv[sp] = src->minv[sp];
+                    } else {
                         if (src->maxv[sp] > d->maxv[sp]) d->maxv[sp] = src->maxv[sp];
                     }
                 }
@@ -644,34 +675,41 @@ static inline double row_measure(V *col, int ct, int64_t row) {
     if (ct == T_FVEC) return col->F[row];
     return cell_float(col, row);
 }
-static void dense_accum_row(int key_val, int64_t row, int *s_nrows, int *s_name_row,
-                            int n_agg, const int *agg_sp, V **sp_col, const int *col_t,
+static inline void dense_accum_row(int key_val, int64_t row, int *s_nrows, int *s_name_row,
+                            int *nactive, ColSpec *specs, int n_agg,
+                            const int *agg_sp, V **sp_col, const int *col_t,
                             double **s_sum, double **s_minv, double **s_maxv, int **s_have_mm) {
     if (s_nrows[key_val] == 0) {
         s_name_row[key_val] = (int)row;
+        (*nactive)++;
     }
     s_nrows[key_val]++;
+    V *last_col = NULL;
+    double last_x = 0;
     for (int k = 0; k < n_agg; k++) {
         int sp = agg_sp[k];
-        double x = row_measure(sp_col[sp], col_t[sp], row);
-        s_sum[k][key_val] += x;
-        if (!s_have_mm[k][key_val]) {
-            s_minv[k][key_val] = s_maxv[k][key_val] = x;
+        V *col = sp_col[sp];
+        double x = col == last_col && col ? last_x : row_measure(col, col_t[sp], row);
+        last_col = col;
+        last_x = x;
+        int kind = specs[sp].kind;
+        if (agg_needs_sum(kind)) {
+            s_sum[k][key_val] += x;
+        } else if (!s_have_mm[k][key_val]) {
+            if (agg_needs_min(kind)) s_minv[k][key_val] = x;
+            else s_maxv[k][key_val] = x;
             s_have_mm[k][key_val] = 1;
-        } else {
+        } else if (agg_needs_min(kind)) {
             if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
+        } else {
             if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
         }
     }
 }
 static void dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *dims,
                            int *s_nrows, int *s_name_row, V *tbl, const int *name_idx, int nspecs,
-                           int n_agg, const int *agg_sp,
+                           int nactive, ColSpec *specs, int n_agg, const int *agg_sp,
                            double **s_sum, double **s_minv, double **s_maxv, int **s_have_mm) {
-    int nactive = 0;
-    for (int i = 0; i < slots_cap; i++) {
-        if (s_nrows[i] > 0) nactive++;
-    }
     tab->nslots = nactive;
     tab->slots = malloc((size_t)nactive * sizeof(GhSlot));
     tab->map = NULL;
@@ -698,10 +736,14 @@ static void dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *di
         }
         for (int k = 0; k < n_agg; k++) {
             int sp = agg_sp[k];
-            s->sum[sp] = s_sum[k][i];
-            s->minv[sp] = s_minv[k][i];
-            s->maxv[sp] = s_maxv[k][i];
-            s->have_mm[sp] = s_have_mm[k][i];
+            int kind = specs[sp].kind;
+            if (agg_needs_sum(kind)) {
+                s->sum[sp] = s_sum[k][i];
+            } else {
+                if (agg_needs_min(kind)) s->minv[sp] = s_minv[k][i];
+                else s->maxv[sp] = s_maxv[k][i];
+                s->have_mm[sp] = s_have_mm[k][i];
+            }
         }
     }
 }
@@ -758,46 +800,47 @@ static void run_reduce_into_slot(GhSlot *s, V **bcols, int nby, int64_t *idx, in
         int sp = agg_sp[k];
         V *col = sp_col[sp];
         int ct = col_t[sp];
+        int kind = specs[sp].kind;
+        int need_sum = agg_needs_sum(kind);
+        int need_min = agg_needs_min(kind);
+        int need_max = agg_needs_max(kind);
         double sum = 0, mn = 0, mx = 0;
         int have = 0;
         /* Contiguous gather + SIMD reduce for large float runs. */
         if (col && ct == T_FVEC && len >= 64) {
             double *tmp = malloc((size_t)len * sizeof(double));
             for (int64_t i = 0; i < len; i++) tmp[i] = col->F[idx[start + i]];
-            sum = shakti_sum_f64(tmp, len);
-            mn = shakti_min_f64(tmp, len);
-            mx = shakti_max_f64(tmp, len);
-            have = 1;
+            if (need_sum) sum = shakti_sum_f64(tmp, len);
+            if (need_min) mn = shakti_min_f64(tmp, len);
+            if (need_max) mx = shakti_max_f64(tmp, len);
+            have = need_min || need_max;
             free(tmp);
-        } else if (col && ct == T_IVEC && len >= 64 &&
-                   (specs[sp].kind == COL_MIN || specs[sp].kind == COL_MAX)) {
+        } else if (col && ct == T_IVEC && len >= 64 && (need_min || need_max)) {
             int64_t *tmp = malloc((size_t)len * sizeof(int64_t));
             for (int64_t i = 0; i < len; i++) tmp[i] = col->J[idx[start + i]];
-            if (specs[sp].kind == COL_MIN || specs[sp].kind == COL_AVG || specs[sp].kind == COL_SUM) {
-                /* still need sum for avg/sum via float path below if needed */
-            }
-            for (int64_t i = 0; i < len; i++) sum += (double)tmp[i];
-            mn = (double)shakti_min_i64(tmp, len);
-            mx = (double)shakti_max_i64(tmp, len);
+            if (need_min) mn = (double)shakti_min_i64(tmp, len);
+            if (need_max) mx = (double)shakti_max_i64(tmp, len);
             have = 1;
             free(tmp);
         } else {
             for (int64_t i = 0; i < len; i++) {
                 double x = row_measure(col, ct, idx[start + i]);
-                sum += x;
-                if (!have) {
-                    mn = mx = x;
+                if (need_sum) sum += x;
+                if ((need_min || need_max) && !have) {
+                    if (need_min) mn = x;
+                    else mx = x;
                     have = 1;
-                } else {
+                } else if (need_min) {
                     if (x < mn) mn = x;
+                } else if (need_max) {
                     if (x > mx) mx = x;
                 }
             }
         }
-        s->sum[sp] = sum;
-        s->minv[sp] = mn;
-        s->maxv[sp] = mx;
-        s->have_mm[sp] = have;
+        if (need_sum) s->sum[sp] = sum;
+        if (need_min) s->minv[sp] = mn;
+        if (need_max) s->maxv[sp] = mx;
+        if (need_min || need_max) s->have_mm[sp] = have;
     }
 }
 static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int nspecs,
@@ -837,30 +880,79 @@ static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int 
     double *s_sum[64] = {0}, *s_minv[64] = {0}, *s_maxv[64] = {0};
     int *s_have_mm[64] = {0};
     for (int k = 0; k < n_agg; k++) {
-        s_sum[k] = calloc((size_t)slots_cap, sizeof(double));
-        s_minv[k] = malloc((size_t)slots_cap * sizeof(double));
-        s_maxv[k] = malloc((size_t)slots_cap * sizeof(double));
-        s_have_mm[k] = calloc((size_t)slots_cap, sizeof(int));
+        int kind = specs[agg_sp[k]].kind;
+        if (agg_needs_sum(kind)) {
+            s_sum[k] = calloc((size_t)slots_cap, sizeof(double));
+        } else {
+            if (agg_needs_min(kind)) s_minv[k] = malloc((size_t)slots_cap * sizeof(double));
+            else s_maxv[k] = malloc((size_t)slots_cap * sizeof(double));
+            s_have_mm[k] = calloc((size_t)slots_cap, sizeof(int));
+        }
     }
+    int nactive = 0;
     /* Tight inlined scans for the common 1- and 2-key cases. */
     if (nby == 1) {
         const int64_t *k0 = bcols[0]->J;
-        for (int64_t r = 0; r < nr; r++) {
-            if (MB && !MB[r]) continue;
-            int key_val = (int)k0[r];
-            if (s_nrows[key_val] == 0) s_name_row[key_val] = (int)r;
-            s_nrows[key_val]++;
-            for (int k = 0; k < n_agg; k++) {
-                int sp = agg_sp[k];
-                double x = row_measure(sp_col[sp], col_t[sp], r);
-                s_sum[k][key_val] += x;
-                if (!s_have_mm[k][key_val]) {
-                    s_minv[k][key_val] = s_maxv[k][key_val] = x;
-                    s_have_mm[k][key_val] = 1;
-                } else {
-                    if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
-                    if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
+        if (n_agg == 0) {
+            for (int64_t r = 0; r < nr; r++) {
+                if (MB && !MB[r]) continue;
+                int key_val = (int)k0[r];
+                if (s_nrows[key_val]++ == 0) {
+                    s_name_row[key_val] = (int)r;
+                    nactive++;
                 }
+            }
+        } else if (n_agg == 1) {
+            int sp = agg_sp[0];
+            int kind = specs[sp].kind;
+            V *col = sp_col[sp];
+            int ct = col_t[sp];
+            if (agg_needs_sum(kind)) {
+                double *sum = s_sum[0];
+                for (int64_t r = 0; r < nr; r++) {
+                    if (MB && !MB[r]) continue;
+                    int key_val = (int)k0[r];
+                    if (s_nrows[key_val]++ == 0) {
+                        s_name_row[key_val] = (int)r;
+                        nactive++;
+                    }
+                    sum[key_val] += row_measure(col, ct, r);
+                }
+            } else if (agg_needs_min(kind)) {
+                double *minv = s_minv[0];
+                int *have = s_have_mm[0];
+                for (int64_t r = 0; r < nr; r++) {
+                    if (MB && !MB[r]) continue;
+                    int key_val = (int)k0[r];
+                    if (s_nrows[key_val]++ == 0) {
+                        s_name_row[key_val] = (int)r;
+                        nactive++;
+                    }
+                    double x = row_measure(col, ct, r);
+                    if (!have[key_val] || x < minv[key_val]) minv[key_val] = x;
+                    have[key_val] = 1;
+                }
+            } else {
+                double *maxv = s_maxv[0];
+                int *have = s_have_mm[0];
+                for (int64_t r = 0; r < nr; r++) {
+                    if (MB && !MB[r]) continue;
+                    int key_val = (int)k0[r];
+                    if (s_nrows[key_val]++ == 0) {
+                        s_name_row[key_val] = (int)r;
+                        nactive++;
+                    }
+                    double x = row_measure(col, ct, r);
+                    if (!have[key_val] || x > maxv[key_val]) maxv[key_val] = x;
+                    have[key_val] = 1;
+                }
+            }
+        } else {
+            for (int64_t r = 0; r < nr; r++) {
+                if (MB && !MB[r]) continue;
+                int key_val = (int)k0[r];
+                dense_accum_row(key_val, r, s_nrows, s_name_row, &nactive, specs,
+                                n_agg, agg_sp, sp_col, col_t, s_sum, s_minv, s_maxv, s_have_mm);
             }
         }
     } else if (nby == 2) {
@@ -870,20 +962,8 @@ static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int 
         for (int64_t r = 0; r < nr; r++) {
             if (MB && !MB[r]) continue;
             int key_val = (int)(k0[r] * d1 + k1[r]);
-            if (s_nrows[key_val] == 0) s_name_row[key_val] = (int)r;
-            s_nrows[key_val]++;
-            for (int k = 0; k < n_agg; k++) {
-                int sp = agg_sp[k];
-                double x = row_measure(sp_col[sp], col_t[sp], r);
-                s_sum[k][key_val] += x;
-                if (!s_have_mm[k][key_val]) {
-                    s_minv[k][key_val] = s_maxv[k][key_val] = x;
-                    s_have_mm[k][key_val] = 1;
-                } else {
-                    if (x < s_minv[k][key_val]) s_minv[k][key_val] = x;
-                    if (x > s_maxv[k][key_val]) s_maxv[k][key_val] = x;
-                }
-            }
+            dense_accum_row(key_val, r, s_nrows, s_name_row, &nactive, specs,
+                            n_agg, agg_sp, sp_col, col_t, s_sum, s_minv, s_maxv, s_have_mm);
         }
     } else {
         for (int64_t r = 0; r < nr; r++) {
@@ -892,12 +972,12 @@ static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int 
             for (int b = 0; b < nby; b++) {
                 flat = flat * dims[b] + bcols[b]->J[r];
             }
-            dense_accum_row((int)flat, r, s_nrows, s_name_row, n_agg, agg_sp, sp_col, col_t,
-                            s_sum, s_minv, s_maxv, s_have_mm);
+            dense_accum_row((int)flat, r, s_nrows, s_name_row, &nactive, specs,
+                            n_agg, agg_sp, sp_col, col_t, s_sum, s_minv, s_maxv, s_have_mm);
         }
     }
     dense_to_slots(tab, slots_cap, nby, dims, s_nrows, s_name_row, tbl, name_idx, nspecs,
-                   n_agg, agg_sp, s_sum, s_minv, s_maxv, s_have_mm);
+                   nactive, specs, n_agg, agg_sp, s_sum, s_minv, s_maxv, s_have_mm);
     free(s_nrows);
     free(s_name_row);
     for (int k = 0; k < n_agg; k++) {
