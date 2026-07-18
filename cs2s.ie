@@ -1,0 +1,1221 @@
+# cs2s — strict C# subset to Shakti.
+
+shakti_reserved : ["select", "update", "delete", "by", "from", "where",
+                   "create", "insert", "into", "values", "join", "on"]
+csharp_keywords : ["if", "else", "while", "for", "foreach", "do", "switch",
+                   "case", "default", "return", "break", "continue", "goto",
+                   "using", "namespace", "class", "struct", "interface", "enum",
+                   "record", "new", "var", "true", "false", "null", "in", "out",
+                   "ref", "params", "public", "private", "protected", "internal",
+                   "static", "readonly", "const", "void", "int", "long", "short",
+                   "byte", "sbyte", "uint", "ulong", "ushort", "double", "float",
+                   "decimal", "bool", "char", "string", "object", "dynamic",
+                   "this", "base", "is", "as", "typeof", "sizeof", "throw", "try",
+                   "catch", "finally", "lock", "yield", "await", "async",
+                   "virtual", "override", "abstract", "sealed", "partial"]
+csharp_type_keywords : ["var", "void", "int", "long", "short", "byte", "sbyte",
+                        "uint", "ulong", "ushort", "double", "float", "decimal",
+                        "bool", "char", "string", "object", "dynamic"]
+two_ops : ["==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=",
+           "/=", "=>", ".."]
+
+def is_kw(text):
+    return text in csharp_keywords
+
+def is_type_kw(text):
+    return text in csharp_type_keywords
+
+def tok(kind, text, val, line, col):
+    return {"kind":kind, "text":text, "val":val, "line":line, "col":col}
+
+def node(t, x):
+    return {"t":t, "line":x["line"], "col":x["col"]}
+
+def starts(s, p):
+    if len(s) < len(p):
+        return False
+    return s[0:len(p)] = p
+
+def is_alpha(c):
+    return ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or c = "_"
+
+def is_digit(c):
+    return "0" <= c and c <= "9"
+
+def is_alnum(c):
+    return is_alpha(c) or is_digit(c)
+
+def quote_string(s):
+    out : ""
+    i : 0
+    while i < len(s):
+        c : s[i]
+        if c = "\\":
+            out += "\\\\"
+        elif c = "\"":
+            out += "\\\""
+        elif c = "\n":
+            out += "\\n"
+        elif c = "\t":
+            out += "\\t"
+        else:
+            out += c
+        i += 1
+    return "\"" + out + "\""
+
+def num_clean(t):
+    out : ""
+    i : 0
+    while i < len(t):
+        c : t[i]
+        if c != "_":
+            out += c
+        i += 1
+    return out
+
+def lex_string(src, i, ln, col):
+    start : i
+    is_interp : False
+    if src[i] = "$":
+        is_interp : True
+        i += 1
+    q : src[i]
+    i += 1
+    val : ""
+    while i < len(src):
+        c : src[i]
+        if c = q:
+            i += 1
+            return [tok("STRING", src[start:i], {"s":val, "f":is_interp}, ln, col), i]
+        if c = "\n":
+            raise str(ln) + ":" + str(col) + ": unterminated string"
+        if c = "\\":
+            if i + 1 >= len(src):
+                raise str(ln) + ":" + str(col) + ": unterminated string"
+            e : src[i + 1]
+            if e = "n":
+                val += "\n"
+            elif e = "t":
+                val += "\t"
+            elif e = "r":
+                val += "\r"
+            elif e = "\"":
+                val += "\""
+            elif e = "'":
+                val += "'"
+            elif e = "\\":
+                val += "\\"
+            else:
+                val += e
+            i += 2
+        else:
+            val += c
+            i += 1
+    raise str(ln) + ":" + str(col) + ": unterminated string"
+
+def lex(source):
+    n : len(source)
+    ts : []
+    comments : {"0":""}
+    inline : {"0":""}
+    i : 0
+    ln : 1
+    line_start : 0
+    line_has_code : False
+    while i < n:
+        c : source[i]
+        if c = "\n":
+            ln += 1
+            i += 1
+            line_start : i
+            line_has_code : False
+            continue
+        if c = " " or c = "\t" or c = "\r":
+            i += 1
+            continue
+        col : i - line_start + 1
+        if c = "/" and i + 1 < n and source[i + 1] = "/":
+            j : i + 2
+            while j < n and source[j] != "\n":
+                j += 1
+            text : "#" + source[i + 2:j]
+            if line_has_code:
+                inline[str(ln)] : text
+            else:
+                comments[str(ln)] : text
+            i : j
+            continue
+        if c = "/" and i + 1 < n and source[i + 1] = "*":
+            j : i + 2
+            while j + 1 < n and not (source[j] = "*" and source[j + 1] = "/"):
+                if source[j] = "\n":
+                    ln += 1
+                    line_start : j + 1
+                j += 1
+            i : j + 2
+            continue
+        line_has_code : True
+        if is_alpha(c):
+            j : i + 1
+            while j < n and is_alnum(source[j]):
+                j += 1
+            text : source[i:j]
+            ts.append(tok("NAME", text, text, ln, col))
+            i : j
+            continue
+        if is_digit(c) or (c = "." and i + 1 < n and is_digit(source[i + 1])):
+            j : i + 1
+            while j < n:
+                cj : source[j]
+                if is_alnum(cj) or cj = "_":
+                    j += 1
+                elif cj = "." and j + 1 < n and is_digit(source[j + 1]):
+                    j += 1
+                else:
+                    break
+            text : num_clean(source[i:j])
+            ts.append(tok("NUMBER", text, text, ln, col))
+            i : j
+            continue
+        if c = "\"" or c = "'" or (c = "$" and i + 1 < n and source[i + 1] = "\""):
+            z : lex_string(source, i, ln, col)
+            ts.append(z[0])
+            i : z[1]
+            continue
+        op : c
+        if i + 1 < n:
+            two : source[i:i + 2]
+            if two in two_ops:
+                op : two
+        ts.append(tok("OP", op, op, ln, col))
+        i += len(op)
+    ts.append(tok("END", "", None, ln, i - line_start + 1))
+    return {"tokens":ts, "comments":comments, "inline":inline}
+
+def peek(p):
+    return p["tokens"][p["pos"]]
+
+def peekn(p, k):
+    j : p["pos"] + k
+    if j >= len(p["tokens"]):
+        j : len(p["tokens"]) - 1
+    return p["tokens"][j]
+
+def take(p):
+    x : peek(p)
+    p["pos"] += 1
+    return x
+
+def at(p, text):
+    return peek(p)["text"] = text
+
+def kind(p, k):
+    return peek(p)["kind"] = k
+
+def fail(p, msg, x):
+    raise p["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": " + msg
+
+def need(p, text):
+    x : peek(p)
+    if x["text"] != text:
+        fail(p, "expected '" + text + "'", x)
+    return take(p)
+
+def need_kind(p, k):
+    x : peek(p)
+    if x["kind"] != k:
+        fail(p, "expected " + k, x)
+    return take(p)
+
+def ident(p, x):
+    name : x["text"]
+    if name in shakti_reserved or starts(name, "__cs_"):
+        name : "__cs_" + name
+    x["text"] : name
+    return name
+
+def parse(source, filename):
+    lx : lex(source)
+    p : {"tokens":lx["tokens"], "pos":0, "filename":filename, "aliases":{"Np":"numpy", "Pd":"pandas"}, "comments":lx["comments"], "inline":lx["inline"]}
+    body : []
+    while not kind(p, "END"):
+        body.append(parse_stmt(p))
+    return {"t":"Module", "body":body, "comments":p["comments"], "inline":p["inline"], "aliases":p["aliases"], "filename":filename}
+
+def skip_generics(p):
+    depth : 1
+    take(p)
+    while depth > 0:
+        if kind(p, "END"):
+            fail(p, "unterminated generic arguments", peek(p))
+        t : peek(p)["text"]
+        if t = "<":
+            depth += 1
+        elif t = ">":
+            depth += -1
+        take(p)
+
+def skip_type(p):
+    if not kind(p, "NAME"):
+        return False
+    if is_kw(peek(p)["text"]) and not is_type_kw(peek(p)["text"]):
+        return False
+    take(p)
+    if at(p, "<"):
+        skip_generics(p)
+    while at(p, "["):
+        take(p)
+        if not at(p, "]"):
+            return False
+        take(p)
+    return True
+
+def parse_stmt(p):
+    x : peek(p)
+    if at(p, "using"):
+        return parse_using(p)
+    if at(p, "namespace") or at(p, "class") or at(p, "struct") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, x["text"] + " declarations are unsupported", x)
+    if at(p, "try") or at(p, "switch") or at(p, "do") or at(p, "throw") or at(p, "lock") or at(p, "yield"):
+        fail(p, x["text"] + " statements are unsupported", x)
+    if at(p, "if"):
+        return parse_if(p)
+    if at(p, "while"):
+        return parse_while(p)
+    if at(p, "for"):
+        return parse_for(p)
+    if at(p, "foreach"):
+        return parse_foreach(p)
+    if at(p, "return"):
+        return parse_return(p)
+    if at(p, "break") or at(p, "continue"):
+        take(p)
+        z : node(x["text"], x)
+        need(p, ";")
+        return z
+    if at(p, "{"):
+        fail(p, "unexpected block", x)
+    fn : try_parse_func(p)
+    if fn != None:
+        return fn
+    d : try_parse_decl(p)
+    if d != None:
+        return d
+    return parse_expr_stmt(p)
+
+def parse_using(p):
+    x : take(p)
+    while not at(p, ";") and not kind(p, "END"):
+        take(p)
+    if at(p, ";"):
+        take(p)
+    z : node("Import", x)
+    z["name"] : ""
+    z["alias"] : None
+    z["erase"] : True
+    return z
+
+def try_parse_func(p):
+    save : p["pos"]
+    ok : skip_type(p)
+    if not ok:
+        p["pos"] : save
+        return None
+    if not kind(p, "NAME") or is_kw(peek(p)["text"]):
+        p["pos"] : save
+        return None
+    name_tok : peek(p)
+    if peekn(p, 1)["text"] != "(":
+        p["pos"] : save
+        return None
+    x : name_tok
+    take(p)
+    ident(p, name_tok)
+    need(p, "(")
+    args : []
+    defaults : []
+    if not at(p, ")"):
+        while True:
+            skip_type(p)
+            a : need_kind(p, "NAME")
+            ident(p, a)
+            args.append(a["text"])
+            if at(p, "="):
+                take(p)
+                defaults.append(parse_expr(p))
+            else:
+                defaults.append(None)
+            if not at(p, ","):
+                break
+            take(p)
+    need(p, ")")
+    z : node("FunctionDef", x)
+    z["name"] : name_tok["text"]
+    z["args"] : args
+    z["defaults"] : defaults
+    z["decorators"] : []
+    if at(p, "=>"):
+        take(p)
+        val : parse_expr(p)
+        need(p, ";")
+        r : node("Return", x)
+        r["value"] : val
+        z["body"] : [r]
+    else:
+        z["body"] : parse_block(p)
+    return z
+
+def try_parse_decl(p):
+    save : p["pos"]
+    ok : skip_type(p)
+    if not ok:
+        p["pos"] : save
+        return None
+    if not kind(p, "NAME") or is_kw(peek(p)["text"]):
+        p["pos"] : save
+        return None
+    name_tok : peek(p)
+    if peekn(p, 1)["text"] != "=":
+        p["pos"] : save
+        return None
+    x : name_tok
+    take(p)
+    ident(p, name_tok)
+    need(p, "=")
+    value : parse_expr(p)
+    need(p, ";")
+    z : node("Assign", x)
+    tgt : node("Name", x)
+    tgt["value"] : name_tok["text"]
+    z["target"] : tgt
+    z["value"] : value
+    return z
+
+def parse_block(p):
+    lb : need(p, "{")
+    xs : []
+    while not at(p, "}") and not kind(p, "END"):
+        xs.append(parse_stmt(p))
+    need(p, "}")
+    if len(xs) = 0:
+        px : node("pass", lb)
+        return [px]
+    return xs
+
+def parse_block_or_stmt(p):
+    if at(p, "{"):
+        return parse_block(p)
+    return [parse_stmt(p)]
+
+def parse_return(p):
+    x : take(p)
+    z : node("Return", x)
+    z["value"] : None
+    if not at(p, ";"):
+        z["value"] : parse_expr(p)
+    need(p, ";")
+    return z
+
+def parse_if(p):
+    x : take(p)
+    need(p, "(")
+    test : parse_expr(p)
+    need(p, ")")
+    z : node("If", x)
+    z["test"] : test
+    z["body"] : parse_block_or_stmt(p)
+    z["elifs"] : []
+    z["orelse"] : []
+    while at(p, "else") and peekn(p, 1)["text"] = "if":
+        e : take(p)
+        take(p)
+        need(p, "(")
+        et : parse_expr(p)
+        need(p, ")")
+        eb : parse_block_or_stmt(p)
+        z["elifs"].append({"test":et, "body":eb, "line":e["line"], "col":e["col"]})
+    if at(p, "else"):
+        take(p)
+        z["orelse"] : parse_block_or_stmt(p)
+    return z
+
+def parse_while(p):
+    x : take(p)
+    need(p, "(")
+    t : parse_expr(p)
+    need(p, ")")
+    z : node("While", x)
+    z["test"] : t
+    z["body"] : parse_block_or_stmt(p)
+    return z
+
+def parse_foreach(p):
+    x : take(p)
+    need(p, "(")
+    skip_type(p)
+    a : need_kind(p, "NAME")
+    ident(p, a)
+    need(p, "in")
+    it : parse_expr(p)
+    need(p, ")")
+    z : node("For", x)
+    tgt : node("Name", a)
+    tgt["value"] : a["text"]
+    z["target"] : tgt
+    z["iter"] : it
+    z["body"] : parse_block_or_stmt(p)
+    return z
+
+def parse_for(p):
+    x : take(p)
+    need(p, "(")
+    init : None
+    if not at(p, ";"):
+        init : parse_for_clause(p)
+    need(p, ";")
+    cond : None
+    if not at(p, ";"):
+        cond : parse_expr(p)
+    need(p, ";")
+    upd : None
+    if not at(p, ")"):
+        upd : parse_assign_no_semi(p)
+    need(p, ")")
+    body : parse_block_or_stmt(p)
+    w : node("While", x)
+    if cond = None:
+        tc : node("Const", x)
+        tc["value"] : "True"
+        tc["kind"] : "number"
+        w["test"] : tc
+    else:
+        w["test"] : cond
+    b2 : []
+    for s in body:
+        b2.append(s)
+    if upd != None:
+        b2.append(upd)
+    w["body"] : b2
+    seq : node("Seq", x)
+    stmts : []
+    if init != None:
+        stmts.append(init)
+    stmts.append(w)
+    seq["body"] : stmts
+    return seq
+
+def parse_for_clause(p):
+    x : peek(p)
+    save : p["pos"]
+    if skip_type(p) and kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "=":
+        nt : take(p)
+        ident(p, nt)
+        need(p, "=")
+        v : parse_expr(p)
+        z : node("Assign", x)
+        tg : node("Name", x)
+        tg["value"] : nt["text"]
+        z["target"] : tg
+        z["value"] : v
+        return z
+    p["pos"] : save
+    return parse_assign_no_semi(p)
+
+def parse_assign_no_semi(p):
+    x : peek(p)
+    left : parse_expr(p)
+    tt : peek(p)["text"]
+    if tt = "=":
+        take(p)
+        val : parse_expr(p)
+        z : node("Assign", x)
+        z["target"] : left
+        z["value"] : val
+        validate_target(p, left)
+        return z
+    if tt in ["+=", "-=", "*=", "/="]:
+        op : take(p)["text"]
+        z : node("AugAssign", x)
+        z["target"] : left
+        validate_target(p, left)
+        z["op"] : op
+        z["value"] : parse_expr(p)
+        return z
+    if tt = "++" or tt = "--":
+        take(p)
+        z : node("AugAssign", x)
+        z["target"] : left
+        validate_target(p, left)
+        z["op"] : "+=" if tt = "++" else "-="
+        one : node("Const", x)
+        one["value"] : "1"
+        one["kind"] : "number"
+        z["value"] : one
+        return z
+    z : node("Expr", x)
+    z["value"] : left
+    return z
+
+def parse_expr_stmt(p):
+    z : parse_assign_no_semi(p)
+    need(p, ";")
+    return z
+
+def validate_target(p, x):
+    if x["t"] = "Name" or x["t"] = "Attr" or x["t"] = "Subscript":
+        return
+    fail(p, "unsupported assignment target", x)
+
+def is_lambda_ahead(p):
+    if kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "=>":
+        return True
+    if peek(p)["text"] = "(":
+        depth : 0
+        j : 0
+        while True:
+            t : peekn(p, j)
+            if t["kind"] = "END":
+                return False
+            tx : t["text"]
+            if tx = "(":
+                depth += 1
+            elif tx = ")":
+                depth += -1
+                if depth = 0:
+                    return peekn(p, j + 1)["text"] = "=>"
+            j += 1
+    return False
+
+def parse_expr(p):
+    if is_lambda_ahead(p):
+        return parse_lambda(p)
+    return parse_ternary(p)
+
+def parse_lambda_param(p):
+    if kind(p, "NAME") and peekn(p, 1)["kind"] = "NAME":
+        skip_type(p)
+    a : need_kind(p, "NAME")
+    return ident(p, a)
+
+def parse_lambda(p):
+    x : peek(p)
+    args : []
+    if at(p, "("):
+        take(p)
+        if not at(p, ")"):
+            while True:
+                args.append(parse_lambda_param(p))
+                if not at(p, ","):
+                    break
+                take(p)
+        need(p, ")")
+    else:
+        a : need_kind(p, "NAME")
+        args.append(ident(p, a))
+    need(p, "=>")
+    if at(p, "{"):
+        fail(p, "block-bodied lambdas are unsupported", peek(p))
+    if len(args) > 1:
+        fail(p, "multi-argument lambdas are unsupported", x)
+    z : node("Lambda", x)
+    z["args"] : args
+    z["body"] : parse_expr(p)
+    return z
+
+def parse_ternary(p):
+    c : parse_or(p)
+    if at(p, "?"):
+        take(p)
+        a : parse_expr(p)
+        need(p, ":")
+        b : parse_expr(p)
+        z : node("IfExp", c)
+        z["body"] : a
+        z["test"] : c
+        z["orelse"] : b
+        return z
+    return c
+
+def parse_or(p):
+    xs : [parse_and(p)]
+    x : xs[0]
+    while at(p, "||"):
+        take(p)
+        xs.append(parse_and(p))
+    if len(xs) = 1:
+        return x
+    z : node("BoolOp", x)
+    z["op"] : "or"
+    z["values"] : xs
+    return z
+
+def parse_and(p):
+    xs : [parse_compare(p)]
+    x : xs[0]
+    while at(p, "&&"):
+        take(p)
+        xs.append(parse_compare(p))
+    if len(xs) = 1:
+        return x
+    z : node("BoolOp", x)
+    z["op"] : "and"
+    z["values"] : xs
+    return z
+
+def parse_compare(p):
+    left : parse_add(p)
+    if peek(p)["text"] in ["==", "!=", "<", "<=", ">", ">="]:
+        op : take(p)["text"]
+        right : parse_add(p)
+        z : node("Compare", left)
+        z["left"] : left
+        z["op"] : op
+        z["right"] : right
+        return z
+    return left
+
+def parse_add(p):
+    z : parse_mul(p)
+    while peek(p)["text"] = "+" or peek(p)["text"] = "-":
+        op : take(p)["text"]
+        q : node("BinOp", z)
+        q["left"] : z
+        q["op"] : op
+        q["right"] : parse_mul(p)
+        z : q
+    return z
+
+def parse_mul(p):
+    z : parse_unary(p)
+    while peek(p)["text"] in ["*", "/", "%"]:
+        op : take(p)["text"]
+        q : node("BinOp", z)
+        q["left"] : z
+        q["op"] : op
+        q["right"] : parse_unary(p)
+        z : q
+    return z
+
+def parse_unary(p):
+    tt : peek(p)["text"]
+    if tt = "!":
+        x : take(p)
+        z : node("Unary", x)
+        z["op"] : "not"
+        z["value"] : parse_unary(p)
+        return z
+    if tt = "-":
+        x : take(p)
+        z : node("Unary", x)
+        z["op"] : "-"
+        z["value"] : parse_unary(p)
+        return z
+    if tt = "+":
+        fail(p, "unary plus is unsupported", peek(p))
+    if tt = "++" or tt = "--":
+        fail(p, "prefix increment is unsupported", peek(p))
+    return parse_postfix(p)
+
+def parse_postfix(p):
+    z : parse_atom(p)
+    while True:
+        if at(p, "."):
+            x : take(p)
+            a : need_kind(p, "NAME")
+            q : node("Attr", x)
+            q["value"] : z
+            q["attr"] : a["text"]
+            z : q
+        elif at(p, "("):
+            x : take(p)
+            q : node("Call", x)
+            q["func"] : z
+            q["args"] : []
+            q["kwargs"] : []
+            if not at(p, ")"):
+                while True:
+                    if kind(p, "NAME") and peekn(p, 1)["text"] = ":":
+                        k : take(p)
+                        ident(p, k)
+                        take(p)
+                        q["kwargs"].append([k, parse_expr(p)])
+                    else:
+                        q["args"].append(parse_expr(p))
+                    if not at(p, ","):
+                        break
+                    take(p)
+            need(p, ")")
+            z : q
+        elif at(p, "["):
+            x : take(p)
+            q : node("Subscript", x)
+            q["value"] : z
+            q["slice"] : parse_index(p)
+            need(p, "]")
+            z : q
+        else:
+            break
+    return z
+
+def parse_index(p):
+    x : peek(p)
+    lower : None
+    if not at(p, "..") and not at(p, "]"):
+        lower : parse_expr(p)
+    if at(p, ".."):
+        take(p)
+        z : node("Slice", x)
+        z["lower"] : lower
+        z["upper"] : None
+        z["step"] : None
+        if not at(p, "]"):
+            z["upper"] : parse_expr(p)
+        return z
+    return lower
+
+def parse_new(p):
+    x : take(p)
+    if at(p, "{"):
+        return parse_anon_object(p, x)
+    if at(p, "["):
+        take(p)
+        need(p, "]")
+        return parse_array_init(p, x)
+    if kind(p, "NAME"):
+        tn : take(p)["text"]
+        if at(p, "<"):
+            skip_generics(p)
+        if at(p, "["):
+            take(p)
+            if at(p, "]"):
+                take(p)
+                return parse_array_init(p, x)
+            fail(p, "sized array 'new " + tn + "[N]' is unsupported", x)
+        if at(p, "("):
+            take(p)
+            if not at(p, ")"):
+                depth : 1
+                while depth > 0 and not kind(p, "END"):
+                    tt : peek(p)["text"]
+                    if tt = "(":
+                        depth += 1
+                    elif tt = ")":
+                        depth += -1
+                    take(p)
+            else:
+                take(p)
+        if at(p, "{"):
+            if is_dict_type(tn):
+                return parse_dict_init(p, x)
+            return parse_array_init(p, x)
+        fail(p, "unsupported 'new " + tn + "' expression", x)
+    fail(p, "unsupported 'new' expression", x)
+
+def is_dict_type(tn):
+    return tn = "Dictionary" or tn = "SortedDictionary" or tn = "IDictionary"
+
+def parse_anon_object(p, x):
+    need(p, "{")
+    z : node("Dict", x)
+    z["keys"] : []
+    z["values"] : []
+    if not at(p, "}"):
+        while True:
+            nm : need_kind(p, "NAME")
+            need(p, "=")
+            v : parse_expr(p)
+            k : node("Const", nm)
+            k["value"] : nm["text"]
+            k["kind"] : "string"
+            z["keys"].append(k)
+            z["values"].append(v)
+            if not at(p, ","):
+                break
+            take(p)
+            if at(p, "}"):
+                break
+    need(p, "}")
+    return z
+
+def parse_dict_init(p, x):
+    need(p, "{")
+    z : node("Dict", x)
+    z["keys"] : []
+    z["values"] : []
+    if not at(p, "}"):
+        while True:
+            need(p, "{")
+            k : parse_expr(p)
+            need(p, ",")
+            v : parse_expr(p)
+            need(p, "}")
+            z["keys"].append(k)
+            z["values"].append(v)
+            if not at(p, ","):
+                break
+            take(p)
+            if at(p, "}"):
+                break
+    need(p, "}")
+    return z
+
+def parse_array_init(p, x):
+    need(p, "{")
+    z : node("List", x)
+    z["elts"] : []
+    if not at(p, "}"):
+        while True:
+            z["elts"].append(parse_expr(p))
+            if not at(p, ","):
+                break
+            take(p)
+            if at(p, "}"):
+                break
+    need(p, "}")
+    return z
+
+def parse_atom(p):
+    x : peek(p)
+    if kind(p, "NUMBER"):
+        take(p)
+        z : node("Const", x)
+        z["value"] : x["text"]
+        z["kind"] : "number"
+        return z
+    if kind(p, "STRING"):
+        take(p)
+        if x["val"]["f"]:
+            depth : 0
+            j : 0
+            sv : x["val"]["s"]
+            while j < len(sv):
+                c : sv[j]
+                if c = "{":
+                    if j + 1 < len(sv) and sv[j + 1] = "{":
+                        j += 2
+                        continue
+                    depth += 1
+                elif c = "}":
+                    depth += -1
+                elif depth > 0 and (c = "!" or c = ":"):
+                    fail(p, "interpolation conversions/format specs are unsupported", x)
+                j += 1
+            z : node("FString", x)
+            z["value"] : sv
+            z["kind"] : "string"
+            return z
+        z : node("Const", x)
+        z["value"] : x["val"]["s"]
+        z["kind"] : "string"
+        return z
+    if at(p, "true") or at(p, "false") or at(p, "null"):
+        take(p)
+        z : node("Const", x)
+        z["value"] : "True" if x["text"] = "true" else ("False" if x["text"] = "false" else "None")
+        z["kind"] : "number"
+        return z
+    if at(p, "new"):
+        return parse_new(p)
+    if kind(p, "NAME"):
+        take(p)
+        if is_kw(x["text"]):
+            fail(p, "unexpected keyword '" + x["text"] + "'", x)
+        z : node("Name", x)
+        z["value"] : ident(p, x)
+        x["text"] : z["value"]
+        return z
+    if at(p, "("):
+        take(p)
+        z : parse_expr(p)
+        need(p, ")")
+        return z
+    fail(p, "unsupported expression", x)
+
+def pad(n):
+    return "    " * n
+
+def render(ast, state):
+    state["comments"] : ast["comments"]
+    state["inline"] : ast["inline"]
+    state["last_comment"] : 0
+    state["filename"] : ast["filename"]
+    lines : render_body(ast["body"], state, 0, True)
+    for k in state["comments"].keys():
+        kn : int(k)
+        if kn > state["last_comment"]:
+            lines.append(state["comments"][k])
+    text : ""
+    for line in lines:
+        if line != "":
+            text += line + "\n"
+    return text
+
+def before_comments(st, line, indent):
+    out : []
+    for k in st["comments"].keys():
+        kn : int(k)
+        if kn > st["last_comment"] and kn < line:
+            out.append(pad(indent) + st["comments"][k])
+            st["last_comment"] : kn
+    return out
+
+def render_body(body, st, indent, doc_ok):
+    out : []
+    i : 0
+    while i < len(body):
+        s : body[i]
+        cs : before_comments(st, s["line"], indent)
+        for c in cs:
+            out.append(c)
+        rs : render_stmt(s, st, indent)
+        key : str(s["line"])
+        if key in st["inline"] and len(rs) > 0:
+            rs[0] : rs[0] + "  " + st["inline"][key]
+        for q in rs:
+            if q != "":
+                out.append(q)
+        i += 1
+    return out
+
+def render_stmt(s, st, ind):
+    p : pad(ind)
+    t : s["t"]
+    if t = "Seq":
+        out : []
+        for c in s["body"]:
+            for q in render_stmt(c, st, ind):
+                out.append(q)
+        return out
+    if t = "Assign":
+        return [p + target_text(s["target"], st) + " : " + expr_text(s["value"], st)]
+    if t = "AugAssign":
+        return [p + target_text(s["target"], st) + " " + s["op"] + " " + expr_text(s["value"], st)]
+    if t = "Return":
+        return [p + ("return" if s["value"] = None else "return " + expr_text(s["value"], st))]
+    if t = "break" or t = "continue" or t = "pass":
+        return [p + t]
+    if t = "Import":
+        return ["" if s["erase"] else p + "import " + s["name"]]
+    if t = "Expr":
+        return [p + expr_text(s["value"], st)]
+    if t = "FunctionDef":
+        out : []
+        for d in s["decorators"]:
+            out.append(p + "@" + expr_text(d, st))
+        parts : []
+        i : 0
+        while i < len(s["args"]):
+            q : s["args"][i]
+            if s["defaults"][i] != None:
+                q += ":" + expr_text(s["defaults"][i], st)
+            parts.append(q)
+            i += 1
+        out.append(p + "def " + s["name"] + "(" + join_text(parts, ", ") + "):")
+        for q in render_body(s["body"], st, ind + 1, True):
+            out.append(q)
+        return out
+    if t = "If":
+        out : [p + "if " + expr_text(s["test"], st) + ":"]
+        for q in render_body(s["body"], st, ind + 1, False):
+            out.append(q)
+        for e in s["elifs"]:
+            out.append(p + "elif " + expr_text(e["test"], st) + ":")
+            for q in render_body(e["body"], st, ind + 1, False):
+                out.append(q)
+        if len(s["orelse"]) > 0:
+            out.append(p + "else:")
+            for q in render_body(s["orelse"], st, ind + 1, False):
+                out.append(q)
+        return out
+    if t = "While":
+        out : [p + "while " + expr_text(s["test"], st) + ":"]
+        for q in render_body(s["body"], st, ind + 1, False):
+            out.append(q)
+        return out
+    if t = "For":
+        out : [p + "for " + target_text(s["target"], st) + " in " + expr_text(s["iter"], st) + ":"]
+        for q in render_body(s["body"], st, ind + 1, False):
+            out.append(q)
+        return out
+    return []
+
+def join_text(xs, sep):
+    out : ""
+    i : 0
+    while i < len(xs):
+        if i > 0:
+            out += sep
+        out += xs[i]
+        i += 1
+    return out
+
+def target_text(x, st):
+    if x["t"] = "Tuple" or x["t"] = "List":
+        parts : []
+        for e in x["elts"]:
+            parts.append(target_text(e, st))
+        return join_text(parts, ", ")
+    return expr_text(x, st)
+
+def slice_text(x, st):
+    if x["t"] = "Slice":
+        a : "" if x["lower"] = None else expr_text(x["lower"], st)
+        b : "" if x["upper"] = None else expr_text(x["upper"], st)
+        q : a + ":" + b
+        if x["step"] != None:
+            q += ":" + expr_text(x["step"], st)
+        return q
+    return expr_text(x, st)
+
+def expr_text(x, st):
+    t : x["t"]
+    if t = "Name":
+        return x["value"]
+    if t = "Const":
+        if x["kind"] = "string":
+            return quote_string(x["value"])
+        return x["value"]
+    if t = "FString":
+        return "f" + quote_string(x["value"])
+    if t = "List":
+        parts : []
+        for e in x["elts"]:
+            parts.append(expr_text(e, st))
+        return "[" + join_text(parts, ", ") + "]"
+    if t = "Tuple":
+        parts : []
+        for e in x["elts"]:
+            parts.append(expr_text(e, st))
+        if len(parts) = 1:
+            return "(" + parts[0] + ",)"
+        return "(" + join_text(parts, ", ") + ")"
+    if t = "Dict":
+        parts : []
+        i : 0
+        while i < len(x["keys"]):
+            parts.append(expr_text(x["keys"][i], st) + ": " + expr_text(x["values"][i], st))
+            i += 1
+        return "{" + join_text(parts, ", ") + "}"
+    if t = "Attr":
+        if x["value"]["t"] = "Name" and x["value"]["value"] in st["aliases"]:
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": " + st["aliases"][x["value"]["value"]] + "." + x["attr"] + " is unsupported outside a mapped call"
+        if x["attr"] = "Length" or x["attr"] = "Count":
+            return "len(" + expr_text(x["value"], st) + ")"
+        return expr_text(x["value"], st) + "." + x["attr"]
+    if t = "Subscript":
+        return expr_text(x["value"], st) + "[" + slice_text(x["slice"], st) + "]"
+    if t = "Unary":
+        return "(" + ("not " if x["op"] = "not" else "-") + expr_text(x["value"], st) + ")"
+    if t = "BinOp":
+        return "(" + expr_text(x["left"], st) + " " + x["op"] + " " + expr_text(x["right"], st) + ")"
+    if t = "BoolOp":
+        parts : []
+        for e in x["values"]:
+            parts.append(expr_text(e, st))
+        return "(" + join_text(parts, " " + x["op"] + " ") + ")"
+    if t = "Compare":
+        op : "=" if x["op"] = "==" else x["op"]
+        return "(" + expr_text(x["left"], st) + " " + op + " " + expr_text(x["right"], st) + ")"
+    if t = "IfExp":
+        return expr_text(x["body"], st) + " if " + expr_text(x["test"], st) + " else " + expr_text(x["orelse"], st)
+    if t = "Lambda":
+        return "(lambda " + join_text(x["args"], ", ") + ": " + expr_text(x["body"], st) + ")"
+    if t = "Call":
+        lowered : lower_call(x, st)
+        if lowered != None:
+            return lowered
+        parts : []
+        for e in x["args"]:
+            parts.append(expr_text(e, st))
+        for kv in x["kwargs"]:
+            parts.append(kv[0]["text"] + ":" + expr_text(kv[1], st))
+        return expr_text(x["func"], st) + "(" + join_text(parts, ", ") + ")"
+    return ""
+
+def lower_call(x, st):
+    f : x["func"]
+    if f["t"] = "Attr" and f["value"]["t"] = "Name" and f["value"]["value"] = "Console":
+        if f["attr"] = "WriteLine" or f["attr"] = "Write":
+            parts : []
+            for e in x["args"]:
+                parts.append(expr_text(e, st))
+            return "print(" + join_text(parts, ", ") + ")"
+        raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Console." + f["attr"] + " is unsupported"
+    if f["t"] != "Attr" or f["value"]["t"] != "Name":
+        return None
+    alias : f["value"]["value"]
+    if not alias in st["aliases"]:
+        return None
+    mod : st["aliases"][alias]
+    name : f["attr"]
+    if mod = "numpy":
+        if name = "Array" or name = "AsArray":
+            if len(x["args"]) != 1 or len(x["kwargs"]) != 0:
+                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Np." + name + " requires one argument"
+            return expr_text(x["args"][0], st)
+        maps : {"Sum":"sum", "Mean":"avg", "Min":"min", "Max":"max", "Dot":"dot",
+                "Matmul":"mmul", "Abs":"abs", "Sqrt":"sqrt", "Exp":"exp", "Log":"log",
+                "Sin":"sin", "Cos":"cos", "Tan":"tan"}
+        if not name in maps:
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Np." + name + " is unsupported"
+        if len(x["kwargs"]) > 0:
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Np." + name + " options are unsupported"
+        parts : []
+        for e in x["args"]:
+            parts.append(expr_text(e, st))
+        return maps[name] + "(" + join_text(parts, ", ") + ")"
+    if mod = "pandas":
+        if name = "Series":
+            if len(x["args"]) != 1 or len(x["kwargs"]) != 0:
+                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Pd.Series requires one argument"
+            return expr_text(x["args"][0], st)
+        if name != "DataFrame":
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Pd." + name + " is unsupported"
+        if len(x["args"]) != 1 or len(x["kwargs"]) != 0 or x["args"][0]["t"] != "Dict":
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Pd.DataFrame requires one anonymous object or dictionary argument"
+        d : x["args"][0]
+        parts : []
+        i : 0
+        while i < len(d["keys"]):
+            k : d["keys"][i]
+            if k["t"] != "Const" or k["kind"] != "string" or not re_match("^[A-Za-z_][A-Za-z0-9_]*$", k["value"]):
+                raise st["filename"] + ":" + str(k["line"]) + ":" + str(k["col"]) + ": DataFrame column names must be valid identifiers"
+            parts.append(k["value"] + ":" + expr_text(d["values"][i], st))
+            i += 1
+        return "table(" + join_text(parts, ", ") + ")"
+    return None
+
+def transpile(source, filename):
+    ast : parse(source, filename)
+    return render(ast, {"aliases":ast["aliases"]})
+
+def main():
+    if len(argv) < 2:
+        raise "usage: cs2s.ie input.cs [-o out.ie]"
+    inp : None
+    out : None
+    i : 1
+    while i < len(argv):
+        if argv[i] = "-o" or argv[i] = "--output":
+            if i + 1 >= len(argv):
+                raise "missing output path"
+            out : argv[i + 1]
+            i += 2
+        elif argv[i][0] = "-":
+            raise "unknown option: " + argv[i]
+        elif inp = None:
+            inp : argv[i]
+            i += 1
+        else:
+            raise "unexpected argument: " + argv[i]
+    if inp = None:
+        raise "usage: cs2s.ie input.cs [-o out.ie]"
+    result : transpile(read(inp), inp)
+    if out = None:
+        write("/dev/stdout", result)
+    else:
+        write(out, result)
+
+# Run CLI only when this file is the entry script.
+if re_match("cs2s\\.ie$", argv[0]):
+    main()
