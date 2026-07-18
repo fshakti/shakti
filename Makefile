@@ -167,6 +167,14 @@ else
 	@test -f $@ || (echo "error: missing $@ — restore scripts/embed_text.py to regenerate from cs2s.ie" >&2; exit 1)
 endif
 
+# Regenerated from j2s.ie when a local embed helper exists (scripts/ is gitignored).
+src/shakti_j2s_embed.h: j2s.ie
+ifneq ($(wildcard scripts/embed_text.py),)
+	python3 scripts/embed_text.py j2s.ie shakti_j2s_source $@
+else
+	@test -f $@ || (echo "error: missing $@ — restore scripts/embed_text.py to regenerate from j2s.ie" >&2; exit 1)
+endif
+
 ifeq ($(SHAKTI_TALK),1)
 talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
 	$(OBJC) $(TALK_OBJC_FLAGS) -c -o $@ src/talk.c
@@ -207,7 +215,7 @@ SYNTH_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_SYNT
 GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_mac.o)
 GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_x11.o)
 
-shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/shakti_cs2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ)
+shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/shakti_cs2s_embed.h src/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
