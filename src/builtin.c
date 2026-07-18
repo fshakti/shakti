@@ -104,6 +104,9 @@ extern V *bi_gfx_click_pending(V**,in);
 extern V *bi_gfx_click_x(V**,in);
 extern V *bi_gfx_click_y(V**,in);
 extern V *bi_gfx_consume_click(V**,in);
+extern V *bi_gfx_text(V**,in);
+extern V *bi_gfx_text_width(V**,in);
+extern V *bi_gfx_copy_rect(V**,in);
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
 extern V *bi_ipc_connect(V**,in);
@@ -141,7 +144,7 @@ extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "bin","asof_sort","asof_bin","sort","reverse","zip","enumerate","map","filter",
+    "bin","asof_sort","asof_bin","shakti_volcurv_index","shakti_volcurv_query","sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
     "load","save","input","readline","wait","repr","clock","timer",
@@ -186,6 +189,8 @@ static const char *BUILTINS[] = {
     "gfx_open","gfx_close","gfx_alive","gfx_available","gfx_tick","gfx_sync_keys",
     "gfx_clear","gfx_fill_rect","gfx_line","gfx_fill_circle",
     "gfx_click_pending","gfx_click_x","gfx_click_y","gfx_consume_click",
+    "gfx_text","gfx_text_width","gfx_copy_rect",
+    "eval",
     NULL
 };
 int is_builtin(const char *name){if(is_isolde_builtin(name))return 1;for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
@@ -732,6 +737,117 @@ static V *bi_asof_bin(V**a,in){
     v_free(qeq); if(qtm_own) v_free(qtm_own);
     return r;
 }
+typedef struct {
+    int64_t sym;
+    int64_t time;
+    double value;
+} VolcurvRow;
+static int volcurv_row_cmp(const void *va,const void *vb){
+    const VolcurvRow *a=va,*b=vb;
+    if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
+    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
+    return 0;
+}
+static int volcurv_value_at(V *v,int64_t i,double *out){
+    if(v->t==T_IVEC){*out=(double)v->J[i];return 1;}
+    if(v->t==T_FVEC){*out=v->F[i];return 1;}
+    if(v->t==T_LIST&&v->L[i]){
+        if(v->L[i]->t==T_INT){*out=(double)v->L[i]->j;return 1;}
+        if(v->L[i]->t==T_FLOAT){*out=v->L[i]->f;return 1;}
+    }
+    return 0;
+}
+/* Load-time VOLCURV index: [sorted sym, sorted time, dense starts,
+ * global prefix sums, global prefix counts]. */
+static V *bi_shakti_volcurv_index(V**a,in){
+    P(n<3||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
+      v_err("shakti_volcurv_index(sym_id, time_ns, size)"))
+    int64_t rows=a[0]->n;
+    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_volcurv_index: length mismatch"))
+    VolcurvRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
+    if(!tmp)return v_err("shakti_volcurv_index: allocation failed");
+    for(int64_t i=0;i<rows;i++){
+        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
+        if(tmp[i].sym<0||!volcurv_value_at(a[2],i,&tmp[i].value)){
+            int bad_sym=tmp[i].sym<0;free(tmp);
+            return v_err(bad_sym?"shakti_volcurv_index: sym_id must be nonnegative":
+                         "shakti_volcurv_index: size must be numeric");
+        }
+    }
+    qsort(tmp,(size_t)rows,sizeof(*tmp),volcurv_row_cmp);
+    int64_t max_key=rows?tmp[rows-1].sym:-1;
+    if(max_key>rows){free(tmp);return v_err("shakti_volcurv_index: sym_id range is not dense");}
+    V *sym=v_ivec(rows),*tm=v_ivec(rows),*starts=v_ivec(max_key+2);
+    V *sums=v_fvec(rows+1),*counts=v_ivec(rows+1);
+    for(int64_t i=0;i<rows;i++){
+        sym->J[i]=tmp[i].sym;tm->J[i]=tmp[i].time;
+        sums->F[i+1]=sums->F[i]+tmp[i].value;
+        counts->J[i+1]=counts->J[i]+1;
+    }
+    int64_t pos=0;
+    for(int64_t key=0;key<=max_key+1;key++){
+        while(pos<rows&&sym->J[pos]<key)pos++;
+        starts->J[key]=pos;
+    }
+    free(tmp);
+    V *r=v_list(5);r->L[0]=sym;r->L[1]=tm;r->L[2]=starts;r->L[3]=sums;r->L[4]=counts;
+    return r;
+}
+static int64_t volcurv_lower_bound(const int64_t *v,int64_t n,int64_t x){
+    int64_t lo=0,hi=n;
+    while(lo<hi){int64_t mid=lo+(hi-lo)/2;if(v[mid]<x)lo=mid+1;else hi=mid;}
+    return lo;
+}
+static V *volcurv_result_table(V *sym,V *avg){
+    V *keys=v_list(2),*data=v_list(2);
+    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("avg_size");
+    data->L[0]=sym;data->L[1]=avg;
+    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
+}
+/* Query every requested window and retain the final grouped-average table. */
+static V *bi_shakti_volcurv_query(V**a,in){
+    P(n<4||a[0]->t!=T_LIST||a[0]->n<5,
+      v_err("shakti_volcurv_query(index, basket, starts, window_ns)"))
+    V *idx=a[0],*sym=idx->L[0],*tm=idx->L[1],*bounds=idx->L[2],
+      *sums=idx->L[3],*counts=idx->L[4];
+    P(!sym||!tm||!bounds||!sums||!counts||sym->t!=T_IVEC||tm->t!=T_IVEC||
+      bounds->t!=T_IVEC||sums->t!=T_FVEC||counts->t!=T_IVEC||
+      sym->n!=tm->n||sums->n!=sym->n+1||counts->n!=sym->n+1,
+      v_err("shakti_volcurv_query: invalid index"))
+    V *basket=as_ivec_arg(a[1],"basket"),*starts=as_ivec_arg(a[2],"starts");
+    if(!basket||!starts){if(basket)v_free(basket);if(starts)v_free(starts);
+        return v_err("shakti_volcurv_query: basket and starts must contain ints");}
+    if(a[3]->t!=T_INT){v_free(basket);v_free(starts);
+        return v_err("shakti_volcurv_query: window_ns must be int");}
+    if(starts->n==0){v_free(basket);v_free(starts);return v_nil();}
+    V *last=NULL;
+    for(int64_t w=0;w<starts->n;w++){
+        int64_t t0=starts->J[w],t1;
+        if(__builtin_add_overflow(t0,a[3]->j,&t1))t1=a[3]->j>=0?INT64_MAX:INT64_MIN;
+        int64_t ng=0;
+        for(int64_t key=0;key+1<bounds->n;key++){
+            int wanted=0;for(int64_t j=0;j<basket->n;j++)if(basket->J[j]==key){wanted=1;break;}
+            if(!wanted)continue;
+            int64_t begin=bounds->J[key],end=bounds->J[key+1];
+            int64_t lo=begin+volcurv_lower_bound(tm->J+begin,end-begin,t0);
+            int64_t hi=begin+volcurv_lower_bound(tm->J+begin,end-begin,t1);
+            if(counts->J[hi]-counts->J[lo]>0)ng++;
+        }
+        V *out_sym=v_ivec(ng),*out_avg=v_fvec(ng);int64_t out=0;
+        for(int64_t key=0;key+1<bounds->n;key++){
+            int wanted=0;for(int64_t j=0;j<basket->n;j++)if(basket->J[j]==key){wanted=1;break;}
+            if(!wanted)continue;
+            int64_t begin=bounds->J[key],end=bounds->J[key+1];
+            int64_t lo=begin+volcurv_lower_bound(tm->J+begin,end-begin,t0);
+            int64_t hi=begin+volcurv_lower_bound(tm->J+begin,end-begin,t1);
+            int64_t count=counts->J[hi]-counts->J[lo];
+            if(count>0){out_sym->J[out]=key;out_avg->F[out]=(sums->F[hi]-sums->F[lo])/(double)count;out++;}
+        }
+        V *current=volcurv_result_table(out_sym,out_avg);
+        if(last)v_free(last);last=current;
+    }
+    v_free(basket);v_free(starts);return last;
+}
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
@@ -1026,7 +1142,7 @@ BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
-BI0(bin) BI0(asof_sort) BI0(asof_bin)
+BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(shakti_volcurv_index) BI0(shakti_volcurv_query)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -1047,6 +1163,38 @@ BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine) BI0(sh)
 BI0(re_findall) BI0(re_sub) BI0(re_match) BI0(re_split)
 BI0(json_loads) BI0(json_dumps) BI0(json_load) BI0(json_dump)
 BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(chr) BI0(ord) BI0(hex)
+static V *bi_eval(V **a, int n, Env *e) {
+    Node *prog;
+    V *r;
+    Env *root = e;
+    P(n < 1 || a[0]->t != T_STR, v_err("eval(src)"));
+    /* Bind into the root environment so session state persists across
+     * calls from nested functions (e.g. Studio IPC server handlers). */
+    while (root && root->parent) root = root->parent;
+    if (!root) root = e;
+    g_error = 0;
+    if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+    prog = parse(a[0]->s);
+    if (g_error) {
+        r = g_error_val ? g_error_val : v_err("eval: parse error");
+        g_error_val = NULL;
+        g_error = 0;
+        if (prog) node_free(prog);
+        return r;
+    }
+    if (!prog) return v_err("eval: parse failed");
+    r = eval(prog, root);
+    node_free(prog);
+    if (g_error) {
+        V *er = g_error_val ? g_error_val : v_err("eval: runtime error");
+        g_error_val = NULL;
+        g_error = 0;
+        v_free(r);
+        return er;
+    }
+    if (!r) return v_nil();
+    return r;
+}
 #ifdef SHAKTI_HAVE_TALK
 BI0(talk_listen) BI0(talk_set_locale) BI0(talk_set_model)
 #endif
@@ -1068,7 +1216,9 @@ BI0(synth_looper_rec_on) BI0(synth_looper_play_on) BI0(synth_looper_has_loop)
 BI0(gfx_open) BI0(gfx_close) BI0(gfx_alive) BI0(gfx_available) BI0(gfx_tick) BI0(gfx_sync_keys)
 BI0(gfx_clear) BI0(gfx_fill_rect) BI0(gfx_line) BI0(gfx_fill_circle)
 BI0(gfx_click_pending) BI0(gfx_click_x) BI0(gfx_click_y) BI0(gfx_consume_click)
+BI0(gfx_text) BI0(gfx_text_width) BI0(gfx_copy_rect)
 #endif
+BIE(eval)
 #ifdef SHAKTI_HAVE_IPC
 BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
 BI0(ipc_recv) BI0(ipc_recv_nowait) BI0(ipc_rdma_available) BI0(ipc_send)
@@ -1106,6 +1256,7 @@ static const BiEntry bi_tab[] = {
     {"dict", bi_w_dict},
     {"dot", bi_w_dot},
     {"enumerate", bi_w_enumerate},
+    {"eval", bi_w_eval},
     {"exp", bi_w_exp},
     {"filter", bi_w_filter},
     {"float", bi_w_float},
@@ -1125,11 +1276,14 @@ static const BiEntry bi_tab[] = {
     {"gfx_click_y", bi_w_gfx_click_y},
     {"gfx_close", bi_w_gfx_close},
     {"gfx_consume_click", bi_w_gfx_consume_click},
+    {"gfx_copy_rect", bi_w_gfx_copy_rect},
     {"gfx_fill_circle", bi_w_gfx_fill_circle},
     {"gfx_fill_rect", bi_w_gfx_fill_rect},
     {"gfx_line", bi_w_gfx_line},
     {"gfx_open", bi_w_gfx_open},
     {"gfx_sync_keys", bi_w_gfx_sync_keys},
+    {"gfx_text", bi_w_gfx_text},
+    {"gfx_text_width", bi_w_gfx_text_width},
     {"gfx_tick", bi_w_gfx_tick},
 #endif
     {"graph_add", bi_w_graph_add},
@@ -1227,6 +1381,8 @@ static const BiEntry bi_tab[] = {
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
     {"sh", bi_w_sh},
+    {"shakti_volcurv_index", bi_w_shakti_volcurv_index},
+    {"shakti_volcurv_query", bi_w_shakti_volcurv_query},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
     {"sort", bi_w_sort},
