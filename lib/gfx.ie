@@ -31,6 +31,15 @@ def line(x0, y0, x1, y1, color):
 def fill_circle(cx, cy, r, color):
     gfx_fill_circle(cx, cy, r, color)
 
+def text(x, y, s, color, scale:1):
+    gfx_text(x, y, s, color, scale)
+
+def text_width(s, scale:1):
+    return gfx_text_width(s, scale)
+
+def copy_rect(sx, sy, w, h, dx, dy):
+    gfx_copy_rect(sx, sy, w, h, dx, dy)
+
 def click_pending():
     return gfx_click_pending()
 

@@ -18,6 +18,9 @@ void gfx_clear(uint32_t color);
 void gfx_fill_rect(int x, int y, int w, int h, uint32_t color);
 void gfx_line(int x0, int y0, int x1, int y1, uint32_t color);
 void gfx_fill_circle(int cx, int cy, int r, uint32_t color);
+void gfx_text(int x, int y, const char *s, uint32_t color, int scale);
+int gfx_text_width(const char *s, int scale);
+void gfx_copy_rect(int sx, int sy, int w, int h, int dx, int dy);
 
 int gfx_click_pending(void);
 int gfx_click_x(void);

@@ -18,7 +18,23 @@
 #else
 #include <unistd.h>
 #endif
+#include <sys/stat.h>
 #include <time.h>
+
+/* fopen() may succeed on directories (Linux); reject non-regular files. */
+static FILE *fopen_regular(const char *path, char *err, size_t err_cap) {
+    struct stat sb;
+    FILE *f;
+    if (!path || !path[0]) return NULL;
+    if (stat(path, &sb) != 0) return NULL;
+    if (!S_ISREG(sb.st_mode)) {
+        if (err && err_cap)
+            snprintf(err, err_cap, "not a regular file: %s", path);
+        return NULL;
+    }
+    f = fopen(path, "r");
+    return f;
+}
 
 #ifdef _WIN32
 FILE *win_open_memstream(char **ptr, size_t *sizeloc) {
@@ -3517,30 +3533,43 @@ static V *require_sql(Env *e) {
 static V *do_import(const char *name, Env *e) {
     P(!name || !name[0],v_err("import requires a module name"))
     char path[8192];
+    char open_err[256];
     FILE *f = NULL;
-    f = fopen(name, "r");
-    if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen(path,"r"); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); f=fopen(path,"r"); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,name); f=fopen(path,"r"); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); f=fopen(path,"r"); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,name); f=fopen(path,"r"); }
+    open_err[0] = 0;
+    f = fopen_regular(name, open_err, sizeof open_err);
+    if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,name); f=fopen_regular(path, open_err, sizeof open_err); }
     if(!f) {
         const char *env = getenv("SHAKTI_LIB");
         if(env) {
-            snprintf(path,sizeof(path),"%s/%s",env,name); f=fopen(path,"r");
-            if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",env,name); f=fopen(path,"r"); }
+            snprintf(path,sizeof(path),"%s/%s",env,name); f=fopen_regular(path, open_err, sizeof open_err);
+            if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",env,name); f=fopen_regular(path, open_err, sizeof open_err); }
         }
     }
     if(!f) {
         char dotpath[8192];
+        const char *envlib;
         strncpy(dotpath, name, sizeof(dotpath)-1);
+        dotpath[sizeof(dotpath)-1] = 0;
         for(char *p=dotpath; *p; p++) if(*p=='.') *p='/';
-        if(g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,dotpath); f=fopen(path,"r"); }
-        if(!f) { snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen(path,"r"); }
+        if(g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,dotpath); f=fopen_regular(path, open_err, sizeof open_err); }
+        if(!f) {
+            envlib = getenv("SHAKTI_LIB");
+            if(envlib && envlib[0]) {
+                snprintf(path,sizeof(path),"%s/%s.ie",envlib,dotpath); f=fopen_regular(path, open_err, sizeof open_err);
+            }
+        }
+        if(!f) { snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen_regular(path, open_err, sizeof open_err); }
+        if(!f && g_script_dir[0]) {
+            snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,dotpath); f=fopen_regular(path, open_err, sizeof open_err);
+        }
     }
     P(!f,v_errf("cannot import '%s'", name))
     fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    if(sz < 0) { fclose(f); return v_errf("cannot import '%s': invalid file size", name); }
+    if(sz < 0 || sz > 64 * 1024 * 1024) { fclose(f); return v_errf("cannot import '%s': invalid file size", name); }
     char *buf = malloc((size_t)sz+2);
     if(!buf) { fclose(f); return v_err("import: oom"); }
     size_t got = fread(buf, 1, (size_t)sz, f);
@@ -5398,7 +5427,7 @@ static const char *HL_BIS[] = {
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail",
     "append","pop","keys","values",
-    "load","save","input","repr","clock",
+    "load","save","input","repr","clock","eval",
     "read","write","readlines",
     "listdir","walk","stat",
     "path_join","path_exists","path_isdir","path_isfile",
