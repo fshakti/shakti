@@ -356,6 +356,7 @@ k : ktable(a:1, b:2)
 - `json_loads(s)`, `json_dumps(x)` — JSON subset (no comments or trailing commas)
 - `re_match`, `re_findall`, `re_sub`, `re_split` — POSIX regex on Unix/macOS
 - `argv` — script path plus remaining CLI args (set when running a script file)
+- `eval(src)` — parse and evaluate a Shakti source string in the **root** environment (returns the value, or an error value). Bindings persist across calls, including when `eval` is invoked from nested functions.
 
 ## Tables from files
 
@@ -627,12 +628,15 @@ Module `lib/gfx.ie`.
 | `gfx.fill_rect(x, y, w, h, color)` | Filled rectangle |
 | `gfx.line(x0, y0, x1, y1, color)` | Bresenham line |
 | `gfx.fill_circle(cx, cy, r, color)` | Filled circle |
+| `gfx.text(x, y, s, color[, scale])` | Draw monospace 5×7 ASCII text (`scale` default 1); A–Z and a–z have distinct glyphs |
+| `gfx.text_width(s[, scale])` | Pixel width of one line of text (6×scale per char) |
+| `gfx.copy_rect(sx, sy, w, h, dx, dy)` | Copy a rectangle within the design buffer |
 | `gfx.click_pending()` | `1` when a click is waiting |
 | `gfx.click_x()` | Last click X in design coordinates |
 | `gfx.click_y()` | Last click Y in design coordinates |
 | `gfx.consume_click()` | Clear the pending click |
 
-Colors are packed as `0xRRGGBB`. Clicks are reported in design-buffer coordinates (not raw window pixels).
+Colors are packed as `0xRRGGBB`. Clicks are reported in design-buffer coordinates (not raw window pixels). `gfx.text` covers digits, A–Z, a–z (distinct lowercase), and common punctuation; unknown glyphs draw as a hollow box.
 
 ---
 
