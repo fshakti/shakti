@@ -144,7 +144,10 @@ extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "bin","asof_sort","asof_bin","shakti_volcurv_index","shakti_volcurv_query","sort","reverse","zip","enumerate","map","filter",
+    "bin","asof_sort","asof_bin","shakti_volcurv_index","shakti_volcurv_query",
+    "shakti_stats_index","shakti_stats_agg","shakti_stats_ui",
+    "shakti_vwab","shakti_vwab_index",
+    "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
     "load","save","input","readline","wait","repr","clock","timer",
@@ -848,6 +851,266 @@ static V *bi_shakti_volcurv_query(V**a,in){
     }
     v_free(basket);v_free(starts);return last;
 }
+typedef struct {
+    int64_t sym;
+    int64_t time;
+    double notional;
+    double bsize;
+} VwabRow;
+static int vwab_row_cmp(const void *va,const void *vb){
+    const VwabRow *a=va,*b=vb;
+    if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
+    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
+    return 0;
+}
+/* Load-time VWAB index: [sorted time, notional prefix, bsize prefix,
+ * dense symbol starts]. */
+static V *bi_shakti_vwab_index(V**a,in){
+    P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
+      v_err("shakti_vwab_index(sym_id, time_ns, bid, bsize)"))
+    int64_t rows=a[0]->n;
+    P(a[1]->n!=rows||a[2]->n!=rows||a[3]->n!=rows,
+      v_err("shakti_vwab_index: length mismatch"))
+    VwabRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
+    if(!tmp)return v_err("shakti_vwab_index: allocation failed");
+    for(int64_t i=0;i<rows;i++){
+        double bid,bsize;
+        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
+        if(tmp[i].sym<0||!volcurv_value_at(a[2],i,&bid)||
+           !volcurv_value_at(a[3],i,&bsize)){
+            int bad_sym=tmp[i].sym<0;free(tmp);
+            return v_err(bad_sym?"shakti_vwab_index: sym_id must be nonnegative":
+                         "shakti_vwab_index: bid and bsize must be numeric");
+        }
+        tmp[i].notional=bid*bsize;tmp[i].bsize=bsize;
+    }
+    qsort(tmp,(size_t)rows,sizeof(*tmp),vwab_row_cmp);
+    int64_t max_key=rows?tmp[rows-1].sym:-1;
+    if(max_key>rows){free(tmp);return v_err("shakti_vwab_index: sym_id range is not dense");}
+    V *tm=v_ivec(rows),*notionals=v_fvec(rows+1),*bsizes=v_fvec(rows+1),
+      *bounds=v_ivec(max_key+2);
+    notionals->F[0]=0.0;bsizes->F[0]=0.0;
+    for(int64_t i=0;i<rows;i++){
+        tm->J[i]=tmp[i].time;
+        notionals->F[i+1]=notionals->F[i]+tmp[i].notional;
+        bsizes->F[i+1]=bsizes->F[i]+tmp[i].bsize;
+    }
+    int64_t pos=0;
+    for(int64_t key=0;key<=max_key+1;key++){
+        while(pos<rows&&tmp[pos].sym<key)pos++;
+        bounds->J[key]=pos;
+    }
+    free(tmp);
+    V *r=v_list(4);r->L[0]=tm;r->L[1]=notionals;r->L[2]=bsizes;r->L[3]=bounds;
+    return r;
+}
+static V *bi_shakti_vwab(V**a,in){
+    P(n<4||a[0]->t!=T_LIST||a[0]->n<4,
+      v_err("shakti_vwab(index, basket, t0, t1)"))
+    V *idx=a[0],*tm=idx->L[0],*notionals=idx->L[1],*bsizes=idx->L[2],
+      *bounds=idx->L[3];
+    P(!tm||!notionals||!bsizes||!bounds||tm->t!=T_IVEC||
+      notionals->t!=T_FVEC||bsizes->t!=T_FVEC||bounds->t!=T_IVEC||
+      notionals->n!=tm->n+1||bsizes->n!=tm->n+1||bounds->n<1||
+      bounds->J[0]!=0||bounds->J[bounds->n-1]!=tm->n,
+      v_err("shakti_vwab: invalid index"))
+    for(int64_t i=1;i<bounds->n;i++)
+        P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
+          v_err("shakti_vwab: invalid index"))
+    V *basket=as_ivec_arg(a[1],"basket");
+    if(!basket)return v_err("shakti_vwab: basket must be ivec or list[int]");
+    if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(basket);
+        return v_err("shakti_vwab: t0 and t1 must be int");}
+    if(basket->n==0||a[2]->j>=a[3]->j){v_free(basket);return v_float(0.0);}
+    V *sorted=v_ivec(basket->n);
+    memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
+    v_free(basket);basket=sorted;
+    qsort(basket->J,(size_t)basket->n,sizeof(int64_t),cmp_i64);
+    double num=0.0,den=0.0;int64_t previous=INT64_MIN;
+    for(int64_t j=0;j<basket->n;j++){
+        int64_t key=basket->J[j];
+        if(key==previous)continue;
+        previous=key;
+        if(key<0||key+1>=bounds->n)continue;
+        int64_t begin=bounds->J[key],end=bounds->J[key+1];
+        int64_t lo=begin+volcurv_lower_bound(tm->J+begin,end-begin,a[2]->j);
+        int64_t hi=begin+volcurv_lower_bound(tm->J+begin,end-begin,a[3]->j);
+        if(lo>=hi)continue;
+        num+=notionals->F[hi]-notionals->F[lo];
+        den+=bsizes->F[hi]-bsizes->F[lo];
+    }
+    v_free(basket);
+    return v_float(den==0.0?0.0:num/den);
+}
+typedef struct {
+    int64_t exchange;
+    int64_t time;
+    int64_t sym;
+    double price;
+} StatsRow;
+static int stats_row_cmp(const void *va,const void *vb){
+    const StatsRow *a=va,*b=vb;
+    if(a->exchange<b->exchange)return -1;if(a->exchange>b->exchange)return 1;
+    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
+    return 0;
+}
+static int64_t stats_lower_bound(const int64_t *v,int64_t n,int64_t x){
+    int64_t lo=0,hi=n;
+    while(lo<hi){int64_t mid=lo+(hi-lo)/2;if(v[mid]<x)lo=mid+1;else hi=mid;}
+    return lo;
+}
+static V *stats_empty_agg(int with_sum){
+    V *keys=v_list(with_sum?6:5),*data=v_list(with_sum?6:5);
+    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("count");
+    data->L[0]=v_ivec(0);data->L[1]=v_ivec(0);
+    if(with_sum){
+        keys->L[2]=v_str("sum");keys->L[3]=v_str("min");keys->L[4]=v_str("max");keys->L[5]=v_str("avg");
+        data->L[2]=v_fvec(0);data->L[3]=v_fvec(0);data->L[4]=v_fvec(0);data->L[5]=v_fvec(0);
+    }else{
+        keys->L[2]=v_str("avg");keys->L[3]=v_str("min");keys->L[4]=v_str("max");
+        data->L[2]=v_fvec(0);data->L[3]=v_fvec(0);data->L[4]=v_fvec(0);
+    }
+    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
+}
+static V *stats_agg_range(const int64_t *sym,const double *price,int64_t lo,int64_t hi,int with_sum){
+    if(lo>=hi)return stats_empty_agg(with_sum);
+    int64_t max_sym=-1;
+    for(int64_t i=lo;i<hi;i++){
+        if(sym[i]<0)return v_err("shakti_stats: sym_id must be nonnegative");
+        if(sym[i]>max_sym)max_sym=sym[i];
+    }
+    uint64_t slots64=(uint64_t)max_sym+1;
+    if(slots64>SIZE_MAX/sizeof(int64_t)||slots64>SIZE_MAX/sizeof(double))
+        return v_err("shakti_stats: sym_id range too large");
+    size_t slots=(size_t)slots64;
+    int64_t *cnt=calloc(slots,sizeof(int64_t));
+    double *sum=calloc(slots,sizeof(double));
+    double *mn=malloc(slots*sizeof(double));
+    double *mx=malloc(slots*sizeof(double));
+    unsigned char *seen=calloc(slots,1);
+    if(!cnt||!sum||!mn||!mx||!seen){
+        free(cnt);free(sum);free(mn);free(mx);free(seen);
+        return v_err("shakti_stats: allocation failed");
+    }
+    int64_t ng=0;
+    for(int64_t i=lo;i<hi;i++){
+        int64_t s=sym[i];double p=price[i];
+        if(!seen[s]){seen[s]=1;cnt[s]=1;sum[s]=p;mn[s]=p;mx[s]=p;ng++;}
+        else{
+            cnt[s]++;sum[s]+=p;
+            if(p<mn[s])mn[s]=p;
+            if(p>mx[s])mx[s]=p;
+        }
+    }
+    V *out_sym=v_ivec(ng),*out_cnt=v_ivec(ng);
+    V *out_sum=with_sum?v_fvec(ng):NULL,*out_avg=v_fvec(ng),*out_min=v_fvec(ng),*out_max=v_fvec(ng);
+    int64_t out=0;
+    for(size_t s=0;s<slots;s++)if(seen[s]){
+        out_sym->J[out]=(int64_t)s;out_cnt->J[out]=cnt[s];
+        out_avg->F[out]=sum[s]/(double)cnt[s];out_min->F[out]=mn[s];out_max->F[out]=mx[s];
+        if(with_sum)out_sum->F[out]=sum[s];
+        out++;
+    }
+    free(cnt);free(sum);free(mn);free(mx);free(seen);
+    V *keys=v_list(with_sum?6:5),*data=v_list(with_sum?6:5);
+    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("count");
+    data->L[0]=out_sym;data->L[1]=out_cnt;
+    if(with_sum){
+        keys->L[2]=v_str("sum");keys->L[3]=v_str("min");keys->L[4]=v_str("max");keys->L[5]=v_str("avg");
+        data->L[2]=out_sum;data->L[3]=out_min;data->L[4]=out_max;data->L[5]=out_avg;
+    }else{
+        keys->L[2]=v_str("avg");keys->L[3]=v_str("min");keys->L[4]=v_str("max");
+        data->L[2]=out_avg;data->L[3]=out_min;data->L[4]=out_max;
+    }
+    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
+}
+/* Load-time STATS index: [sorted time, sym, price, dense exchange starts]. */
+static V *bi_shakti_stats_index(V**a,in){
+    P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC||a[2]->t!=T_IVEC,
+      v_err("shakti_stats_index(exchange, time_ns, sym_id, price)"))
+    int64_t rows=a[0]->n;
+    P(a[1]->n!=rows||a[2]->n!=rows||a[3]->n!=rows,v_err("shakti_stats_index: length mismatch"))
+    StatsRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
+    if(!tmp)return v_err("shakti_stats_index: allocation failed");
+    for(int64_t i=0;i<rows;i++){
+        tmp[i].exchange=a[0]->J[i];tmp[i].time=a[1]->J[i];tmp[i].sym=a[2]->J[i];
+        if(tmp[i].exchange<0||tmp[i].sym<0||!volcurv_value_at(a[3],i,&tmp[i].price)){
+            int bad_ex=tmp[i].exchange<0,bad_sym=tmp[i].sym<0;free(tmp);
+            return v_err(bad_ex?"shakti_stats_index: exchange must be nonnegative":
+                         bad_sym?"shakti_stats_index: sym_id must be nonnegative":
+                         "shakti_stats_index: price must be numeric");
+        }
+    }
+    qsort(tmp,(size_t)rows,sizeof(*tmp),stats_row_cmp);
+    int64_t max_ex=rows?tmp[rows-1].exchange:-1;
+    if(max_ex>rows){free(tmp);return v_err("shakti_stats_index: exchange range is not dense");}
+    V *tm=v_ivec(rows),*sym=v_ivec(rows),*price=v_fvec(rows),*starts=v_ivec(max_ex+2);
+    for(int64_t i=0;i<rows;i++){
+        tm->J[i]=tmp[i].time;sym->J[i]=tmp[i].sym;price->F[i]=tmp[i].price;
+    }
+    int64_t pos=0;
+    for(int64_t key=0;key<=max_ex+1;key++){
+        while(pos<rows&&tmp[pos].exchange<key)pos++;
+        starts->J[key]=pos;
+    }
+    free(tmp);
+    V *r=v_list(4);r->L[0]=tm;r->L[1]=sym;r->L[2]=price;r->L[3]=starts;
+    return r;
+}
+static int stats_unpack_index(V *idx,V **tm,V **sym,V **price,V **starts,const char *ctx){
+    if(!idx||idx->t!=T_LIST||idx->n<4)return 0;
+    *tm=idx->L[0];*sym=idx->L[1];*price=idx->L[2];*starts=idx->L[3];
+    if(!*tm||!*sym||!*price||!*starts)return 0;
+    if((*tm)->t!=T_IVEC||(*sym)->t!=T_IVEC||(*price)->t!=T_FVEC||(*starts)->t!=T_IVEC)return 0;
+    if((*tm)->n!=(*sym)->n||(*tm)->n!=(*price)->n||(*starts)->n<1)return 0;
+    int64_t prev=0;
+    for(int64_t i=0;i<(*starts)->n;i++){
+        int64_t x=(*starts)->J[i];
+        if(x<prev||x>(*tm)->n)return 0;
+        prev=x;
+    }
+    if((*starts)->J[(*starts)->n-1]!=(*tm)->n)return 0;
+    (void)ctx;return 1;
+}
+static V *bi_shakti_stats_agg(V**a,in){
+    P(n<4,v_err("shakti_stats_agg(index, exchange_id, t0, t1)"))
+    V *tm,*sym,*price,*starts;
+    P(!stats_unpack_index(a[0],&tm,&sym,&price,&starts,"shakti_stats_agg"),
+      v_err("shakti_stats_agg: invalid index"))
+    P(a[1]->t!=T_INT||a[2]->t!=T_INT||a[3]->t!=T_INT,v_err("shakti_stats_agg: exchange/t0/t1 must be int"))
+    int64_t ex=a[1]->j,t0=a[2]->j,t1=a[3]->j;
+    if(ex<0||ex+1>=starts->n)return stats_empty_agg(1);
+    int64_t begin=starts->J[ex],end=starts->J[ex+1];
+    int64_t lo=begin+stats_lower_bound(tm->J+begin,end-begin,t0);
+    int64_t hi=begin+stats_lower_bound(tm->J+begin,end-begin,t1);
+    return stats_agg_range(sym->J,price->F,lo,hi,1);
+}
+static V *bi_shakti_stats_ui(V**a,in){
+    P(n<5,v_err("shakti_stats_ui(index, exchange_id, t0, t1, minute_ns)"))
+    V *tm,*sym,*price,*starts;
+    P(!stats_unpack_index(a[0],&tm,&sym,&price,&starts,"shakti_stats_ui"),
+      v_err("shakti_stats_ui: invalid index"))
+    P(a[1]->t!=T_INT||a[2]->t!=T_INT||a[3]->t!=T_INT||a[4]->t!=T_INT,
+      v_err("shakti_stats_ui: exchange/t0/t1/minute_ns must be int"))
+    int64_t ex=a[1]->j,t0=a[2]->j,t1=a[3]->j,minute=a[4]->j;
+    P(minute<=0,v_err("shakti_stats_ui: minute_ns must be positive"))
+    if(ex<0||ex+1>=starts->n)return stats_empty_agg(0);
+    int64_t begin=starts->J[ex],end=starts->J[ex+1];
+    V *last=NULL;
+    for(int64_t t=t0;t<t1;){
+        int64_t te;
+        if(__builtin_add_overflow(t,minute,&te))te=INT64_MAX;
+        if(te>t1)te=t1;
+        int64_t lo=begin+stats_lower_bound(tm->J+begin,end-begin,t);
+        int64_t hi=begin+stats_lower_bound(tm->J+begin,end-begin,te);
+        V *current=stats_agg_range(sym->J,price->F,lo,hi,0);
+        if(current->t==T_ERR){if(last)v_free(last);return current;}
+        if(last)v_free(last);last=current;
+        if(te<=t)break;
+        t=te;
+    }
+    return last?last:stats_empty_agg(0);
+}
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
@@ -1143,6 +1406,8 @@ BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
 BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(shakti_volcurv_index) BI0(shakti_volcurv_query)
+BI0(shakti_stats_index) BI0(shakti_stats_agg) BI0(shakti_stats_ui)
+BI0(shakti_vwab) BI0(shakti_vwab_index)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -1381,8 +1646,13 @@ static const BiEntry bi_tab[] = {
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
     {"sh", bi_w_sh},
+    {"shakti_stats_agg", bi_w_shakti_stats_agg},
+    {"shakti_stats_index", bi_w_shakti_stats_index},
+    {"shakti_stats_ui", bi_w_shakti_stats_ui},
     {"shakti_volcurv_index", bi_w_shakti_volcurv_index},
     {"shakti_volcurv_query", bi_w_shakti_volcurv_query},
+    {"shakti_vwab", bi_w_shakti_vwab},
+    {"shakti_vwab_index", bi_w_shakti_vwab_index},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
     {"sort", bi_w_sort},
