@@ -47,6 +47,8 @@ export SHAKTI_LIB=$PWD/lib
 
 Converters: [`s2p.ie`](s2p.ie) (Python), [`cs2s.ie`](cs2s.ie) (C#), [`j2s.ie`](j2s.ie) (Java).  
 More detail: [doc.md](doc.md). Examples: [example.ie](example.ie), [example.py](example.py), [example.cs](example.cs), [example.java](example.java).
+The C# and Java converters reject unterminated strings and `/* ... */` block
+comments with source-line diagnostics instead of emitting partial programs.
 
 Optional GUI pixel window: `import gfx` — see [gfx module](doc.md#gfx-module).
 
