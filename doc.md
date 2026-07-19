@@ -182,7 +182,9 @@ format specs in interpolations, bitwise ops, unary `+`, prefix `++`/`--`,
 generics beyond ignored type arguments on declarations/calls, and arbitrary
 .NET library APIs outside the mapped `Console`/`Np`/`Pd` surface.
 
-`//` comments become `#` comments.
+`//` comments become `#` comments; closed `/* ... */` block comments are
+discarded. An unterminated block comment exits nonzero with the opening
+`line:col` and does not emit or execute a partial program.
 
 ---
 
@@ -242,7 +244,9 @@ multi-argument/block lambdas, sized arrays `new T[n]`, bitwise ops, unary `+`,
 prefix `++`/`--`, generics beyond ignored type arguments, and arbitrary JDK
 APIs outside the mapped `System.out` / `Math` / `List.of` / `Map.of` surface.
 
-`//` comments become `#` comments.
+`//` comments become `#` comments; closed `/* ... */` block comments are
+discarded. An unterminated block comment exits nonzero with the opening
+`line:col` and does not emit or execute a partial program.
 
 ---
 

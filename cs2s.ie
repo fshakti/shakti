@@ -146,12 +146,15 @@ def lex(source):
             i : j
             continue
         if c = "/" and i + 1 < n and source[i + 1] = "*":
+            start_ln : ln
             j : i + 2
             while j + 1 < n and not (source[j] = "*" and source[j + 1] = "/"):
                 if source[j] = "\n":
                     ln += 1
                     line_start : j + 1
                 j += 1
+            if not (j + 1 < n and source[j] = "*" and source[j + 1] = "/"):
+                raise str(start_ln) + ":" + str(col) + ": unterminated block comment"
             i : j + 2
             continue
         line_has_code : True
