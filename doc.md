@@ -21,14 +21,14 @@
 
 # Examples index
 
-Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally.
+Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally (that tree is workspace-local / not always published).
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
 ./shakti example.ie  # section: <name>.ie
 ```
 
-Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`.
+Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`. Full game (local): `examples/infinibattle/` — `make gfx-build && make test && make bench && make duel` (see that directory’s README).
 
 ## By module
 
@@ -43,6 +43,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/gfx_demo.ie`) |
 | `import gfx` | `examples/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
 | `import gfx` | `examples/gfx_movie.ie` | Animated redraw demo (standalone) |
+| `import gfx` + `input` | `examples/infinibattle/` | Infinibattle Omega — craft weapons, armory JSON, duel AI (local) |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
@@ -610,6 +611,7 @@ else:
 | `gfx_demo.ie` | Minimal open/draw/click loop ([`example.ie`](example.ie) section; also `examples/gfx_demo.ie`) |
 | `examples/gfx_demo_timed.ie` | Reports open/draw/tick timing |
 | `examples/gfx_movie.ie` | Animated redraw stress demo |
+| `examples/infinibattle/` | Infinibattle Omega (craft / armory / duel); local-only — `make gfx-build && make test && make bench && make duel` |
 | `tests/gfx_api.ie` | Smoke test for API and reopen/close behavior |
 
 ## API
