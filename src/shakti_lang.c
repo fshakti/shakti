@@ -10,6 +10,7 @@
 #define SHAKTI_PKG_VERSION "0.10.0"
 #endif
 #include "shakti_s2p_embed.h"
+#include "shakti_c2s_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
@@ -5881,19 +5882,30 @@ static char *read_file(const char *path) {
     fclose(f);
     return buf;
 }
-static int shakti_path_is_python(const char *path) {
-    size_t n;
-    if (!path) return 0;
+static int shakti_path_has_ext(const char *path, const char *ext) {
+    size_t n, e;
+    if (!path || !ext) return 0;
     n = strlen(path);
-    return n >= 3 && path[n - 3] == '.' && path[n - 2] == 'p' && path[n - 1] == 'y';
+    e = strlen(ext);
+    return n >= e && !strcmp(path + (n - e), ext);
 }
-/* Load the embedded s2p converter and transpile Python subset source to Shakti.
- * Returns a malloc'd Shakti source string, or NULL after printing an Error: line. */
-static char *shakti_transpile_python(const char *py_src, const char *filename, Env *global) {
-    V *mod = env_get(global, "__shakti_s2p__");
+static int shakti_path_is_python(const char *path) {
+    return shakti_path_has_ext(path, ".py");
+}
+static int shakti_path_is_c(const char *path) {
+    return shakti_path_has_ext(path, ".c");
+}
+/* Load an embedded converter module (cached on `global` under `cache_key`) and
+ * transpile a language-subset source to Shakti. `label` names the converter for
+ * error messages. Returns a malloc'd Shakti source string, or NULL after
+ * printing an Error: line. */
+static char *shakti_transpile_embedded(const char *src_text, const char *filename,
+                                       Env *global, const char *converter_source,
+                                       const char *cache_key, const char *label) {
+    V *mod = env_get(global, cache_key);
     if (!mod || mod->t != T_DICT) {
         Env *mod_env = env_new(global);
-        Node *prog = parse(shakti_s2p_source);
+        Node *prog = parse(converter_source);
         V *er = eval(prog, mod_env);
         int load_err = g_error || (er && er->t == T_ERR);
         if (load_err) {
@@ -5903,7 +5915,7 @@ static char *shakti_transpile_python(const char *py_src, const char *filename, E
             } else if (er && er->t == T_ERR)
                 fprintf(stderr, "Error: %s\n", er->s);
             else
-                fprintf(stderr, "Error: failed to load embedded s2p converter\n");
+                fprintf(stderr, "Error: failed to load embedded %s converter\n", label);
             v_free(er);
             env_free(mod_env);
             return NULL;
@@ -5919,25 +5931,25 @@ static char *shakti_transpile_python(const char *py_src, const char *filename, E
         v_free(mk); v_free(mv);
         /* Keep the module on the global env so function closures stay alive,
          * matching do_import lifetime semantics. */
-        env_set(global, "__shakti_s2p__", mod_dict);
+        env_set(global, cache_key, mod_dict);
         v_free(mod_dict);
         env_free(mod_env);
-        mod = env_get(global, "__shakti_s2p__");
+        mod = env_get(global, cache_key);
     }
     if (!mod || mod->t != T_DICT) {
-        fprintf(stderr, "Error: embedded s2p module missing\n");
+        fprintf(stderr, "Error: embedded %s module missing\n", label);
         return NULL;
     }
 
     V *fn = v_dict_get(mod, "transpile");
     if (!fn || fn->t != T_FN) {
-        fprintf(stderr, "Error: embedded s2p.transpile not found\n");
+        fprintf(stderr, "Error: embedded %s.transpile not found\n", label);
         return NULL;
     }
     fn = v_ref(fn);
 
     V *al = v_list(2);
-    al->L[0] = v_str(py_src);
+    al->L[0] = v_str(src_text);
     al->L[1] = v_str(filename);
     if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
     g_error = 0;
@@ -5959,6 +5971,14 @@ static char *shakti_transpile_python(const char *py_src, const char *filename, E
     }
     v_free(out);
     return ie;
+}
+static char *shakti_transpile_python(const char *py_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(py_src, filename, global, shakti_s2p_source,
+                                     "__shakti_s2p__", "s2p");
+}
+static char *shakti_transpile_c(const char *c_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(c_src, filename, global, shakti_c2s_source,
+                                     "__shakti_c2s__", "c2s");
 }
 #ifndef SHAKTI_NO_MAIN
 int shakti_lang_main(int argc, char **argv) {
@@ -6071,6 +6091,11 @@ int shakti_lang_main(int argc, char **argv) {
         P(!src,1)
         if (shakti_path_is_python(argv[i])) {
             char *ie = shakti_transpile_python(src, argv[i], global);
+            free(src);
+            if (!ie) { env_free(global); return 1; }
+            src = ie;
+        } else if (shakti_path_is_c(argv[i])) {
+            char *ie = shakti_transpile_c(src, argv[i], global);
             free(src);
             if (!ie) { env_free(global); return 1; }
             src = ie;
