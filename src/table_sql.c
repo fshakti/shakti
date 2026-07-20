@@ -710,9 +710,13 @@ static void dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *di
                            int *s_nrows, int *s_name_row, V *tbl, const int *name_idx, int nspecs,
                            int nactive, ColSpec *specs, int n_agg, const int *agg_sp,
                            double **s_sum, double **s_minv, double **s_maxv, int **s_have_mm) {
+    tab->nslots = 0;
+    tab->slots = NULL;
+    tab->map = NULL;
+    if (nby <= 0 || nby > 32 || nactive <= 0 || !dims) return;
     tab->nslots = nactive;
     tab->slots = malloc((size_t)nactive * sizeof(GhSlot));
-    tab->map = NULL;
+    if (!tab->slots) { tab->nslots = 0; return; }
     int aidx = 0;
     for (int i = 0; i < slots_cap; i++) {
         if (s_nrows[i] <= 0) continue;
@@ -725,8 +729,13 @@ static void dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *di
         s->by_cell = calloc((size_t)nby, sizeof(V *));
         int64_t flat = i;
         for (int b = nby - 1; b >= 0; b--) {
-            s->iparts[b] = flat % dims[b];
-            flat /= dims[b];
+            if (dims[b] <= 0) {
+                s->iparts[b] = 0;
+                flat = 0;
+            } else {
+                s->iparts[b] = flat % dims[b];
+                flat /= dims[b];
+            }
             s->by_cell[b] = v_int(s->iparts[b]);
         }
         for (int sp = 0; sp < nspecs; sp++) {
@@ -846,7 +855,7 @@ static void run_reduce_into_slot(GhSlot *s, V **bcols, int nby, int64_t *idx, in
 static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int nspecs,
                                 GhTab *tab, const unsigned char *MB) {
     int64_t nr = tbl->n;
-    if (nr <= 0) return 0;
+    if (nr <= 0 || nby <= 0 || nby > 32) return 0;
     int64_t mins[32], maxs[32], dims[32];
     for (int b = 0; b < nby; b++) {
         mins[b] = INT64_MAX;

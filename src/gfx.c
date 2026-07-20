@@ -191,6 +191,7 @@ void gfx_fill_rect(int x, int y, int w, int h, uint32_t color) {
 }
 
 void gfx_line(int x0, int y0, int x1, int y1, uint32_t color) {
+    if (!g.fb) return;
     int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy, e2;

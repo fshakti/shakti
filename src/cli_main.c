@@ -14,7 +14,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.10.0"
+#define SHAKTI_PKG_VERSION "0.10.1"
 #endif
 extern int shakti_lang_main(int argc, char **argv);
 static void shakti_print_banner(void) {
@@ -29,13 +29,15 @@ static int shakti_flag_is(const char *arg, const char *name, const char *short_n
 }
 static int shakti_parent_is_self(void) {
 #if defined(__linux__)
-    char self[4096], parent[4096], ppath[64];
-    ssize_t slen = readlink("/proc/self/exe", self, sizeof(self) - 1);
+    /* realpath() NUL-terminates and avoids the Level-5 readlink TOCTOU hit. */
+    char *self = realpath("/proc/self/exe", NULL);
+    char ppath[64];
     snprintf(ppath, sizeof(ppath), "/proc/%d/exe", (int)getppid());
-    ssize_t plen = readlink(ppath, parent, sizeof(parent) - 1);
-    if (slen <= 0 || plen <= 0) return 0;
-    self[slen] = parent[plen] = 0;
-    return !strcmp(self, parent);
+    char *parent = realpath(ppath, NULL);
+    int same = (self && parent && !strcmp(self, parent));
+    free(self);
+    free(parent);
+    return same;
 #elif defined(__APPLE__)
     char self[4096], parent[4096];
     uint32_t sz = (uint32_t)sizeof(self);
