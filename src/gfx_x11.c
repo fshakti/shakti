@@ -52,11 +52,11 @@ static void gfx_x11_blit(void) {
 int gfx_platform_init(const char *title, char *err, size_t cap) {
     XSetWindowAttributes swa;
     Atom wm_delete;
-  (void)title;
-    memset(&g, 0, sizeof g);
+    (void)title;
+    if (g.dpy || g.img) gfx_platform_shutdown();
     g.dpy = XOpenDisplay(NULL);
     if (!g.dpy) {
-        snprintf(err, cap, "gfx_open: cannot open X display");
+        if (err && cap) snprintf(err, cap, "gfx_open: cannot open X display");
         return -1;
     }
     g.scr = DefaultScreen(g.dpy);
@@ -69,19 +69,22 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
                      ButtonReleaseMask | StructureNotifyMask;
     XSelectInput(g.dpy, g.win, swa.event_mask);
     if (gfx_core_fb_resize(1920, 1080) != 0) {
-        snprintf(err, cap, "gfx_open: framebuffer init failed");
+        if (err && cap) snprintf(err, cap, "gfx_open: framebuffer init failed");
+        gfx_platform_shutdown();
         return -1;
     }
     g.img = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, NULL, 1920, 1080, 32, 0);
     if (!g.img) {
-        snprintf(err, cap, "gfx_open: XCreateImage failed");
+        if (err && cap) snprintf(err, cap, "gfx_open: XCreateImage failed");
+        gfx_platform_shutdown();
         return -1;
     }
     g.img->data = (char *)malloc((size_t)g.img->bytes_per_line * (size_t)g.img->height);
     if (!g.img->data) {
         XDestroyImage(g.img);
         g.img = NULL;
-        snprintf(err, cap, "gfx_open: out of memory");
+        if (err && cap) snprintf(err, cap, "gfx_open: out of memory");
+        gfx_platform_shutdown();
         return -1;
     }
     XMapWindow(g.dpy, g.win);
@@ -92,10 +95,23 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
 }
 
 void gfx_platform_shutdown(void) {
-    if (g.dpy && g.win) XDestroyWindow(g.dpy, g.win);
-    if (g.gc && g.dpy) XFreeGC(g.dpy, g.gc);
-    if (g.img) XDestroyImage(g.img);
-    if (g.dpy) XCloseDisplay(g.dpy);
+    /* XDestroyImage frees img->data — never free(data) beforehand (issue #2). */
+    if (g.img) {
+        XDestroyImage(g.img);
+        g.img = NULL;
+    }
+    if (g.dpy && g.gc) {
+        XFreeGC(g.dpy, g.gc);
+        g.gc = NULL;
+    }
+    if (g.dpy && g.win) {
+        XDestroyWindow(g.dpy, g.win);
+        g.win = None;
+    }
+    if (g.dpy) {
+        XCloseDisplay(g.dpy);
+        g.dpy = NULL;
+    }
     memset(&g, 0, sizeof g);
 }
 
