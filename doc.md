@@ -4,6 +4,7 @@
 
 - [Examples index](#examples-index)
 - [Syntax and builtins](#syntax-and-builtins)
+- [Time-series indexes](#time-series-indexes)
 - [Decorators](#decorators)
 - [Each (`@`)](#each)
 - [Python 3 → Shakti converter](#python-3-shakti-converter)
@@ -90,6 +91,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `ipc` | [IPC module](#ipc-module) |
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
+| Time-series indexes | [time-series indexes](#time-series-indexes) |
 
 ## Tests and benchmarks (local tree)
 
@@ -104,6 +106,8 @@ SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
 ```
 
 Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`.
+
+Index tests (local): `tests/native_vwbid.ie`, `tests/native_winavg.ie`, `tests/native_stats.ie`.
 
 ---
 
@@ -305,6 +309,7 @@ print(sum(a * b))      # same math; allocates a * b first
 
 Large vector operations use OpenMP. `make prod-speed` enables native SIMD.
 With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
+For windowed VWAP / averages over many symbols, see [time-series indexes](#time-series-indexes).
 
 ## Matrices
 
@@ -458,6 +463,8 @@ delete from u where id = 2
 
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Join (`t1 join t2 on col`) is not yet implemented.
 
+For high-throughput windowed VWAP / averages / exchange stats over dense symbol ids, prefer the [time-series indexes](#time-series-indexes) instead of a full SQL scan.
+
 ## Modules
 
 | Module | Doc | Example |
@@ -472,6 +479,63 @@ delete from u where id = 2
 | `rest` | [REST module](#rest-module) | `rest_demo.ie` |
 
 Index: [examples index](#examples-index).
+
+---
+
+# Time-series indexes
+
+Core builtins (no `import`) for load-time prefix / sorted indexes over columnar `ivec` / `fvec` quote and trade data. Build the index **once** outside the timed query path; query with binary search over half-open `[t0, t1)` windows.
+
+Symbol / exchange ids must be dense nonnegative integers (`max_id ≤ row count`). Windows are half-open: include `t0`, exclude `t1`.
+
+## Volume-weighted bid (`shakti_vwbid*`)
+
+Basket VWAP of bid × size over a time window:
+
+```ie
+idx : shakti_vwbid_index(quote.sym_id, quote.time_ns, quote.bid, quote.bsize)
+vwap : shakti_vwbid(idx, basket, t0, t1)   # Σ(bid·bsize) / Σ(bsize); 0 if den=0
+```
+
+| Builtin | Role |
+|---------|------|
+| `shakti_vwbid_index(sym_id, time_ns, bid, bsize)` | Sort by `(sym, time)`; return `[time, notional_prefix, bsize_prefix, bounds]` |
+| `shakti_vwbid(index, basket, t0, t1)` | Scalar VWAP for symbols in `basket` over `[t0, t1)` |
+
+`bid` / `bsize` may be `fvec` or other numeric columns. The query does not reorder the caller’s basket. Prefer a pre-sorted basket to skip an internal sort.
+
+## Windowed average (`shakti_winavg*`)
+
+Per-symbol average of a numeric column over one or more windows (returns the **last** window’s grouped table):
+
+| Builtin | Role |
+|---------|------|
+| `shakti_winavg_index(sym_id, time_ns, size)` | Dense symbol starts + prefix sums/counts |
+| `shakti_winavg_query(index, basket, starts, window_ns)` | For each start in `starts`, average over `[start, start+window_ns)` |
+
+Result columns: `sym_id`, `avg_size`.
+
+## Exchange stats (`shakti_stats*`)
+
+Trade aggregates by symbol for one exchange id:
+
+| Builtin | Role |
+|---------|------|
+| `shakti_stats_index(exchange, time_ns, sym_id, price)` | Sort by `(exchange, time)` |
+| `shakti_stats_agg(index, exchange_id, t0, t1)` | `count` / `sum` / `min` / `max` / `avg` by `sym_id` |
+| `shakti_stats_ui(index, exchange_id, t0, t1, minute_ns)` | Minute-bucket pass; returns the last minute’s table (no sum column) |
+
+## Asof join helpers
+
+| Builtin | Role |
+|---------|------|
+| `asof_sort(eq, time)` | Sort paired `ivec`s by `(eq, time)` → `[eq_sorted, time_sorted]` |
+| `asof_bin(eq, time, query_eq, query_time)` | Per query row, last index with matching `eq` and `time ≤ query_time` (`-1` if none) |
+
+## See also
+
+- [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where` (slower for full-table VWAP scans)
+- Local tests: `tests/native_vwbid.ie`, `tests/native_winavg.ie`, `tests/native_stats.ie`
 
 ---
 
