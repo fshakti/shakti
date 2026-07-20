@@ -31,6 +31,29 @@ CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wn
 	-I$(BUILD) -Isrc \
 	$(OMP_CFLAGS)
 
+# Optional JNI headers for src/shakti_jni.c (Homebrew OpenJDK or JAVA_HOME).
+JNI_CFLAGS :=
+ifeq ($(JAVA_HOME),)
+  ifneq ($(wildcard /opt/homebrew/opt/openjdk@17/include/jni.h),)
+    JAVA_HOME := /opt/homebrew/opt/openjdk@17
+  else ifneq ($(wildcard /opt/homebrew/opt/openjdk/include/jni.h),)
+    JAVA_HOME := /opt/homebrew/opt/openjdk
+  else ifneq ($(wildcard /usr/local/opt/openjdk/include/jni.h),)
+    JAVA_HOME := /usr/local/opt/openjdk
+  endif
+endif
+ifneq ($(JAVA_HOME),)
+  ifneq ($(wildcard $(JAVA_HOME)/include/jni.h),)
+    JNI_CFLAGS += -I$(JAVA_HOME)/include
+    ifneq ($(wildcard $(JAVA_HOME)/include/darwin),)
+      JNI_CFLAGS += -I$(JAVA_HOME)/include/darwin
+    endif
+    ifneq ($(wildcard $(JAVA_HOME)/include/linux),)
+      JNI_CFLAGS += -I$(JAVA_HOME)/include/linux
+    endif
+  endif
+endif
+
 # -Wno-alloc-size-larger-than is a GCC-only flag; clang rejects it as "unknown
 # warning option", so only pass it when the compiler is not clang.
 ifeq ($(findstring clang,$(shell $(CC) --version 2>/dev/null)),)
@@ -206,11 +229,27 @@ shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/a.h $(LANG_STANDALO
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
+SHAKTI_TESTS := $(wildcard tests/*.ie)
+
+ifneq ($(SHAKTI_TESTS),)
+test: shakti
+	@for f in $(SHAKTI_TESTS); do \
+	  echo "Running $$f..."; case "$$f" in \
+	    *synth*|*mac_synth*) SHAKTI_SYNTH_HEADLESS=1 SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti "$$f" || exit 1 ;; \
+	    *) SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti "$$f" || exit 1 ;; \
+	  esac; \
+	done
+	@if [ -x tests/exe_realpath.sh ]; then bash tests/exe_realpath.sh || exit 1; fi
+	@if [ -x tests/build_guards.sh ]; then bash tests/build_guards.sh || exit 1; fi
+endif
+
+test-parse: shakti
+	@bash scripts/parse_golden.sh
 
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
+	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o shakti_jni.o *.tmp *.plist
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
-	rm -rf build/ shakti/ *.dSYM shakti.zip
+	rm -rf build/ shakti/ *.dSYM shakti.zip $(BUILD)/analyze
 
 PROD_RELEASE_CFLAGS := -fstack-protector-strong
 
@@ -281,4 +320,11 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps
+.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse
+
+# Optional JNI bridge (not linked into the CLI). Requires JAVA_HOME or Homebrew OpenJDK.
+shakti_jni.o: src/shakti_jni.c src/a.h
+	@if [ -z "$(JNI_CFLAGS)" ]; then \
+	  echo "error: jni.h not found — set JAVA_HOME or install openjdk" >&2; exit 1; \
+	fi
+	$(CC) $(CFLAGS) $(JNI_CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/shakti_jni.c

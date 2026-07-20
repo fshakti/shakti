@@ -7,7 +7,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.10.0"
+#define SHAKTI_PKG_VERSION "0.10.1"
 #endif
 #include "shakti_s2p_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -1242,9 +1242,13 @@ static int lex_peek_is_signed_literal(Lexer *l) {
         lex_peek(l);
     if (l->peek.type != T_MINUS_)
         return 0;
-    /* Tight signed literal only: "-2" / "- 2" is NOT a literal for
-     * juxtaposition or numeric vectors. That keeps `abs -1.2` and
-     * `1 -2 3` as jux/vector forms while letting `x - 1` be subtraction. */
+    /* k/q signed-literal convention: whitespace before the '-', none after,
+     * digit immediately following. That keeps `abs -1.2` and `1 -2 3` as
+     * jux/vector forms while letting both `x - 1` and `x-1` be subtraction. */
+    if (l->pos >= 2) {
+        char prev = l->src[l->pos - 2];
+        if (prev != ' ' && prev != '\t') return 0;
+    }
     return lex_src_is_digit_start(l, l->pos);
 }
 
@@ -3870,10 +3874,18 @@ static V *each_empty_mat_like(V *v) {
     return v_imat(v->n, cols);
 }
 static V *each_pack_mat(V **items, int64_t rows, int64_t cols) {
+    if (!items || rows <= 0 || cols <= 0) return v_imat(rows > 0 ? rows : 0, cols > 0 ? cols : 0);
+    if (cols > 0 && rows > INT64_MAX / cols) return v_err("each: matrix too large");
     int64_t n = rows * cols;
-    if (n == 0) return v_imat(rows, cols);
+    if (n <= 0) return v_imat(rows, cols);
     int all_int = 1, all_num = 1, all_bool = 1;
     for (int64_t i = 0; i < n; i++) {
+        if (!items[i]) {
+            for (int64_t j = 0; j < n; j++) {
+                if (items[j]) { v_free(items[j]); items[j] = NULL; }
+            }
+            return v_err("each: null matrix element");
+        }
         if (items[i]->t != T_INT) all_int = 0;
         if (items[i]->t != T_INT && items[i]->t != T_FLOAT) all_num = 0;
         if (items[i]->t != T_BOOL) all_bool = 0;
@@ -3961,7 +3973,7 @@ static V *each_unary(V *fn, V *xs, Env *e) {
     }
     if (is_mat_t(xs->t)) {
         int64_t rows = xs->n, cols = mat_cols(xs), n = rows * cols;
-        if (n == 0) return each_empty_mat_like(xs);
+        if (rows <= 0 || cols <= 0 || n <= 0) return each_empty_mat_like(xs);
         V **items = calloc((size_t)n, sizeof(V*));
         if (!items) return v_err("out of memory");
         for (int64_t r = 0; r < rows; r++) for (int64_t c = 0; c < cols; c++) {
@@ -4067,8 +4079,8 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
         }
         if (is_mat_t(xs->t)) {
             int64_t rows = xs->n, cols = mat_cols(xs), n = rows * cols;
-            if (n == 0) return each_empty_mat_like(xs);
-            V **items = calloc(n ? (size_t)n : 1, sizeof(V*));
+            if (rows <= 0 || cols <= 0 || n <= 0) return each_empty_mat_like(xs);
+            V **items = calloc((size_t)n, sizeof(V*));
             if (!items) return v_err("out of memory");
             for (int64_t r = 0; r < rows; r++) for (int64_t c = 0; c < cols; c++) {
                 int64_t i = r * cols + c;
@@ -4151,8 +4163,8 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
         }
         if (is_mat_t(ys->t)) {
             int64_t rows = ys->n, cols = mat_cols(ys), n = rows * cols;
-            if (n == 0) return each_empty_mat_like(ys);
-            V **items = calloc(n ? (size_t)n : 1, sizeof(V*));
+            if (rows <= 0 || cols <= 0 || n <= 0) return each_empty_mat_like(ys);
+            V **items = calloc((size_t)n, sizeof(V*));
             if (!items) return v_err("out of memory");
             for (int64_t r = 0; r < rows; r++) for (int64_t c = 0; c < cols; c++) {
                 int64_t i = r * cols + c;
@@ -4238,8 +4250,8 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
         if (xs->n != ys->n || mat_cols(xs) != mat_cols(ys))
             return v_err("each: matrix shape mismatch");
         int64_t rows = xs->n, cols = mat_cols(xs), n = rows * cols;
-        if (n == 0) return each_empty_mat_like(xs);
-        V **items = calloc(n ? (size_t)n : 1, sizeof(V*));
+        if (rows <= 0 || cols <= 0 || n <= 0) return each_empty_mat_like(xs);
+        V **items = calloc((size_t)n, sizeof(V*));
         if (!items) return v_err("out of memory");
         for (int64_t r = 0; r < rows; r++) for (int64_t c = 0; c < cols; c++) {
             int64_t i = r * cols + c;
@@ -5658,17 +5670,17 @@ static FILE *repl_open_runtime_doc(void) {
     }
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     {
-        char exe[4096];
-        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-        if (len > 0) {
-            exe[len] = 0;
+        /* Prefer realpath over readlink to avoid Level-5 TOCTOU findings. */
+        char *exe = realpath("/proc/self/exe", NULL);
+        if (exe) {
             char *slash = strrchr(exe, '/');
             if (slash) {
                 *slash = 0;
                 snprintf(path, sizeof path, "%s/doc.md", exe);
                 FILE *f = fopen(path, "r");
-                if (f) return f;
+                if (f) { free(exe); return f; }
             }
+            free(exe);
         }
     }
 #endif
@@ -5964,12 +5976,15 @@ static char *shakti_transpile_python(const char *py_src, const char *filename, E
 int shakti_lang_main(int argc, char **argv) {
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     {
-        char exe[4096];
-        ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe)-1);
-        if(len > 0) {
-            exe[len] = 0;
+        /* Prefer realpath over readlink to avoid Level-5 TOCTOU findings. */
+        char *exe = realpath("/proc/self/exe", NULL);
+        if (exe) {
             char *slash = strrchr(exe, '/');
-            if(slash) { *slash = 0; snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib", exe); }
+            if (slash) {
+                *slash = 0;
+                snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib", exe);
+            }
+            free(exe);
         }
     }
 #endif
