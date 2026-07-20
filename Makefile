@@ -108,6 +108,11 @@ endif
 # Always link synth.c (full UI on Linux+X11+ALSA; stubs elsewhere).
 SHAKTI_SYNTH ?= 1
 SHAKTI_GFX ?= 1
+SHAKTI_SONICPI ?= 1
+SHAKTI_DSP ?= 1
+SHAKTI_PDF ?= 1
+SHAKTI_MIDI ?= 1
+SHAKTI_IEFS ?= 1
 
 ifeq ($(SHAKTI_SYNTH),1)
   CFLAGS += -DSHAKTI_HAVE_SYNTH=1
@@ -115,6 +120,26 @@ endif
 
 ifeq ($(SHAKTI_GFX),1)
   CFLAGS += -DSHAKTI_HAVE_GFX=1
+endif
+
+ifeq ($(SHAKTI_SONICPI),1)
+  CFLAGS += -DSHAKTI_HAVE_SONICPI=1
+endif
+
+ifeq ($(SHAKTI_DSP),1)
+  CFLAGS += -DSHAKTI_HAVE_DSP=1
+endif
+
+ifeq ($(SHAKTI_PDF),1)
+  CFLAGS += -DSHAKTI_HAVE_PDF=1
+endif
+
+ifeq ($(SHAKTI_MIDI),1)
+  CFLAGS += -DSHAKTI_HAVE_MIDI=1
+endif
+
+ifeq ($(SHAKTI_IEFS),1)
+  CFLAGS += -DSHAKTI_HAVE_IEFS=1
 endif
 
 ifeq ($(UNAME_S),Linux)
@@ -126,6 +151,12 @@ ifeq ($(UNAME_S),Linux)
   endif
   ifeq ($(SHAKTI_GFX),1)
     GFX_LDFLAGS := -lX11
+  endif
+  ifeq ($(SHAKTI_MIDI),1)
+    MIDI_LDFLAGS := -lpthread
+    ifneq ($(wildcard /usr/include/alsa/asoundlib.h),)
+      MIDI_LDFLAGS += -lasound
+    endif
   endif
 endif
 
@@ -144,6 +175,9 @@ ifeq ($(UNAME_S),Darwin)
     GFX_OBJC_FLAGS := -x objective-c -O2 -g -Wall -std=gnu11 -fobjc-arc -DSHAKTI_HAVE_GFX=1 -DSHAKTI_STANDALONE=1 \
 	-I$(BUILD) -Isrc
     OBJC ?= clang
+  endif
+  ifeq ($(SHAKTI_MIDI),1)
+    MIDI_LDFLAGS := -framework CoreMIDI -framework CoreFoundation
   endif
 endif
 
@@ -177,6 +211,34 @@ gfx.o: src/gfx.c src/gfx.h src/gfx_platform.h src/shakti.h src/a.h $(BUILD)/shak
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/gfx.c
 endif
 
+ifeq ($(SHAKTI_SONICPI),1)
+sonicpi.o: src/sonicpi.c src/sonicpi.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/sonicpi.c
+endif
+
+ifeq ($(SHAKTI_DSP),1)
+dsp.o: src/dsp.c src/dsp.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/dsp.c
+endif
+
+ifeq ($(SHAKTI_PDF),1)
+pdf.o: src/pdf.c src/pdf.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/pdf.c
+endif
+
+ifeq ($(SHAKTI_MIDI),1)
+midi.o: src/midi.c src/midi.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/midi.c
+endif
+
+ifeq ($(SHAKTI_IEFS),1)
+iefs_io.o: src/iefs_io.c src/iefs_io.h
+	$(CC) $(CFLAGS) -c -o $@ src/iefs_io.c
+
+iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_format.c
+endif
+
 ifeq ($(UNAME_S),Darwin)
 ifeq ($(SHAKTI_SYNTH),1)
 synth_mac.o: src/synth_mac.m $(BUILD)/shakti_version.h
@@ -198,17 +260,22 @@ endif
 SYNTH_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_SYNTH))),synth_mac.o)
 GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_mac.o)
 GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_x11.o)
+SONICPI_OBJ := $(if $(filter 1,$(SHAKTI_SONICPI)),sonicpi.o)
+DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),dsp.o)
+PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),pdf.o)
+MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),midi.o)
+IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o)
 
-shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ)
+shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS))
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
 
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o *.tmp
+	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o pdf.o midi.o iefs_io.o iefs_format.o *.tmp
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
 	rm -rf build/ shakti/ *.dSYM shakti.zip
 

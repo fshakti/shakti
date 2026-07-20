@@ -1,0 +1,24 @@
+# iefs — IE file store (durable Shakti values on disk)
+# Requires shakti built with SHAKTI_IEFS=1 (default).
+#
+#   import iefs
+#   iefs.save(x, "data.iefs")
+#   y : iefs.load("data.iefs")
+#   iefs.save(x, "big.iefs", 1)    # force O_DIRECT on Linux when available
+#   iefs.save(x, "small.iefs", 0)  # force buffered
+#   print(iefs.direct_available())
+#
+# Also reachable via global save/load when the path ends in .iefs.
+# Env: SHAKTI_IEFS_DIRECT=0|1, SHAKTI_IEFS_DIRECT_MIN=<bytes>
+# (ISOLDE_IEFS_* still accepted as aliases.)
+
+def save(x, path, direct:-1):
+    if direct = -1:
+        return iefs_save(x, path)
+    return iefs_save(x, path, direct)
+
+def load(path):
+    return iefs_load(path)
+
+def direct_available():
+    return iefs_direct_available()
