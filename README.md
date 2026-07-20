@@ -3,7 +3,8 @@
 [Discord](https://discord.gg/PkKwUk9Tf)
 
 Small interpreted language (0.10.0) with vectors, matrices, tables, decorators,
-each (`f@`), and optional modules for SQL, graphics, audio, MIDI, PDF, and durable storage.
+each (`f@`), load-time time-series indexes (VWAB / windowed avg / stats / asof),
+and optional modules for SQL, graphics, audio, MIDI, PDF, and durable storage.
 
 ## grammar
 
@@ -11,6 +12,7 @@ each (`f@`), and optional modules for SQL, graphics, audio, MIDI, PDF, and durab
 - **Compare** with `=` — `if x = 1:`
 - `==` is not supported
 - Leading `@` decorates; expression `@` is each; matrix multiply is `mmul(a, b)`
+- Prefix indexes: `shakti_vwbid_index` / `shakti_vwbid`, `shakti_winavg_*`, `shakti_stats_*`, `asof_sort` / `asof_bin` — see [doc.md](doc.md#time-series-indexes)
 
 ```ie
 values : [1, -2, 3]
@@ -74,6 +76,8 @@ make -f Makefile.local test-modules   # dsp, pdf, midi, iefs, sonicpi
 make -f Makefile.local bench-modules  # focused module benches
 make -f Makefile.local bench          # full suite vs baselines
 ```
+
+Index correctness (when present): `tests/native_vwbid.ie`, `tests/native_winavg.ie`, `tests/native_stats.ie`.
 
 ## license
 

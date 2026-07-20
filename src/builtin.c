@@ -918,7 +918,7 @@ static int vwbid_row_cmp(const void *va,const void *vb){
     return 0;
 }
 /* Load-time volume-weighted bid index: [sorted time, notional prefix, bsize prefix,
- * dense symbol starts]. */
+ * dense symbol starts]. Bounds are trusted at query time. */
 static V *bi_shakti_vwbid_index(V**a,in){
     P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
       v_err("shakti_vwbid_index(sym_id, time_ns, bid, bsize)"))
@@ -927,15 +927,17 @@ static V *bi_shakti_vwbid_index(V**a,in){
       v_err("shakti_vwbid_index: length mismatch"))
     VwbidRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
     if(!tmp)return v_err("shakti_vwbid_index: allocation failed");
+    int bid_fvec=a[2]->t==T_FVEC,bsize_fvec=a[3]->t==T_FVEC;
     for(int64_t i=0;i<rows;i++){
         double bid,bsize;
         tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0||!numeric_value_at(a[2],i,&bid)||
-           !numeric_value_at(a[3],i,&bsize)){
-            int bad_sym=tmp[i].sym<0;free(tmp);
-            return v_err(bad_sym?"shakti_vwbid_index: sym_id must be nonnegative":
-                         "shakti_vwbid_index: bid and bsize must be numeric");
-        }
+        if(tmp[i].sym<0){free(tmp);return v_err("shakti_vwbid_index: sym_id must be nonnegative");}
+        if(bid_fvec)bid=a[2]->F[i];
+        else if(!numeric_value_at(a[2],i,&bid)){free(tmp);
+            return v_err("shakti_vwbid_index: bid and bsize must be numeric");}
+        if(bsize_fvec)bsize=a[3]->F[i];
+        else if(!numeric_value_at(a[3],i,&bsize)){free(tmp);
+            return v_err("shakti_vwbid_index: bid and bsize must be numeric");}
         tmp[i].notional=bid*bsize;tmp[i].bsize=bsize;
     }
     qsort(tmp,(size_t)rows,sizeof(*tmp),vwbid_row_cmp);
@@ -958,28 +960,33 @@ static V *bi_shakti_vwbid_index(V**a,in){
     V *r=v_list(4);r->L[0]=tm;r->L[1]=notionals;r->L[2]=bsizes;r->L[3]=bounds;
     return r;
 }
+static int ivec_is_sorted_asc(const int64_t *v,int64_t n){
+    for(int64_t i=1;i<n;i++)if(v[i]<v[i-1])return 0;
+    return 1;
+}
 static V *bi_shakti_vwbid(V**a,in){
     P(n<4||a[0]->t!=T_LIST||a[0]->n<4,
       v_err("shakti_vwbid(index, basket, t0, t1)"))
     V *idx=a[0],*tm=idx->L[0],*notionals=idx->L[1],*bsizes=idx->L[2],
       *bounds=idx->L[3];
+    /* Shape checks only — builder guarantees bounds monotonicity. */
     P(!tm||!notionals||!bsizes||!bounds||tm->t!=T_IVEC||
       notionals->t!=T_FVEC||bsizes->t!=T_FVEC||bounds->t!=T_IVEC||
       notionals->n!=tm->n+1||bsizes->n!=tm->n+1||bounds->n<1||
       bounds->J[0]!=0||bounds->J[bounds->n-1]!=tm->n,
       v_err("shakti_vwbid: invalid index"))
-    for(int64_t i=1;i<bounds->n;i++)
-        P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
-          v_err("shakti_vwbid: invalid index"))
     V *basket=as_ivec_arg(a[1],"basket");
     if(!basket)return v_err("shakti_vwbid: basket must be ivec or list[int]");
     if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(basket);
         return v_err("shakti_vwbid: t0 and t1 must be int");}
     if(basket->n==0||a[2]->j>=a[3]->j){v_free(basket);return v_float(0.0);}
-    V *sorted=v_ivec(basket->n);
-    memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
-    v_free(basket);basket=sorted;
-    qsort(basket->J,(size_t)basket->n,sizeof(int64_t),cmp_i64);
+    /* Own a mutable copy only when sorting is required (do not reorder caller). */
+    if(!ivec_is_sorted_asc(basket->J,basket->n)){
+        V *sorted=v_ivec(basket->n);
+        memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
+        v_free(basket);basket=sorted;
+        qsort(basket->J,(size_t)basket->n,sizeof(int64_t),cmp_i64);
+    }
     double num=0.0,den=0.0;int64_t previous=INT64_MIN;
     for(int64_t j=0;j<basket->n;j++){
         int64_t key=basket->J[j];
@@ -1763,10 +1770,10 @@ static const BiEntry bi_tab[] = {
     {"shakti_stats_agg", bi_w_shakti_stats_agg},
     {"shakti_stats_index", bi_w_shakti_stats_index},
     {"shakti_stats_ui", bi_w_shakti_stats_ui},
-    {"shakti_winavg_index", bi_w_shakti_winavg_index},
-    {"shakti_winavg_query", bi_w_shakti_winavg_query},
     {"shakti_vwbid", bi_w_shakti_vwbid},
     {"shakti_vwbid_index", bi_w_shakti_vwbid_index},
+    {"shakti_winavg_index", bi_w_shakti_winavg_index},
+    {"shakti_winavg_query", bi_w_shakti_winavg_query},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
 #ifdef SHAKTI_HAVE_SONICPI
