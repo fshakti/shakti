@@ -107,6 +107,53 @@ extern V *bi_gfx_consume_click(V**,in);
 extern V *bi_gfx_text(V**,in);
 extern V *bi_gfx_text_width(V**,in);
 extern V *bi_gfx_copy_rect(V**,in);
+#ifdef SHAKTI_HAVE_SONICPI
+extern V *bi_sonicpi_bpm(V**,in);
+extern V *bi_sonicpi_configure(V**,in);
+extern V *bi_sonicpi_play(V**,in);
+extern V *bi_sonicpi_send(V**,in);
+extern V *bi_sonicpi_stop(V**,in);
+extern V *bi_sonicpi_synth(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_DSP
+extern V *bi_dsp_ratio_freq(V**,in);
+extern V *bi_dsp_ratio_cents(V**,in);
+extern V *bi_dsp_ratio_reduce(V**,in);
+extern V *bi_dsp_perfect7(V**,in);
+extern V *bi_dsp_degree_freq(V**,in);
+extern V *bi_dsp_et_cents(V**,in);
+extern V *bi_dsp_et_delta(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_PDF
+extern V *bi_pdf_create(V**,in);
+extern V *bi_pdf_add_page(V**,in);
+extern V *bi_pdf_text_at(V**,in);
+extern V *bi_pdf_save(V**,in);
+extern V *bi_pdf_open(V**,in);
+extern V *bi_pdf_page_count(V**,in);
+extern V *bi_pdf_info(V**,in);
+extern V *bi_pdf_text(V**,in);
+extern V *bi_pdf_close(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_MIDI
+extern V *bi_midi_open(V**,in);
+extern V *bi_midi_close(V**,in);
+extern V *bi_midi_alive(V**,in);
+extern V *bi_midi_backend(V**,in);
+extern V *bi_midi_list(V**,in);
+extern V *bi_midi_connect(V**,in);
+extern V *bi_midi_disconnect(V**,in);
+extern V *bi_midi_note_on(V**,in);
+extern V *bi_midi_note_off(V**,in);
+extern V *bi_midi_cc(V**,in);
+extern V *bi_midi_program(V**,in);
+extern V *bi_midi_raw(V**,in);
+extern V *bi_midi_poll(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_IEFS
+#include "iefs_format.h"
+#include "iefs_io.h"
+#endif
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
 extern V *bi_ipc_connect(V**,in);
@@ -193,6 +240,13 @@ static const char *BUILTINS[] = {
     "gfx_clear","gfx_fill_rect","gfx_line","gfx_fill_circle",
     "gfx_click_pending","gfx_click_x","gfx_click_y","gfx_consume_click",
     "gfx_text","gfx_text_width","gfx_copy_rect",
+    "sonicpi_bpm","sonicpi_configure","sonicpi_play","sonicpi_send","sonicpi_stop","sonicpi_synth",
+    "dsp_ratio_freq","dsp_ratio_cents","dsp_ratio_reduce","dsp_perfect7",
+    "dsp_degree_freq","dsp_et_cents","dsp_et_delta",
+    "pdf_create","pdf_add_page","pdf_text_at","pdf_save","pdf_open","pdf_page_count","pdf_info","pdf_text","pdf_close",
+    "midi_open","midi_close","midi_alive","midi_backend","midi_list","midi_connect","midi_disconnect",
+    "midi_note_on","midi_note_off","midi_cc","midi_program","midi_raw","midi_poll",
+    "iefs_save","iefs_load","iefs_direct_available",
     "eval",
     NULL
 };
@@ -1483,6 +1537,26 @@ BI0(gfx_clear) BI0(gfx_fill_rect) BI0(gfx_line) BI0(gfx_fill_circle)
 BI0(gfx_click_pending) BI0(gfx_click_x) BI0(gfx_click_y) BI0(gfx_consume_click)
 BI0(gfx_text) BI0(gfx_text_width) BI0(gfx_copy_rect)
 #endif
+#ifdef SHAKTI_HAVE_SONICPI
+BI0(sonicpi_bpm) BI0(sonicpi_configure) BI0(sonicpi_play) BI0(sonicpi_send)
+BI0(sonicpi_stop) BI0(sonicpi_synth)
+#endif
+#ifdef SHAKTI_HAVE_DSP
+BI0(dsp_ratio_freq) BI0(dsp_ratio_cents) BI0(dsp_ratio_reduce) BI0(dsp_perfect7)
+BI0(dsp_degree_freq) BI0(dsp_et_cents) BI0(dsp_et_delta)
+#endif
+#ifdef SHAKTI_HAVE_PDF
+BI0(pdf_create) BI0(pdf_add_page) BI0(pdf_text_at) BI0(pdf_save) BI0(pdf_open)
+BI0(pdf_page_count) BI0(pdf_info) BI0(pdf_text) BI0(pdf_close)
+#endif
+#ifdef SHAKTI_HAVE_MIDI
+BI0(midi_open) BI0(midi_close) BI0(midi_alive) BI0(midi_backend) BI0(midi_list)
+BI0(midi_connect) BI0(midi_disconnect) BI0(midi_note_on) BI0(midi_note_off)
+BI0(midi_cc) BI0(midi_program) BI0(midi_raw) BI0(midi_poll)
+#endif
+#ifdef SHAKTI_HAVE_IEFS
+BI0(iefs_save) BI0(iefs_load) BI0(iefs_direct_available)
+#endif
 BIE(eval)
 #ifdef SHAKTI_HAVE_IPC
 BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
@@ -1520,6 +1594,15 @@ static const BiEntry bi_tab[] = {
     {"datetime", bi_w_datetime},
     {"dict", bi_w_dict},
     {"dot", bi_w_dot},
+#ifdef SHAKTI_HAVE_DSP
+    {"dsp_degree_freq", bi_w_dsp_degree_freq},
+    {"dsp_et_cents", bi_w_dsp_et_cents},
+    {"dsp_et_delta", bi_w_dsp_et_delta},
+    {"dsp_perfect7", bi_w_dsp_perfect7},
+    {"dsp_ratio_cents", bi_w_dsp_ratio_cents},
+    {"dsp_ratio_freq", bi_w_dsp_ratio_freq},
+    {"dsp_ratio_reduce", bi_w_dsp_ratio_reduce},
+#endif
     {"enumerate", bi_w_enumerate},
     {"eval", bi_w_eval},
     {"exp", bi_w_exp},
@@ -1564,6 +1647,11 @@ static const BiEntry bi_tab[] = {
     {"hasattr", bi_w_hasattr},
     {"head", bi_w_head},
     {"hex", bi_w_hex},
+#ifdef SHAKTI_HAVE_IEFS
+    {"iefs_direct_available", bi_w_iefs_direct_available},
+    {"iefs_load", bi_w_iefs_load},
+    {"iefs_save", bi_w_iefs_save},
+#endif
     {"input", bi_w_input},
     {"input_get_hz", bi_w_input_get_hz},
     {"input_get_qwerty", bi_w_input_get_qwerty},
@@ -1607,6 +1695,21 @@ static const BiEntry bi_tab[] = {
     {"machine", bi_w_machine},
     {"map", bi_w_map},
     {"max", bi_w_max},
+#ifdef SHAKTI_HAVE_MIDI
+    {"midi_alive", bi_w_midi_alive},
+    {"midi_backend", bi_w_midi_backend},
+    {"midi_cc", bi_w_midi_cc},
+    {"midi_close", bi_w_midi_close},
+    {"midi_connect", bi_w_midi_connect},
+    {"midi_disconnect", bi_w_midi_disconnect},
+    {"midi_list", bi_w_midi_list},
+    {"midi_note_off", bi_w_midi_note_off},
+    {"midi_note_on", bi_w_midi_note_on},
+    {"midi_open", bi_w_midi_open},
+    {"midi_poll", bi_w_midi_poll},
+    {"midi_program", bi_w_midi_program},
+    {"midi_raw", bi_w_midi_raw},
+#endif
     {"min", bi_w_min},
     {"mkdir", bi_w_mkdir},
     {"mmul", bi_w_mmul},
@@ -1622,6 +1725,17 @@ static const BiEntry bi_tab[] = {
     {"pcm_close", bi_w_pcm_close},
     {"pcm_open", bi_w_pcm_open},
     {"pcm_write", bi_w_pcm_write},
+#ifdef SHAKTI_HAVE_PDF
+    {"pdf_add_page", bi_w_pdf_add_page},
+    {"pdf_close", bi_w_pdf_close},
+    {"pdf_create", bi_w_pdf_create},
+    {"pdf_info", bi_w_pdf_info},
+    {"pdf_open", bi_w_pdf_open},
+    {"pdf_page_count", bi_w_pdf_page_count},
+    {"pdf_save", bi_w_pdf_save},
+    {"pdf_text", bi_w_pdf_text},
+    {"pdf_text_at", bi_w_pdf_text_at},
+#endif
     {"pop", bi_w_pop},
     {"print", bi_w_print},
     {"range", bi_w_range},
@@ -1655,6 +1769,14 @@ static const BiEntry bi_tab[] = {
     {"shakti_vwbid_index", bi_w_shakti_vwbid_index},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
+#ifdef SHAKTI_HAVE_SONICPI
+    {"sonicpi_bpm", bi_w_sonicpi_bpm},
+    {"sonicpi_configure", bi_w_sonicpi_configure},
+    {"sonicpi_play", bi_w_sonicpi_play},
+    {"sonicpi_send", bi_w_sonicpi_send},
+    {"sonicpi_stop", bi_w_sonicpi_stop},
+    {"sonicpi_synth", bi_w_sonicpi_synth},
+#endif
     {"sort", bi_w_sort},
     {"sorted", bi_w_sorted},
     {"sqrt", bi_w_sqrt},
@@ -1775,6 +1897,14 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         if(nargs < 1 || args[0]->t != T_STR) {
             return v_err("load(path) or load(path, [column, ...])");
         }
+#ifdef SHAKTI_HAVE_IEFS
+        {
+            const char *path = args[0]->s;
+            size_t plen = strlen(path);
+            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs"))
+                return iefs_store_read(path);
+        }
+#endif
         V *cols = NULL;
         if(nargs > 1) {
             if(args[1]->t != T_LIST) {
@@ -1784,7 +1914,28 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         }
         return table_load(args[0]->s, cols);
     }
-    P(!strcmp(name,"save"),nargs>1&&args[1]->t==T_STR?(table_save(args[0],args[1]->s)?v_err("save failed"):v_nil()):v_err("save(table,path)"))
+    if(!strcmp(name,"save")) {
+        if(nargs < 2 || args[1]->t != T_STR)
+            return v_err("save(value, path)");
+#ifdef SHAKTI_HAVE_IEFS
+        {
+            const char *path = args[1]->s;
+            size_t plen = strlen(path);
+            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs")) {
+                char err[256];
+                err[0] = 0;
+                if (iefs_store_write(args[0], path, IEFS_IO_AUTO, err, sizeof err) != 0) {
+                    const char *e = iefs_last_error();
+                    return v_err(e && e[0] ? e : (err[0] ? err : "save failed"));
+                }
+                return v_nil();
+            }
+        }
+#endif
+        if (table_save(args[0], args[1]->s))
+            return v_err("save failed");
+        return v_nil();
+    }
     if(is_isolde_builtin(name)) return isolde_builtin_call(name, args, nargs);
     return v_errf("unknown builtin '%s'",name);
 }

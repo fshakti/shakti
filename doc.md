@@ -14,6 +14,11 @@
 - [IPC module](#ipc-module)
 - [REST module](#rest-module)
 - [`synth` module](#synth-module)
+- [`dsp` module](#dsp-module)
+- [`sonicpi` module](#sonicpi-module)
+- [`pdf` module](#pdf-module)
+- [`midi` module](#midi-module)
+- [`iefs` module](#iefs-module)
 - [`talk` module](#talk-module-macos)
 - [Third-party dependencies](#third-party-dependencies-and-optional-assets)
 
@@ -49,6 +54,11 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
+| `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers |
+| `import sonicpi` | `sonicpi_demo.ie` / `examples/sonicpi_demo.ie` | Drive Sonic Pi over OSC |
+| `import pdf` | `pdf_demo.ie` / `examples/pdf_smoke.ie` | PDF 1.4 write/read |
+| `import midi` | `midi_demo.ie` / `examples/midi_demo.ie` | ALSA / CoreMIDI I/O |
+| `import iefs` | `iefs_demo.ie` | Durable `.iefs` save/load |
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
 | `import ipc` | `ipc_echo_client.ie` | Client for `ipc_echo.ie` |
@@ -71,10 +81,29 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `gfx` | [gfx module](#gfx-module) |
 | `input` | [input module](#input-module) |
 | `synth` | [synth module](#synth-module) |
+| `dsp` | [dsp module](#dsp-module) |
+| `sonicpi` | [sonicpi module](#sonicpi-module) |
+| `pdf` | [pdf module](#pdf-module) |
+| `midi` | [midi module](#midi-module) |
+| `iefs` | [iefs module](#iefs-module) |
 | `talk` | [talk module](#talk-module-macos) |
 | `ipc` | [IPC module](#ipc-module) |
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
+
+## Tests and benchmarks (local tree)
+
+When `tests/`, `benchmarks/`, and `Makefile.local` are present:
+
+```bash
+make prod && export SHAKTI_LIB=$PWD/lib
+make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, module_defaults
+make -f Makefile.local bench-modules  # focused suites only
+SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
+SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
+```
+
+Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`.
 
 ---
 
@@ -990,6 +1019,246 @@ Disable at build: `SHAKTI_SYNTH=0 make prod`.
 
 ---
 
+# `dsp` module
+
+Just-intonation / k-scale ratio primitives. Built by default (`SHAKTI_DSP=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: dsp_demo.ie
+```
+
+## Perfect 7 ratio set
+
+| Degree | Ratio | × root (A=440) |
+|--------|-------|----------------|
+| 1 | 1/1 | 440 Hz |
+| 2 | 9/8 | 495 Hz |
+| 3 | 5/4 | 550 Hz |
+| 4 | 3/2 | 660 Hz |
+| 5 | 15/8 | 825 Hz |
+| 6 | 3/1 | 1320 Hz |
+| 7 | 3/5 | 264 Hz |
+
+## Example
+
+`dsp_demo.ie`:
+
+```ie
+import dsp
+
+root : 440.0
+print(dsp.degree_freq(root, 4))   # 660 — perfect fifth
+for row in dsp.perfect7(root):
+    print(row["degree"], row["num"], row["den"], row["hz"])
+```
+
+## API
+
+Module `lib/dsp.ie`:
+
+| Function | Description |
+|----------|-------------|
+| `dsp.ratio_freq(root_hz, num, den)` | Frequency from ratio |
+| `dsp.ratio_cents(num, den)` | Cents from unison (1200×log₂) |
+| `dsp.ratio_reduce(num, den)` | GCD-reduced `{num, den}` dict |
+| `dsp.perfect7([root_hz])` | List of 7 dicts (`degree`, `num`, `den`, `cents`, optional `hz`) |
+| `dsp.degree_freq(root_hz, degree)` | Degree 1–7 from the perfect table |
+| `dsp.et_cents(semitone)` | Equal-temperament cents for semitone count |
+| `dsp.et_delta(num, den)` | Cents deviation from nearest ET semitone |
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-dsp
+make -f Makefile.local bench-dsp
+```
+
+Disable at build: `SHAKTI_DSP=0 make prod`.
+
+---
+
+# `sonicpi` module
+
+OSC bridge to [Sonic Pi](https://sonic-pi.net/) for live-coded music from Shakti scripts. Built by default (`SHAKTI_SONICPI=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: sonicpi_demo.ie
+# or: ./shakti examples/sonicpi_demo.ie
+```
+
+## Prerequisites
+
+1. Install **Sonic Pi** separately from [sonic-pi.net](https://sonic-pi.net/) (not bundled with Shakti).
+2. Start Sonic Pi and run the bridge in `examples/sonicpi_bridge.rb` when that tree is present locally.
+3. By default Sonic Pi listens for OSC on **`127.0.0.1:4560`**. For remote hosts, enable **Preferences → IO → Networked OSC → Allow OSC from other computers**.
+
+## Example
+
+`sonicpi_demo.ie`:
+
+```ie
+import sonicpi
+
+sonicpi.configure("127.0.0.1", 4560)
+sonicpi.bpm(120)
+sonicpi.play(60, 0.8, 0.25)
+sonicpi.synth("prophet", 70, 0.9, 1.0)
+```
+
+## API
+
+Module `lib/sonicpi.ie`:
+
+| Function | Description |
+|----------|-------------|
+| `configure(host, port)` | Target Sonic Pi OSC listener (default `127.0.0.1`, `4560`) |
+| `play(note, amp, sustain)` | Play note via `/shakti/play` |
+| `synth(name, note, amp, sustain)` | Named synth via `/shakti/synth` |
+| `bpm(tempo)` | Set tempo via `/shakti/bpm` |
+| `stop()` | Stop via `/shakti/stop` |
+
+For arbitrary OSC paths, call the builtin `sonicpi_send(path, args...)` directly.
+
+Environment overrides: `SONICPI_HOST`, `SONICPI_PORT`.
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-sonicpi   # UDP smoke (Sonic Pi optional)
+make -f Makefile.local bench-sonicpi  # configure/play/send; set SHAKTI_SONICPI_SKIP_SEND=1 for configure-only
+```
+
+Disable at build: `SHAKTI_SONICPI=0 make prod`.
+
+Shakti communicates with Sonic Pi over the public **OSC** protocol. Shakti does **not** ship Sonic Pi binaries, samples, or synthdefs. Sonic Pi is external software by Samuel Aaron and contributors.
+
+---
+
+# `pdf` module
+
+From-scratch PDF 1.4 reader/writer (`src/pdf.c`) — no MuPDF/Poppler/PDFium. Built by default (`SHAKTI_PDF=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: pdf_demo.ie
+# or: ./shakti examples/pdf_smoke.ie
+```
+
+## Example
+
+```ie
+import pdf
+
+w : pdf.create()
+pdf.add_page(w)
+pdf.text_at(w, 72, 720, "Hello Shakti", size:12)
+pdf.save(w, "/tmp/hello.pdf")
+pdf.close(w)
+
+d : pdf.open("/tmp/hello.pdf")
+print(pdf.page_count(d))
+print(pdf.text(d))
+pdf.close(d)
+```
+
+## API
+
+| Function | Description |
+|----------|-------------|
+| `pdf.create()` | New write document; returns handle |
+| `pdf.add_page(h)` | Append letter page (612×792 pt) |
+| `pdf.text_at(h, x, y, text, size:12)` | Draw text (origin bottom-left) |
+| `pdf.save(h, path)` | Emit PDF 1.4 file |
+| `pdf.open(path)` | Open for read |
+| `pdf.page_count(h)` | Number of pages |
+| `pdf.info(h)` | Info dict (may be empty) |
+| `pdf.text(h, page:0)` | Extract text; `page` 1-based, `0` = all |
+| `pdf.close(h)` | Release handle |
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-pdf
+make -f Makefile.local bench-pdf
+```
+
+Disable at build: `SHAKTI_PDF=0 make prod`.
+
+---
+
+# `midi` module
+
+MIDI I/O via ALSA sequencer (Linux) or CoreMIDI (macOS). Built by default (`SHAKTI_MIDI=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti examples/midi_demo.ie
+# optional: MIDI_PORT='Scarlett' ./shakti examples/midi_demo.ie
+```
+
+## vs `synth` / `sonicpi`
+
+| Module | Role |
+|--------|------|
+| `midi` | Wire protocol to hardware / DAW / virtual ports |
+| `synth` | Built-in softsynth + UI |
+| `sonicpi` | OSC bridge to Sonic Pi |
+
+## API
+
+| Function | Description |
+|----------|-------------|
+| `open()` / `close()` / `alive()` | Lifecycle |
+| `backend()` | `"alsa"`, `"coremidi"`, or `"none"` |
+| `list()` | Ports as dicts |
+| `connect(id_or_name)` / `disconnect()` | Subscribe output (and input when matched) |
+| `note_on` / `note_off` / `cc` / `program` / `raw` | Send |
+| `poll()` | Next inbound event or `nil` |
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-midi
+make -f Makefile.local bench-midi   # set SHAKTI_MIDI_SKIP_SEND=1 to skip note I/O
+```
+
+Disable at build: `SHAKTI_MIDI=0 make prod`.
+
+---
+
+# `iefs` module
+
+Portable durable save/load for Shakti values (`.iefs`). Built by default (`SHAKTI_IEFS=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: iefs_demo.ie
+```
+
+```ie
+import iefs
+iefs.save(x, "data.iefs")
+x2 : iefs.load("data.iefs")
+iefs.save(x, "big.iefs", 1)   # force O_DIRECT when available
+print(iefs.direct_available())
+```
+
+Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, vectors, matrices, lists, dicts, tables. Functions, errors, and input streams are rejected.
+
+Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>` (`ISOLDE_IEFS_*` aliases still accepted).
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-iefs
+make -f Makefile.local bench-iefs
+```
+
+Disable at build: `SHAKTI_IEFS=0 make prod`.
+
+---
 
 # `talk` module (macOS)
 
@@ -1054,7 +1323,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it.
 
-Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
+Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 
 ## Platform SDKs

@@ -3,7 +3,7 @@
 [Discord](https://discord.gg/PkKwUk9Tf)
 
 Small interpreted language (0.10.0) with vectors, matrices, tables, decorators,
-each (`f@`), and optional SQL, graph, IPC, REST, gfx, synth, and input modules.
+each (`f@`), and optional modules for SQL, graphics, audio, MIDI, PDF, and durable storage.
 
 ## grammar
 
@@ -35,6 +35,8 @@ export SHAKTI_LIB=$PWD/lib
 `make prod-speed` enables native CPU tuning; `make prod-size` optimizes for size.
 `make check-deps` verifies Homebrew packages on macOS.
 
+Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
+
 ## run
 
 ```bash
@@ -45,8 +47,33 @@ export SHAKTI_LIB=$PWD/lib
 
 More detail: [doc.md](doc.md). Examples: [example.ie](example.ie).
 
-Optional GUI pixel window: `import gfx` — see [gfx module](doc.md#gfx-module).
-Local gfx demos / game (when `examples/` is present): `examples/gfx_demo.ie`, `examples/infinibattle/`.
+## modules
+
+| `import` | Role | Doc |
+|----------|------|-----|
+| `sql` | Tables / select | [doc](doc.md#sql-module) |
+| `graph` | Knowledge graph | [doc](doc.md#graph-module) |
+| `gfx` | Pixel window | [doc](doc.md#gfx-module) |
+| `synth` | Softsynth UI | [doc](doc.md#synth-module) |
+| `dsp` | Just intonation | [doc](doc.md#dsp-module) |
+| `sonicpi` | Sonic Pi OSC | [doc](doc.md#sonicpi-module) |
+| `pdf` | PDF 1.4 R/W | [doc](doc.md#pdf-module) |
+| `midi` | ALSA / CoreMIDI | [doc](doc.md#midi-module) |
+| `iefs` | Durable `.iefs` | [doc](doc.md#iefs-module) |
+| `input` / `ipc` / `rest` / `talk` | IO / network / STT | see [doc.md](doc.md) |
+
+Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`, `examples/infinibattle/`.
+
+## test & bench (local tree)
+
+When `tests/`, `benchmarks/`, and `Makefile.local` are present:
+
+```bash
+make -f Makefile.local test
+make -f Makefile.local test-modules   # dsp, pdf, midi, iefs, sonicpi
+make -f Makefile.local bench-modules  # focused module benches
+make -f Makefile.local bench          # full suite vs baselines
+```
 
 ## license
 
