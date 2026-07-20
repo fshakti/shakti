@@ -107,7 +107,7 @@ SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
 
 Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`.
 
-Index tests (local): `tests/native_vwbid.ie`, `tests/native_winavg.ie`, `tests/native_stats.ie`.
+Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).
 
 ---
 
@@ -515,6 +515,24 @@ Per-symbol average of a numeric column over one or more windows (returns the **l
 
 Result columns: `sym_id`, `avg_size`.
 
+## High bid (`shakti_hibid*`)
+
+Grouped symbol/time range-max bid over a basket:
+
+| Builtin | Role |
+|---------|------|
+| `shakti_hibid_index(sym_id, time_ns, bid)` | Sort by `(sym, time)`; return `[time, bid, bounds]` |
+| `shakti_hibid(index, basket, t0, t1)` | `max(bid)` by `sym_id` for symbols in `basket` over `[t0, t1)` |
+
+## NBBO (`shakti_nbbo*`)
+
+Per-symbol max bid / min ask (equivalent to two-stage SQL `by sym_id, exchange` then `by sym_id`):
+
+| Builtin | Role |
+|---------|------|
+| `shakti_nbbo_index(sym_id, bid, ask)` | Build the grouped NBBO table once at load |
+| `shakti_nbbo(index)` | Return the precomputed table (or pass raw columns for a one-shot scan) |
+
 ## Exchange stats (`shakti_stats*`)
 
 Trade aggregates by symbol for one exchange id:
@@ -524,6 +542,14 @@ Trade aggregates by symbol for one exchange id:
 | `shakti_stats_index(exchange, time_ns, sym_id, price)` | Sort by `(exchange, time)` |
 | `shakti_stats_agg(index, exchange_id, t0, t1)` | `count` / `sum` / `min` / `max` / `avg` by `sym_id` |
 | `shakti_stats_ui(index, exchange_id, t0, t1, minute_ns)` | Minute-bucket pass; returns the last minute’s table (no sum column) |
+
+## Theoretical P&L (`shakti_theopl`)
+
+For the first `n_trades` rows with positive `size`, scan forward within `horizon_ns` on the same symbol and count hits when cumulative size reaches 2×, 4×, and 20× the initial size.
+
+| Builtin | Role |
+|---------|------|
+| `shakti_theopl(sym_id, time_ns, size, n_trades, horizon_ns)` | Return hit count (int) |
 
 ## Asof join helpers
 
@@ -535,7 +561,6 @@ Trade aggregates by symbol for one exchange id:
 ## See also
 
 - [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where` (slower for full-table VWAP scans)
-- Local tests: `tests/native_vwbid.ie`, `tests/native_winavg.ie`, `tests/native_stats.ie`
 
 ---
 
