@@ -46,6 +46,7 @@ export SHAKTI_LIB=$PWD/lib
 More detail: [doc.md](doc.md). Examples: [example.ie](example.ie).
 
 Optional GUI pixel window: `import gfx` — see [gfx module](doc.md#gfx-module).
+Local gfx demos / game (when `examples/` is present): `examples/gfx_demo.ie`, `examples/infinibattle/`.
 
 ## license
 
