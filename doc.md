@@ -7,6 +7,7 @@
 - [Decorators](#decorators)
 - [Each (`@`)](#each)
 - [Python 3 → Shakti converter](#python-3-shakti-converter)
+- [C → Shakti converter](#c-shakti-converter)
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
 - [`gfx` module](#gfx-module)
@@ -59,7 +60,10 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 
 | Tool | Description |
 |------|-------------|
-| `s2p.ie` | Strict Python 3 → Shakti converter |
+| `s2p.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
+| `c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
+| `python.py` / `c.c` | Tiny demos for each converter |
+| `example.py` / `example.c` | Broader subset demos (`./shakti example.py` / `example.c`) |
 
 ## Module docs
 
@@ -117,6 +121,59 @@ become native vectors or matrices; common reducers map to Shakti builtins;
 Chained assignment/comparisons, annotations, classes, comprehensions/generators, sets/bytes/complex, `is`/`is not`, bitwise ops, unary `+`, `*args`/`**kwargs`, keyword-only/positional-only args, multi-argument lambdas, loop `else`, from-import/aliases, nested/starred unpacking, exceptions/`with`/`yield`/`async`, and `del`/`global`/`nonlocal`.
 
 Docstrings become `#` comments.
+
+---
+
+# C → Shakti converter
+
+Strict subset converter written in Shakti. Embedded in the executable for
+direct runs, and still available as `c2s.ie` for emit-only conversion.
+
+If `main` is present, the converter appends a call so the program runs.
+`int main(void)` / `int main()` become `def main():` plus `main()`.
+`int main(int argc, char **argv)` becomes `def main(argc, argv):` plus
+`main(len(argv[1:]), argv[1:])` (CLI args without the program name).
+
+```bash
+./shakti file.c                  # transpile + run (supported subset)
+./shakti example.c
+./shakti c2s.ie input.c -o out.ie
+./shakti c2s.ie c.c -o c.ie
+SHAKTI_LIB=$PWD/lib ./shakti out.ie
+```
+
+`./shakti file.c` is not a C compiler or libc runtime: it lowers the supported
+subset to Shakti and evaluates that. Unsupported syntax exits nonzero with
+`file:line:col` diagnostics (original `.c` path preserved).
+
+## Rewrites
+
+| C | Shakti |
+|---|--------|
+| `int x = 1;` | `x : 1` |
+| `x == 1` | `x = 1` |
+| `int f(int n) { ... }` | `def f(n): ...` |
+| `printf(...)` / `puts(...)` | `print(...)` |
+| `true` / `false` / `NULL` | `True` / `False` / `None` |
+| `&&` / `\|\|` / `!` | `and` / `or` / `not` |
+| `for (int i = 0; i < n; i++)` | `i : 0` + `while (i < n): ...; i += 1` |
+| `int nums[] = {2, 4}` | `nums : [2, 4]` |
+| `#include ...` | erased |
+| `main` | `def main(...):` + trailing call (`main()` or `main(len(argv[1:]), argv[1:])`) |
+
+Also converts `if`/`else if`/`else`, `while`, break/continue, indexing,
+calls, augmented `+= -= *= /=`, and postfix `++`/`--` (as `+= 1` / `-= 1`).
+
+## Rejected
+
+Pointers/`*` deref/`&`/`->`, structs/unions/enums/typedefs, preprocessor
+beyond `#include` (`#define`/`#if`/…), `switch`/`goto`/`do`, `malloc`/`free`/
+`sizeof`, bitwise ops, unary `+`, prefix `++`/`--`, and arbitrary libc APIs
+outside the mapped `printf`/`puts` surface.
+
+`//` comments become `#` comments; closed `/* ... */` block comments are
+discarded. An unterminated block comment exits nonzero with the opening
+`line:col` and does not emit or execute a partial program.
 
 ---
 
