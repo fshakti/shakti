@@ -144,7 +144,7 @@ extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "bin","asof_sort","asof_bin","shakti_winavg_index","shakti_winavg_query",
+    "bin","asof_sort","asof_bin","asof_index","asof_index_count","shakti_winavg_index","shakti_winavg_query",
     "shakti_stats_index","shakti_stats_agg","shakti_stats_ui",
     "shakti_vwbid","shakti_vwbid_index","shakti_hibid","shakti_hibid_index","shakti_nbbo","shakti_nbbo_index","shakti_theopl",
     "sort","reverse","zip","enumerate","map","filter",
@@ -704,6 +704,28 @@ static V *bi_asof_sort(V**a,in){
     shakti_asof_sort_i64(a[0]->J,a[1]->J,a[0]->n,eq->J,tm->J);
     V *r=v_list(2); r->L[0]=eq; r->L[1]=tm; return r;
 }
+/* Dense grouped-asof index: sorted (eq,time) plus O(1) group boundaries.
+ * Intended for dense nonnegative integer IDs such as STAC sym_id. */
+static V *bi_asof_index(V**a,in){
+    P(n<2||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,v_err("asof_index(eq, time)"))
+    P(a[0]->n!=a[1]->n,v_err("asof_index: length mismatch"))
+    int64_t rows=a[0]->n;
+    V *eq=v_ivec(rows), *tm=v_ivec(rows);
+    shakti_asof_sort_i64(a[0]->J,a[1]->J,rows,eq->J,tm->J);
+    int64_t max_key=-1;
+    if(rows>0){
+        if(eq->J[0]<0){v_free(eq);v_free(tm);return v_err("asof_index: keys must be nonnegative");}
+        max_key=eq->J[rows-1];
+        if(max_key>rows){v_free(eq);v_free(tm);return v_err("asof_index: key range is not dense");}
+    }
+    V *starts=v_ivec(max_key+2);
+    int64_t pos=0;
+    for(int64_t key=0;key<=max_key+1;key++){
+        while(pos<rows&&eq->J[pos]<key) pos++;
+        starts->J[key]=pos;
+    }
+    V *r=v_list(3);r->L[0]=eq;r->L[1]=tm;r->L[2]=starts;return r;
+}
 /* Coerce list[int] → owned ivec (or NULL on type error). */
 static V *as_ivec_arg(V *v, const char *ctx){
     if(v->t==T_IVEC) return v_ref(v);
@@ -739,6 +761,26 @@ static V *bi_asof_bin(V**a,in){
     shakti_asof_bin_i64(a[0]->J,a[1]->J,a[0]->n,qeq->J,qtm,qeq->n,scalar,r->J);
     v_free(qeq); if(qtm_own) v_free(qtm_own);
     return r;
+}
+/* Count grouped-asof hits using dense boundaries built by asof_index. */
+static V *bi_asof_index_count(V**a,in){
+    P(n<3||a[0]->t!=T_LIST||a[0]->n<3,v_err("asof_index_count(index, query_eq, query_time)"))
+    V *idx=a[0],*eq=idx->L[0],*tm=idx->L[1],*starts=idx->L[2];
+    P(!eq||!tm||!starts||eq->t!=T_IVEC||tm->t!=T_IVEC||starts->t!=T_IVEC,
+      v_err("asof_index_count: invalid index"))
+    P(eq->n!=tm->n,v_err("asof_index_count: invalid index lengths"))
+    V *qeq=as_ivec_arg(a[1],"query_eq");
+    if(!qeq) return v_err("asof_index_count: query_eq must be ivec or list[int]");
+    if(a[2]->t!=T_INT){v_free(qeq);return v_err("asof_index_count: query_time must be int");}
+    int64_t hits=0,qtm=a[2]->j;
+    for(int64_t j=0;j<qeq->n;j++){
+        int64_t key=qeq->J[j];
+        if(key<0||key+1>=starts->n) continue;
+        int64_t start=starts->J[key],end=starts->J[key+1];
+        if(start<end&&shakti_bin_i64(tm->J+start,end-start,qtm)>=0) hits++;
+    }
+    v_free(qeq);
+    return v_int(hits);
 }
 typedef struct {
     int64_t sym;
@@ -1589,7 +1631,7 @@ BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
-BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
+BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(asof_index) BI0(asof_index_count) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
 BI0(shakti_stats_index) BI0(shakti_stats_agg) BI0(shakti_stats_ui)
 BI0(shakti_vwbid) BI0(shakti_vwbid_index)
 BI0(shakti_hibid) BI0(shakti_hibid_index)
@@ -1694,6 +1736,8 @@ static const BiEntry bi_tab[] = {
     {"any", bi_w_any},
     {"append", bi_w_append},
     {"asof_bin", bi_w_asof_bin},
+    {"asof_index", bi_w_asof_index},
+    {"asof_index_count", bi_w_asof_index_count},
     {"asof_sort", bi_w_asof_sort},
     {"avg", bi_w_avg},
     {"bin", bi_w_bin},
