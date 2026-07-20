@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #include <ApplicationServices/ApplicationServices.h>
+#include <stdio.h>
 #include "gfx_platform.h"
 #include "gfx.h"
 #include "input.h"
@@ -149,16 +150,24 @@ static void gfx_mac_ensure_app(void) {
 int gfx_platform_init(const char *title, char *err, size_t cap) {
     NSRect frame;
     NSString *t;
-    (void)err;(void)cap;
-    if (NSScreen.mainScreen == nil) return -1;
+    if (g_win) gfx_platform_shutdown();
+    if (NSScreen.mainScreen == nil) {
+        if (err && cap) snprintf(err, cap, "gfx_open: no display");
+        return -1;
+    }
     gfx_mac_ensure_app();
-    if (gfx_core_fb_resize(GFX_MAC_W, GFX_MAC_H) != 0) return -1;
+    if (gfx_core_fb_resize(GFX_MAC_W, GFX_MAC_H) != 0) {
+        if (err && cap) snprintf(err, cap, "gfx_open: framebuffer init failed");
+        return -1;
+    }
     frame = NSMakeRect(100, 100, GFX_MAC_W, GFX_MAC_H);
     g_view = [[GfxView alloc] initWithFrame:frame];
     g_win = [[NSWindow alloc] initWithContentRect:frame
                                         styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                    NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
                                           backing:NSBackingStoreBuffered defer:NO];
+    /* ARC owns g_win — do not also auto-release on close (over-release on reopen). */
+    [g_win setReleasedWhenClosed:NO];
     t = title ? [NSString stringWithUTF8String:title] : @"Shakti GFX";
     [g_win setContentView:g_view];
     [g_win setTitle:t];
@@ -171,7 +180,12 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
 }
 
 void gfx_platform_shutdown(void) {
-    if (g_win) { [g_win orderOut:nil]; g_win = nil; }
+    if (g_win) {
+        [g_win setDelegate:nil];
+        [g_win setContentView:nil];
+        [g_win orderOut:nil];
+        g_win = nil;
+    }
     g_view = nil;
     g_delegate = nil;
 }

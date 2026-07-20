@@ -114,7 +114,9 @@ int gfx_available(void) { return 1; }
 
 int gfx_open(const char *title, char *err, size_t err_cap) {
     (void)title;
-    if (g.fb) gfx_close();
+    /* Tear down any prior session, including a failed open that left
+     * present/platform state without fb (issue #2 reopen path). */
+    if (g.fb || g.present || g.alive) gfx_close();
     g.design_w = GFX_DESIGN_W;
     g.design_h = GFX_DESIGN_H;
     g.fb = (uint32_t *)calloc((size_t)GFX_DESIGN_W * (size_t)GFX_DESIGN_H, sizeof(uint32_t));
@@ -125,8 +127,9 @@ int gfx_open(const char *title, char *err, size_t err_cap) {
     g.alive = 1;
     g.dirty = 1;
     if (gfx_platform_init(title, err, err_cap) != 0) {
-        free(g.fb);
-        g.fb = NULL;
+        gfx_close();
+        if (err && err_cap && !err[0])
+            snprintf(err, err_cap, "gfx_open: platform init failed");
         return -1;
     }
     return 0;
