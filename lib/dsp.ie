@@ -1,0 +1,29 @@
+# dsp — just intonation / k-scale ratio primitives
+# Requires shakti built with SHAKTI_DSP=1 (default).
+#
+#   import dsp
+#   dsp.degree_freq(440.0, 4)    # 3/2 → 660 Hz
+#   scale : dsp.perfect7(440.0)
+
+def ratio_freq(root, num, den):
+    return dsp_ratio_freq(root, num, den)
+
+def ratio_cents(num, den):
+    return dsp_ratio_cents(num, den)
+
+def ratio_reduce(num, den):
+    return dsp_ratio_reduce(num, den)
+
+def perfect7(root:""):
+    if root:
+        return dsp_perfect7(root)
+    return dsp_perfect7()
+
+def degree_freq(root, degree):
+    return dsp_degree_freq(root, degree)
+
+def et_cents(semitone):
+    return dsp_et_cents(semitone)
+
+def et_delta(num, den):
+    return dsp_et_delta(num, den)

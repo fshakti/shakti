@@ -1,0 +1,27 @@
+# sonicpi — OSC bridge to Sonic Pi (native UDP in src/sonicpi.c)
+# Requires shakti built with SHAKTI_SONICPI=1 (default).
+#
+#   import sonicpi
+#   sonicpi.configure("127.0.0.1", 4560)
+#   sonicpi.play(60, 0.8, 0.25)
+#   sonicpi.synth("prophet", 70, 0.9, 1.0)
+#   sonicpi.bpm(120)
+#   sonicpi.stop()
+#
+# Arbitrary paths: sonicpi_send("/shakti/play", 62, 0.5, 0.1)
+# Env overrides: SONICPI_HOST, SONICPI_PORT
+
+def configure(host:"127.0.0.1", port:4560):
+    return sonicpi_configure(host, port)
+
+def play(note, amp:0.8, sustain:0.25):
+    return sonicpi_play(note, amp, sustain)
+
+def synth(name, note, amp:0.9, sustain:1.0):
+    return sonicpi_synth(name, note, amp, sustain)
+
+def bpm(tempo):
+    return sonicpi_bpm(tempo)
+
+def stop():
+    return sonicpi_stop()

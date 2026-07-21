@@ -5046,8 +5046,20 @@ V *eval(Node *n, Env *e) {
             if(attr && attr->t == T_FN) {
                 Env *call_env = env_new(attr->closure);
                 V *params = attr->params;
-                for(int i=0; i<params->n && i<nargs; i++)
-                    env_set(call_env, params->L[i]->s, args[i]);
+                for(int i=0; i<params->n; i++) {
+                    if(i < nargs) {
+                        env_set(call_env, params->L[i]->s, args[i]);
+                    } else if(attr->defaults && i < attr->defaults->n && attr->defaults->L[i]->t != T_NIL) {
+                        env_set(call_env, params->L[i]->s, attr->defaults->L[i]);
+                    }
+                }
+                for(int i=1; i<n->nch; i++) {
+                    if(n->ch[i]->type == N_KWARG) {
+                        V *kv = eval(n->ch[i]->ch[0], e);
+                        env_set(call_env, n->ch[i]->sval, kv);
+                        v_free(kv);
+                    }
+                }
                 Node *body = fn_ast[(int)attr->j];
                 V *result = eval(body, call_env);
                 if(g_returning) {

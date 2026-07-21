@@ -1,0 +1,36 @@
+# pdf — from-scratch PDF 1.4 reader/writer (no third-party PDF libs)
+# Requires shakti built with SHAKTI_PDF=1 (default).
+#
+#   import pdf
+#   w : pdf.create()
+#   pdf.add_page(w)
+#   pdf.text_at(w, 72, 720, "Hello Shakti", size:12)
+#   pdf.save(w, "out.pdf")
+#   pdf.close(w)
+
+def create():
+    return pdf_create()
+
+def add_page(h):
+    return pdf_add_page(h)
+
+def text_at(h, x, y, text, size:12):
+    return pdf_text_at(h, x, y, text, size)
+
+def save(h, path):
+    return pdf_save(h, path)
+
+def open(path):
+    return pdf_open(path)
+
+def page_count(h):
+    return pdf_page_count(h)
+
+def info(h):
+    return pdf_info(h)
+
+def text(h, page:0):
+    return pdf_text(h, page)
+
+def close(h):
+    return pdf_close(h)
