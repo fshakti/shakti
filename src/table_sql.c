@@ -36,7 +36,18 @@ typedef struct {
 static int is_agg_kw(ss){static const char*kws[]={"count","sum","avg","min","max",0};int k;for(k=0;kws[k];k++)if(!strcmp(s,kws[k]))return 1;return 0;}
 static int tbl_col_idx(V*tbl,const g0*name){int64_t k;P(!tbl||tbl->t!=T_TABLE||!name,-1)for(k=0;k<tbl->keys->n;k++)if(!strcmp(tbl->keys->L[k]->s,name))return(int)k;return-1;}
 static inline V*tbl_col(V*tbl,int idx){return(!tbl||tbl->t!=T_TABLE||idx<0||idx>=tbl->keys->n)?NULL:tbl->vals->L[idx];}
-static inline double cell_float(V*col,int64_t row){return !col?0.:col->t==T_IVEC?row<col->n?(double)col->J[row]:0.:col->t==T_FVEC?row<col->n?col->F[row]:0.:col->t==T_BVEC?row<col->n?col->B[row]?1.:0.:0.:col->t==T_IMAT&&row<col->n?(double)col->J[mat_idx(col,row,0)]:col->t==T_FMAT&&row<col->n?col->F[mat_idx(col,row,0)]:0.;}
+static inline double cell_float(V*col,int64_t row){
+    if(!col) return 0.;
+    if(col->t==T_INT) return (double)col->j;
+    if(col->t==T_FLOAT) return col->f;
+    if(col->t==T_BOOL) return col->b?1.:0.;
+    if(col->t==T_IVEC) return row<col->n?(double)col->J[row]:0.;
+    if(col->t==T_FVEC) return row<col->n?col->F[row]:0.;
+    if(col->t==T_BVEC) return row<col->n?col->B[row]?1.:0.:0.;
+    if(col->t==T_IMAT&&row<col->n) return (double)col->J[mat_idx(col,row,0)];
+    if(col->t==T_FMAT&&row<col->n) return col->F[mat_idx(col,row,0)];
+    return 0.;
+}
 static void fmt_f64_bits(char*buf,size_t cap,double x){
  union{double d;uint64_t u;}u;u.d=x;
  snprintf(buf,cap,"%016llx",(unsigned long long)u.u);}
@@ -1715,12 +1726,30 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
     if (table->t != T_TABLE) {
         return v_err("insert: need table");
     }
-    if (!vals || vals->t != T_LIST) {
+    /* Accept T_LIST, or numeric vectors from N_LIST promotion of VALUES (...). */
+    V *vals_list = NULL;
+    int free_vals_list = 0;
+    if (!vals) {
         return v_err("insert: need values list");
     }
+    if (vals->t == T_LIST) {
+        vals_list = vals;
+    } else if (vals->t == T_IVEC || vals->t == T_FVEC || vals->t == T_BVEC) {
+        vals_list = v_list(vals->n);
+        free_vals_list = 1;
+        for (int64_t i = 0; i < vals->n; i++) {
+            if (vals->t == T_IVEC) vals_list->L[i] = v_int(vals->J[i]);
+            else if (vals->t == T_FVEC) vals_list->L[i] = v_float(vals->F[i]);
+            else vals_list->L[i] = v_bool(vals->B[i]);
+        }
+    } else {
+        return v_err("insert: need values list");
+    }
+    vals = vals_list;
     int use_all_cols = !cols || cols->t == T_NIL || (cols->t == T_LIST && cols->n == 0);
     int64_t ncols = use_all_cols ? table->keys->n : cols->n;
     if (vals->n != ncols) {
+        if (free_vals_list) v_free(vals_list);
         return v_err("insert: column/value count mismatch");
     }
     if (table->rc == 1) {
@@ -1728,6 +1757,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
             const char *name = use_all_cols ? table->keys->L[i]->s : cols->L[i]->s;
             int idx = tbl_col_idx(table, name);
             if (idx < 0) {
+                if (free_vals_list) v_free(vals_list);
                 return v_errf("insert: unknown column '%s'", name);
             }
             V *col = table->vals->L[idx];
@@ -1740,6 +1770,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
         if (table->vals->n > 0 && table->vals->L[0]) {
             table->n = table->vals->L[0]->n;
         }
+        if (free_vals_list) v_free(vals_list);
         return v_ref(table);
     }
     V *new_data = v_list(table->keys->n);
@@ -1751,6 +1782,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
         int idx = tbl_col_idx(table, name);
         if (idx < 0) {
             v_free(new_data);
+            if (free_vals_list) v_free(vals_list);
             return v_errf("insert: unknown column '%s'", name);
         }
         V *col = new_data->L[idx];
@@ -1760,6 +1792,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
             new_data->L[idx] = next;
         }
     }
+    if (free_vals_list) v_free(vals_list);
     return v_table(v_copy(table->keys), new_data);
 }
 V *table_sql_join(V *left, V *right, V *on_col) {

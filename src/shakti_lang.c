@@ -3661,6 +3661,23 @@ static V *eval_name_list(Node *n) {
     }
     return r;
 }
+/* INSERT VALUES must stay a heterogeneous T_LIST. Generic N_LIST eval promotes
+ * all-int / all-num literals to ivec/fvec; table_sql_insert then reads vals->L[i]
+ * and segfaults (union alias with J/F). */
+static V *eval_insert_values(Node *n, Env *e) {
+    P(!n || n->type != N_LIST,v_err("insert: need values list"))
+    V *r = v_list(n->nch);
+    for (int i = 0; i < n->nch; i++) {
+        V *el = eval(n->ch[i], e);
+        if (g_error || !el || el->t == T_ERR) {
+            r->n = i;
+            v_free(r);
+            return el ? el : v_err("insert: value error");
+        }
+        r->L[i] = el;
+    }
+    return r;
+}
 static V *eval_update_cols(Node *n, V *tbl, Env *e) {
     P(!n || n->type == N_NONE,v_dict(v_list(0), v_list(0)))
     Env *inner = env_new(e);
@@ -4442,7 +4459,8 @@ V *eval(Node *n, Env *e) {
         P(!existing,v_errf("insert: table '%s' not found", n->sval))
         V *cols = eval_name_list(n->ch[0]);
         P(cols->t == T_ERR,(cols))
-        V *vals = eval(n->ch[1], e);
+        V *vals = eval_insert_values(n->ch[1], e);
+        P(vals->t == T_ERR,(v_free(cols),vals))
         V *r = table_sql_insert(existing, cols, vals);
         if (r && r->t != T_ERR && r != existing) env_update(e, n->sval, r);
         v_free(cols); v_free(vals);
