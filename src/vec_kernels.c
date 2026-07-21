@@ -377,7 +377,7 @@ void shakti_bin_i64_batch(const int64_t *keys, int64_t n,
         for (int64_t j = 0; j < m; j++) out[j] = -1;
         return;
     }
-    /* Sorted needles → O(n+m) two-pointer merge (MKTSNAP request tables). */
+    /* Sorted needles → O(n+m) two-pointer merge. */
     if (m >= 2 && shakti_i64_ascending(qs, m)) {
         int64_t i = 0;
         for (int64_t j = 0; j < m; j++) {

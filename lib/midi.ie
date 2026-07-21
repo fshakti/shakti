@@ -1,0 +1,53 @@
+# midi — ALSA sequencer (Linux) / CoreMIDI (macOS)
+# Requires shakti built with SHAKTI_MIDI=1 (default).
+#
+#   import midi
+#   midi.open()
+#   print(midi.backend())          # "alsa" or "coremidi"
+#   for p in midi.list(): print(p)
+#   midi.connect("Scarlett")       # name substring, or "20:0" / "dest:0"
+#   midi.note_on(60, 100)
+#   wait(0.5)
+#   midi.note_off(60)
+#   midi.close()
+#
+# Distinct from import synth (built-in softsynth) and import sonicpi (OSC).
+
+def open():
+    return midi_open()
+
+def close():
+    return midi_close()
+
+def alive():
+    return midi_alive()
+
+def backend():
+    return midi_backend()
+
+def list():
+    return midi_list()
+
+def connect(id_or_name):
+    return midi_connect(id_or_name)
+
+def disconnect():
+    return midi_disconnect()
+
+def note_on(note, vel:100, ch:0):
+    return midi_note_on(note, vel, ch)
+
+def note_off(note, vel:0, ch:0):
+    return midi_note_off(note, vel, ch)
+
+def cc(controller, val, ch:0):
+    return midi_cc(controller, val, ch)
+
+def program(prog, ch:0):
+    return midi_program(prog, ch)
+
+def raw(status, d1:0, d2:0):
+    return midi_raw(status, d1, d2)
+
+def poll():
+    return midi_poll()
