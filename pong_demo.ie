@@ -1,0 +1,3 @@
+# Pong gfx demo — requires SHAKTI_GFX=1 and SHAKTI_LIB pointing at lib/
+import pong
+pong.run()

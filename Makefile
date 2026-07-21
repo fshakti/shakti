@@ -337,6 +337,16 @@ endif
 test-parse: shakti
 	@bash scripts/parse_golden.sh
 
+test-pong: shakti
+	@echo "Running pong_test.ie..."
+	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_test.ie
+	@echo "Running pong_spell_test.ie..."
+	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_spell_test.ie
+	@echo "PONG TESTS PASSED"
+
+bench-pong: shakti
+	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_bench.ie
+
 clean:
 	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o pdf.o midi.o iefs_io.o iefs_format.o shakti_jni.o *.tmp *.plist
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
@@ -411,7 +421,7 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse
+.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse test-pong bench-pong
 
 # Optional JNI bridge (not linked into the CLI). Requires JAVA_HOME or Homebrew OpenJDK.
 shakti_jni.o: src/shakti_jni.c src/a.h

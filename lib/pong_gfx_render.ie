@@ -1,0 +1,227 @@
+# Gfx renderer — pseudo-3D perspective court (960x540 design space).
+# Game x = depth (near→far), game y = lateral across the court.
+
+import pong_core
+import pong_skins
+
+MID_X : 480
+NEAR_Y : 500
+FAR_Y : 72
+NEAR_HALF : 390
+FAR_HALF : 118
+
+COURT2_X : 70
+COURT2_Y : 56
+COURT2_W : 820
+COURT2_H : 428
+
+def depth_t(px):
+    t : px / (pong_core.W * 1.0)
+    if t < 0.0:
+        t : 0.0
+    if t > 1.0:
+        t : 1.0
+    return t
+
+def half_at(t):
+    return NEAR_HALF + t * (FAR_HALF - NEAR_HALF)
+
+def y_at(t):
+    return NEAR_Y + t * (FAR_Y - NEAR_Y)
+
+def proj(px, py):
+    t : depth_t(px)
+    hy : half_at(t)
+    u : (py / (pong_core.H * 1.0)) * 2.0 - 1.0
+    sx : int(MID_X + u * hy + 0.5)
+    sy : int(y_at(t) + 0.5)
+    return dict(x: sx, y: sy, t: t)
+
+def darken(rgb, amount):
+    # amount 0..1 — pull channels toward black
+    r : (rgb // 65536) % 256
+    g : (rgb // 256) % 256
+    b : rgb % 256
+    keep : 1.0 - amount
+    r : int(r * keep + 0.5)
+    g : int(g * keep + 0.5)
+    b : int(b * keep + 0.5)
+    return r * 65536 + g * 256 + b
+
+def proj2(px, py):
+    sx : COURT2_X + int((px / (pong_core.W * 1.0)) * COURT2_W + 0.5)
+    sy : COURT2_Y + int((py / (pong_core.H * 1.0)) * COURT2_H + 0.5)
+    return dict(x: sx, y: sy)
+
+def draw_score(gfx, st, skin, p1, p2):
+    col : pong_skins.gfx_line(skin)
+    score : p1 + "  " + str(st["sl"]) + " - " + str(st["sr"]) + "  " + p2
+    sw : gfx.text_width(score, 2)
+    gfx.text(480 - sw // 2, 8, score, 0xffffff, 2)
+    i : 0
+    while i < st["sl"]:
+        gfx.fill_rect(24 + i * 10, 34, 6, 10, col)
+        i : i + 1
+    i : 0
+    while i < st["sr"]:
+        gfx.fill_rect(930 + (-i * 10), 34, 6, 10, col)
+        i : i + 1
+
+def draw_court(gfx, bg, ln, net):
+    # Floor as horizontal strips (trapezoid)
+    sy : FAR_Y
+    while sy <= NEAR_Y:
+        t : (sy - NEAR_Y) / (FAR_Y - NEAR_Y)
+        hy : half_at(t)
+        x0 : int(MID_X - hy + 0.5)
+        w : int(hy * 2.0 + 0.5)
+        shade : darken(bg, t * 0.35)
+        if w > 0:
+            gfx.fill_rect(x0, sy, w, 1, shade)
+        sy : sy + 1
+
+    # Side rails + near/far edges
+    nl : proj(0.0, 0.0)
+    nr : proj(0.0, pong_core.H * 1.0)
+    fl : proj(pong_core.W * 1.0, 0.0)
+    fr : proj(pong_core.W * 1.0, pong_core.H * 1.0)
+    gfx.line(nl["x"], nl["y"], fl["x"], fl["y"], ln)
+    gfx.line(nr["x"], nr["y"], fr["x"], fr["y"], ln)
+    gfx.line(nl["x"], nl["y"], nr["x"], nr["y"], ln)
+    gfx.line(fl["x"], fl["y"], fr["x"], fr["y"], ln)
+
+    # Net across mid-court depth
+    mid : pong_core.W / 2.0
+    n0 : proj(mid, 0.0)
+    n1 : proj(mid, pong_core.H * 1.0)
+    gfx.line(n0["x"], n0["y"], n1["x"], n1["y"], net)
+
+def draw_bat3d(gfx, px, top, face, side):
+    p0 : proj(px, top)
+    p1 : proj(px, top + pong_core.PH * 1.0)
+    x0 : p0["x"]
+    x1 : p1["x"]
+    if x1 < x0:
+        tmp : x0
+        x0 : x1
+        x1 : tmp
+    w : x1 - x0
+    if w < 6:
+        w : 6
+    t : p0["t"]
+    thick : int(18.0 * (1.0 - t * 0.65) + 0.5)
+    if thick < 5:
+        thick : 5
+    y0 : p0["y"] - thick // 2
+    # Side face (depth extrusion) then top face
+    extr : int(10.0 * (1.0 - t * 0.5) + 0.5)
+    if extr < 3:
+        extr : 3
+    gfx.fill_rect(x0, y0 - extr, w, thick + extr, side)
+    gfx.fill_rect(x0, y0, w, thick, face)
+
+def draw_ball3d(gfx, st, color):
+    # Mr Squarey — shady little square with side-eye and a smirk.
+    p : proj(st["bx"], st["bpy"])
+    t : p["t"]
+    half : int((12.0 - t * 7.0) + 0.5)
+    if half < 5:
+        half : 5
+    s : half * 2
+    x0 : p["x"] - half
+    y0 : p["y"] - half
+    # Shadow on court
+    sh : darken(color, 0.7)
+    gfx.fill_rect(x0, p["y"] + half // 2, s, half // 2 + 1, sh)
+    # Depth edge, then face
+    gfx.fill_rect(x0 + 2, y0 - 2, s, s, darken(color, 0.35))
+    gfx.fill_rect(x0, y0, s, s, color)
+    # Outline (makes him read as a character, not a pixel blob)
+    ink : 0x1a1208
+    gfx.fill_rect(x0, y0, s, 1, ink)
+    gfx.fill_rect(x0, y0 + s - 1, s, 1, ink)
+    gfx.fill_rect(x0, y0, 1, s, ink)
+    gfx.fill_rect(x0 + s - 1, y0, 1, s, ink)
+    # Suspicious brows (low, angled toward center)
+    brow : darken(color, 0.55)
+    ew : half // 3
+    if ew < 2:
+        ew : 2
+    eh : half // 5
+    if eh < 1:
+        eh : 1
+    eye_y : y0 + half // 3
+    lx : x0 + half // 4
+    rx : x0 + half + half // 5
+    gfx.fill_rect(lx, eye_y - eh - 1, ew + 1, eh, brow)
+    gfx.fill_rect(rx - 1, eye_y - eh - 1, ew + 1, eh, brow)
+    # Side-eye whites + pupils shifted right (he's watching you)
+    white : 0xf5f0e6
+    pupil : 0x0d0d12
+    gfx.fill_rect(lx, eye_y, ew, eh + 1, white)
+    gfx.fill_rect(rx, eye_y, ew, eh + 1, white)
+    pw : eh
+    if pw < 1:
+        pw : 1
+    gfx.fill_rect(lx + ew - pw, eye_y, pw, eh + 1, pupil)
+    gfx.fill_rect(rx + ew - pw, eye_y, pw, eh + 1, pupil)
+    # Smirk — short crooked mouth, up on the right
+    my : y0 + half + half // 5
+    mw : half // 2
+    if mw < 3:
+        mw : 3
+    mx : x0 + half // 3
+    gfx.fill_rect(mx, my, mw, 1, ink)
+    gfx.fill_rect(mx + mw - 1, my - 1, 2, 1, ink)
+
+def render2d(gfx, st, skin, p1, p2):
+    bg : pong_skins.gfx_bg(skin)
+    ln : pong_skins.gfx_line(skin)
+    net : pong_skins.gfx_net(skin)
+    batl : pong_skins.gfx_bat_near(skin)
+    batr : pong_skins.gfx_bat_far(skin)
+    ball : pong_skins.gfx_ball(skin)
+
+    gfx.clear(0x0a0a12)
+    gfx.fill_rect(COURT2_X, COURT2_Y, COURT2_W, COURT2_H, bg)
+    gfx.fill_rect(COURT2_X, COURT2_Y, COURT2_W, 2, ln)
+    gfx.fill_rect(COURT2_X, COURT2_Y + COURT2_H - 2, COURT2_W, 2, ln)
+    gfx.fill_rect(COURT2_X, COURT2_Y, 2, COURT2_H, ln)
+    gfx.fill_rect(COURT2_X + COURT2_W - 2, COURT2_Y, 2, COURT2_H, ln)
+    gfx.fill_rect(COURT2_X + COURT2_W // 2 - 1, COURT2_Y, 2, COURT2_H, net)
+
+    lp0 : proj2(pong_core.PLX * 1.0, st["ly"])
+    lp1 : proj2(pong_core.PLX * 1.0, st["ly"] + pong_core.PH * 1.0)
+    rp0 : proj2(pong_core.PRX * 1.0, st["ry"])
+    rp1 : proj2(pong_core.PRX * 1.0, st["ry"] + pong_core.PH * 1.0)
+    gfx.fill_rect(lp0["x"] - 7, lp0["y"], 14, lp1["y"] - lp0["y"], batl)
+    gfx.fill_rect(rp0["x"] - 7, rp0["y"], 14, rp1["y"] - rp0["y"], batr)
+
+    bp : proj2(st["bx"], st["bpy"])
+    gfx.fill_rect(bp["x"] - 9, bp["y"] - 9, 18, 18, darken(ball, 0.35))
+    gfx.fill_rect(bp["x"] - 8, bp["y"] - 8, 16, 16, ball)
+    draw_score(gfx, st, skin, p1, p2)
+
+def render3d(gfx, st, skin, p1, p2):
+    bg : pong_skins.gfx_bg(skin)
+    ln : pong_skins.gfx_line(skin)
+    net : pong_skins.gfx_net(skin)
+    batn : pong_skins.gfx_bat_near(skin)
+    batf : pong_skins.gfx_bat_far(skin)
+    ball : pong_skins.gfx_ball(skin)
+
+    gfx.clear(0x0a0a12)
+    draw_court(gfx, bg, ln, net)
+    # Far bat (AI) then near bat (player) then ball
+    draw_bat3d(gfx, pong_core.PRX * 1.0, st["ry"], batf, darken(batf, 0.4))
+    draw_bat3d(gfx, pong_core.PLX * 1.0, st["ly"], batn, darken(batn, 0.45))
+    draw_ball3d(gfx, st, ball)
+    draw_score(gfx, st, skin, p1, p2)
+
+def render(gfx, st, skin, view, p1, p2):
+    if view = 0:
+        render2d(gfx, st, skin, p1, p2)
+    else:
+        render3d(gfx, st, skin, p1, p2)
+
+pong_gfx_render_loaded : 1

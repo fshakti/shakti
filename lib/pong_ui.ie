@@ -1,0 +1,281 @@
+# UI helpers: court-surface dropdown (terminal + gfx).
+
+import pong_skins
+import pong_gfx_text
+
+ESC : chr(27)
+CLR : ESC + "[2J" + ESC + "[H"
+
+# Gfx menu layout (960x540 design space)
+TITLE_H : 56
+TITLE_SCALE : 3
+LABEL_SCALE : 2
+BTN_SCALE : 2
+
+MODE_AI : 0
+MODE_2P : 1
+MODE_NONE : -1
+
+VIEW_2D : 0
+VIEW_3D : 1
+
+MODE_X : 24
+MODE_Y : 80
+MODE_BTN_W : 300
+MODE_BTN_H : 52
+MODE_GAP : 24
+
+VIEW_X : 400
+VIEW_Y : 148
+VIEW_BTN_W : 140
+VIEW_BTN_H : 36
+VIEW_GAP : 16
+
+DD_X : 24
+DD_Y : 148
+DD_W : 340
+DD_ROW : 32
+DD_HDR : 36
+NAME_X : 400
+NAME_Y : 230
+NAME_W : 340
+NAME_H : 36
+NAME_GAP : 58
+START_Y : 350
+START_W : 180
+START_H : 44
+BACK_X : 20
+BACK_Y : 8
+BACK_W : 86
+BACK_H : 28
+
+def mode_btn_x(which):
+    if which = MODE_AI:
+        return MODE_X
+    return MODE_X + MODE_BTN_W + MODE_GAP
+
+def view_btn_x(which):
+    if which = VIEW_2D:
+        return VIEW_X
+    return VIEW_X + VIEW_BTN_W + VIEW_GAP
+
+def start_rect():
+    return dict(x: DD_X, y: START_Y, w: START_W, h: START_H)
+
+def dd_item_y(i):
+    return DD_Y + DD_HDR + i * DD_ROW
+
+def in_rect(x, y, rx, ry, rw, rh):
+    if x < rx:
+        return 0
+    if y < ry:
+        return 0
+    if x >= rx + rw:
+        return 0
+    if y >= ry + rh:
+        return 0
+    return 1
+
+def draw_back_button(gfx):
+    gfx.fill_rect(BACK_X, BACK_Y, BACK_W, BACK_H, 0x3d5afe)
+    gfx.fill_rect(BACK_X + 2, BACK_Y + 2, BACK_W - 4, BACK_H - 4, 0x202040)
+    gfx.text(BACK_X + 16, BACK_Y + 7, "BACK", 0xffffff, 1)
+
+def back_clicked(x, y):
+    return in_rect(x, y, BACK_X, BACK_Y, BACK_W, BACK_H)
+
+# ----- terminal dropdown (boxed list) -----
+def draw_terminal_picker(skin, open):
+    out : CLR
+    out : out + "  PONG — court surface\n\n"
+    out : out + "  +------------------------+\n"
+    if open = 0:
+        out : out + "  | " + pong_skins.name(skin)
+        pad : 22 + (-len(pong_skins.name(skin)))
+        i : 0
+        while i < pad:
+            out : out + " "
+            i : i + 1
+        out : out + " v |\n"
+    else:
+        i : 0
+        while i < pong_skins.N_SKINS:
+            nm : pong_skins.name(i)
+            mark : "  "
+            if i = skin:
+                mark : "> "
+            out : out + "  | " + mark + nm
+            pad2 : 20 + (-len(nm))
+            j : 0
+            while j < pad2:
+                out : out + " "
+                j : j + 1
+            out : out + "  |\n"
+            i : i + 1
+    out : out + "  +------------------------+\n\n"
+    if open = 0:
+        out : out + "  o = open list   Enter = start   q = quit\n"
+    else:
+        out : out + "  1 grass   2 clay   3 hard court   Enter = start   q = quit\n"
+    return out
+
+def pick_skin_terminal():
+    skin : pong_skins.SKIN_GRASS
+    open : 0
+    running : 1
+    while running:
+        print(draw_terminal_picker(skin, open))
+        cmd : readline("  > ")
+        if len(cmd) > 0:
+            c : cmd[0]
+            if c = "q":
+                running : 0
+                skin : -1
+            else:
+                if c = "o":
+                    open : 1
+                else:
+                    if c = "1":
+                        skin : pong_skins.SKIN_GRASS
+                        open : 1
+                    else:
+                        if c = "2":
+                            skin : pong_skins.SKIN_CLAY
+                            open : 1
+                        else:
+                            if c = "3":
+                                skin : pong_skins.SKIN_PLASTIC
+                                open : 1
+        else:
+            running : 0
+    return skin
+
+# ----- gfx menu (mode + court surface + start) -----
+def draw_mode_btn(gfx, which, selected, label):
+    x : mode_btn_x(which)
+    bg : 0x2a2a2a
+    hi : 0x3d5afe
+    tc : 0xcccccc
+    if selected = which:
+        bg : hi
+        tc : 0xffffff
+    gfx.fill_rect(x, MODE_Y, MODE_BTN_W, MODE_BTN_H, bg)
+    gfx.fill_rect(x, MODE_Y, MODE_BTN_W, 2, hi)
+    cx : x + MODE_BTN_W // 2
+    ty : MODE_Y + (MODE_BTN_H + (-(7 * BTN_SCALE))) // 2
+    pong_gfx_text.draw_text_c(gfx, cx, ty, label, tc, BTN_SCALE)
+
+def draw_view_btn(gfx, which, selected, label):
+    x : view_btn_x(which)
+    bg : 0x2a2a2a
+    hi : 0x3d5afe
+    tc : 0xcccccc
+    if selected = which:
+        bg : hi
+        tc : 0xffffff
+    gfx.fill_rect(x, VIEW_Y, VIEW_BTN_W, VIEW_BTN_H, bg)
+    gfx.fill_rect(x, VIEW_Y, VIEW_BTN_W, 2, hi)
+    pong_gfx_text.draw_text_c(gfx, x + VIEW_BTN_W // 2, VIEW_Y + 10, label, tc, LABEL_SCALE)
+
+def draw_name_field(gfx, y, label, value, active, enabled):
+    border : 0x444444
+    bg : 0x202020
+    tc : 0xffffff
+    if enabled = 0:
+        bg : 0x181818
+        tc : 0x777777
+    if active = 1:
+        border : 0x3d5afe
+    gfx.text(NAME_X, y - 18, label, 0xaaaaaa, 1)
+    gfx.fill_rect(NAME_X, y, NAME_W, NAME_H, border)
+    gfx.fill_rect(NAME_X + 2, y + 2, NAME_W - 4, NAME_H - 4, bg)
+    shown : value
+    if active = 1:
+        shown : shown + "_"
+    gfx.text(NAME_X + 10, y + 9, shown, tc, 1)
+
+def draw_gfx_dropdown(gfx, skin, open):
+    bg : 0x2a2a2a
+    hi : 0x3d5afe
+    pong_gfx_text.draw_text(gfx, DD_X, DD_Y + (-16), pong_gfx_text.MENU_LABELS[4], 0xaaaaaa, LABEL_SCALE)
+    gfx.fill_rect(DD_X, DD_Y, DD_W, DD_HDR, bg)
+    gfx.fill_rect(DD_X, DD_Y, DD_W, 2, hi)
+    gfx.fill_rect(DD_X + 10, DD_Y + 10, 24, 16, pong_skins.gfx_bg(skin))
+    pong_gfx_text.draw_text(gfx, DD_X + 44, DD_Y + 10, pong_skins.skin_gfx_label(skin), 0xffffff, LABEL_SCALE)
+    if open = 1:
+        h : pong_skins.N_SKINS * DD_ROW
+        gfx.fill_rect(DD_X, DD_Y + DD_HDR, DD_W, h, 0x1a1a1a)
+        i : 0
+        while i < pong_skins.N_SKINS:
+            ry : dd_item_y(i)
+            if i = skin:
+                gfx.fill_rect(DD_X + 2, ry, DD_W + (-4), DD_ROW + (-2), hi)
+            gfx.fill_rect(DD_X + 10, ry + 8, 24, 16, pong_skins.gfx_bg(i))
+            pong_gfx_text.draw_text(gfx, DD_X + 44, ry + 8, pong_skins.skin_gfx_label(i), 0xffffff, LABEL_SCALE)
+            i : i + 1
+
+def draw_gfx_menu(gfx, skin, open, mode, view, p1, p2, active_name):
+    gfx.clear(0x101010)
+    gfx.fill_rect(0, 0, 960, TITLE_H, 0x1a1a2e)
+    gfx.fill_rect(0, TITLE_H + (-2), 960, 2, 0x3d5afe)
+    pong_gfx_text.draw_text_c(gfx, 480, 12, pong_gfx_text.MENU_LABELS[0], 0xffffff, TITLE_SCALE)
+    pong_gfx_text.draw_text(gfx, MODE_X, 64, pong_gfx_text.MENU_LABELS[1], 0x888888, LABEL_SCALE)
+    draw_mode_btn(gfx, MODE_AI, mode, pong_gfx_text.MENU_LABELS[2])
+    draw_mode_btn(gfx, MODE_2P, mode, pong_gfx_text.MENU_LABELS[3])
+    draw_gfx_dropdown(gfx, skin, open)
+    pong_gfx_text.draw_text(gfx, VIEW_X, VIEW_Y + (-16), pong_gfx_text.MENU_LABELS[9], 0xaaaaaa, LABEL_SCALE)
+    draw_view_btn(gfx, VIEW_2D, view, pong_gfx_text.MENU_LABELS[10])
+    draw_view_btn(gfx, VIEW_3D, view, pong_gfx_text.MENU_LABELS[11])
+    draw_name_field(gfx, NAME_Y, "PLAYER 1 NAME", p1, active_name = 1, 1)
+    p2_enabled : 0
+    p2_shown : "CPU"
+    if mode = MODE_2P:
+        p2_enabled : 1
+        p2_shown : p2
+    draw_name_field(gfx, NAME_Y + NAME_GAP, "PLAYER 2 NAME", p2_shown, active_name = 2, p2_enabled)
+    sb : 0x2e7d32
+    if mode = MODE_NONE:
+        sb : 0x333333
+    gfx.fill_rect(DD_X, START_Y, START_W, START_H, sb)
+    if mode >= 0:
+        gfx.fill_rect(DD_X + 2, START_Y + 2, START_W + (-4), START_H + (-4), 0x43a047)
+        pong_gfx_text.draw_text_c(gfx, DD_X + START_W // 2, START_Y + 12, pong_gfx_text.MENU_LABELS[8], 0xffffff, LABEL_SCALE)
+
+def pick_gfx_menu_click(skin, open, mode, view, active_name, cx, cy):
+    start : 0
+    if in_rect(cx, cy, mode_btn_x(MODE_AI), MODE_Y, MODE_BTN_W, MODE_BTN_H):
+        mode : MODE_AI
+        if active_name = 2:
+            active_name : 1
+    if in_rect(cx, cy, mode_btn_x(MODE_2P), MODE_Y, MODE_BTN_W, MODE_BTN_H):
+        mode : MODE_2P
+    if in_rect(cx, cy, view_btn_x(VIEW_2D), VIEW_Y, VIEW_BTN_W, VIEW_BTN_H):
+        view : VIEW_2D
+    if in_rect(cx, cy, view_btn_x(VIEW_3D), VIEW_Y, VIEW_BTN_W, VIEW_BTN_H):
+        view : VIEW_3D
+    if in_rect(cx, cy, NAME_X, NAME_Y, NAME_W, NAME_H):
+        active_name : 1
+    if mode = MODE_2P:
+        if in_rect(cx, cy, NAME_X, NAME_Y + NAME_GAP, NAME_W, NAME_H):
+            active_name : 2
+    if in_rect(cx, cy, DD_X, DD_Y, DD_W, DD_HDR):
+        if open = 1:
+            open : 0
+        else:
+            open : 1
+    else:
+        if open = 1:
+            i : 0
+            while i < pong_skins.N_SKINS:
+                if in_rect(cx, cy, DD_X, dd_item_y(i), DD_W, DD_ROW):
+                    skin : i
+                    open : 0
+                i : i + 1
+        else:
+            sr : start_rect()
+            if in_rect(cx, cy, sr["x"], sr["y"], sr["w"], sr["h"]):
+                if mode >= 0:
+                    start : 1
+    return dict(skin: skin, open: open, mode: mode, view: view, active_name: active_name, start: start)
+
+pong_ui_loaded : 1

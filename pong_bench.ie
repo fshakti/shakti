@@ -1,0 +1,99 @@
+# pong_bench - throughput benchmark for the Pong engine
+#
+# Run:  SHAKTI_LIB=$PWD/lib ./shakti pong_bench.ie
+#   or: make bench-pong
+#
+# Uses clock() (CPU seconds) for physics, terminal frame, projections, and AI.
+
+import pong_core
+import pong_gfx_render
+
+def report(name, n, elapsed):
+    nf : n * 1.0
+    if elapsed <= 0.0:
+        elapsed : 0.000001
+    ops : nf / elapsed
+    msper : (elapsed / nf) * 1000.0
+    print(name)
+    print("    " + str(n) + " ops in " + str(elapsed) + " s CPU")
+    print("    " + str(int(ops)) + " ops/sec, " + str(msper) + " ms/op")
+
+def bench_step(n):
+    st : pong_core.new_state()
+    t0 : clock()
+    i : 0
+    while i < n:
+        pong_core.step(st)
+        if st["over"] = 1:
+            st : pong_core.new_state()
+        i : i + 1
+    t1 : clock()
+    return pong_core.sub(t1, t0)
+
+def bench_frame(n):
+    st : pong_core.new_state()
+    t0 : clock()
+    i : 0
+    while i < n:
+        f : pong_core.frame(st, "BENCH")
+        i : i + 1
+    t1 : clock()
+    return pong_core.sub(t1, t0)
+
+def bench_tick(n):
+    st : pong_core.new_state()
+    t0 : clock()
+    i : 0
+    while i < n:
+        pong_core.step(st)
+        if st["over"] = 1:
+            st : pong_core.new_state()
+        f : pong_core.frame(st, "BENCH")
+        i : i + 1
+    t1 : clock()
+    return pong_core.sub(t1, t0)
+
+def bench_proj(n):
+    t0 : clock()
+    i : 0
+    while i < n:
+        p : pong_gfx_render.proj(i % 44 * 1.0, i % 16 * 1.0)
+        q : pong_gfx_render.proj2(i % 44 * 1.0, i % 16 * 1.0)
+        i : i + 1
+    t1 : clock()
+    return pong_core.sub(t1, t0)
+
+def bench_ai(n):
+    st : pong_core.new_state()
+    t0 : clock()
+    i : 0
+    while i < n:
+        pong_core.ai_move(st)
+        pong_core.step(st)
+        if st["over"] = 1:
+            st : pong_core.new_state()
+        i : i + 1
+    t1 : clock()
+    return pong_core.sub(t1, t0)
+
+print("=== Pong engine benchmark (CPU time via clock(), seconds) ===")
+
+nstep : 200000
+report("step() physics", nstep, bench_step(nstep))
+
+nframe : 600
+report("frame() render", nframe, bench_frame(nframe))
+
+ntick : 600
+tick_s : bench_tick(ntick)
+report("step()+frame() full tick", ntick, tick_s)
+
+nproj : 200000
+report("proj()+proj2() map", nproj, bench_proj(nproj))
+
+nai : 100000
+report("ai_move()+step()", nai, bench_ai(nai))
+
+fps : (ntick * 1.0) / tick_s
+print("")
+print("Implied max frame rate: " + str(int(fps)) + " FPS (compute only)")

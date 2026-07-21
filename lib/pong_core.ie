@@ -1,0 +1,244 @@
+# pong_core - classic 2D Pong (logic + renderer), no I/O on import.
+
+import pong_skins
+
+ESC : chr(27)
+
+W : 44
+H : 16
+PH : 3
+PLX : 1
+PRX : 40
+BSPD : 0.12
+PSPD : 0.25
+AISPD : 0.14
+WIN : 7
+
+def sub(a, b):
+    return a + (-b)
+
+WM : sub(W, 1)
+HM : sub(H, 1)
+PYMAX : sub(H, PH)
+
+def fabs(x):
+    if x < 0.0:
+        return -x
+    return x
+
+def clampf(v, lo, hi):
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+def clampc(v, hi):
+    if v < 0.0:
+        return 0.0
+    if v > hi:
+        return hi
+    return v
+
+def clampi(v, lo, hi):
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+def rep(ch, n):
+    s : ""
+    i : 0
+    while i < n:
+        s : s + ch
+        i : i + 1
+    return s
+
+def serve(st, dir):
+    st["bx"] : W / 2.0
+    st["bpy"] : H / 2.0
+    st["serves"] : st["serves"] + 1
+    st["bvx"] : dir * BSPD
+    vy : BSPD * 0.9
+    if st["serves"] % 2 = 0:
+        vy : 0.0 - vy
+    st["bvy"] : vy
+
+def new_state():
+    st : dict(ly: 0.0, ry: 0.0, bx: 0.0, bpy: 0.0, bvx: 0.0, bvy: 0.0, sl: 0, sr: 0, over: 0, serves: 0)
+    st["ly"] : PYMAX / 2.0
+    st["ry"] : PYMAX / 2.0
+    serve(st, 1)
+    return st
+
+def covers(top, y):
+    if y >= top:
+        if y <= top + PH:
+            return 1
+    return 0
+
+def add_spin(st, top):
+    center : top + (PH / 2.0)
+    off : sub(st["bpy"], center)
+    st["bvy"] : clampf(st["bvy"] + off * 0.35, -1.5, 1.5)
+
+def step(st):
+    if st["over"] = 1:
+        return
+    st["bx"] : st["bx"] + st["bvx"]
+    st["bpy"] : st["bpy"] + st["bvy"]
+
+    if st["bpy"] <= 0.0:
+        st["bpy"] : 0.0
+        st["bvy"] : fabs(st["bvy"])
+    if st["bpy"] >= HM * 1.0:
+        st["bpy"] : HM * 1.0
+        vy : fabs(st["bvy"])
+        st["bvy"] : -vy
+
+    if st["bvx"] < 0.0:
+        if st["bx"] <= PLX + 1.0:
+            if covers(st["ly"], st["bpy"]) = 1:
+                st["bx"] : PLX + 1.0
+                st["bvx"] : fabs(st["bvx"])
+                add_spin(st, st["ly"])
+            else:
+                if st["bx"] <= 0.0:
+                    st["sr"] : st["sr"] + 1
+                    serve(st, -1)
+
+    if st["bvx"] > 0.0:
+        if st["bx"] >= PRX + (-1.0):
+            if covers(st["ry"], st["bpy"]) = 1:
+                st["bx"] : PRX + (-1.0)
+                vx : fabs(st["bvx"])
+                st["bvx"] : -vx
+                add_spin(st, st["ry"])
+            else:
+                if st["bx"] >= WM * 1.0:
+                    st["sl"] : st["sl"] + 1
+                    serve(st, 1)
+
+    if st["sl"] >= WIN:
+        st["over"] : 1
+    if st["sr"] >= WIN:
+        st["over"] : 1
+
+def ai_move(st):
+    # Sluggish chase: ignore prediction, react late, big deadzone.
+    target : PYMAX / 2.0
+    if st["bvx"] > 0.0:
+        if st["bx"] > W * 0.5:
+            target : st["bpy"] - PH / 2.0
+    c : st["ry"] + (PH / 2.0)
+    aim : target + (PH / 2.0)
+    dead : 0.85
+    if aim < c - dead:
+        st["ry"] : clampc(st["ry"] - AISPD, PYMAX * 1.0)
+    if aim > c + dead:
+        st["ry"] : clampc(st["ry"] + AISPD, PYMAX * 1.0)
+
+def move_left(st, dy):
+    st["ly"] : clampc(st["ly"] + dy, PYMAX * 1.0)
+
+def move_right(st, dy):
+    st["ry"] : clampc(st["ry"] + dy, PYMAX * 1.0)
+
+def has_quit(s):
+    if len(s) > 0:
+        if s[0] = "q":
+            return 1
+    return 0
+
+def turn_left(st, choice):
+    if choice = "1":
+        move_left(st, -PSPD * 2.0)
+    if choice = "2":
+        move_left(st, PSPD * 2.0)
+
+def turn_right(st, choice):
+    if choice = "1":
+        move_right(st, -PSPD * 2.0)
+    if choice = "2":
+        move_right(st, PSPD * 2.0)
+
+def advance_local(st):
+    s0 : st["sl"] + st["sr"]
+    if st["bvx"] > 0.0:
+        k : 0
+        while st["bvx"] > 0.0:
+            if st["over"] = 1:
+                return
+            ai_move(st)
+            step(st)
+            if st["sl"] + st["sr"] > s0:
+                return
+            k : k + 1
+            if k >= 80:
+                return
+    if st["over"] = 1:
+        return
+    if st["bvx"] < 0.0:
+        step(st)
+
+def advance_2p(st):
+    step(st)
+
+def draw_bat(buf, col, top):
+    t : int(top + 0.5)
+    k : 0
+    while k < PH:
+        rr : t + k
+        if rr >= 0:
+            if rr < H:
+                buf[rr * W + col] : "|"
+        k : k + 1
+
+def frame(st, msg, skin):
+    n : W * H
+    buf : []
+    i : 0
+    while i < n:
+        buf.append(" ")
+        i : i + 1
+
+    netx : W // 2
+    r : 0
+    while r < H:
+        if r % 2 = 0:
+            buf[r * W + netx] : ":"
+        r : r + 1
+
+    draw_bat(buf, PLX, st["ly"])
+    draw_bat(buf, PRX, st["ry"])
+
+    bxi : clampi(int(st["bx"] + 0.5), 0, WM)
+    byi : clampi(int(st["bpy"] + 0.5), 0, HM)
+    buf[byi * W + bxi] : "o"
+
+    score : str(st["sl"]) + "  -  " + str(st["sr"])
+    pad : sub(W, len(score))
+    lpad : pad // 2
+    tc : pong_skins.term_court(skin)
+    tr : pong_skins.term_reset()
+    surf : " " + pong_skins.name(skin) + " "
+
+    out : "\n"
+    out : out + rep(" ", lpad) + score + surf + "\n"
+    out : out + tc + "+" + rep("-", W) + "+" + tr + "\n"
+    r : 0
+    while r < H:
+        line : ""
+        c : 0
+        while c < W:
+            line : line + buf[r * W + c]
+            c : c + 1
+        out : out + tc + "|" + line + "|" + tr + "\n"
+        r : r + 1
+    out : out + tc + "+" + rep("-", W) + "+" + tr + "\n"
+    if len(msg) > 0:
+        out : out + msg + "\n"
+    return out
+
+pong_core_loaded : 1

@@ -1,0 +1,77 @@
+# Court surface skins for Pong (grass, clay, hard/plastic court).
+# Used by terminal renderer (ANSI) and gfx renderer (0xRRGGBB).
+
+SKIN_GRASS : 0
+SKIN_CLAY : 1
+SKIN_PLASTIC : 2
+N_SKINS : 3
+
+def name(id):
+    if id = SKIN_GRASS:
+        return "Grass"
+    if id = SKIN_CLAY:
+        return "Clay"
+    return "Hard court"
+
+def skin_gfx_label(id):
+    if id = SKIN_GRASS:
+        return "GRASS"
+    if id = SKIN_CLAY:
+        return "CLAY"
+    return "HARD COURT"
+
+def short_name(id):
+    if id = SKIN_GRASS:
+        return "grass"
+    if id = SKIN_CLAY:
+        return "clay"
+    return "plastic"
+
+# --- gfx colors (0xRRGGBB) ---
+def gfx_bg(id):
+    if id = SKIN_GRASS:
+        return 0x1a4d2e
+    if id = SKIN_CLAY:
+        return 0x9b4a2a
+    return 0x1e3a5f
+
+def gfx_line(id):
+    if id = SKIN_GRASS:
+        return 0x7cfc00
+    if id = SKIN_CLAY:
+        return 0xffe4c4
+    return 0x4fc3f7
+
+def gfx_net(id):
+    if id = SKIN_GRASS:
+        return 0xffffff
+    if id = SKIN_CLAY:
+        return 0xfff8dc
+    return 0xb3e5fc
+
+def gfx_bat_near(id):
+    return 0xffffff
+
+def gfx_bat_far(id):
+    if id = SKIN_GRASS:
+        return 0xc8e6c9
+    if id = SKIN_CLAY:
+        return 0xffccbc
+    return 0x90caf9
+
+def gfx_ball(id):
+    # Mr Squarey — warm shady yellow
+    return 0xffcc33
+
+# --- terminal ANSI (prefix codes; caller resets with ESC + "[0m") ---
+def term_court(id):
+    if id = SKIN_GRASS:
+        return chr(27) + "[32m"
+    if id = SKIN_CLAY:
+        return chr(27) + "[33m"
+    return chr(27) + "[36m"
+
+def term_reset():
+    return chr(27) + "[0m"
+
+pong_skins_loaded : 1

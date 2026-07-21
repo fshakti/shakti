@@ -73,6 +73,13 @@ CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger
 | `iefs` | Durable `.iefs` | [doc](doc.md#iefs-module) |
 | `input` / `ipc` / `rest` / `talk` | IO / network / STT | see [doc.md](doc.md) |
 
+Demo game: [`import pong`](lib/pong.ie) then `pong.run()` (gfx; needs `SHAKTI_GFX=1`). Terminal: `pong.run_terminal()`. Launcher: [`pong_demo.ie`](pong_demo.ie).
+
+```bash
+make test-pong    # pong_test.ie + pong_spell_test.ie
+make bench-pong   # pong_bench.ie (physics / frame / proj / AI)
+```
+
 Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`, `examples/infinibattle/`.
 
 ## test & bench (local tree)
