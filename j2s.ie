@@ -1,29 +1,33 @@
-# cs2s — strict C# subset to Shakti.
+# j2s — strict Java subset to Shakti.
+# Accepts one top-level class as a shell for static fields/methods.
 
 shakti_reserved : ["select", "update", "delete", "by", "from", "where",
                    "create", "insert", "into", "values", "join", "on"]
-csharp_keywords : ["if", "else", "while", "for", "foreach", "do", "switch",
-                   "case", "default", "return", "break", "continue", "goto",
-                   "using", "namespace", "class", "struct", "interface", "enum",
-                   "record", "new", "var", "true", "false", "null", "in", "out",
-                   "ref", "params", "public", "private", "protected", "internal",
-                   "static", "readonly", "const", "void", "int", "long", "short",
-                   "byte", "sbyte", "uint", "ulong", "ushort", "double", "float",
-                   "decimal", "bool", "char", "string", "object", "dynamic",
-                   "this", "base", "is", "as", "typeof", "sizeof", "throw", "try",
-                   "catch", "finally", "lock", "yield", "await", "async",
-                   "virtual", "override", "abstract", "sealed", "partial"]
-csharp_type_keywords : ["var", "void", "int", "long", "short", "byte", "sbyte",
-                        "uint", "ulong", "ushort", "double", "float", "decimal",
-                        "bool", "char", "string", "object", "dynamic"]
+java_keywords : ["if", "else", "while", "for", "do", "switch", "case",
+                 "default", "return", "break", "continue", "goto", "package",
+                 "import", "class", "interface", "enum", "record", "new",
+                 "var", "true", "false", "null", "this", "super", "instanceof",
+                 "public", "private", "protected", "static", "final", "abstract",
+                 "synchronized", "volatile", "transient", "native", "strictfp",
+                 "void", "int", "long", "short", "byte", "double", "float",
+                 "boolean", "char", "throws", "throw", "try", "catch", "finally",
+                 "extends", "implements", "assert", "const"]
+java_type_keywords : ["var", "void", "int", "long", "short", "byte", "double",
+                      "float", "boolean", "char"]
+java_modifiers : ["public", "private", "protected", "static", "final",
+                  "abstract", "synchronized", "volatile", "transient",
+                  "native", "strictfp"]
 two_ops : ["==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=",
-           "/=", "=>", ".."]
+           "/=", "->"]
 
 def is_kw(text):
-    return text in csharp_keywords
+    return text in java_keywords
 
 def is_type_kw(text):
-    return text in csharp_type_keywords
+    return text in java_type_keywords
+
+def is_mod(text):
+    return text in java_modifiers
 
 def tok(kind, text, val, line, col):
     return {"kind":kind, "text":text, "val":val, "line":line, "col":col}
@@ -68,17 +72,13 @@ def num_clean(t):
     i : 0
     while i < len(t):
         c : t[i]
-        if c != "_":
+        if c != "_" and c != "L" and c != "l" and c != "F" and c != "f" and c != "D" and c != "d":
             out += c
         i += 1
     return out
 
 def lex_string(src, i, ln, col):
     start : i
-    is_interp : False
-    if src[i] = "$":
-        is_interp : True
-        i += 1
     q : src[i]
     i += 1
     val : ""
@@ -86,7 +86,7 @@ def lex_string(src, i, ln, col):
         c : src[i]
         if c = q:
             i += 1
-            return [tok("STRING", src[start:i], {"s":val, "f":is_interp}, ln, col), i]
+            return [tok("STRING", src[start:i], {"s":val}, ln, col), i]
         if c = "\n":
             raise str(ln) + ":" + str(col) + ": unterminated string"
         if c = "\\":
@@ -180,7 +180,7 @@ def lex(source):
             ts.append(tok("NUMBER", text, text, ln, col))
             i : j
             continue
-        if c = "\"" or c = "'" or (c = "$" and i + 1 < n and source[i + 1] = "\""):
+        if c = "\"" or c = "'":
             z : lex_string(source, i, ln, col)
             ts.append(z[0])
             i : z[1]
@@ -232,18 +232,10 @@ def need_kind(p, k):
 
 def ident(p, x):
     name : x["text"]
-    if name in shakti_reserved or starts(name, "__cs_"):
-        name : "__cs_" + name
+    if name in shakti_reserved or starts(name, "__j_"):
+        name : "__j_" + name
     x["text"] : name
     return name
-
-def parse(source, filename):
-    lx : lex(source)
-    p : {"tokens":lx["tokens"], "pos":0, "filename":filename, "aliases":{"Np":"numpy", "Pd":"pandas"}, "comments":lx["comments"], "inline":lx["inline"]}
-    body : []
-    while not kind(p, "END"):
-        body.append(parse_stmt(p))
-    return {"t":"Module", "body":body, "comments":p["comments"], "inline":p["inline"], "aliases":p["aliases"], "filename":filename}
 
 def skip_generics(p):
     depth : 1
@@ -264,6 +256,11 @@ def skip_type(p):
     if is_kw(peek(p)["text"]) and not is_type_kw(peek(p)["text"]):
         return False
     take(p)
+    while at(p, "."):
+        take(p)
+        if not kind(p, "NAME"):
+            return False
+        take(p)
     if at(p, "<"):
         skip_generics(p)
     while at(p, "["):
@@ -273,40 +270,59 @@ def skip_type(p):
         take(p)
     return True
 
-def parse_stmt(p):
-    x : peek(p)
-    if at(p, "using"):
-        return parse_using(p)
-    if at(p, "namespace") or at(p, "class") or at(p, "struct") or at(p, "interface") or at(p, "enum") or at(p, "record"):
-        fail(p, x["text"] + " declarations are unsupported", x)
-    if at(p, "try") or at(p, "switch") or at(p, "do") or at(p, "throw") or at(p, "lock") or at(p, "yield"):
-        fail(p, x["text"] + " statements are unsupported", x)
-    if at(p, "if"):
-        return parse_if(p)
-    if at(p, "while"):
-        return parse_while(p)
-    if at(p, "for"):
-        return parse_for(p)
-    if at(p, "foreach"):
-        return parse_foreach(p)
-    if at(p, "return"):
-        return parse_return(p)
-    if at(p, "break") or at(p, "continue"):
+def skip_modifiers(p):
+    saw_static : False
+    while kind(p, "NAME") and is_mod(peek(p)["text"]):
+        if peek(p)["text"] = "static":
+            saw_static : True
         take(p)
-        z : node(x["text"], x)
-        need(p, ";")
-        return z
-    if at(p, "{"):
-        fail(p, "unexpected block", x)
-    fn : try_parse_func(p)
-    if fn != None:
-        return fn
-    d : try_parse_decl(p)
-    if d != None:
-        return d
-    return parse_expr_stmt(p)
+    return saw_static
 
-def parse_using(p):
+def parse(source, filename):
+    lx : lex(source)
+    p : {"tokens":lx["tokens"], "pos":0, "filename":filename, "aliases":{},
+         "comments":lx["comments"], "inline":lx["inline"], "has_main":False,
+         "class_name":None}
+    body : []
+    while at(p, "package"):
+        body.append(parse_package(p))
+    while at(p, "import"):
+        body.append(parse_import(p))
+    if kind(p, "END"):
+        fail(p, "expected class declaration", peek(p))
+    members : parse_class(p)
+    for m in members:
+        body.append(m)
+    if not kind(p, "END"):
+        fail(p, "only one top-level class is supported", peek(p))
+    if p["has_main"]:
+        x : peek(p)
+        call : node("Expr", x)
+        c : node("Call", x)
+        fn : node("Name", x)
+        fn["value"] : "main"
+        c["func"] : fn
+        c["args"] : []
+        sl : node("Subscript", x)
+        av : node("Name", x)
+        av["value"] : "argv"
+        sl["value"] : av
+        slice : node("Slice", x)
+        one : node("Const", x)
+        one["value"] : "1"
+        one["kind"] : "number"
+        slice["lower"] : one
+        slice["upper"] : None
+        slice["step"] : None
+        sl["slice"] : slice
+        c["args"].append(sl)
+        c["kwargs"] : []
+        call["value"] : c
+        body.append(call)
+    return {"t":"Module", "body":body, "comments":p["comments"], "inline":p["inline"],
+            "aliases":p["aliases"], "filename":filename, "has_main":p["has_main"]}
+
+def parse_package(p):
     x : take(p)
     while not at(p, ";") and not kind(p, "END"):
         take(p)
@@ -317,6 +333,85 @@ def parse_using(p):
     z["alias"] : None
     z["erase"] : True
     return z
+
+def parse_import(p):
+    x : take(p)
+    while not at(p, ";") and not kind(p, "END"):
+        take(p)
+    if at(p, ";"):
+        take(p)
+    z : node("Import", x)
+    z["name"] : ""
+    z["alias"] : None
+    z["erase"] : True
+    return z
+
+def parse_class(p):
+    skip_modifiers(p)
+    x : peek(p)
+    if not at(p, "class"):
+        fail(p, "expected class declaration", x)
+    take(p)
+    nm : need_kind(p, "NAME")
+    p["class_name"] : nm["text"]
+    if at(p, "extends") or at(p, "implements"):
+        fail(p, "inheritance and interfaces are unsupported", peek(p))
+    need(p, "{")
+    members : []
+    while not at(p, "}") and not kind(p, "END"):
+        members.append(parse_member(p))
+    need(p, "}")
+    return members
+
+def parse_member(p):
+    x : peek(p)
+    if at(p, "class") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, "nested " + x["text"] + " declarations are unsupported", x)
+    saw_static : skip_modifiers(p)
+    if at(p, "class") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, "nested " + peek(p)["text"] + " declarations are unsupported", peek(p))
+    # Constructor: ClassName(...)
+    if kind(p, "NAME") and peek(p)["text"] = p["class_name"] and peekn(p, 1)["text"] = "(":
+        fail(p, "constructors are unsupported", peek(p))
+    save : p["pos"]
+    fn : try_parse_func(p)
+    if fn != None:
+        if not saw_static:
+            fail(p, "instance methods are unsupported; mark methods static", x)
+        if fn["name"] = "main":
+            p["has_main"] : True
+        return fn
+    p["pos"] : save
+    d : try_parse_decl(p)
+    if d != None:
+        if not saw_static:
+            fail(p, "instance fields are unsupported; mark fields static", x)
+        return d
+    fail(p, "unsupported class member", x)
+
+def parse_stmt(p):
+    x : peek(p)
+    if at(p, "try") or at(p, "switch") or at(p, "do") or at(p, "throw") or at(p, "synchronized") or at(p, "assert"):
+        fail(p, x["text"] + " statements are unsupported", x)
+    if at(p, "if"):
+        return parse_if(p)
+    if at(p, "while"):
+        return parse_while(p)
+    if at(p, "for"):
+        return parse_for(p)
+    if at(p, "return"):
+        return parse_return(p)
+    if at(p, "break") or at(p, "continue"):
+        take(p)
+        z : node(x["text"], x)
+        need(p, ";")
+        return z
+    if at(p, "{"):
+        fail(p, "unexpected block", x)
+    d : try_parse_decl(p)
+    if d != None:
+        return d
+    return parse_expr_stmt(p)
 
 def try_parse_func(p):
     save : p["pos"]
@@ -340,32 +435,29 @@ def try_parse_func(p):
     if not at(p, ")"):
         while True:
             skip_type(p)
+            # Java varargs: Type... name
+            if at(p, "."):
+                fail(p, "varargs are unsupported", peek(p))
             a : need_kind(p, "NAME")
+            # Array brackets after name: String args[]
+            while at(p, "["):
+                take(p)
+                need(p, "]")
             ident(p, a)
             args.append(a["text"])
-            if at(p, "="):
-                take(p)
-                defaults.append(parse_expr(p))
-            else:
-                defaults.append(None)
+            defaults.append(None)
             if not at(p, ","):
                 break
             take(p)
     need(p, ")")
+    if at(p, "throws"):
+        fail(p, "throws clauses are unsupported", peek(p))
     z : node("FunctionDef", x)
     z["name"] : name_tok["text"]
     z["args"] : args
     z["defaults"] : defaults
     z["decorators"] : []
-    if at(p, "=>"):
-        take(p)
-        val : parse_expr(p)
-        need(p, ";")
-        r : node("Return", x)
-        r["value"] : val
-        z["body"] : [r]
-    else:
-        z["body"] : parse_block(p)
+    z["body"] : parse_block(p)
     return z
 
 def try_parse_decl(p):
@@ -378,11 +470,20 @@ def try_parse_decl(p):
         p["pos"] : save
         return None
     name_tok : peek(p)
-    if peekn(p, 1)["text"] != "=":
+    # Array brackets after name: int xs[] = ...
+    j : 1
+    while peekn(p, j)["text"] = "[":
+        if peekn(p, j + 1)["text"] != "]":
+            break
+        j += 2
+    if peekn(p, j)["text"] != "=":
         p["pos"] : save
         return None
     x : name_tok
     take(p)
+    while at(p, "["):
+        take(p)
+        need(p, "]")
     ident(p, name_tok)
     need(p, "=")
     value : parse_expr(p)
@@ -452,26 +553,25 @@ def parse_while(p):
     z["body"] : parse_block_or_stmt(p)
     return z
 
-def parse_foreach(p):
-    x : take(p)
-    need(p, "(")
-    skip_type(p)
-    a : need_kind(p, "NAME")
-    ident(p, a)
-    need(p, "in")
-    it : parse_expr(p)
-    need(p, ")")
-    z : node("For", x)
-    tgt : node("Name", a)
-    tgt["value"] : a["text"]
-    z["target"] : tgt
-    z["iter"] : it
-    z["body"] : parse_block_or_stmt(p)
-    return z
-
 def parse_for(p):
     x : take(p)
     need(p, "(")
+    # Enhanced for: for (Type name : expr)
+    save : p["pos"]
+    if skip_type(p) and kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = ":":
+        a : take(p)
+        ident(p, a)
+        need(p, ":")
+        it : parse_expr(p)
+        need(p, ")")
+        z : node("For", x)
+        tgt : node("Name", a)
+        tgt["value"] : a["text"]
+        z["target"] : tgt
+        z["iter"] : it
+        z["body"] : parse_block_or_stmt(p)
+        return z
+    p["pos"] : save
     init : None
     if not at(p, ";"):
         init : parse_for_clause(p)
@@ -570,7 +670,7 @@ def validate_target(p, x):
     fail(p, "unsupported assignment target", x)
 
 def is_lambda_ahead(p):
-    if kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "=>":
+    if kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "->":
         return True
     if peek(p)["text"] = "(":
         depth : 0
@@ -585,7 +685,7 @@ def is_lambda_ahead(p):
             elif tx = ")":
                 depth += -1
                 if depth = 0:
-                    return peekn(p, j + 1)["text"] = "=>"
+                    return peekn(p, j + 1)["text"] = "->"
             j += 1
     return False
 
@@ -615,7 +715,7 @@ def parse_lambda(p):
     else:
         a : need_kind(p, "NAME")
         args.append(ident(p, a))
-    need(p, "=>")
+    need(p, "->")
     if at(p, "{"):
         fail(p, "block-bodied lambdas are unsupported", peek(p))
     if len(args) > 1:
@@ -737,13 +837,7 @@ def parse_postfix(p):
             q["kwargs"] : []
             if not at(p, ")"):
                 while True:
-                    if kind(p, "NAME") and peekn(p, 1)["text"] = ":":
-                        k : take(p)
-                        ident(p, k)
-                        take(p)
-                        q["kwargs"].append([k, parse_expr(p)])
-                    else:
-                        q["args"].append(parse_expr(p))
+                    q["args"].append(parse_expr(p))
                     if not at(p, ","):
                         break
                     take(p)
@@ -763,40 +857,34 @@ def parse_postfix(p):
 def parse_index(p):
     x : peek(p)
     lower : None
-    if not at(p, "..") and not at(p, "]"):
+    if not at(p, "]"):
         lower : parse_expr(p)
-    if at(p, ".."):
-        take(p)
-        z : node("Slice", x)
-        z["lower"] : lower
-        z["upper"] : None
-        z["step"] : None
-        if not at(p, "]"):
-            z["upper"] : parse_expr(p)
-        return z
     return lower
 
 def parse_new(p):
     x : take(p)
-    if at(p, "{"):
-        return parse_anon_object(p, x)
-    if at(p, "["):
-        take(p)
-        need(p, "]")
-        return parse_array_init(p, x)
     if kind(p, "NAME"):
         tn : take(p)["text"]
+        while at(p, "."):
+            take(p)
+            tn += "." + need_kind(p, "NAME")["text"]
         if at(p, "<"):
             skip_generics(p)
         if at(p, "["):
             take(p)
             if at(p, "]"):
                 take(p)
+                while at(p, "["):
+                    take(p)
+                    need(p, "]")
                 return parse_array_init(p, x)
             fail(p, "sized array 'new " + tn + "[N]' is unsupported", x)
         if at(p, "("):
             take(p)
             if not at(p, ")"):
+                # Allow empty or reject constructor args for collections
+                if is_map_type(tn) or is_list_type(tn):
+                    fail(p, "constructed " + tn + " with arguments is unsupported; use Map.of/List.of or initializer", x)
                 depth : 1
                 while depth > 0 and not kind(p, "END"):
                     tt : peek(p)["text"]
@@ -807,38 +895,37 @@ def parse_new(p):
                     take(p)
             else:
                 take(p)
+            if is_map_type(tn):
+                if at(p, "{"):
+                    return parse_dict_init(p, x)
+                z : node("Dict", x)
+                z["keys"] : []
+                z["values"] : []
+                return z
+            if is_list_type(tn):
+                if at(p, "{"):
+                    return parse_array_init(p, x)
+                z : node("List", x)
+                z["elts"] : []
+                return z
+            fail(p, "unsupported 'new " + tn + "(...)' expression", x)
         if at(p, "{"):
-            if is_dict_type(tn):
+            if is_map_type(tn):
                 return parse_dict_init(p, x)
             return parse_array_init(p, x)
         fail(p, "unsupported 'new " + tn + "' expression", x)
     fail(p, "unsupported 'new' expression", x)
 
-def is_dict_type(tn):
-    return tn = "Dictionary" or tn = "SortedDictionary" or tn = "IDictionary"
+def is_map_type(tn):
+    return tn = "HashMap" or tn = "Map" or tn = "LinkedHashMap" or tn = "TreeMap" or ends_with(tn, ".HashMap") or ends_with(tn, ".Map")
 
-def parse_anon_object(p, x):
-    need(p, "{")
-    z : node("Dict", x)
-    z["keys"] : []
-    z["values"] : []
-    if not at(p, "}"):
-        while True:
-            nm : need_kind(p, "NAME")
-            need(p, "=")
-            v : parse_expr(p)
-            k : node("Const", nm)
-            k["value"] : nm["text"]
-            k["kind"] : "string"
-            z["keys"].append(k)
-            z["values"].append(v)
-            if not at(p, ","):
-                break
-            take(p)
-            if at(p, "}"):
-                break
-    need(p, "}")
-    return z
+def is_list_type(tn):
+    return tn = "ArrayList" or tn = "List" or tn = "LinkedList" or ends_with(tn, ".ArrayList") or ends_with(tn, ".List")
+
+def ends_with(s, suf):
+    if len(s) < len(suf):
+        return False
+    return s[len(s) - len(suf):len(s)] = suf
 
 def parse_dict_init(p, x):
     need(p, "{")
@@ -847,13 +934,17 @@ def parse_dict_init(p, x):
     z["values"] : []
     if not at(p, "}"):
         while True:
-            need(p, "{")
-            k : parse_expr(p)
-            need(p, ",")
-            v : parse_expr(p)
-            need(p, "}")
-            z["keys"].append(k)
-            z["values"].append(v)
+            # Java double-brace / put style is unsupported; accept {k, v} pairs like C#
+            if at(p, "{"):
+                take(p)
+                k : parse_expr(p)
+                need(p, ",")
+                v : parse_expr(p)
+                need(p, "}")
+                z["keys"].append(k)
+                z["values"].append(v)
+            else:
+                fail(p, "dictionary initializers must use {key, value} entries", peek(p))
             if not at(p, ","):
                 break
             take(p)
@@ -887,26 +978,6 @@ def parse_atom(p):
         return z
     if kind(p, "STRING"):
         take(p)
-        if x["val"]["f"]:
-            depth : 0
-            j : 0
-            sv : x["val"]["s"]
-            while j < len(sv):
-                c : sv[j]
-                if c = "{":
-                    if j + 1 < len(sv) and sv[j + 1] = "{":
-                        j += 2
-                        continue
-                    depth += 1
-                elif c = "}":
-                    depth += -1
-                elif depth > 0 and (c = "!" or c = ":"):
-                    fail(p, "interpolation conversions/format specs are unsupported", x)
-                j += 1
-            z : node("FString", x)
-            z["value"] : sv
-            z["kind"] : "string"
-            return z
         z : node("Const", x)
         z["value"] : x["val"]["s"]
         z["kind"] : "string"
@@ -932,6 +1003,9 @@ def parse_atom(p):
         z : parse_expr(p)
         need(p, ")")
         return z
+    if at(p, "{"):
+        # Bare array initializer in decl context handled by parse_new; reject here
+        fail(p, "unsupported expression", x)
     fail(p, "unsupported expression", x)
 
 def pad(n):
@@ -1078,20 +1152,11 @@ def expr_text(x, st):
         if x["kind"] = "string":
             return quote_string(x["value"])
         return x["value"]
-    if t = "FString":
-        return "f" + quote_string(x["value"])
     if t = "List":
         parts : []
         for e in x["elts"]:
             parts.append(expr_text(e, st))
         return "[" + join_text(parts, ", ") + "]"
-    if t = "Tuple":
-        parts : []
-        for e in x["elts"]:
-            parts.append(expr_text(e, st))
-        if len(parts) = 1:
-            return "(" + parts[0] + ",)"
-        return "(" + join_text(parts, ", ") + ")"
     if t = "Dict":
         parts : []
         i : 0
@@ -1100,16 +1165,18 @@ def expr_text(x, st):
             i += 1
         return "{" + join_text(parts, ", ") + "}"
     if t = "Attr":
-        if x["value"]["t"] = "Name" and x["value"]["value"] in st["aliases"]:
-            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": " + st["aliases"][x["value"]["value"]] + "." + x["attr"] + " is unsupported outside a mapped call"
-        if x["attr"] = "Length" or x["attr"] = "Count":
-            return "len(" + expr_text(x["value"], st) + ")"
+        if x["attr"] = "length" or x["attr"] = "Length" or x["attr"] = "size":
+            # .length on arrays; .size() is a call, handled in lower_call
+            if x["attr"] = "length" or x["attr"] = "Length":
+                return "len(" + expr_text(x["value"], st) + ")"
         return expr_text(x["value"], st) + "." + x["attr"]
     if t = "Subscript":
         return expr_text(x["value"], st) + "[" + slice_text(x["slice"], st) + "]"
     if t = "Unary":
         return "(" + ("not " if x["op"] = "not" else "-") + expr_text(x["value"], st) + ")"
     if t = "BinOp":
+        if x["op"] = "+" and (is_stringy(x["left"]) or is_stringy(x["right"])):
+            return "(" + string_operand(x["left"], st) + " + " + string_operand(x["right"], st) + ")"
         return "(" + expr_text(x["left"], st) + " " + x["op"] + " " + expr_text(x["right"], st) + ")"
     if t = "BoolOp":
         parts : []
@@ -1135,57 +1202,65 @@ def expr_text(x, st):
         return expr_text(x["func"], st) + "(" + join_text(parts, ", ") + ")"
     return ""
 
+def is_stringy(x):
+    if x["t"] = "Const" and x["kind"] = "string":
+        return True
+    if x["t"] = "BinOp" and x["op"] = "+" and (is_stringy(x["left"]) or is_stringy(x["right"])):
+        return True
+    return False
+
+def string_operand(x, st):
+    if is_stringy(x) and not (x["t"] = "BinOp" and x["op"] = "+"):
+        return expr_text(x, st)
+    if x["t"] = "BinOp" and x["op"] = "+" and (is_stringy(x["left"]) or is_stringy(x["right"])):
+        return expr_text(x, st)
+    return "str(" + expr_text(x, st) + ")"
+
 def lower_call(x, st):
     f : x["func"]
-    if f["t"] = "Attr" and f["value"]["t"] = "Name" and f["value"]["value"] = "Console":
-        if f["attr"] = "WriteLine" or f["attr"] = "Write":
+    # System.out.println / System.out.print
+    if f["t"] = "Attr" and f["value"]["t"] = "Attr":
+        outer : f["value"]
+        if outer["value"]["t"] = "Name" and outer["value"]["value"] = "System" and outer["attr"] = "out":
+            if f["attr"] = "println" or f["attr"] = "print":
+                parts : []
+                for e in x["args"]:
+                    parts.append(expr_text(e, st))
+                return "print(" + join_text(parts, ", ") + ")"
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": System.out." + f["attr"] + " is unsupported"
+    if f["t"] = "Attr" and f["value"]["t"] = "Name":
+        base : f["value"]["value"]
+        name : f["attr"]
+        if base = "Math":
+            maps : {"max":"max", "min":"min", "abs":"abs", "sqrt":"sqrt", "exp":"exp",
+                    "log":"log", "sin":"sin", "cos":"cos", "tan":"tan", "floor":"floor",
+                    "ceil":"ceil", "pow":"pow"}
+            if not name in maps:
+                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Math." + name + " is unsupported"
             parts : []
             for e in x["args"]:
                 parts.append(expr_text(e, st))
-            return "print(" + join_text(parts, ", ") + ")"
-        raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Console." + f["attr"] + " is unsupported"
-    if f["t"] != "Attr" or f["value"]["t"] != "Name":
-        return None
-    alias : f["value"]["value"]
-    if not alias in st["aliases"]:
-        return None
-    mod : st["aliases"][alias]
-    name : f["attr"]
-    if mod = "numpy":
-        if name = "Array" or name = "AsArray":
-            if len(x["args"]) != 1 or len(x["kwargs"]) != 0:
-                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Np." + name + " requires one argument"
-            return expr_text(x["args"][0], st)
-        maps : {"Sum":"sum", "Mean":"avg", "Min":"min", "Max":"max", "Dot":"dot",
-                "Matmul":"mmul", "Abs":"abs", "Sqrt":"sqrt", "Exp":"exp", "Log":"log",
-                "Sin":"sin", "Cos":"cos", "Tan":"tan"}
-        if not name in maps:
-            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Np." + name + " is unsupported"
-        if len(x["kwargs"]) > 0:
-            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Np." + name + " options are unsupported"
-        parts : []
-        for e in x["args"]:
-            parts.append(expr_text(e, st))
-        return maps[name] + "(" + join_text(parts, ", ") + ")"
-    if mod = "pandas":
-        if name = "Series":
-            if len(x["args"]) != 1 or len(x["kwargs"]) != 0:
-                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Pd.Series requires one argument"
-            return expr_text(x["args"][0], st)
-        if name != "DataFrame":
-            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Pd." + name + " is unsupported"
-        if len(x["args"]) != 1 or len(x["kwargs"]) != 0 or x["args"][0]["t"] != "Dict":
-            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Pd.DataFrame requires one anonymous object or dictionary argument"
-        d : x["args"][0]
-        parts : []
-        i : 0
-        while i < len(d["keys"]):
-            k : d["keys"][i]
-            if k["t"] != "Const" or k["kind"] != "string" or not re_match("^[A-Za-z_][A-Za-z0-9_]*$", k["value"]):
-                raise st["filename"] + ":" + str(k["line"]) + ":" + str(k["col"]) + ": DataFrame column names must be valid identifiers"
-            parts.append(k["value"] + ":" + expr_text(d["values"][i], st))
-            i += 1
-        return "table(" + join_text(parts, ", ") + ")"
+            return maps[name] + "(" + join_text(parts, ", ") + ")"
+        if base = "List" and name = "of":
+            parts : []
+            for e in x["args"]:
+                parts.append(expr_text(e, st))
+            return "[" + join_text(parts, ", ") + "]"
+        if base = "Map" and name = "of":
+            if len(x["args"]) % 2 != 0:
+                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Map.of requires an even number of arguments"
+            parts : []
+            i : 0
+            while i < len(x["args"]):
+                parts.append(expr_text(x["args"][i], st) + ": " + expr_text(x["args"][i + 1], st))
+                i += 2
+            return "{" + join_text(parts, ", ") + "}"
+        if name = "size" and len(x["args"]) = 0:
+            return "len(" + expr_text(f["value"], st) + ")"
+        if name = "length" and len(x["args"]) = 0:
+            return "len(" + expr_text(f["value"], st) + ")"
+        if name = "get" and len(x["args"]) = 1:
+            return expr_text(f["value"], st) + "[" + expr_text(x["args"][0], st) + "]"
     return None
 
 def transpile(source, filename):
@@ -1194,7 +1269,7 @@ def transpile(source, filename):
 
 def main():
     if len(argv) < 2:
-        raise "usage: cs2s.ie input.cs [-o out.ie]"
+        raise "usage: j2s.ie input.java [-o out.ie]"
     inp : None
     out : None
     i : 1
@@ -1212,7 +1287,7 @@ def main():
         else:
             raise "unexpected argument: " + argv[i]
     if inp = None:
-        raise "usage: cs2s.ie input.cs [-o out.ie]"
+        raise "usage: j2s.ie input.java [-o out.ie]"
     result : transpile(read(inp), inp)
     if out = None:
         write("/dev/stdout", result)
@@ -1220,5 +1295,5 @@ def main():
         write(out, result)
 
 # Run CLI only when this file is the entry script.
-if re_match("cs2s\\.ie$", argv[0]):
+if re_match("j2s\\.ie$", argv[0]):
     main()
