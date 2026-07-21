@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define SYNTH_UI_DESIGN_W 960
-#define SYNTH_UI_DESIGN_H 540
+#define SYNTH_UI_DESIGN_H 660
 #define SYNTH_UI_MAX_CMDS 4096
 #define SYNTH_UI_TEXT_MAX 16
 #define SYNTH_UI_SPECTRUM_BINS 64
@@ -20,6 +20,7 @@ typedef enum {
     UI_PANEL_RECESSED,
     UI_BTN,
     UI_KNOB,
+    UI_SLIDER,
     UI_LED_STEP,
     UI_PAD,
     UI_PIANO_KEY,
@@ -54,6 +55,7 @@ void synth_ui_emit_header_deck(UiRect r);
 void synth_ui_emit_panel(UiRect r);
 void synth_ui_emit_btn(UiRect r, uint32_t hi, uint32_t lo, int lit, int pressed, const char *txt);
 void synth_ui_emit_knob(UiRect r, float val, const char *label);
+void synth_ui_emit_slider(UiRect r, float val, const char *label);
 void synth_ui_emit_led_step(UiRect r, int on, int playhead);
 void synth_ui_emit_pad(UiRect r, int pressed, const char *lbl);
 void synth_ui_emit_piano_key(UiRect r, int down, int style);
