@@ -151,6 +151,8 @@ print("sum(u * v):", sum(u * v))
 # table_csv.ie
 # =============================================================================
 # CSV/TSV table save/load. String columns save as text; load is numeric-only.
+# Normal-sized files use a buffered read; oversized files stream when
+# SHAKTI_CSV_MAX_BYTES is exceeded (default 1 GiB).
 #   ./shakti example.ie   # or copy this section to its own file
 
 people : table(id:[1, 2, 3], name:["ada", "bob", "cam"])

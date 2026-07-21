@@ -78,7 +78,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
 | `cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
 | `j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
-| `python.py` / `c.c` / `csharp.cs` | Tiny demos for each converter |
+| `python.py` / `c.c` / `csharp.cs` / `java.java` | Tiny demos for each converter |
 | `example.py` / `example.c` / `example.cs` / `example.java` | Broader subset demos (`./shakti example.py` / `example.c` / `example.cs` / `example.java`) |
 
 ## Module docs
@@ -288,9 +288,10 @@ arguments match Java (no program name).
 
 ```bash
 ./shakti file.java               # transpile + run (supported subset)
+./shakti java.java
 ./shakti example.java
 ./shakti j2s.ie input.java -o out.ie
-./shakti j2s.ie example.java -o example.ie
+./shakti j2s.ie java.java -o java.ie
 SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
 
@@ -602,6 +603,9 @@ Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TS
 - Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0`.
 - Empty fields (e.g. CSV `1,` or TSV `1\t`) pad as `0`. Leading/trailing empty fields are preserved.
 - String columns written by `save` do **not** round-trip as strings — reload yields numerics (often `0` for labels).
+- Normal-sized files load via a single buffered read (fast path). Files larger than
+  `SHAKTI_CSV_MAX_BYTES` (default 1 GiB; override with that env var) stream with
+  `getline` so the whole file need not reside in memory.
 
 ## Input
 
