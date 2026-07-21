@@ -4,6 +4,7 @@
 
 - [Examples index](#examples-index)
 - [Syntax and builtins](#syntax-and-builtins)
+- [Time-series indexes](#time-series-indexes)
 - [Decorators](#decorators)
 - [Each (`@`)](#each)
 - [Python 3 → Shakti converter](#python-3-shakti-converter)
@@ -17,6 +18,11 @@
 - [IPC module](#ipc-module)
 - [REST module](#rest-module)
 - [`synth` module](#synth-module)
+- [`dsp` module](#dsp-module)
+- [`sonicpi` module](#sonicpi-module)
+- [`pdf` module](#pdf-module)
+- [`midi` module](#midi-module)
+- [`iefs` module](#iefs-module)
 - [`talk` module](#talk-module-macos)
 - [Third-party dependencies](#third-party-dependencies-and-optional-assets)
 
@@ -24,14 +30,14 @@
 
 # Examples index
 
-Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally.
+Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally (that tree is workspace-local / not always published).
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
 ./shakti example.ie  # section: <name>.ie
 ```
 
-Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`.
+Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`. Full game (local): `examples/infinibattle/` — `make gfx-build && make test && make bench && make duel` (see that directory’s README).
 
 ## By module
 
@@ -46,11 +52,17 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/gfx_demo.ie`) |
 | `import gfx` | `examples/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
 | `import gfx` | `examples/gfx_movie.ie` | Animated redraw demo (standalone) |
+| `import gfx` + `input` | `examples/infinibattle/` | Infinibattle Omega — craft weapons, armory JSON, duel AI (local) |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
+| `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers |
+| `import sonicpi` | `sonicpi_demo.ie` / `examples/sonicpi_demo.ie` | Drive Sonic Pi over OSC |
+| `import pdf` | `pdf_demo.ie` / `examples/pdf_smoke.ie` | PDF 1.4 write/read |
+| `import midi` | `midi_demo.ie` / `examples/midi_demo.ie` | ALSA / CoreMIDI I/O |
+| `import iefs` | `iefs_demo.ie` | Durable `.iefs` save/load |
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
 | `import ipc` | `ipc_echo_client.ie` | Client for `ipc_echo.ie` |
@@ -78,10 +90,32 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `gfx` | [gfx module](#gfx-module) |
 | `input` | [input module](#input-module) |
 | `synth` | [synth module](#synth-module) |
+| `dsp` | [dsp module](#dsp-module) |
+| `sonicpi` | [sonicpi module](#sonicpi-module) |
+| `pdf` | [pdf module](#pdf-module) |
+| `midi` | [midi module](#midi-module) |
+| `iefs` | [iefs module](#iefs-module) |
 | `talk` | [talk module](#talk-module-macos) |
 | `ipc` | [IPC module](#ipc-module) |
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
+| Time-series indexes | [time-series indexes](#time-series-indexes) |
+
+## Tests and benchmarks (local tree)
+
+When `tests/`, `benchmarks/`, and `Makefile.local` are present:
+
+```bash
+make prod && export SHAKTI_LIB=$PWD/lib
+make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, module_defaults
+make -f Makefile.local bench-modules  # focused suites only
+SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
+SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
+```
+
+Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`.
+
+Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).
 
 ---
 
@@ -460,6 +494,7 @@ print(sum(a * b))      # same math; allocates a * b first
 
 Large vector operations use OpenMP. `make prod-speed` enables native SIMD.
 With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
+For windowed VWAP / averages over many symbols, see [time-series indexes](#time-series-indexes).
 
 ## Matrices
 
@@ -613,6 +648,8 @@ delete from u where id = 2
 
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Join (`t1 join t2 on col`) is not yet implemented.
 
+For high-throughput windowed VWAP / averages / exchange stats over dense symbol ids, prefer the [time-series indexes](#time-series-indexes) instead of a full SQL scan.
+
 ## Modules
 
 | Module | Doc | Example |
@@ -627,6 +664,88 @@ delete from u where id = 2
 | `rest` | [REST module](#rest-module) | `rest_demo.ie` |
 
 Index: [examples index](#examples-index).
+
+---
+
+# Time-series indexes
+
+Core builtins (no `import`) for load-time prefix / sorted indexes over columnar `ivec` / `fvec` quote and trade data. Build the index **once** outside the timed query path; query with binary search over half-open `[t0, t1)` windows.
+
+Symbol / exchange ids must be dense nonnegative integers (`max_id ≤ row count`). Windows are half-open: include `t0`, exclude `t1`.
+
+## Volume-weighted bid (`shakti_vwbid*`)
+
+Basket VWAP of bid × size over a time window:
+
+```ie
+idx : shakti_vwbid_index(quote.sym_id, quote.time_ns, quote.bid, quote.bsize)
+vwap : shakti_vwbid(idx, basket, t0, t1)   # Σ(bid·bsize) / Σ(bsize); 0 if den=0
+```
+
+| Builtin | Role |
+|---------|------|
+| `shakti_vwbid_index(sym_id, time_ns, bid, bsize)` | Sort by `(sym, time)`; return `[time, notional_prefix, bsize_prefix, bounds]` |
+| `shakti_vwbid(index, basket, t0, t1)` | Scalar VWAP for symbols in `basket` over `[t0, t1)` |
+
+`bid` / `bsize` may be `fvec` or other numeric columns. The query does not reorder the caller’s basket. Prefer a pre-sorted basket to skip an internal sort.
+
+## Windowed average (`shakti_winavg*`)
+
+Per-symbol average of a numeric column over one or more windows (returns the **last** window’s grouped table):
+
+| Builtin | Role |
+|---------|------|
+| `shakti_winavg_index(sym_id, time_ns, size)` | Dense symbol starts + prefix sums/counts |
+| `shakti_winavg_query(index, basket, starts, window_ns)` | For each start in `starts`, average over `[start, start+window_ns)` |
+
+Result columns: `sym_id`, `avg_size`.
+
+## High bid (`shakti_hibid*`)
+
+Grouped symbol/time range-max bid over a basket:
+
+| Builtin | Role |
+|---------|------|
+| `shakti_hibid_index(sym_id, time_ns, bid)` | Sort by `(sym, time)`; return `[time, bid, bounds]` |
+| `shakti_hibid(index, basket, t0, t1)` | `max(bid)` by `sym_id` for symbols in `basket` over `[t0, t1)` |
+
+## NBBO (`shakti_nbbo*`)
+
+Per-symbol max bid / min ask (equivalent to two-stage SQL `by sym_id, exchange` then `by sym_id`):
+
+| Builtin | Role |
+|---------|------|
+| `shakti_nbbo_index(sym_id, bid, ask)` | Build the grouped NBBO table once at load |
+| `shakti_nbbo(index)` | Return the precomputed table (or pass raw columns for a one-shot scan) |
+
+## Exchange stats (`shakti_stats*`)
+
+Trade aggregates by symbol for one exchange id:
+
+| Builtin | Role |
+|---------|------|
+| `shakti_stats_index(exchange, time_ns, sym_id, price)` | Sort by `(exchange, time)` |
+| `shakti_stats_agg(index, exchange_id, t0, t1)` | `count` / `sum` / `min` / `max` / `avg` by `sym_id` |
+| `shakti_stats_ui(index, exchange_id, t0, t1, minute_ns)` | Minute-bucket pass; returns the last minute’s table (no sum column) |
+
+## Theoretical P&L (`shakti_theopl`)
+
+For the first `n_trades` rows with positive `size`, scan forward within `horizon_ns` on the same symbol and count hits when cumulative size reaches 2×, 4×, and 20× the initial size.
+
+| Builtin | Role |
+|---------|------|
+| `shakti_theopl(sym_id, time_ns, size, n_trades, horizon_ns)` | Return hit count (int) |
+
+## Asof join helpers
+
+| Builtin | Role |
+|---------|------|
+| `asof_sort(eq, time)` | Sort paired `ivec`s by `(eq, time)` → `[eq_sorted, time_sorted]` |
+| `asof_bin(eq, time, query_eq, query_time)` | Per query row, last index with matching `eq` and `time ≤ query_time` (`-1` if none) |
+
+## See also
+
+- [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where` (slower for full-table VWAP scans)
 
 ---
 
@@ -795,6 +914,7 @@ else:
 | `gfx_demo.ie` | Minimal open/draw/click loop ([`example.ie`](example.ie) section; also `examples/gfx_demo.ie`) |
 | `examples/gfx_demo_timed.ie` | Reports open/draw/tick timing |
 | `examples/gfx_movie.ie` | Animated redraw stress demo |
+| `examples/infinibattle/` | Infinibattle Omega (craft / armory / duel); local-only — `make gfx-build && make test && make bench && make duel` |
 | `tests/gfx_api.ie` | Smoke test for API and reopen/close behavior |
 
 ## API
@@ -1173,6 +1293,246 @@ Disable at build: `SHAKTI_SYNTH=0 make prod`.
 
 ---
 
+# `dsp` module
+
+Just-intonation / k-scale ratio primitives. Built by default (`SHAKTI_DSP=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: dsp_demo.ie
+```
+
+## Perfect 7 ratio set
+
+| Degree | Ratio | × root (A=440) |
+|--------|-------|----------------|
+| 1 | 1/1 | 440 Hz |
+| 2 | 9/8 | 495 Hz |
+| 3 | 5/4 | 550 Hz |
+| 4 | 3/2 | 660 Hz |
+| 5 | 15/8 | 825 Hz |
+| 6 | 3/1 | 1320 Hz |
+| 7 | 3/5 | 264 Hz |
+
+## Example
+
+`dsp_demo.ie`:
+
+```ie
+import dsp
+
+root : 440.0
+print(dsp.degree_freq(root, 4))   # 660 — perfect fifth
+for row in dsp.perfect7(root):
+    print(row["degree"], row["num"], row["den"], row["hz"])
+```
+
+## API
+
+Module `lib/dsp.ie`:
+
+| Function | Description |
+|----------|-------------|
+| `dsp.ratio_freq(root_hz, num, den)` | Frequency from ratio |
+| `dsp.ratio_cents(num, den)` | Cents from unison (1200×log₂) |
+| `dsp.ratio_reduce(num, den)` | GCD-reduced `{num, den}` dict |
+| `dsp.perfect7([root_hz])` | List of 7 dicts (`degree`, `num`, `den`, `cents`, optional `hz`) |
+| `dsp.degree_freq(root_hz, degree)` | Degree 1–7 from the perfect table |
+| `dsp.et_cents(semitone)` | Equal-temperament cents for semitone count |
+| `dsp.et_delta(num, den)` | Cents deviation from nearest ET semitone |
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-dsp
+make -f Makefile.local bench-dsp
+```
+
+Disable at build: `SHAKTI_DSP=0 make prod`.
+
+---
+
+# `sonicpi` module
+
+OSC bridge to [Sonic Pi](https://sonic-pi.net/) for live-coded music from Shakti scripts. Built by default (`SHAKTI_SONICPI=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: sonicpi_demo.ie
+# or: ./shakti examples/sonicpi_demo.ie
+```
+
+## Prerequisites
+
+1. Install **Sonic Pi** separately from [sonic-pi.net](https://sonic-pi.net/) (not bundled with Shakti).
+2. Start Sonic Pi and run the bridge in `examples/sonicpi_bridge.rb` when that tree is present locally.
+3. By default Sonic Pi listens for OSC on **`127.0.0.1:4560`**. For remote hosts, enable **Preferences → IO → Networked OSC → Allow OSC from other computers**.
+
+## Example
+
+`sonicpi_demo.ie`:
+
+```ie
+import sonicpi
+
+sonicpi.configure("127.0.0.1", 4560)
+sonicpi.bpm(120)
+sonicpi.play(60, 0.8, 0.25)
+sonicpi.synth("prophet", 70, 0.9, 1.0)
+```
+
+## API
+
+Module `lib/sonicpi.ie`:
+
+| Function | Description |
+|----------|-------------|
+| `configure(host, port)` | Target Sonic Pi OSC listener (default `127.0.0.1`, `4560`) |
+| `play(note, amp, sustain)` | Play note via `/shakti/play` |
+| `synth(name, note, amp, sustain)` | Named synth via `/shakti/synth` |
+| `bpm(tempo)` | Set tempo via `/shakti/bpm` |
+| `stop()` | Stop via `/shakti/stop` |
+
+For arbitrary OSC paths, call the builtin `sonicpi_send(path, args...)` directly.
+
+Environment overrides: `SONICPI_HOST`, `SONICPI_PORT`.
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-sonicpi   # UDP smoke (Sonic Pi optional)
+make -f Makefile.local bench-sonicpi  # configure/play/send; set SHAKTI_SONICPI_SKIP_SEND=1 for configure-only
+```
+
+Disable at build: `SHAKTI_SONICPI=0 make prod`.
+
+Shakti communicates with Sonic Pi over the public **OSC** protocol. Shakti does **not** ship Sonic Pi binaries, samples, or synthdefs. Sonic Pi is external software by Samuel Aaron and contributors.
+
+---
+
+# `pdf` module
+
+From-scratch PDF 1.4 reader/writer (`src/pdf.c`) — no MuPDF/Poppler/PDFium. Built by default (`SHAKTI_PDF=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: pdf_demo.ie
+# or: ./shakti examples/pdf_smoke.ie
+```
+
+## Example
+
+```ie
+import pdf
+
+w : pdf.create()
+pdf.add_page(w)
+pdf.text_at(w, 72, 720, "Hello Shakti", size:12)
+pdf.save(w, "/tmp/hello.pdf")
+pdf.close(w)
+
+d : pdf.open("/tmp/hello.pdf")
+print(pdf.page_count(d))
+print(pdf.text(d))
+pdf.close(d)
+```
+
+## API
+
+| Function | Description |
+|----------|-------------|
+| `pdf.create()` | New write document; returns handle |
+| `pdf.add_page(h)` | Append letter page (612×792 pt) |
+| `pdf.text_at(h, x, y, text, size:12)` | Draw text (origin bottom-left) |
+| `pdf.save(h, path)` | Emit PDF 1.4 file |
+| `pdf.open(path)` | Open for read |
+| `pdf.page_count(h)` | Number of pages |
+| `pdf.info(h)` | Info dict (may be empty) |
+| `pdf.text(h, page:0)` | Extract text; `page` 1-based, `0` = all |
+| `pdf.close(h)` | Release handle |
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-pdf
+make -f Makefile.local bench-pdf
+```
+
+Disable at build: `SHAKTI_PDF=0 make prod`.
+
+---
+
+# `midi` module
+
+MIDI I/O via ALSA sequencer (Linux) or CoreMIDI (macOS). Built by default (`SHAKTI_MIDI=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti examples/midi_demo.ie
+# optional: MIDI_PORT='Scarlett' ./shakti examples/midi_demo.ie
+```
+
+## vs `synth` / `sonicpi`
+
+| Module | Role |
+|--------|------|
+| `midi` | Wire protocol to hardware / DAW / virtual ports |
+| `synth` | Built-in softsynth + UI |
+| `sonicpi` | OSC bridge to Sonic Pi |
+
+## API
+
+| Function | Description |
+|----------|-------------|
+| `open()` / `close()` / `alive()` | Lifecycle |
+| `backend()` | `"alsa"`, `"coremidi"`, or `"none"` |
+| `list()` | Ports as dicts |
+| `connect(id_or_name)` / `disconnect()` | Subscribe output (and input when matched) |
+| `note_on` / `note_off` / `cc` / `program` / `raw` | Send |
+| `poll()` | Next inbound event or `nil` |
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-midi
+make -f Makefile.local bench-midi   # set SHAKTI_MIDI_SKIP_SEND=1 to skip note I/O
+```
+
+Disable at build: `SHAKTI_MIDI=0 make prod`.
+
+---
+
+# `iefs` module
+
+Portable durable save/load for Shakti values (`.iefs`). Built by default (`SHAKTI_IEFS=1`).
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti example.ie  # section: iefs_demo.ie
+```
+
+```ie
+import iefs
+iefs.save(x, "data.iefs")
+x2 : iefs.load("data.iefs")
+iefs.save(x, "big.iefs", 1)   # force O_DIRECT when available
+print(iefs.direct_available())
+```
+
+Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, vectors, matrices, lists, dicts, tables. Functions, errors, and input streams are rejected.
+
+Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>` (`ISOLDE_IEFS_*` aliases still accepted).
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-iefs
+make -f Makefile.local bench-iefs
+```
+
+Disable at build: `SHAKTI_IEFS=0 make prod`.
+
+---
 
 # `talk` module (macOS)
 
@@ -1237,7 +1597,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it.
 
-Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
+Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 
 ## Platform SDKs
