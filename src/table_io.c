@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "shakti.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -202,6 +201,135 @@ static int count_delim_fields(const char *line, char c) {
 
 static V *table_delim_load(const char *path, V *columns_opt, char c, const char *fmt) {
     (void)columns_opt;
+    /* Prefer a single buffered read for normal-sized files (fast path / benches).
+     * Fall back to two-pass getline streaming when the file exceeds
+     * SHAKTI_CSV_MAX_BYTES (default 1 GiB) or cannot be mapped that way. */
+    char *raw = read_all(path);
+    if (raw) {
+        char *buf = raw;
+        if ((unsigned char)buf[0] == 0xef && (unsigned char)buf[1] == 0xbb &&
+            (unsigned char)buf[2] == 0xbf)
+            buf += 3;
+        int cap = 256, nl = 0;
+        char **lines = malloc((size_t)cap * sizeof(char *));
+        if (!lines) {
+            free(raw);
+            return v_errf("%s: out of memory", fmt);
+        }
+        char *at = buf;
+        while (*at) {
+            if (nl >= cap) {
+                if (cap > (1 << 30)) {
+                    free(lines);
+                    free(raw);
+                    return v_errf("%s: too many lines", fmt);
+                }
+                cap *= 2;
+                char **nlines = realloc(lines, (size_t)cap * sizeof(char *));
+                if (!nlines) {
+                    free(lines);
+                    free(raw);
+                    return v_errf("%s: out of memory", fmt);
+                }
+                lines = nlines;
+            }
+            char *e = strchr(at, '\n');
+            if (e) {
+                *e = 0;
+                if (e > at && e[-1] == '\r')
+                    e[-1] = 0;
+                lines[nl++] = at;
+                at = e + 1;
+            } else {
+                lines[nl++] = at;
+                break;
+            }
+        }
+        if (nl < 2) {
+            free(lines);
+            free(raw);
+            return v_errf("%s: need header + rows", fmt);
+        }
+        char *hdr_cells[64];
+        int nh = split_delim_line(lines[0], hdr_cells, 64, c);
+        if (nh <= 0) {
+            free(lines);
+            free(raw);
+            return v_errf("%s: bad header", fmt);
+        }
+        int data_rows = 0;
+        char *cells[64];
+        char cell_buf[64];
+        int use_float[64];
+        memset(use_float, 0, sizeof(use_float));
+        for (int li = 1; li < nl; li++) {
+            strip_pad(lines[li], c);
+            if (!lines[li][0])
+                continue;
+            data_rows++;
+            if (count_delim_fields(lines[li], c) != nh) {
+                free(lines);
+                free(raw);
+                return v_errf("%s: column count mismatch", fmt);
+            }
+            for (int cj = 0; cj < nh; cj++) {
+                if (!scan_delim_field(lines[li], cj, cell_buf, sizeof cell_buf, c))
+                    continue;
+                if (!all_int_cell(cell_buf))
+                    use_float[cj] = 1;
+            }
+        }
+        if (data_rows <= 0) {
+            free(lines);
+            free(raw);
+            return v_errf("%s: need header + rows", fmt);
+        }
+        V **cols = calloc((size_t)nh, sizeof(V *));
+        if (!cols) {
+            free(lines);
+            free(raw);
+            return v_errf("%s: out of memory", fmt);
+        }
+        for (int cj = 0; cj < nh; cj++)
+            cols[cj] = use_float[cj] ? v_fvec(data_rows) : v_ivec(data_rows);
+        for (int cj = 0; cj < nh; cj++)
+            if (!use_float[cj])
+                memset(cols[cj]->J, 0, (size_t)data_rows * sizeof(int64_t));
+        int row = 0;
+        for (int li = 1; li < nl; li++) {
+            strip_pad(lines[li], c);
+            if (!lines[li][0])
+                continue;
+            for (int cj = 0; cj < nh; cj++)
+                cells[cj] = NULL;
+            split_delim_line(lines[li], cells, 64, c);
+            for (int cj = 0; cj < nh; cj++) {
+                const char *cell = cells[cj] ? cells[cj] : "";
+                if (use_float[cj])
+                    cols[cj]->F[row] = strtod(cell, NULL);
+                else
+                    cols[cj]->J[row] = (int64_t)strtoll(cell, NULL, 10);
+            }
+            row++;
+        }
+        V *kl = v_list(nh);
+        V *dl = v_list(nh);
+        for (int ci = 0; ci < nh; ci++) {
+            kl->L[ci] = v_str(hdr_cells[ci]);
+            dl->L[ci] = cols[ci];
+        }
+        free(cols);
+        free(lines);
+        free(raw);
+        V *t = v_table(kl, dl);
+        v_free(kl);
+        v_free(dl);
+        t->n = row;
+        for (int ci = 0; ci < nh; ci++)
+            t->vals->L[ci]->n = row;
+        return t;
+    }
+
     FILE *f = fopen(path, "rb");
     P(!f, v_errf("%s: cannot read '%s'", fmt, path))
     char *line = NULL;
