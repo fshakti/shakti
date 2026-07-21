@@ -8,6 +8,7 @@
 - [Each (`@`)](#each)
 - [Python 3 → Shakti converter](#python-3-shakti-converter)
 - [C → Shakti converter](#c-shakti-converter)
+- [C# → Shakti converter](#c-shakti-converter-1)
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
 - [`gfx` module](#gfx-module)
@@ -62,8 +63,9 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 |------|-------------|
 | `s2p.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
 | `c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
-| `python.py` / `c.c` | Tiny demos for each converter |
-| `example.py` / `example.c` | Broader subset demos (`./shakti example.py` / `example.c`) |
+| `cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
+| `python.py` / `c.c` / `csharp.cs` | Tiny demos for each converter |
+| `example.py` / `example.c` / `example.cs` | Broader subset demos (`./shakti example.py` / `example.c` / `example.cs`) |
 
 ## Module docs
 
@@ -174,6 +176,66 @@ outside the mapped `printf`/`puts` surface.
 `//` comments become `#` comments; closed `/* ... */` block comments are
 discarded. An unterminated block comment exits nonzero with the opening
 `line:col` and does not emit or execute a partial program.
+
+---
+
+# C# → Shakti converter
+
+Strict subset converter written in Shakti. Embedded in the executable for
+direct runs, and still available as `cs2s.ie` for emit-only conversion.
+
+```bash
+./shakti file.cs                 # transpile + run (supported subset)
+./shakti csharp.cs
+./shakti cs2s.ie input.cs -o out.ie
+./shakti cs2s.ie csharp.cs -o csharp.ie
+SHAKTI_LIB=$PWD/lib ./shakti out.ie
+```
+
+`./shakti file.cs` is not the .NET runtime: it lowers the supported subset to
+Shakti and evaluates that. Unsupported syntax exits nonzero with
+`file:line:col` diagnostics (original `.cs` path preserved).
+
+## Rewrites
+
+| C# | Shakti |
+|----|--------|
+| `int x = 1;` | `x : 1` |
+| `x == 1` | `x = 1` |
+| `int f(int n = 2) { ... }` | `def f(n:2): ...` |
+| `f(k: 1)` | `f(k:1)` |
+| `Console.WriteLine(...)` | `print(...)` |
+| `xs.Length` / `xs.Count` | `len(xs)` |
+| `xs[1..3]` | `xs[1:3]` |
+| `true` / `false` / `null` | `True` / `False` / `None` |
+| `&&` / `\|\|` / `!` | `and` / `or` / `not` |
+| `x => x + 1` | `lambda x: (x + 1)` |
+| `for (int i = 0; i < n; i++)` | `i : 0` + `while (i < n): ...; i += 1` |
+| `new[] { 1, 2 }` | `[1, 2]` |
+| `new Dictionary<...> { {k, v} }` | `{k: v}` |
+| `new { a = x, b = y }` | `{ "a": x, "b": y }` (via `table` for DataFrames) |
+| `$"hi {x}"` | `f"hi {x}"` |
+| `using ...;` | erased |
+
+Also converts expression-bodied methods (`=>`), `if`/`else if`/`else`, `while`,
+`foreach`, break/continue, indexing/slices, attributes, calls, keyword
+arguments, augmented `+= -= *= /=`, postfix `++`/`--` (as `+= 1` / `-= 1`),
+and one-argument lambdas.
+
+`csharp.cs` demonstrates NumPy/pandas-style lowering via `Np.*` / `Pd.*`
+(paralleling Python's `numpy`/`pandas` aliases). `Np.Array` becomes a native
+vector; common reducers map to Shakti builtins; `Pd.DataFrame(new { ... })`
+becomes `table(...)`. Other `Np`/`Pd` calls fail with a source location.
+
+## Rejected
+
+Classes/structs/interfaces/enums/records/namespaces, `try`/`catch`/`switch`/
+`do`/`throw`/`lock`/`yield`/`async`/`await`, multi-argument/block lambdas,
+format specs in interpolations, bitwise ops, unary `+`, prefix `++`/`--`,
+generics beyond ignored type arguments on declarations/calls, and arbitrary
+.NET library APIs outside the mapped `Console`/`Np`/`Pd` surface.
+
+`//` comments become `#` comments.
 
 ---
 

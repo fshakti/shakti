@@ -42,10 +42,11 @@ export SHAKTI_LIB=$PWD/lib
 ./shakti          # REPL
 ./shakti file.py  # supported Python subset → Shakti, then run
 ./shakti file.c   # supported C subset → Shakti, then run
+./shakti file.cs  # supported C# subset → Shakti, then run
 ```
 
-Converters: [`s2p.ie`](s2p.ie) (Python), [`c2s.ie`](c2s.ie) (C).  
-More detail: [doc.md](doc.md). Examples: [example.ie](example.ie), [example.py](example.py), [example.c](example.c).
+Converters: [`s2p.ie`](s2p.ie) (Python), [`c2s.ie`](c2s.ie) (C), [`cs2s.ie`](cs2s.ie) (C#).  
+More detail: [doc.md](doc.md). Examples: [example.ie](example.ie), [example.py](example.py), [example.c](example.c), [example.cs](example.cs).
 
 Optional GUI pixel window: `import gfx` — see [gfx module](doc.md#gfx-module).
 

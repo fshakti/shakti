@@ -11,6 +11,7 @@
 #endif
 #include "shakti_s2p_embed.h"
 #include "shakti_c2s_embed.h"
+#include "shakti_cs2s_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
@@ -5907,6 +5908,9 @@ static int shakti_path_is_python(const char *path) {
 static int shakti_path_is_c(const char *path) {
     return shakti_path_has_ext(path, ".c");
 }
+static int shakti_path_is_csharp(const char *path) {
+    return shakti_path_has_ext(path, ".cs");
+}
 /* Load an embedded converter module (cached on `global` under `cache_key`) and
  * transpile a language-subset source to Shakti. `label` names the converter for
  * error messages. Returns a malloc'd Shakti source string, or NULL after
@@ -5991,6 +5995,10 @@ static char *shakti_transpile_python(const char *py_src, const char *filename, E
 static char *shakti_transpile_c(const char *c_src, const char *filename, Env *global) {
     return shakti_transpile_embedded(c_src, filename, global, shakti_c2s_source,
                                      "__shakti_c2s__", "c2s");
+}
+static char *shakti_transpile_csharp(const char *cs_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(cs_src, filename, global, shakti_cs2s_source,
+                                     "__shakti_cs2s__", "cs2s");
 }
 #ifndef SHAKTI_NO_MAIN
 int shakti_lang_main(int argc, char **argv) {
@@ -6111,6 +6119,11 @@ int shakti_lang_main(int argc, char **argv) {
             src = ie;
         } else if (shakti_path_is_c(argv[i])) {
             char *ie = shakti_transpile_c(src, argv[i], global);
+            free(src);
+            if (!ie) { env_free(global); return 1; }
+            src = ie;
+        } else if (shakti_path_is_csharp(argv[i])) {
+            char *ie = shakti_transpile_csharp(src, argv[i], global);
             free(src);
             if (!ie) { env_free(global); return 1; }
             src = ie;
