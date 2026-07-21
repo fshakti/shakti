@@ -1,0 +1,100 @@
+# discord — Discord REST API via `import rest`
+#
+#   export DISCORD_BOT_TOKEN=...   # or DISCORD_TOKEN
+#   import discord
+#   discord.guilds()
+#   discord.search_members(guild_id, "name")
+#   discord.add_role(guild_id, user_id, role_id)
+#
+# Auth header is `Authorization: Bot <token>` (not Bearer).
+
+import rest
+
+_API : "https://discord.com/api/v10"
+
+def _token():
+    t : getenv("DISCORD_BOT_TOKEN")
+    if t = None:
+        t : getenv("DISCORD_TOKEN")
+    if t = None:
+        raise "discord: set DISCORD_BOT_TOKEN (or DISCORD_TOKEN)"
+    if t = "":
+        raise "discord: set DISCORD_BOT_TOKEN (or DISCORD_TOKEN)"
+    return t
+
+def _headers():
+    return {"Authorization": "Bot " + _token(), "Content-Type": "application/json"}
+
+def _url(path):
+    return _API + path
+
+def _check(resp):
+    if rest.ok(resp):
+        return rest.json(resp)
+    body : rest.text(resp)
+    raise "discord HTTP " + str(rest.status(resp)) + ": " + body
+
+def request(method, path, body:""):
+    if body = "":
+        return _check(rest.request(method, _url(path), "", "", _headers()))
+    return _check(rest.request(method, _url(path), body, "application/json", _headers()))
+
+def get(path):
+    return request("GET", path)
+
+def post_json(path, obj):
+    return request("POST", path, json_dumps(obj))
+
+def put_json(path, obj):
+    return request("PUT", path, json_dumps(obj))
+
+def put(path):
+    return request("PUT", path)
+
+def patch_json(path, obj):
+    return request("PATCH", path, json_dumps(obj))
+
+def delete(path):
+    return request("DELETE", path)
+
+def me():
+    return get("/users/@me")
+
+def guilds():
+    return get("/users/@me/guilds")
+
+def guild(guild_id):
+    return get("/guilds/" + str(guild_id))
+
+def channels(guild_id):
+    return get("/guilds/" + str(guild_id) + "/channels")
+
+def roles(guild_id):
+    return get("/guilds/" + str(guild_id) + "/roles")
+
+def members(guild_id, limit:100):
+    return get("/guilds/" + str(guild_id) + "/members?limit=" + str(limit))
+
+def search_members(guild_id, query, limit:10):
+    return get("/guilds/" + str(guild_id) + "/members/search?query=" + str(query) + "&limit=" + str(limit))
+
+def member(guild_id, user_id):
+    return get("/guilds/" + str(guild_id) + "/members/" + str(user_id))
+
+def add_role(guild_id, user_id, role_id):
+    return put("/guilds/" + str(guild_id) + "/members/" + str(user_id) + "/roles/" + str(role_id))
+
+def remove_role(guild_id, user_id, role_id):
+    return delete("/guilds/" + str(guild_id) + "/members/" + str(user_id) + "/roles/" + str(role_id))
+
+def create_role(guild_id, name, permissions:""):
+    body : {"name": name}
+    if not (permissions = ""):
+        body["permissions"] : permissions
+    return post_json("/guilds/" + str(guild_id) + "/roles", body)
+
+def send_message(channel_id, content):
+    return post_json("/channels/" + str(channel_id) + "/messages", {"content": content})
+
+def get_messages(channel_id, limit:50):
+    return get("/channels/" + str(channel_id) + "/messages?limit=" + str(limit))
