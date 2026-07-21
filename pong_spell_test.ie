@@ -1,0 +1,81 @@
+# Spell-check: every menu label char must have a glyph; P must differ from F.
+#
+# Run:  SHAKTI_LIB=$PWD/lib ./shakti pong_spell_test.ie
+#   or: make test-pong
+
+import pong_gfx_text
+import pong_skins
+
+res : dict(passed: 0, failed: 0)
+
+def check(name, cond):
+    if cond:
+        res["passed"] : res["passed"] + 1
+        print("  PASS  " + name)
+    else:
+        res["failed"] : res["failed"] + 1
+        print("  FAIL  " + name)
+
+def glyph_ink(ch):
+    row : 0
+    while row < 7:
+        bits : pong_gfx_text.glyph_row(ch, row)
+        col : 0
+        while col < 5:
+            if bits[col] = "1":
+                return 1
+            col : col + 1
+        row : row + 1
+    return 0
+
+def row_F(r):
+    if r = 0:
+        return "11111"
+    if r = 3:
+        return "11110"
+    return "10000"
+
+def p_differs_from_f():
+    row : 0
+    while row < 7:
+        if pong_gfx_text.glyph_row("P", row) != row_F(row):
+            return 1
+        row : row + 1
+    return 0
+
+print("== label strings ==")
+check("title PONG",     pong_gfx_text.MENU_LABELS[0] = "PONG")
+check("section MODE",   pong_gfx_text.MENU_LABELS[1] = "MODE")
+check("btn 1 PLAYER",   pong_gfx_text.MENU_LABELS[2] = "1 PLAYER")
+check("btn 2 PLAYER",   pong_gfx_text.MENU_LABELS[3] = "2 PLAYER")
+check("section COURT",  pong_gfx_text.MENU_LABELS[4] = "COURT")
+check("skin GRASS",     pong_skins.skin_gfx_label(0) = "GRASS")
+check("skin CLAY",      pong_skins.skin_gfx_label(1) = "CLAY")
+check("skin HARD COURT", pong_skins.skin_gfx_label(2) = "HARD COURT")
+check("btn START",      pong_gfx_text.MENU_LABELS[8] = "START")
+check("section VIEW",   pong_gfx_text.MENU_LABELS[9] = "VIEW")
+check("btn 2D",         pong_gfx_text.MENU_LABELS[10] = "2D")
+check("btn 3D",         pong_gfx_text.MENU_LABELS[11] = "3D")
+
+print("== glyph coverage ==")
+li : 0
+while li < len(pong_gfx_text.MENU_LABELS):
+    s : pong_gfx_text.MENU_LABELS[li]
+    i : 0
+    while i < len(s):
+        ch : s[i]
+        if ch != " ":
+            check(s + "[" + ch + "]", glyph_ink(ch) = 1)
+        i : i + 1
+    li : li + 1
+
+print("== P not F ==")
+check("P differs from F", p_differs_from_f() = 1)
+check("P row0 open bowl", pong_gfx_text.glyph_row("P", 0) = "11110")
+check("P bowl right col", pong_gfx_text.glyph_row("P", 1) = "10001")
+check("F no right col",   row_F(1) = "10000")
+check("P stem rows 4-5", pong_gfx_text.glyph_row("P", 4) = "10000")
+
+print("")
+print("RESULT: " + str(res["passed"]) + " passed, " + str(res["failed"]) + " failed")
+assert res["failed"] = 0

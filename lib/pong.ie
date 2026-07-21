@@ -1,0 +1,323 @@
+# pong — classic Pong demo (gfx + terminal).
+# Requires Shakti built with SHAKTI_GFX=1 for gfx mode.
+#
+#   import pong
+#   pong.run()            # gfx menu (2D/3D, names, BACK)
+#   pong.run_terminal()   # terminal menu
+
+import gfx
+import input
+import pong_core
+import pong_skins
+import pong_ui
+import pong_gfx_render
+
+# 2D uses vertical controls (↑/↓ and W/S); 3D uses lateral controls (←/→ and A/D).
+KEY_W : 87
+KEY_S : 83
+KEY_A : 65
+KEY_D : 68
+KEY_UP : 65362
+KEY_DOWN : 65364
+KEY_LEFT : 65361
+KEY_RIGHT : 65363
+KEY_W_MAC : 13
+KEY_S_MAC : 1
+KEY_A_MAC : 0
+KEY_D_MAC : 2
+KEY_UP_MAC : 126
+KEY_DOWN_MAC : 125
+KEY_LEFT_MAC : 123
+KEY_RIGHT_MAC : 124
+SCORE_PAUSE : 0.9
+
+CLR : pong_core.ESC + "[2J" + pong_core.ESC + "[H"
+HINT : "  1 up   2 down   3 hold   q quit"
+
+def edit_name(name, ev):
+    if ev["kind"] != "down":
+        return name
+    code : ev["code"]
+    if code = 51 or code = 8 or code = 127:
+        if len(name) > 0:
+            return name[0:len(name) - 1]
+        return name
+    u : ev["utf8"]
+    if len(u) > 0 and len(name) < 16:
+        if u != "\r" and u != "\n" and u != "\b":
+            return name + u
+    return name
+
+def display_name(name, fallback):
+    if len(name) = 0:
+        return fallback
+    return name
+
+def poll_keys():
+    up : 0
+    down : 0
+    left : 0
+    right : 0
+    w : 0
+    s : 0
+    a : 0
+    d : 0
+    if input.key_down(KEY_UP_MAC) = 1:
+        up : 1
+    if input.key_down(KEY_UP) = 1:
+        up : 1
+    if input.key_down(KEY_DOWN_MAC) = 1:
+        down : 1
+    if input.key_down(KEY_DOWN) = 1:
+        down : 1
+    if input.key_down(KEY_LEFT_MAC) = 1:
+        left : 1
+    if input.key_down(KEY_LEFT) = 1:
+        left : 1
+    if input.key_down(KEY_RIGHT_MAC) = 1:
+        right : 1
+    if input.key_down(KEY_RIGHT) = 1:
+        right : 1
+    if input.key_down(KEY_W_MAC) = 1:
+        w : 1
+    if input.key_down(KEY_W) = 1:
+        w : 1
+    if input.key_down(KEY_S_MAC) = 1:
+        s : 1
+    if input.key_down(KEY_S) = 1:
+        s : 1
+    if input.key_down(KEY_A_MAC) = 1:
+        a : 1
+    if input.key_down(KEY_A) = 1:
+        a : 1
+    if input.key_down(KEY_D_MAC) = 1:
+        d : 1
+    if input.key_down(KEY_D) = 1:
+        d : 1
+    return dict(up: up, down: down, left: left, right: right, w: w, s: s, a: a, d: d)
+
+def apply_keys(st, ai, view, keys):
+    dy : 0.0
+    pspd : pong_core.PSPD
+    if view = pong_ui.VIEW_2D:
+        if keys["up"] = 1:
+            dy : dy - pspd
+        if keys["down"] = 1:
+            dy : dy + pspd
+    else:
+        if keys["left"] = 1:
+            dy : dy - pspd
+        if keys["right"] = 1:
+            dy : dy + pspd
+    if dy != 0.0:
+        pong_core.move_left(st, dy)
+    if ai = 0:
+        dy2 : 0.0
+        if view = pong_ui.VIEW_2D:
+            if keys["w"] = 1:
+                dy2 : dy2 - pspd
+            if keys["s"] = 1:
+                dy2 : dy2 + pspd
+        else:
+            if keys["a"] = 1:
+                dy2 : dy2 - pspd
+            if keys["d"] = 1:
+                dy2 : dy2 + pspd
+        if dy2 != 0.0:
+            pong_core.move_right(st, dy2)
+
+def show_menu_gfx():
+    if gfx.available() = 0:
+        print("gfx not available — rebuild with SHAKTI_GFX=1")
+        return dict(ok: 0)
+    gfx.open("Pong")
+    input.set_own_gui(1)
+    input.set_hz(60)
+    skin : pong_skins.SKIN_GRASS
+    open : 0
+    mode : pong_ui.MODE_NONE
+    view : pong_ui.VIEW_3D
+    p1 : ""
+    p2 : ""
+    active_name : 1
+    dirty : 1
+    while gfx.alive() = 1:
+        if dirty = 1:
+            pong_ui.draw_gfx_menu(gfx, skin, open, mode, view, p1, p2, active_name)
+            dirty : 0
+        gfx.tick()
+        for ev in input(0):
+            if active_name = 1:
+                p1 : edit_name(p1, ev)
+                dirty : 1
+            else:
+                if active_name = 2 and mode = pong_ui.MODE_2P:
+                    p2 : edit_name(p2, ev)
+                    dirty : 1
+        if gfx.click_pending() = 1:
+            cx : gfx.click_x()
+            cy : gfx.click_y()
+            gfx.consume_click()
+            res : pong_ui.pick_gfx_menu_click(skin, open, mode, view, active_name, cx, cy)
+            skin : res["skin"]
+            open : res["open"]
+            mode : res["mode"]
+            view : res["view"]
+            active_name : res["active_name"]
+            dirty : 1
+            if res["start"] = 1:
+                gfx.close()
+                p1 : display_name(p1, "PLAYER 1")
+                if mode = pong_ui.MODE_AI:
+                    p2 : "CPU"
+                else:
+                    p2 : display_name(p2, "PLAYER 2")
+                return dict(ok: 1, skin: skin, mode: mode, view: view, p1: p1, p2: p2)
+        wait(0)
+    return dict(ok: 0)
+
+def play_gfx(ai, skin, view, p1, p2):
+    input.keys_clear()
+    gfx.open("Pong")
+    input.set_own_gui(1)
+    input.set_hz(60)
+    st : pong_core.new_state()
+    tick_dt : 1.0 / 60.0
+    acc : 0.0
+    last : clock()
+    pause_until : 0.0
+    while gfx.alive() = 1:
+        if st["over"] = 1:
+            break
+        gfx.tick()
+        if gfx.click_pending() = 1:
+            cx : gfx.click_x()
+            cy : gfx.click_y()
+            gfx.consume_click()
+            if pong_ui.back_clicked(cx, cy) = 1:
+                gfx.close()
+                return 1
+        now : clock()
+        acc : acc + (now - last)
+        last : now
+        if acc > tick_dt * 4.0:
+            acc : tick_dt * 4.0
+        while acc >= tick_dt:
+            gfx.sync_keys()
+            keys : poll_keys()
+            t : clock()
+            apply_keys(st, ai, view, keys)
+            if ai = 1:
+                pong_core.ai_move(st)
+            if t >= pause_until:
+                sl0 : st["sl"]
+                sr0 : st["sr"]
+                pong_core.step(st)
+                if st["sl"] > sl0 or st["sr"] > sr0:
+                    pause_until : clock() + SCORE_PAUSE
+            acc : acc - tick_dt
+        pong_gfx_render.render(gfx, st, skin, view, p1, p2)
+        pong_ui.draw_back_button(gfx)
+    gfx.close()
+    return 0
+
+def menu_gfx():
+    running : 1
+    while running = 1:
+        r : show_menu_gfx()
+        if r["ok"] = 0:
+            running : 0
+        else:
+            ai : 1
+            if r["mode"] = pong_ui.MODE_2P:
+                ai : 0
+            back : play_gfx(ai, r["skin"], r["view"], r["p1"], r["p2"])
+            if back = 0:
+                running : 0
+
+def hint_for(st, side):
+    if side = "left":
+        if st["bvx"] < 0.0:
+            return "  DEFEND!   " + HINT
+    else:
+        if st["bvx"] > 0.0:
+            return "  DEFEND!   " + HINT
+    return HINT
+
+def winner_text(st):
+    if st["sl"] >= pong_core.WIN:
+        return "  LEFT WINS - Enter"
+    return "  RIGHT WINS - Enter"
+
+def draw_term(st, msg, skin):
+    print(CLR + pong_core.frame(st, msg, skin))
+
+def first_char(s):
+    if len(s) > 0:
+        return s[0]
+    return "3"
+
+def play_terminal(ai, skin):
+    st : pong_core.new_state()
+    running : 1
+    while running:
+        if ai = 1:
+            draw_term(st, hint_for(st, "left"), skin)
+        else:
+            draw_term(st, "P1: " + hint_for(st, "left"), skin)
+        if st["over"] = 1:
+            if ai = 1:
+                if st["sl"] >= pong_core.WIN:
+                    print("  YOU WIN - Enter")
+                else:
+                    print("  YOU LOSE - Enter")
+            else:
+                print(winner_text(st))
+            readline("")
+            running : 0
+        else:
+            if ai = 1:
+                cmd : readline("  > ")
+            else:
+                cmd : readline("  P1 > ")
+            ch : first_char(cmd)
+            if pong_core.has_quit(cmd) = 1:
+                running : 0
+            else:
+                pong_core.turn_left(st, ch)
+                if ai = 0:
+                    draw_term(st, "P2: " + hint_for(st, "right"), skin)
+                    cmd2 : readline("  P2 > ")
+                    ch2 : first_char(cmd2)
+                    if pong_core.has_quit(cmd2) = 1:
+                        running : 0
+                    else:
+                        pong_core.turn_right(st, ch2)
+                        pong_core.advance_2p(st)
+                else:
+                    pong_core.advance_local(st)
+
+def menu_terminal():
+    print(CLR)
+    print("  PONG")
+    print("")
+    print("  1  vs AI")
+    print("  2  two player")
+    print("")
+    c : readline("  > ")
+    if len(c) > 0:
+        skin : pong_ui.pick_skin_terminal()
+        if skin >= 0:
+            if c[0] = "1":
+                play_terminal(1, skin)
+            else:
+                if c[0] = "2":
+                    play_terminal(0, skin)
+
+def run():
+    menu_gfx()
+
+def run_terminal():
+    menu_terminal()
+
+pong_loaded : 1
