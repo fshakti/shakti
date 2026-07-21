@@ -107,6 +107,53 @@ extern V *bi_gfx_consume_click(V**,in);
 extern V *bi_gfx_text(V**,in);
 extern V *bi_gfx_text_width(V**,in);
 extern V *bi_gfx_copy_rect(V**,in);
+#ifdef SHAKTI_HAVE_SONICPI
+extern V *bi_sonicpi_bpm(V**,in);
+extern V *bi_sonicpi_configure(V**,in);
+extern V *bi_sonicpi_play(V**,in);
+extern V *bi_sonicpi_send(V**,in);
+extern V *bi_sonicpi_stop(V**,in);
+extern V *bi_sonicpi_synth(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_DSP
+extern V *bi_dsp_ratio_freq(V**,in);
+extern V *bi_dsp_ratio_cents(V**,in);
+extern V *bi_dsp_ratio_reduce(V**,in);
+extern V *bi_dsp_perfect7(V**,in);
+extern V *bi_dsp_degree_freq(V**,in);
+extern V *bi_dsp_et_cents(V**,in);
+extern V *bi_dsp_et_delta(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_PDF
+extern V *bi_pdf_create(V**,in);
+extern V *bi_pdf_add_page(V**,in);
+extern V *bi_pdf_text_at(V**,in);
+extern V *bi_pdf_save(V**,in);
+extern V *bi_pdf_open(V**,in);
+extern V *bi_pdf_page_count(V**,in);
+extern V *bi_pdf_info(V**,in);
+extern V *bi_pdf_text(V**,in);
+extern V *bi_pdf_close(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_MIDI
+extern V *bi_midi_open(V**,in);
+extern V *bi_midi_close(V**,in);
+extern V *bi_midi_alive(V**,in);
+extern V *bi_midi_backend(V**,in);
+extern V *bi_midi_list(V**,in);
+extern V *bi_midi_connect(V**,in);
+extern V *bi_midi_disconnect(V**,in);
+extern V *bi_midi_note_on(V**,in);
+extern V *bi_midi_note_off(V**,in);
+extern V *bi_midi_cc(V**,in);
+extern V *bi_midi_program(V**,in);
+extern V *bi_midi_raw(V**,in);
+extern V *bi_midi_poll(V**,in);
+#endif
+#ifdef SHAKTI_HAVE_IEFS
+#include "iefs_format.h"
+#include "iefs_io.h"
+#endif
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
 extern V *bi_ipc_connect(V**,in);
@@ -193,6 +240,13 @@ static const char *BUILTINS[] = {
     "gfx_clear","gfx_fill_rect","gfx_line","gfx_fill_circle",
     "gfx_click_pending","gfx_click_x","gfx_click_y","gfx_consume_click",
     "gfx_text","gfx_text_width","gfx_copy_rect",
+    "sonicpi_bpm","sonicpi_configure","sonicpi_play","sonicpi_send","sonicpi_stop","sonicpi_synth",
+    "dsp_ratio_freq","dsp_ratio_cents","dsp_ratio_reduce","dsp_perfect7",
+    "dsp_degree_freq","dsp_et_cents","dsp_et_delta",
+    "pdf_create","pdf_add_page","pdf_text_at","pdf_save","pdf_open","pdf_page_count","pdf_info","pdf_text","pdf_close",
+    "midi_open","midi_close","midi_alive","midi_backend","midi_list","midi_connect","midi_disconnect",
+    "midi_note_on","midi_note_off","midi_cc","midi_program","midi_raw","midi_poll",
+    "iefs_save","iefs_load","iefs_direct_available",
     "eval",
     NULL
 };
@@ -906,7 +960,7 @@ static int vwbid_row_cmp(const void *va,const void *vb){
     return 0;
 }
 /* Load-time volume-weighted bid index: [sorted time, notional prefix, bsize prefix,
- * dense symbol starts]. */
+ * dense symbol starts]. Bounds are trusted at query time. */
 static V *bi_shakti_vwbid_index(V**a,in){
     P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
       v_err("shakti_vwbid_index(sym_id, time_ns, bid, bsize)"))
@@ -915,15 +969,17 @@ static V *bi_shakti_vwbid_index(V**a,in){
       v_err("shakti_vwbid_index: length mismatch"))
     VwbidRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
     if(!tmp)return v_err("shakti_vwbid_index: allocation failed");
+    int bid_fvec=a[2]->t==T_FVEC,bsize_fvec=a[3]->t==T_FVEC;
     for(int64_t i=0;i<rows;i++){
         double bid,bsize;
         tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0||!numeric_value_at(a[2],i,&bid)||
-           !numeric_value_at(a[3],i,&bsize)){
-            int bad_sym=tmp[i].sym<0;free(tmp);
-            return v_err(bad_sym?"shakti_vwbid_index: sym_id must be nonnegative":
-                         "shakti_vwbid_index: bid and bsize must be numeric");
-        }
+        if(tmp[i].sym<0){free(tmp);return v_err("shakti_vwbid_index: sym_id must be nonnegative");}
+        if(bid_fvec)bid=a[2]->F[i];
+        else if(!numeric_value_at(a[2],i,&bid)){free(tmp);
+            return v_err("shakti_vwbid_index: bid and bsize must be numeric");}
+        if(bsize_fvec)bsize=a[3]->F[i];
+        else if(!numeric_value_at(a[3],i,&bsize)){free(tmp);
+            return v_err("shakti_vwbid_index: bid and bsize must be numeric");}
         tmp[i].notional=bid*bsize;tmp[i].bsize=bsize;
     }
     qsort(tmp,(size_t)rows,sizeof(*tmp),vwbid_row_cmp);
@@ -946,28 +1002,33 @@ static V *bi_shakti_vwbid_index(V**a,in){
     V *r=v_list(4);r->L[0]=tm;r->L[1]=notionals;r->L[2]=bsizes;r->L[3]=bounds;
     return r;
 }
+static int ivec_is_sorted_asc(const int64_t *v,int64_t n){
+    for(int64_t i=1;i<n;i++)if(v[i]<v[i-1])return 0;
+    return 1;
+}
 static V *bi_shakti_vwbid(V**a,in){
     P(n<4||a[0]->t!=T_LIST||a[0]->n<4,
       v_err("shakti_vwbid(index, basket, t0, t1)"))
     V *idx=a[0],*tm=idx->L[0],*notionals=idx->L[1],*bsizes=idx->L[2],
       *bounds=idx->L[3];
+    /* Shape checks only — builder guarantees bounds monotonicity. */
     P(!tm||!notionals||!bsizes||!bounds||tm->t!=T_IVEC||
       notionals->t!=T_FVEC||bsizes->t!=T_FVEC||bounds->t!=T_IVEC||
       notionals->n!=tm->n+1||bsizes->n!=tm->n+1||bounds->n<1||
       bounds->J[0]!=0||bounds->J[bounds->n-1]!=tm->n,
       v_err("shakti_vwbid: invalid index"))
-    for(int64_t i=1;i<bounds->n;i++)
-        P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
-          v_err("shakti_vwbid: invalid index"))
     V *basket=as_ivec_arg(a[1],"basket");
     if(!basket)return v_err("shakti_vwbid: basket must be ivec or list[int]");
     if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(basket);
         return v_err("shakti_vwbid: t0 and t1 must be int");}
     if(basket->n==0||a[2]->j>=a[3]->j){v_free(basket);return v_float(0.0);}
-    V *sorted=v_ivec(basket->n);
-    memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
-    v_free(basket);basket=sorted;
-    qsort(basket->J,(size_t)basket->n,sizeof(int64_t),cmp_i64);
+    /* Own a mutable copy only when sorting is required (do not reorder caller). */
+    if(!ivec_is_sorted_asc(basket->J,basket->n)){
+        V *sorted=v_ivec(basket->n);
+        memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
+        v_free(basket);basket=sorted;
+        qsort(basket->J,(size_t)basket->n,sizeof(int64_t),cmp_i64);
+    }
     double num=0.0,den=0.0;int64_t previous=INT64_MIN;
     for(int64_t j=0;j<basket->n;j++){
         int64_t key=basket->J[j];
@@ -983,6 +1044,189 @@ static V *bi_shakti_vwbid(V**a,in){
     }
     v_free(basket);
     return v_float(den==0.0?0.0:num/den);
+}
+/* Load-time high-bid index: [sorted time, bid, dense symbol starts]. */
+static V *bi_shakti_hibid_index(V**a,in){
+    P(n<3||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
+      v_err("shakti_hibid_index(sym_id, time_ns, bid)"))
+    P(a[2]->t!=T_IVEC&&a[2]->t!=T_FVEC,
+      v_err("shakti_hibid_index: bid must be ivec or fvec"))
+    int64_t rows=a[0]->n;
+    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_hibid_index: length mismatch"))
+    WinavgRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
+    if(!tmp)return v_err("shakti_hibid_index: allocation failed");
+    int bid_fvec=a[2]->t==T_FVEC;
+    for(int64_t i=0;i<rows;i++){
+        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
+        if(tmp[i].sym<0){free(tmp);return v_err("shakti_hibid_index: sym_id must be nonnegative");}
+        if(bid_fvec)tmp[i].value=a[2]->F[i];
+        else if(!numeric_value_at(a[2],i,&tmp[i].value)){free(tmp);
+            return v_err("shakti_hibid_index: bid must be numeric");}
+    }
+    qsort(tmp,(size_t)rows,sizeof(*tmp),winavg_row_cmp);
+    int64_t max_key=rows?tmp[rows-1].sym:-1;
+    if(max_key>rows){free(tmp);return v_err("shakti_hibid_index: sym_id range is not dense");}
+    V *tm=v_ivec(rows),*bid=v_fvec(rows),*bounds=v_ivec(max_key+2);
+    for(int64_t i=0;i<rows;i++){tm->J[i]=tmp[i].time;bid->F[i]=tmp[i].value;}
+    int64_t pos=0;
+    for(int64_t key=0;key<=max_key+1;key++){
+        while(pos<rows&&tmp[pos].sym<key)pos++;
+        bounds->J[key]=pos;
+    }
+    free(tmp);
+    V *r=v_list(3);r->L[0]=tm;r->L[1]=bid;r->L[2]=bounds;return r;
+}
+static V *hibid_result_table(V *sym,V *bid){
+    V *keys=v_list(2),*data=v_list(2);
+    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("bid");
+    data->L[0]=sym;data->L[1]=bid;
+    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
+}
+static V *hibid_empty_table(void){
+    return hibid_result_table(v_ivec(0),v_fvec(0));
+}
+static V *bi_shakti_hibid(V**a,in){
+    P(n<4||a[0]->t!=T_LIST||a[0]->n<3,
+      v_err("shakti_hibid(index, basket, t0, t1)"))
+    V *idx=a[0],*tm=idx->L[0],*bid=idx->L[1],*bounds=idx->L[2];
+    P(!tm||!bid||!bounds||tm->t!=T_IVEC||bid->t!=T_FVEC||bounds->t!=T_IVEC||
+      tm->n!=bid->n||bounds->n<1||bounds->J[0]!=0||
+      bounds->J[bounds->n-1]!=tm->n,v_err("shakti_hibid: invalid index"))
+    for(int64_t i=1;i<bounds->n;i++)
+        P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
+          v_err("shakti_hibid: invalid index"))
+    V *basket=as_ivec_arg(a[1],"basket");
+    if(!basket)return v_err("shakti_hibid: basket must be ivec or list[int]");
+    if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(basket);
+        return v_err("shakti_hibid: t0 and t1 must be int");}
+    if(basket->n==0||a[2]->j>=a[3]->j){v_free(basket);return hibid_empty_table();}
+    if(!ivec_is_sorted_asc(basket->J,basket->n)){
+        V *sorted=v_ivec(basket->n);
+        memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
+        v_free(basket);basket=sorted;
+        qsort(basket->J,(size_t)basket->n,sizeof(int64_t),cmp_i64);
+    }
+    V *out_sym=v_ivec(basket->n),*out_bid=v_fvec(basket->n);int64_t out=0;
+    int64_t previous=INT64_MIN;
+    for(int64_t j=0;j<basket->n;j++){
+        int64_t key=basket->J[j];
+        if(key==previous)continue;
+        previous=key;
+        if(key<0||key+1>=bounds->n)continue;
+        int64_t begin=bounds->J[key],end=bounds->J[key+1];
+        int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,a[2]->j);
+        int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,a[3]->j);
+        if(lo>=hi)continue;
+        double maximum=bid->F[lo];
+        for(int64_t i=lo+1;i<hi;i++)if(bid->F[i]>maximum)maximum=bid->F[i];
+        out_sym->J[out]=key;out_bid->F[out]=maximum;out++;
+    }
+    out_sym->n=out;out_bid->n=out;
+    v_free(basket);
+    return hibid_result_table(out_sym,out_bid);
+}
+static V *nbbo_result_table(V *sym,V *bid,V *ask){
+    V *keys=v_list(3),*data=v_list(3);
+    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("bid");keys->L[2]=v_str("ask");
+    data->L[0]=sym;data->L[1]=bid;data->L[2]=ask;
+    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
+}
+static V *nbbo_empty_table(void){
+    return nbbo_result_table(v_ivec(0),v_fvec(0),v_fvec(0));
+}
+/* Full-table NBBO: max(bid) and min(ask) by sym_id.
+ * Equivalent to the two-stage SQL path because max/min distribute over exchanges. */
+static V *nbbo_build_table(V *sym_col,V *bid_col,V *ask_col){
+    int64_t rows=sym_col->n;
+    if(rows==0)return nbbo_empty_table();
+    int64_t max_sym=-1;
+    for(int64_t i=0;i<rows;i++){
+        if(sym_col->J[i]<0)return v_err("shakti_nbbo: sym_id must be nonnegative");
+        if(sym_col->J[i]>max_sym)max_sym=sym_col->J[i];
+    }
+    if(max_sym>rows)return v_err("shakti_nbbo: sym_id range is not dense");
+    size_t slots=(size_t)max_sym+1;
+    double *bids=malloc(slots*sizeof(double)),*asks=malloc(slots*sizeof(double));
+    unsigned char *seen=calloc(slots,1);
+    if(!bids||!asks||!seen){free(bids);free(asks);free(seen);return v_err("shakti_nbbo: allocation failed");}
+    int64_t ng=0;
+    if(bid_col->t==T_FVEC&&ask_col->t==T_FVEC){
+        for(int64_t i=0;i<rows;i++){
+            int64_t key=sym_col->J[i];
+            double bid=bid_col->F[i],ask=ask_col->F[i];
+            if(!seen[key]){seen[key]=1;bids[key]=bid;asks[key]=ask;ng++;}
+            else{
+                if(bid>bids[key])bids[key]=bid;
+                if(ask<asks[key])asks[key]=ask;
+            }
+        }
+    }else{
+        for(int64_t i=0;i<rows;i++){
+            int64_t key=sym_col->J[i];double bid,ask;
+            if(!numeric_value_at(bid_col,i,&bid)||!numeric_value_at(ask_col,i,&ask)){
+                free(bids);free(asks);free(seen);
+                return v_err("shakti_nbbo: bid and ask must be numeric");
+            }
+            if(!seen[key]){seen[key]=1;bids[key]=bid;asks[key]=ask;ng++;}
+            else{
+                if(bid>bids[key])bids[key]=bid;
+                if(ask<asks[key])asks[key]=ask;
+            }
+        }
+    }
+    V *out_sym=v_ivec(ng),*out_bid=v_fvec(ng),*out_ask=v_fvec(ng);int64_t out=0;
+    for(int64_t key=0;key<=max_sym;key++)if(seen[key]){
+        out_sym->J[out]=key;out_bid->F[out]=bids[key];out_ask->F[out]=asks[key];out++;
+    }
+    free(bids);free(asks);free(seen);
+    return nbbo_result_table(out_sym,out_bid,out_ask);
+}
+static V *bi_shakti_nbbo_index(V**a,in){
+    P(n<3||a[0]->t!=T_IVEC,
+      v_err("shakti_nbbo_index(sym_id, bid, ask)"))
+    P(a[1]->n!=a[0]->n||a[2]->n!=a[0]->n,
+      v_err("shakti_nbbo_index: length mismatch"))
+    return nbbo_build_table(a[0],a[1],a[2]);
+}
+static V *bi_shakti_nbbo(V**a,in){
+    if(n==1&&a[0]->t==T_TABLE){
+        P(a[0]->keys->n<3,v_err("shakti_nbbo: invalid index"))
+        return v_copy(a[0]);
+    }
+    P(n<3||a[0]->t!=T_IVEC,v_err("shakti_nbbo(index_or_sym_id, bid, ask)"))
+    P(a[1]->n!=a[0]->n||a[2]->n!=a[0]->n,v_err("shakti_nbbo: length mismatch"))
+    return nbbo_build_table(a[0],a[1],a[2]);
+}
+/* Forward cumulative size: first n_trades positive rows, same-symbol horizon scan. */
+static V *bi_shakti_theopl(V**a,in){
+    P(n!=5||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC||a[2]->t!=T_IVEC||
+      a[3]->t!=T_INT||a[4]->t!=T_INT,
+      v_err("shakti_theopl(sym_id, time_ns, size, n_trades, horizon_ns)"))
+    int64_t rows=a[0]->n,n_trades=a[3]->j;
+    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_theopl: length mismatch"))
+    P(n_trades<0,v_err("shakti_theopl: n_trades must be nonnegative"))
+    int64_t picked=0,hits=0;
+    for(int64_t r=0;r<rows&&picked<n_trades;r++){
+        int64_t initial=a[2]->J[r];
+        if(initial<=0)continue;
+        __int128 target2=(__int128)initial*2;
+        __int128 target4=(__int128)initial*4;
+        __int128 target20=(__int128)initial*20;
+        int64_t t_end;
+        if(__builtin_add_overflow(a[1]->J[r],a[4]->j,&t_end))
+            t_end=a[4]->j>=0?INT64_MAX:INT64_MIN;
+        __int128 cumulative=0;
+        int got2=0,got4=0;
+        for(int64_t j=r+1;j<rows&&a[1]->J[j]<=t_end;j++){
+            if(a[0]->J[j]!=a[0]->J[r])continue;
+            cumulative+=(__int128)a[2]->J[j];
+            if(!got2&&cumulative>=target2){got2=1;hits++;}
+            if(!got4&&cumulative>=target4){got4=1;hits++;}
+            if(cumulative>=target20){hits++;break;}
+        }
+        picked++;
+    }
+    return v_int(hits);
 }
 typedef struct {
     int64_t exchange;
@@ -1439,189 +1683,6 @@ static V *bi_next(V**a,in){
     return v_ref(a[0]->L[0]);}
 typedef V *(*BiCall)(V **a, in, V **kwn, V **kwv, int nkw, Env *e);
 
-/* ---- STAC-M3 helpers ported from Isolde (hibid / nbbo / theopl) ---- */
-typedef struct {
-    int64_t sym;
-    int64_t time;
-    double value;
-} HibidRow;
-static int hibid_row_cmp(const void *va,const void *vb){
-    const HibidRow *a=va,*b=vb;
-    if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
-    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
-    return 0;
-}
-static int i64_cmp(const void *va,const void *vb){
-    int64_t a=*(const int64_t*)va,b=*(const int64_t*)vb;
-    return (a>b)-(a<b);
-}
-static V *bi_shakti_hibid_index(V**a,in){
-    P(n<3||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
-      v_err("shakti_hibid_index(sym_id, time_ns, bid)"))
-    P(a[2]->t!=T_IVEC&&a[2]->t!=T_FVEC,
-      v_err("shakti_hibid_index: bid must be ivec or fvec"))
-    int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_hibid_index: length mismatch"))
-    HibidRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("shakti_hibid_index: allocation failed");
-    for(int64_t i=0;i<rows;i++){
-        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        tmp[i].value=a[2]->t==T_IVEC?(double)a[2]->J[i]:a[2]->F[i];
-        if(tmp[i].sym<0){free(tmp);return v_err("shakti_hibid_index: sym_id must be nonnegative");}
-    }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),hibid_row_cmp);
-    int64_t max_key=rows?tmp[rows-1].sym:-1;
-    if(max_key>rows){free(tmp);return v_err("shakti_hibid_index: sym_id range is not dense");}
-    V *tm=v_ivec(rows),*bid=v_fvec(rows),*bounds=v_ivec(max_key+2);
-    for(int64_t i=0;i<rows;i++){tm->J[i]=tmp[i].time;bid->F[i]=tmp[i].value;}
-    int64_t pos=0;
-    for(int64_t key=0;key<=max_key+1;key++){
-        while(pos<rows&&tmp[pos].sym<key)pos++;
-        bounds->J[key]=pos;
-    }
-    free(tmp);
-    V *r=v_list(3);r->L[0]=tm;r->L[1]=bid;r->L[2]=bounds;return r;
-}
-static V *hibid_result_table(V *sym,V *bid){
-    V *keys=v_list(2),*data=v_list(2);
-    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("bid");
-    data->L[0]=sym;data->L[1]=bid;
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-static V *hibid_empty_table(void){
-    return hibid_result_table(v_ivec(0),v_fvec(0));
-}
-static V *bi_shakti_hibid(V**a,in){
-    P(n<4||a[0]->t!=T_LIST||a[0]->n<3,
-      v_err("shakti_hibid(index, basket, t0, t1)"))
-    V *idx=a[0],*tm=idx->L[0],*bid=idx->L[1],*bounds=idx->L[2];
-    P(!tm||!bid||!bounds||tm->t!=T_IVEC||bid->t!=T_FVEC||bounds->t!=T_IVEC||
-      tm->n!=bid->n||bounds->n<1||bounds->J[0]!=0||
-      bounds->J[bounds->n-1]!=tm->n,v_err("shakti_hibid: invalid index"))
-    for(int64_t i=1;i<bounds->n;i++)
-        P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
-          v_err("shakti_hibid: invalid index"))
-    V *basket=as_ivec_arg(a[1],"basket");
-    if(!basket)return v_err("shakti_hibid: basket must be ivec or list[int]");
-    if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(basket);
-        return v_err("shakti_hibid: t0 and t1 must be int");}
-    if(basket->n==0||a[2]->j>=a[3]->j){v_free(basket);return hibid_empty_table();}
-    V *sorted=v_ivec(basket->n);
-    memcpy(sorted->J,basket->J,(size_t)basket->n*sizeof(int64_t));
-    v_free(basket);basket=sorted;
-    qsort(basket->J,(size_t)basket->n,sizeof(int64_t),i64_cmp);
-    int64_t ng=0,previous=INT64_MIN;
-    for(int64_t j=0;j<basket->n;j++){
-        int64_t key=basket->J[j];
-        if(key==previous)continue;
-        previous=key;
-        if(key<0||key+1>=bounds->n)continue;
-        int64_t begin=bounds->J[key],end=bounds->J[key+1];
-        int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,a[2]->j);
-        int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,a[3]->j);
-        if(lo<hi)ng++;
-    }
-    V *out_sym=v_ivec(ng),*out_bid=v_fvec(ng);int64_t out=0;
-    previous=INT64_MIN;
-    for(int64_t j=0;j<basket->n;j++){
-        int64_t key=basket->J[j];
-        if(key==previous)continue;
-        previous=key;
-        if(key<0||key+1>=bounds->n)continue;
-        int64_t begin=bounds->J[key],end=bounds->J[key+1];
-        int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,a[2]->j);
-        int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,a[3]->j);
-        if(lo>=hi)continue;
-        double maximum=bid->F[lo];
-        for(int64_t i=lo+1;i<hi;i++)if(bid->F[i]>maximum)maximum=bid->F[i];
-        out_sym->J[out]=key;out_bid->F[out]=maximum;out++;
-    }
-    v_free(basket);
-    return hibid_result_table(out_sym,out_bid);
-}
-/* One-pass NBBO used both as "index" build and query over raw columns. */
-static V *bi_shakti_nbbo_core(V**a,in,const char *name){
-    P(n<3||a[0]->t!=T_IVEC,v_err(name))
-    int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_nbbo: length mismatch"))
-    if(rows==0){
-        V *keys=v_list(3),*data=v_list(3);
-        keys->L[0]=v_str("sym_id");keys->L[1]=v_str("bid");keys->L[2]=v_str("ask");
-        data->L[0]=v_ivec(0);data->L[1]=v_fvec(0);data->L[2]=v_fvec(0);
-        V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-    }
-    int64_t max_sym=-1;
-    for(int64_t i=0;i<rows;i++){
-        if(a[0]->J[i]<0)return v_err("shakti_nbbo: sym_id must be nonnegative");
-        if(a[0]->J[i]>max_sym)max_sym=a[0]->J[i];
-    }
-    if(max_sym>rows)return v_err("shakti_nbbo: sym_id range is not dense");
-    size_t slots=(size_t)max_sym+1;
-    double *bids=malloc(slots*sizeof(double)),*asks=malloc(slots*sizeof(double));
-    unsigned char *seen=calloc(slots,1);
-    if(!bids||!asks||!seen){free(bids);free(asks);free(seen);return v_err("shakti_nbbo: allocation failed");}
-    int64_t ng=0;
-    for(int64_t i=0;i<rows;i++){
-        int64_t key=a[0]->J[i];double bid,ask;
-        if(!numeric_value_at(a[1],i,&bid)||!numeric_value_at(a[2],i,&ask)){
-            free(bids);free(asks);free(seen);
-            return v_err("shakti_nbbo: bid and ask must be numeric");
-        }
-        if(!seen[key]){seen[key]=1;bids[key]=bid;asks[key]=ask;ng++;}
-        else{
-            if(bid>bids[key])bids[key]=bid;
-            if(ask<asks[key])asks[key]=ask;
-        }
-    }
-    V *out_sym=v_ivec(ng),*out_bid=v_fvec(ng),*out_ask=v_fvec(ng);int64_t out=0;
-    for(int64_t key=0;key<=max_sym;key++)if(seen[key]){
-        out_sym->J[out]=key;out_bid->F[out]=bids[key];out_ask->F[out]=asks[key];out++;
-    }
-    free(bids);free(asks);free(seen);
-    V *keys=v_list(3),*data=v_list(3);
-    keys->L[0]=v_str("sym_id");keys->L[1]=v_str("bid");keys->L[2]=v_str("ask");
-    data->L[0]=out_sym;data->L[1]=out_bid;data->L[2]=out_ask;
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-static V *bi_shakti_nbbo_index(V**a,in){
-    return bi_shakti_nbbo_core(a,n,"shakti_nbbo_index(sym_id, bid, ask)");
-}
-static V *bi_shakti_nbbo(V**a,in){
-    /* Accept either prebuilt NBBO table or raw columns. */
-    if(n>=1&&a[0]->t==T_TABLE)return v_ref(a[0]);
-    return bi_shakti_nbbo_core(a,n,"shakti_nbbo(sym_id, bid, ask)");
-}
-static V *bi_shakti_theopl(V**a,in){
-    P(n!=5||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC||a[2]->t!=T_IVEC||
-      a[3]->t!=T_INT||a[4]->t!=T_INT,
-      v_err("shakti_theopl(sym_id, time_ns, size, n_trades, horizon_ns)"))
-    int64_t rows=a[0]->n,n_trades=a[3]->j;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("shakti_theopl: length mismatch"))
-    P(n_trades<0,v_err("shakti_theopl: n_trades must be nonnegative"))
-    int64_t picked=0,hits=0;
-    for(int64_t r=0;r<rows&&picked<n_trades;r++){
-        int64_t initial=a[2]->J[r];
-        if(initial<=0)continue;
-        __int128 target2=(__int128)initial*2;
-        __int128 target4=(__int128)initial*4;
-        __int128 target20=(__int128)initial*20;
-        int64_t t_end;
-        if(__builtin_add_overflow(a[1]->J[r],a[4]->j,&t_end))
-            t_end=a[4]->j>=0?INT64_MAX:INT64_MIN;
-        __int128 cumulative=0;
-        int got2=0,got4=0;
-        for(int64_t j=r+1;j<rows&&a[1]->J[j]<=t_end;j++){
-            if(a[0]->J[j]!=a[0]->J[r])continue;
-            cumulative+=(__int128)a[2]->J[j];
-            if(!got2&&cumulative>=target2){got2=1;hits++;}
-            if(!got4&&cumulative>=target4){got4=1;hits++;}
-            if(cumulative>=target20){hits++;break;}
-        }
-        picked++;
-    }
-    return v_int(hits);
-}
-
 #define BI0(nm) static MS V *bi_w_##nm(V **a,in,V **k,V **v,int nk,Env *e){(void)k;(void)v;(void)nk;(void)e;return bi_##nm(a,n);}
 #define BIKW(nm) static MS V *bi_w_##nm(V **a,in,V **k,V **v,int nk,Env *e){(void)e;return bi_##nm(a,n,k,v,nk);}
 #define BIE(nm) static MS V *bi_w_##nm(V **a,in,V **k,V **v,int nk,Env *e){(void)k;(void)v;(void)nk;return bi_##nm(a,n,e);}
@@ -1633,9 +1694,8 @@ BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
 BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(asof_index) BI0(asof_index_count) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
 BI0(shakti_stats_index) BI0(shakti_stats_agg) BI0(shakti_stats_ui)
+BI0(shakti_hibid) BI0(shakti_hibid_index) BI0(shakti_nbbo) BI0(shakti_nbbo_index) BI0(shakti_theopl)
 BI0(shakti_vwbid) BI0(shakti_vwbid_index)
-BI0(shakti_hibid) BI0(shakti_hibid_index)
-BI0(shakti_nbbo) BI0(shakti_nbbo_index) BI0(shakti_theopl)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -1711,6 +1771,26 @@ BI0(gfx_clear) BI0(gfx_fill_rect) BI0(gfx_line) BI0(gfx_fill_circle)
 BI0(gfx_click_pending) BI0(gfx_click_x) BI0(gfx_click_y) BI0(gfx_consume_click)
 BI0(gfx_text) BI0(gfx_text_width) BI0(gfx_copy_rect)
 #endif
+#ifdef SHAKTI_HAVE_SONICPI
+BI0(sonicpi_bpm) BI0(sonicpi_configure) BI0(sonicpi_play) BI0(sonicpi_send)
+BI0(sonicpi_stop) BI0(sonicpi_synth)
+#endif
+#ifdef SHAKTI_HAVE_DSP
+BI0(dsp_ratio_freq) BI0(dsp_ratio_cents) BI0(dsp_ratio_reduce) BI0(dsp_perfect7)
+BI0(dsp_degree_freq) BI0(dsp_et_cents) BI0(dsp_et_delta)
+#endif
+#ifdef SHAKTI_HAVE_PDF
+BI0(pdf_create) BI0(pdf_add_page) BI0(pdf_text_at) BI0(pdf_save) BI0(pdf_open)
+BI0(pdf_page_count) BI0(pdf_info) BI0(pdf_text) BI0(pdf_close)
+#endif
+#ifdef SHAKTI_HAVE_MIDI
+BI0(midi_open) BI0(midi_close) BI0(midi_alive) BI0(midi_backend) BI0(midi_list)
+BI0(midi_connect) BI0(midi_disconnect) BI0(midi_note_on) BI0(midi_note_off)
+BI0(midi_cc) BI0(midi_program) BI0(midi_raw) BI0(midi_poll)
+#endif
+#ifdef SHAKTI_HAVE_IEFS
+BI0(iefs_save) BI0(iefs_load) BI0(iefs_direct_available)
+#endif
 BIE(eval)
 #ifdef SHAKTI_HAVE_IPC
 BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
@@ -1750,6 +1830,15 @@ static const BiEntry bi_tab[] = {
     {"datetime", bi_w_datetime},
     {"dict", bi_w_dict},
     {"dot", bi_w_dot},
+#ifdef SHAKTI_HAVE_DSP
+    {"dsp_degree_freq", bi_w_dsp_degree_freq},
+    {"dsp_et_cents", bi_w_dsp_et_cents},
+    {"dsp_et_delta", bi_w_dsp_et_delta},
+    {"dsp_perfect7", bi_w_dsp_perfect7},
+    {"dsp_ratio_cents", bi_w_dsp_ratio_cents},
+    {"dsp_ratio_freq", bi_w_dsp_ratio_freq},
+    {"dsp_ratio_reduce", bi_w_dsp_ratio_reduce},
+#endif
     {"enumerate", bi_w_enumerate},
     {"eval", bi_w_eval},
     {"exp", bi_w_exp},
@@ -1794,6 +1883,11 @@ static const BiEntry bi_tab[] = {
     {"hasattr", bi_w_hasattr},
     {"head", bi_w_head},
     {"hex", bi_w_hex},
+#ifdef SHAKTI_HAVE_IEFS
+    {"iefs_direct_available", bi_w_iefs_direct_available},
+    {"iefs_load", bi_w_iefs_load},
+    {"iefs_save", bi_w_iefs_save},
+#endif
     {"input", bi_w_input},
     {"input_get_hz", bi_w_input_get_hz},
     {"input_get_qwerty", bi_w_input_get_qwerty},
@@ -1837,6 +1931,21 @@ static const BiEntry bi_tab[] = {
     {"machine", bi_w_machine},
     {"map", bi_w_map},
     {"max", bi_w_max},
+#ifdef SHAKTI_HAVE_MIDI
+    {"midi_alive", bi_w_midi_alive},
+    {"midi_backend", bi_w_midi_backend},
+    {"midi_cc", bi_w_midi_cc},
+    {"midi_close", bi_w_midi_close},
+    {"midi_connect", bi_w_midi_connect},
+    {"midi_disconnect", bi_w_midi_disconnect},
+    {"midi_list", bi_w_midi_list},
+    {"midi_note_off", bi_w_midi_note_off},
+    {"midi_note_on", bi_w_midi_note_on},
+    {"midi_open", bi_w_midi_open},
+    {"midi_poll", bi_w_midi_poll},
+    {"midi_program", bi_w_midi_program},
+    {"midi_raw", bi_w_midi_raw},
+#endif
     {"min", bi_w_min},
     {"mkdir", bi_w_mkdir},
     {"mmul", bi_w_mmul},
@@ -1852,6 +1961,17 @@ static const BiEntry bi_tab[] = {
     {"pcm_close", bi_w_pcm_close},
     {"pcm_open", bi_w_pcm_open},
     {"pcm_write", bi_w_pcm_write},
+#ifdef SHAKTI_HAVE_PDF
+    {"pdf_add_page", bi_w_pdf_add_page},
+    {"pdf_close", bi_w_pdf_close},
+    {"pdf_create", bi_w_pdf_create},
+    {"pdf_info", bi_w_pdf_info},
+    {"pdf_open", bi_w_pdf_open},
+    {"pdf_page_count", bi_w_pdf_page_count},
+    {"pdf_save", bi_w_pdf_save},
+    {"pdf_text", bi_w_pdf_text},
+    {"pdf_text_at", bi_w_pdf_text_at},
+#endif
     {"pop", bi_w_pop},
     {"print", bi_w_print},
     {"range", bi_w_range},
@@ -1890,6 +2010,14 @@ static const BiEntry bi_tab[] = {
     {"shakti_winavg_query", bi_w_shakti_winavg_query},
     {"shape", bi_w_shape},
     {"sin", bi_w_sin},
+#ifdef SHAKTI_HAVE_SONICPI
+    {"sonicpi_bpm", bi_w_sonicpi_bpm},
+    {"sonicpi_configure", bi_w_sonicpi_configure},
+    {"sonicpi_play", bi_w_sonicpi_play},
+    {"sonicpi_send", bi_w_sonicpi_send},
+    {"sonicpi_stop", bi_w_sonicpi_stop},
+    {"sonicpi_synth", bi_w_sonicpi_synth},
+#endif
     {"sort", bi_w_sort},
     {"sorted", bi_w_sorted},
     {"sqrt", bi_w_sqrt},
@@ -2010,6 +2138,14 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         if(nargs < 1 || args[0]->t != T_STR) {
             return v_err("load(path) or load(path, [column, ...])");
         }
+#ifdef SHAKTI_HAVE_IEFS
+        {
+            const char *path = args[0]->s;
+            size_t plen = strlen(path);
+            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs"))
+                return iefs_store_read(path);
+        }
+#endif
         V *cols = NULL;
         if(nargs > 1) {
             if(args[1]->t != T_LIST) {
@@ -2019,7 +2155,28 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         }
         return table_load(args[0]->s, cols);
     }
-    P(!strcmp(name,"save"),nargs>1&&args[1]->t==T_STR?(table_save(args[0],args[1]->s)?v_err("save failed"):v_nil()):v_err("save(table,path)"))
+    if(!strcmp(name,"save")) {
+        if(nargs < 2 || args[1]->t != T_STR)
+            return v_err("save(value, path)");
+#ifdef SHAKTI_HAVE_IEFS
+        {
+            const char *path = args[1]->s;
+            size_t plen = strlen(path);
+            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs")) {
+                char err[256];
+                err[0] = 0;
+                if (iefs_store_write(args[0], path, IEFS_IO_AUTO, err, sizeof err) != 0) {
+                    const char *e = iefs_last_error();
+                    return v_err(e && e[0] ? e : (err[0] ? err : "save failed"));
+                }
+                return v_nil();
+            }
+        }
+#endif
+        if (table_save(args[0], args[1]->s))
+            return v_err("save failed");
+        return v_nil();
+    }
     if(is_isolde_builtin(name)) return isolde_builtin_call(name, args, nargs);
     return v_errf("unknown builtin '%s'",name);
 }

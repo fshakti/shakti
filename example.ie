@@ -151,6 +151,8 @@ print("sum(u * v):", sum(u * v))
 # table_csv.ie
 # =============================================================================
 # CSV/TSV table save/load. String columns save as text; load is numeric-only.
+# Normal-sized files use a buffered read; oversized files stream when
+# SHAKTI_CSV_MAX_BYTES is exceeded (default 1 GiB).
 #   ./shakti example.ie   # or copy this section to its own file
 
 people : table(id:[1, 2, 3], name:["ada", "bob", "cam"])
@@ -230,6 +232,7 @@ print(roster)
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti example.ie  # section: gfx_demo.ie
 # Also: examples/gfx_demo.ie, examples/gfx_demo_timed.ie, examples/gfx_movie.ie
+# Game (local): examples/infinibattle/ — make gfx-build && make duel
 
 import gfx
 
@@ -474,6 +477,89 @@ synth.note_off(64)
 synth.note_off(67)
 synth.close()
 print("done")
+
+
+# =============================================================================
+# dsp_demo.ie
+# =============================================================================
+# Just-intonation ratio helpers (no audio device required).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: dsp_demo.ie
+
+import dsp
+
+root : 440.0
+print("degree 4 (3/2):", dsp.degree_freq(root, 4))
+for row in dsp.perfect7(root):
+    print(row["degree"], row["num"], "/", row["den"], "→", row["hz"], "Hz")
+
+
+# =============================================================================
+# sonicpi_demo.ie
+# =============================================================================
+# Drive Sonic Pi via OSC (UDP). Start Sonic Pi + examples/sonicpi_bridge.rb first.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: sonicpi_demo.ie
+
+import sonicpi
+
+sonicpi.configure("127.0.0.1", 4560)
+sonicpi.bpm(120)
+sonicpi.play(60, 0.8, 0.25)
+sonicpi.synth("prophet", 70, 0.9, 1.0)
+print("sonicpi demo sent — check Sonic Pi audio")
+
+
+# =============================================================================
+# pdf_demo.ie
+# =============================================================================
+# PDF 1.4 write/read round-trip (no third-party PDF libs).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: pdf_demo.ie
+
+import pdf
+
+path : "/tmp/shakti_pdf_demo.pdf"
+w : pdf.create()
+pdf.add_page(w)
+pdf.text_at(w, 72, 720, "Hello Shakti", size:12)
+pdf.save(w, path)
+pdf.close(w)
+d : pdf.open(path)
+print("pages:", pdf.page_count(d), "text:", pdf.text(d))
+pdf.close(d)
+
+
+# =============================================================================
+# midi_demo.ie
+# =============================================================================
+# MIDI I/O (ALSA / CoreMIDI). Override port with MIDI_PORT env.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: midi_demo.ie
+
+import midi
+
+print("backend:", midi.backend())
+if midi.backend() != "none":
+    midi.open()
+    print("ports:", len(midi.list()))
+    midi.close()
+
+
+# =============================================================================
+# iefs_demo.ie
+# =============================================================================
+# Durable .iefs save/load for any supported value.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti example.ie  # section: iefs_demo.ie
+
+import iefs
+
+path : "/tmp/shakti_iefs_demo.iefs"
+x : [1, 2, 3, 4]
+iefs.save(x, path)
+print("roundtrip:", iefs.load(path))
+print("direct_available:", iefs.direct_available())
 
 
 # =============================================================================
