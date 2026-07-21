@@ -1,0 +1,293 @@
+# 5x7 bitmap text — glyphs matched to Shakti synth font.
+# P is customized (open bowl) so it cannot be read as F.
+
+def row_P(r):
+    if r = 0:
+        return "11110"
+    if r = 1:
+        return "10001"
+    if r = 2:
+        return "10001"
+    if r = 3:
+        return "11110"
+    if r = 4:
+        return "10000"
+    if r = 5:
+        return "10000"
+    return "10000"
+
+def row_O(r):
+    if r = 0:
+        return "01110"
+    if r = 6:
+        return "01110"
+    return "10001"
+
+def row_N(r):
+    if r = 0:
+        return "10001"
+    if r = 1:
+        return "11001"
+    if r = 2:
+        return "10101"
+    if r = 3:
+        return "10011"
+    return "10001"
+
+def row_G(r):
+    if r = 0:
+        return "01110"
+    if r = 1:
+        return "10001"
+    if r = 3:
+        return "10111"
+    if r = 5:
+        return "10001"
+    if r = 6:
+        return "01110"
+    return "10000"
+
+def row_M(r):
+    if r = 0:
+        return "10001"
+    if r = 1:
+        return "11011"
+    if r = 2:
+        return "10101"
+    return "10001"
+
+def row_D(r):
+    if r = 0:
+        return "11110"
+    if r = 6:
+        return "11110"
+    return "10001"
+
+def row_E(r):
+    if r = 0:
+        return "11111"
+    if r = 3:
+        return "11110"
+    if r = 6:
+        return "11111"
+    return "10000"
+
+def row_1(r):
+    if r = 0:
+        return "00100"
+    if r = 1:
+        return "01100"
+    if r = 6:
+        return "01110"
+    return "00100"
+
+def row_2(r):
+    if r = 0:
+        return "01110"
+    if r = 1:
+        return "10001"
+    if r = 2:
+        return "00001"
+    if r = 3:
+        return "00110"
+    if r = 4:
+        return "01000"
+    if r = 5:
+        return "10000"
+    return "11111"
+
+def row_3(r):
+    if r = 0:
+        return "11110"
+    if r = 1:
+        return "00001"
+    if r = 2:
+        return "00001"
+    if r = 3:
+        return "01110"
+    if r = 4:
+        return "00001"
+    if r = 5:
+        return "00001"
+    return "11110"
+
+def row_L(r):
+    if r = 6:
+        return "11111"
+    return "10000"
+
+def row_A(r):
+    if r = 0:
+        return "01110"
+    if r = 3:
+        return "11111"
+    return "10001"
+
+def row_Y(r):
+    if r = 0:
+        return "10001"
+    if r = 1:
+        return "10001"
+    if r = 2:
+        return "01010"
+    return "00100"
+
+def row_R(r):
+    if r = 0:
+        return "11110"
+    if r = 3:
+        return "11110"
+    if r = 4:
+        return "10100"
+    if r = 5:
+        return "10010"
+    return "10001"
+
+def row_C(r):
+    if r = 0:
+        return "01110"
+    if r = 6:
+        return "01110"
+    if r = 1:
+        return "10001"
+    if r = 5:
+        return "10001"
+    return "10000"
+
+def row_U(r):
+    if r = 6:
+        return "01110"
+    return "10001"
+
+def row_T(r):
+    if r = 0:
+        return "11111"
+    return "00100"
+
+def row_V(r):
+    if r < 5:
+        return "10001"
+    if r = 5:
+        return "01010"
+    return "00100"
+
+def row_I(r):
+    if r = 0:
+        return "11111"
+    if r = 6:
+        return "11111"
+    return "00100"
+
+def row_W(r):
+    if r < 4:
+        return "10001"
+    if r = 4:
+        return "10101"
+    if r = 5:
+        return "11011"
+    return "10001"
+
+def row_H(r):
+    if r = 3:
+        return "11111"
+    return "10001"
+
+def row_S(r):
+    if r = 0:
+        return "01111"
+    if r = 1:
+        return "10000"
+    if r = 2:
+        return "10000"
+    if r = 3:
+        return "01110"
+    if r = 4:
+        return "00001"
+    if r = 5:
+        return "00001"
+    if r = 6:
+        return "11110"
+    return "00000"
+
+def glyph_row(ch, row):
+    if ch = " ":
+        return "00000"
+    if ch = "P":
+        return row_P(row)
+    if ch = "O":
+        return row_O(row)
+    if ch = "N":
+        return row_N(row)
+    if ch = "G":
+        return row_G(row)
+    if ch = "M":
+        return row_M(row)
+    if ch = "D":
+        return row_D(row)
+    if ch = "E":
+        return row_E(row)
+    if ch = "1":
+        return row_1(row)
+    if ch = "2":
+        return row_2(row)
+    if ch = "3":
+        return row_3(row)
+    if ch = "L":
+        return row_L(row)
+    if ch = "A":
+        return row_A(row)
+    if ch = "Y":
+        return row_Y(row)
+    if ch = "R":
+        return row_R(row)
+    if ch = "C":
+        return row_C(row)
+    if ch = "U":
+        return row_U(row)
+    if ch = "T":
+        return row_T(row)
+    if ch = "V":
+        return row_V(row)
+    if ch = "I":
+        return row_I(row)
+    if ch = "W":
+        return row_W(row)
+    if ch = "H":
+        return row_H(row)
+    if ch = "S":
+        return row_S(row)
+    return "00000"
+
+def draw_char(gfx, x, y, ch, color, scale):
+    row : 0
+    while row < 7:
+        bits : glyph_row(ch, row)
+        col : 0
+        while col < 5:
+            if bits[col] = "1":
+                start : col
+                while col < 5 and bits[col] = "1":
+                    col : col + 1
+                gfx.fill_rect(x + start * scale, y + row * scale, (col - start) * scale, scale, color)
+            else:
+                col : col + 1
+        row : row + 1
+
+def text_w(s, scale):
+    return len(s) * 6 * scale
+
+def draw_text(gfx, x, y, s, color, scale):
+    i : 0
+    adv : 6 * scale
+    while i < len(s):
+        draw_char(gfx, x + i * adv, y, s[i], color, scale)
+        i : i + 1
+
+def draw_text_c(gfx, cx, y, s, color, scale):
+    w : text_w(s, scale)
+    draw_text(gfx, cx + (-(w // 2)), y, s, color, scale)
+
+# All on-screen labels (spell-check source of truth)
+MENU_LABELS : ["PONG", "MODE", "1 PLAYER", "2 PLAYER", "COURT", "GRASS", "CLAY", "HARD COURT", "START", "VIEW", "2D", "3D"]
+
+pong_gfx_text_loaded : 1

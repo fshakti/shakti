@@ -1,0 +1,150 @@
+# pong_test - assertions for pong_core / ui / render / module API
+#
+# Run:  SHAKTI_LIB=$PWD/lib ./shakti pong_test.ie
+#   or: make test-pong
+
+import pong_core
+import pong_skins
+import pong_ui
+import pong_gfx_render
+import pong
+
+res : dict(passed: 0, failed: 0)
+
+def check(res, name, cond):
+    if cond:
+        res["passed"] : res["passed"] + 1
+        print("  PASS  " + name)
+    else:
+        res["failed"] : res["failed"] + 1
+        print("  FAIL  " + name)
+
+def approx(a, b):
+    return pong_core.fabs(pong_core.sub(a, b)) < 0.001
+
+def mkstate():
+    st : pong_core.new_state()
+    st["bvx"] : 0.0
+    st["bvy"] : 0.0
+    return st
+
+print("== math / clamps ==")
+check(res, "sub",         pong_core.sub(10, 3) = 7)
+check(res, "fabs neg",    approx(pong_core.fabs(-2.5), 2.5))
+check(res, "clampc",      approx(pong_core.clampc(15.0, 10.0), 10.0))
+check(res, "clampf",      approx(pong_core.clampf(2.0, 0.0, 1.0), 1.0))
+check(res, "clampi",      pong_core.clampi(9, 0, 5) = 5)
+check(res, "rep",         pong_core.rep("-", 4) = "----")
+
+print("== helpers ==")
+check(res, "covers inside",  pong_core.covers(6.0, 7.0) = 1)
+check(res, "covers outside", pong_core.covers(0.0, 15.0) = 0)
+
+print("== initial state ==")
+s0 : pong_core.new_state()
+check(res, "score0",       s0["sl"] = 0)
+check(res, "not over",     s0["over"] = 0)
+check(res, "ball centered", approx(s0["bx"], pong_core.W / 2.0))
+
+print("== wall bounces ==")
+swt : mkstate()
+swt["bpy"] : 0.0
+swt["bvy"] : -0.5
+pong_core.step(swt)
+check(res, "top wall", swt["bvy"] > 0.0)
+
+swb : mkstate()
+swb["bpy"] : pong_core.HM * 1.0
+swb["bvy"] : 0.5
+pong_core.step(swb)
+check(res, "bottom wall", swb["bvy"] < 0.0)
+
+print("== scoring ==")
+sl : mkstate()
+sl["bx"] : 1.0
+sl["bpy"] : 10.0
+sl["bvx"] : -1.5
+sl["ly"] : 0.0
+pong_core.step(sl)
+check(res, "left miss -> sr+1", sl["sr"] = 1)
+
+sr : mkstate()
+sr["bx"] : pong_core.WM * 1.0
+sr["bpy"] : 10.0
+sr["bvx"] : 1.5
+sr["ry"] : 0.0
+pong_core.step(sr)
+check(res, "right miss -> sl+1", sr["sl"] = 1)
+
+print("== bat reflection ==")
+hl : mkstate()
+hl["bx"] : pong_core.PLX + 1.0
+hl["bpy"] : 7.0
+hl["bvx"] : -1.5
+hl["ly"] : 6.0
+pong_core.step(hl)
+check(res, "left bat reflects", hl["bvx"] > 0.0)
+
+hr : mkstate()
+hr["bx"] : pong_core.PRX + (-1.0)
+hr["bpy"] : 7.0
+hr["bvx"] : 1.5
+hr["ry"] : 6.0
+pong_core.step(hr)
+check(res, "right bat reflects", hr["bvx"] < 0.0)
+
+print("== movement ==")
+mv : pong_core.new_state()
+y0 : mv["ly"]
+pong_core.move_left(mv, -2.0)
+check(res, "move_left up", mv["ly"] < y0)
+
+print("== win condition ==")
+sw : mkstate()
+sw["sl"] : pong_core.WIN
+pong_core.step(sw)
+check(res, "WIN sets over", sw["over"] = 1)
+
+print("== frame renderer ==")
+fr : pong_core.frame(pong_core.new_state(), "", pong_skins.SKIN_GRASS)
+check(res, "frame non-empty", len(fr) > 500)
+
+print("== court skins ==")
+check(res, "skin grass", pong_skins.name(pong_skins.SKIN_GRASS) = "Grass")
+check(res, "skin clay", pong_skins.name(pong_skins.SKIN_CLAY) = "Clay")
+check(res, "skin plastic", pong_skins.name(pong_skins.SKIN_PLASTIC) = "Hard court")
+check(res, "term clay", len(pong_skins.term_court(pong_skins.SKIN_CLAY)) > 2)
+check(res, "gfx grass bg", pong_skins.gfx_bg(pong_skins.SKIN_GRASS) = 0x1a4d2e)
+
+print("== view / ui ==")
+check(res, "view 2d", pong_ui.VIEW_2D = 0)
+check(res, "view 3d", pong_ui.VIEW_3D = 1)
+check(res, "in_rect hit", pong_ui.in_rect(30, 20, 20, 10, 40, 30) = 1)
+check(res, "in_rect miss", pong_ui.in_rect(5, 5, 20, 10, 40, 30) = 0)
+check(res, "back hit", pong_ui.back_clicked(pong_ui.BACK_X + 1, pong_ui.BACK_Y + 1) = 1)
+check(res, "back miss", pong_ui.back_clicked(900, 500) = 0)
+
+print("== 3d / 2d projection ==")
+check(res, "depth near", approx(pong_gfx_render.depth_t(0.0), 0.0))
+check(res, "depth far", approx(pong_gfx_render.depth_t(pong_core.W * 1.0), 1.0))
+pn : pong_gfx_render.proj(0.0, pong_core.H / 2.0)
+pf : pong_gfx_render.proj(pong_core.W * 1.0, pong_core.H / 2.0)
+check(res, "proj near below far", pn["y"] > pf["y"])
+check(res, "proj mid x", pn["x"] = pong_gfx_render.MID_X)
+p2 : pong_gfx_render.proj2(0.0, 0.0)
+check(res, "proj2 origin", p2["x"] = pong_gfx_render.COURT2_X)
+check(res, "proj2 origin y", p2["y"] = pong_gfx_render.COURT2_Y)
+
+print("== module API ==")
+check(res, "pong loaded", pong.pong_loaded = 1)
+check(res, "display empty", pong.display_name("", "PLAYER 1") = "PLAYER 1")
+check(res, "display keep", pong.display_name("Ada", "PLAYER 1") = "Ada")
+check(res, "first blank", pong.first_char("") = "3")
+check(res, "first char", pong.first_char("2hold") = "2")
+st_h : pong_core.new_state()
+st_h["bvx"] : -1.0
+check(res, "hint defend", pong.hint_for(st_h, "left")[2] = "D")
+
+print("")
+print("RESULT: " + str(res["passed"]) + " passed, " + str(res["failed"]) + " failed")
+assert res["failed"] = 0
