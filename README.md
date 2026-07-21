@@ -2,7 +2,7 @@
 
 [Discord](https://discord.gg/PkKwUk9Tf)
 
-Small interpreted language (0.10.1) with vectors, matrices, tables, decorators,
+Small interpreted language (0.11.0) with vectors, matrices, tables, decorators,
 each (`f@`), load-time time-series indexes (VWAB / windowed avg / stats / asof),
 and optional SQL, graph, IPC, REST, gfx, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
