@@ -16,16 +16,19 @@ static int g_wave_pos;
 static float g_spectrum[SYNTH_UI_SPECTRUM_BINS];
 static float g_vu_level;
 
-#define COL_LABEL 0x646870u
-#define COL_TEXT 0xf4f5f8u
-#define COL_AMBER 0xff9228u
+#define COL_LABEL 0x8a909au
+#define COL_TEXT 0xf2f4f7u
+#define COL_AMBER 0xff9a3cu
 #define COL_LED_ON 0xffa840u
-#define COL_LED_OFF 0x141418u
-#define COL_HOT 0xff5038u
-#define COL_PLAY 0xffa030u
-#define COL_PANEL 0x08080au
-#define COL_PAD_FACE 0x1a1a1eu
-#define COL_PAD_PRESS 0x28282eu
+#define COL_LED_OFF 0x12141au
+#define COL_HOT 0xff5a42u
+#define COL_PLAY 0xff9a3cu
+#define COL_PANEL 0x0c0e12u
+#define COL_PAD_FACE 0x1c1e24u
+#define COL_PAD_PRESS 0x2a2e36u
+#define COL_ACCENT 0x5ec8ffu
+#define COL_SLOT 0x06070au
+#define COL_METAL 0x2a2e36u
 
 static uint32_t rgb(int r, int g, int b) {
     if (r < 0) r = 0;
@@ -90,27 +93,32 @@ static void drect_glow_border(UiCtx *c, UiRect r, uint32_t col, int thick) {
     }
 }
 static void draw_panel_recessed(UiCtx *c, UiRect r) {
-    drect_fill(c, r, COL_PANEL);
-    drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, rgb(56, 58, 64));
-    drect_fill(c, (UiRect){r.x, r.y, 1, r.h}, rgb(56, 58, 64));
-    drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, rgb(6, 6, 8));
-    drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, 1}, rgb(14, 14, 18));
-    drect_fill(c, (UiRect){r.x + 1, r.y + 1, 1, r.h - 2}, rgb(14, 14, 18));
+    drect_fill(c, r, rgb(18, 20, 24));
+    drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, rgb(48, 52, 60));
+    drect_fill(c, (UiRect){r.x, r.y, 1, r.h}, rgb(48, 52, 60));
+    drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, rgb(4, 5, 7));
+    drect_fill(c, (UiRect){r.x + r.w - 1, r.y, 1, r.h}, rgb(4, 5, 7));
+    drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, COL_PANEL);
+    drect_fill(c, (UiRect){r.x + 2, r.y + 2, r.w - 4, 1}, rgb(22, 24, 30));
+    drect_fill(c, (UiRect){r.x + 2, r.y + 2, 1, r.h - 4}, rgb(22, 24, 30));
 }
 static void fill_chassis(UiCtx *c) {
     int x, y;
     for (y = 0; y < c->h; y++) {
-        float vy = (float)y / (float)c->h;
-        float vignette = 1.f - fabsf(vy - 0.5f) * 0.18f;
+        float vy = (float)y / (float)(c->h > 1 ? c->h - 1 : 1);
+        uint32_t row = rgb_lerp(rgb(14, 16, 20), rgb(8, 9, 12), vy);
         for (x = 0; x < c->w; x++) {
-            float vx = (float)x / (float)c->w;
-            float edge = (vx < 0.03f || vx > 0.97f) ? 0.92f : 1.f;
-            uint32_t base = rgb_lerp(rgb(10, 10, 12), rgb(18, 18, 22), vy);
-            pix(c, x, y, rgb_mul(base, vignette * edge));
+            float vx = (float)x / (float)(c->w > 1 ? c->w - 1 : 1);
+            float edge = 1.f;
+            if (vx < 0.02f) edge = 0.88f + vx * 6.f;
+            if (vx > 0.98f) edge = 0.88f + (1.f - vx) * 6.f;
+            float grain = hash2f(x, y) * 0.03f;
+            pix(c, x, y, rgb_mul(rgb_lerp(row, rgb(20, 24, 30), grain), edge));
         }
     }
-    drect_fill(c, (UiRect){0, 0, c->w, 1}, rgb(72, 74, 80));
-    drect_fill(c, (UiRect){0, 1, c->w, 1}, rgb(24, 24, 28));
+    drect_fill(c, (UiRect){0, 0, c->w, 1}, rgb(70, 76, 86));
+    drect_fill(c, (UiRect){0, 1, c->w, 1}, rgb(28, 30, 36));
+    drect_fill(c, (UiRect){0, c->h - 1, c->w, 1}, rgb(4, 5, 7));
 }
 static void dcircle_fill(UiCtx *c, int cx, int cy, int rad, uint32_t col) {
     int x, y;
@@ -173,44 +181,68 @@ static void text_label(UiCtx *c, int x, int y, const char *s, uint32_t col) {
     for (i = 0; s[i]; i++) glyph5x7(c, x + i * adv, y, s[i], col, 1);
 }
 static void draw_btn(UiCtx *c, UiRect r, uint32_t hi, uint32_t lo, int lit, int pressed, const char *txt) {
-    uint32_t face = lit ? hi : rgb(26, 27, 30);
-    uint32_t face_bot = lit ? lo : rgb(16, 17, 20);
-    int tx;
+    uint32_t face = lit ? hi : rgb(32, 36, 42);
+    uint32_t face_bot = lit ? lo : rgb(18, 20, 24);
+    int tx, radius_shade;
     if (pressed) {
-        drect_fill(c, r, rgb_mul(face_bot, 0.88f));
-        drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, rgb_mul(face, 0.82f));
+        drect_fill(c, r, rgb_mul(face_bot, 0.9f));
+        drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, rgb_mul(face, 0.84f));
     } else {
         drect_grad_v(c, r, face, face_bot);
+        drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, 1},
+                   lit ? rgb_mul(hi, 1.15f) : rgb(58, 62, 70));
+        drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, rgb(6, 7, 9));
         if (lit) drect_glow_border(c, r, hi, 1);
-        else {
-            drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, rgb(48, 50, 56));
-            drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, rgb(8, 8, 10));
-        }
+    }
+    for (radius_shade = 0; radius_shade < 2 && r.w > 8 && r.h > 8; radius_shade++) {
+        pix(c, r.x + radius_shade, r.y, rgb(6, 7, 9));
+        pix(c, r.x + r.w - 1 - radius_shade, r.y, rgb(6, 7, 9));
+        pix(c, r.x + radius_shade, r.y + r.h - 1, rgb(6, 7, 9));
+        pix(c, r.x + r.w - 1 - radius_shade, r.y + r.h - 1, rgb(6, 7, 9));
     }
     tx = r.x + (r.w - (int)strlen(txt) * 6) / 2;
     if (tx < r.x + 2) tx = r.x + 2;
     text_label(c, tx, r.y + (r.h - 7) / 2, txt, lit ? COL_TEXT : COL_LABEL);
 }
-static void draw_knob(UiCtx *c, UiRect r, float val, const char *label) {
-    int cx = r.x + r.w / 2, cy = r.y + r.h / 2 - 5, rad = r.w / 4, sx, sy, kx, ky, lx, i;
-    float ang;
-    if (rad < 6) rad = 6;
-    if (cy + rad + 2 > r.y + r.h - 12) rad = (r.y + r.h - 12 - cy);
-    if (rad < 6) rad = 6;
-    dcircle_radial(c, cx, cy, rad + 2, rgb(10, 10, 12), rgb(4, 4, 6));
-    dcircle_radial(c, cx, cy, rad, rgb(28, 28, 32), rgb(14, 14, 18));
-    dcircle_fill(c, cx, cy, rad - 2, rgb(18, 18, 22));
-    sx = cx - rad / 4;
-    sy = cy - rad / 4;
-    dcircle_fill(c, sx, sy, rad / 5, rgb_mul(rgb(255, 255, 255), 0.06f));
-    ang = val * 4.18879f + 2.61799f;
-    kx = cx + (int)(cosf(ang) * (rad - 4));
-    ky = cy + (int)(sinf(ang) * (rad - 4));
-    for (i = 2; i >= 0; i--)
-        dcircle_fill(c, kx, ky, i + 1, i ? rgb_mul(COL_AMBER, 0.35f) : COL_AMBER);
+static void draw_slider(UiCtx *c, UiRect r, float val, const char *label) {
+    UiRect slot, fill, thumb;
+    int track_w, track_x, track_top, track_bot, track_h, fill_h, thumb_y, lx;
+    if (val < 0.f) val = 0.f;
+    if (val > 1.f) val = 1.f;
+    track_w = r.w / 3;
+    if (track_w < 14) track_w = 14;
+    if (track_w > 28) track_w = 28;
+    track_x = r.x + (r.w - track_w) / 2;
+    track_top = r.y + 16;
+    track_bot = r.y + r.h - 14;
+    track_h = track_bot - track_top;
+    if (track_h < 24) track_h = 24;
+    slot = (UiRect){track_x, track_top, track_w, track_h};
+    drect_fill(c, (UiRect){slot.x - 3, slot.y - 2, slot.w + 6, slot.h + 4}, rgb(22, 24, 30));
+    drect_fill(c, slot, COL_SLOT);
+    drect_fill(c, (UiRect){slot.x, slot.y, slot.w, 1}, rgb(4, 5, 7));
+    drect_fill(c, (UiRect){slot.x, slot.y + slot.h - 1, slot.w, 1}, rgb(40, 44, 52));
+    drect_fill(c, (UiRect){slot.x + slot.w / 2 - 1, slot.y + 2, 2, slot.h - 4}, rgb(16, 18, 22));
+    fill_h = (int)(val * (float)(slot.h - 4));
+    if (fill_h > 0) {
+        fill = (UiRect){slot.x + 2, slot.y + slot.h - 2 - fill_h, slot.w - 4, fill_h};
+        drect_grad_v(c, fill, rgb(255, 190, 110), COL_AMBER);
+        drect_fill(c, (UiRect){fill.x, fill.y, 1, fill.h}, rgb_mul(COL_AMBER, 0.55f));
+    }
+    thumb_y = slot.y + slot.h - 2 - fill_h - 7;
+    if (thumb_y < slot.y - 2) thumb_y = slot.y - 2;
+    if (thumb_y > slot.y + slot.h - 12) thumb_y = slot.y + slot.h - 12;
+    thumb = (UiRect){slot.x - 5, thumb_y, slot.w + 10, 14};
+    drect_grad_v(c, thumb, rgb(58, 62, 70), rgb(28, 30, 36));
+    drect_fill(c, (UiRect){thumb.x, thumb.y, thumb.w, 1}, rgb(90, 96, 108));
+    drect_fill(c, (UiRect){thumb.x, thumb.y + thumb.h - 1, thumb.w, 1}, rgb(10, 11, 14));
+    drect_fill(c, (UiRect){thumb.x + 3, thumb.y + thumb.h / 2 - 1, thumb.w - 6, 2}, COL_AMBER);
     lx = r.x + (r.w - (int)strlen(label) * 6) / 2;
     if (lx < r.x) lx = r.x;
-    text_label(c, lx, r.y + r.h - 10, label, COL_LABEL);
+    text_label(c, lx, r.y + 2, label, COL_LABEL);
+}
+static void draw_knob(UiCtx *c, UiRect r, float val, const char *label) {
+    draw_slider(c, r, val, label);
 }
 static void draw_led_step(UiCtx *c, UiRect r, int on, int playhead) {
     UiRect pad = {r.x + 1, r.y + 1, r.w - 2, r.h - 2};
@@ -251,39 +283,56 @@ static void draw_pad(UiCtx *c, UiRect r, int pressed, const char *lbl) {
 static void draw_piano_key(UiCtx *c, UiRect r, int down, int style) {
     UiRect face = r;
     uint32_t top, bot, edge_r, edge_b;
-    if (down) face.y += 1;
+    if (down) face.y += 2;
     if (style == 1) {
-        top = down ? rgb(14, 14, 16) : rgb(24, 24, 28);
-        bot = down ? rgb(8, 8, 10) : rgb(14, 14, 18);
-        edge_r = rgb(18, 18, 22);
-        edge_b = rgb(6, 6, 8);
+        top = down ? rgb(18, 18, 22) : rgb(28, 30, 36);
+        bot = down ? rgb(8, 8, 10) : rgb(12, 13, 16);
+        edge_r = rgb(8, 8, 10);
+        edge_b = rgb(4, 4, 6);
+        drect_grad_v(c, face, top, bot);
+        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 1}, rgb(48, 50, 56));
+        drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
+        drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
+        if (down) drect_glow_border(c, face, COL_ACCENT, 1);
     } else if (style == 2) {
-        top = down ? rgb(180, 180, 176) : rgb(236, 236, 232);
-        bot = down ? rgb(180, 180, 176) : rgb(220, 220, 214);
-        edge_r = rgb(160, 160, 156);
-        edge_b = rgb(140, 140, 136);
+        top = down ? rgb(210, 214, 220) : rgb(246, 248, 252);
+        bot = down ? rgb(188, 192, 198) : rgb(220, 224, 230);
+        edge_r = rgb(150, 154, 160);
+        edge_b = rgb(120, 124, 130);
+        drect_grad_v(c, face, top, bot);
+        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 2}, rgb(255, 255, 255));
+        drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
+        drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
+        if (down) drect_fill(c, (UiRect){face.x + 2, face.y + 2, face.w - 4, face.h - 4},
+                             rgb_mul(COL_ACCENT, 0.12f));
+        text_label(c, face.x + (face.w - 6) / 2, face.y + face.h - 16, "C",
+                   down ? rgb(60, 70, 90) : rgb(90, 100, 120));
     } else {
-        top = down ? rgb(200, 200, 200) : rgb(244, 244, 242);
-        bot = down ? rgb(190, 190, 188) : rgb(228, 228, 224);
-        edge_r = rgb(170, 170, 168);
-        edge_b = rgb(150, 150, 148);
+        top = down ? rgb(220, 222, 226) : rgb(250, 250, 252);
+        bot = down ? rgb(198, 200, 204) : rgb(228, 230, 234);
+        edge_r = rgb(160, 162, 166);
+        edge_b = rgb(130, 132, 136);
+        drect_grad_v(c, face, top, bot);
+        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 2}, rgb(255, 255, 255));
+        drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
+        drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
+        if (down) drect_fill(c, (UiRect){face.x + 2, face.y + 2, face.w - 4, face.h - 4},
+                             rgb_mul(COL_ACCENT, 0.10f));
     }
-    drect_grad_v(c, face, top, bot);
-    drect_fill(c, (UiRect){face.x, face.y, face.w, 1},
-               rgb_lerp(rgb(255, 255, 255), rgb(0, 0, 0), down ? 0.04f : (style == 1 ? 0.12f : 0.18f)));
-    drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
-    drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
-    if (style == 2 && !down) text_label(c, face.x + (face.w - 6) / 2, face.y + face.h - 14, "C", rgb(100, 100, 96));
 }
 static void draw_ribbon_track(UiCtx *c, UiRect track, float val) {
-    UiRect cap;
+    UiRect cap, rail;
     int cap_x;
-    drect_fill(c, track, rgb(8, 8, 10));
-    drect_fill(c, (UiRect){track.x, track.y, track.w, 1}, rgb(40, 42, 48));
-    drect_fill(c, (UiRect){track.x, track.y + track.h - 1, track.w, 1}, rgb(4, 4, 6));
-    cap_x = track.x + (int)((val * 0.5f + 0.5f) * (float)(track.w - 12));
-    cap = (UiRect){cap_x, track.y - 4, 12, track.h + 8};
-    drect_grad_v(c, cap, rgb(255, 180, 80), rgb(210, 110, 32));
+    rail = (UiRect){track.x, track.y + track.h / 2 - 2, track.w, 4};
+    drect_fill(c, track, rgb(10, 11, 14));
+    drect_fill(c, (UiRect){track.x, track.y, track.w, 1}, rgb(36, 40, 48));
+    drect_fill(c, (UiRect){track.x, track.y + track.h - 1, track.w, 1}, rgb(4, 5, 7));
+    drect_fill(c, rail, rgb(20, 22, 28));
+    drect_fill(c, (UiRect){rail.x + rail.w / 2 - 1, rail.y - 3, 2, rail.h + 6}, rgb(70, 76, 86));
+    cap_x = track.x + (int)((val * 0.5f + 0.5f) * (float)(track.w - 18));
+    cap = (UiRect){cap_x, track.y - 3, 18, track.h + 6};
+    drect_grad_v(c, cap, rgb(255, 190, 110), rgb(210, 110, 36));
+    drect_fill(c, (UiRect){cap.x + 1, cap.y + 1, cap.w - 2, 1}, rgb(255, 220, 160));
     drect_glow_border(c, cap, COL_AMBER, 1);
 }
 static void draw_spectrum(UiCtx *c, UiRect r, const float *mags, int n) {
@@ -371,7 +420,10 @@ void synth_ui_emit_btn(UiRect r, uint32_t hi, uint32_t lo, int lit, int pressed,
     if (txt) snprintf(g_cmds[g_ncmds - 1].text, SYNTH_UI_TEXT_MAX, "%s", txt);
 }
 void synth_ui_emit_knob(UiRect r, float val, const char *label) {
-    ui_emit(UI_KNOB);
+    synth_ui_emit_slider(r, val, label);
+}
+void synth_ui_emit_slider(UiRect r, float val, const char *label) {
+    ui_emit(UI_SLIDER);
     g_cmds[g_ncmds - 1].r = r;
     g_cmds[g_ncmds - 1].f0 = val;
     if (label) snprintf(g_cmds[g_ncmds - 1].text, SYNTH_UI_TEXT_MAX, "%s", label);
@@ -442,7 +494,8 @@ static void replay_cmd(UiCtx *c, const UiCmd *cmd) {
         break;
     case UI_PANEL_RECESSED: draw_panel_recessed(c, cmd->r); break;
     case UI_BTN: draw_btn(c, cmd->r, cmd->c0, cmd->c1, cmd->idx0, cmd->idx1, cmd->text); break;
-    case UI_KNOB: draw_knob(c, cmd->r, cmd->f0, cmd->text); break;
+    case UI_KNOB:
+    case UI_SLIDER: draw_slider(c, cmd->r, cmd->f0, cmd->text); break;
     case UI_LED_STEP: draw_led_step(c, cmd->r, cmd->idx0, cmd->idx1); break;
     case UI_PAD: draw_pad(c, cmd->r, cmd->idx0, cmd->text); break;
     case UI_PIANO_KEY: draw_piano_key(c, cmd->r, cmd->idx0, cmd->idx1); break;

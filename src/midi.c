@@ -33,7 +33,8 @@ enum {
     MIDI_EV_NOTE_ON = 1,
     MIDI_EV_CC = 2,
     MIDI_EV_PROGRAM = 3,
-    MIDI_EV_RAW = 4
+    MIDI_EV_PITCH_BEND = 4,
+    MIDI_EV_RAW = 5
 };
 
 typedef struct {
@@ -119,6 +120,7 @@ static V *midi_ev_dict(const MidiEv *ev) {
     else if (ev->type == MIDI_EV_NOTE_OFF) type = "note_off";
     else if (ev->type == MIDI_EV_CC) type = "cc";
     else if (ev->type == MIDI_EV_PROGRAM) type = "program";
+    else if (ev->type == MIDI_EV_PITCH_BEND) type = "pitch_bend";
     dput(d, "type", v_str(type));
     dput(d, "ch", v_int(ev->ch));
     dput(d, "status", v_int(ev->status));
@@ -132,6 +134,9 @@ static V *midi_ev_dict(const MidiEv *ev) {
         dput(d, "val", v_int(ev->val));
     } else if (ev->type == MIDI_EV_PROGRAM) {
         dput(d, "program", v_int(ev->val));
+    } else if (ev->type == MIDI_EV_PITCH_BEND) {
+        dput(d, "val", v_int(ev->val));
+        dput(d, "bend", v_float(((double)ev->val - 8192.0) / 8192.0));
     }
     return d;
 }
@@ -160,6 +165,9 @@ static void midi_decode_bytes(const unsigned char *data, int len) {
     } else if (cmd == 0xc0) {
         ev.type = MIDI_EV_PROGRAM;
         ev.val = ev.d1;
+    } else if (cmd == 0xe0) {
+        ev.type = MIDI_EV_PITCH_BEND;
+        ev.val = ev.d1 | (ev.d2 << 7);
     } else {
         ev.type = MIDI_EV_RAW;
     }
@@ -383,6 +391,15 @@ static void midi_alsa_poll_into_q(void) {
             status = (unsigned char)(0xc0 | (ev->data.control.channel & 0x0f));
             d1 = (unsigned char)ev->data.control.value;
             break;
+        case SND_SEQ_EVENT_PITCHBEND: {
+            int pb = ev->data.control.value + 8192;
+            if (pb < 0) pb = 0;
+            if (pb > 16383) pb = 16383;
+            status = (unsigned char)(0xe0 | (ev->data.control.channel & 0x0f));
+            d1 = (unsigned char)(pb & 0x7f);
+            d2 = (unsigned char)((pb >> 7) & 0x7f);
+            break;
+        }
         default:
             snd_seq_free_event(ev);
             continue;

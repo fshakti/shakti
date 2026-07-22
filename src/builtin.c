@@ -70,6 +70,20 @@ extern V *bi_synth_set_cutoff(V**,in);
 extern V *bi_synth_cutoff(V**,in);
 extern V *bi_synth_set_reso(V**,in);
 extern V *bi_synth_reso(V**,in);
+extern V *bi_synth_set_attack(V**,in);
+extern V *bi_synth_attack(V**,in);
+extern V *bi_synth_set_decay(V**,in);
+extern V *bi_synth_decay(V**,in);
+extern V *bi_synth_set_sustain(V**,in);
+extern V *bi_synth_sustain(V**,in);
+extern V *bi_synth_set_release(V**,in);
+extern V *bi_synth_release(V**,in);
+extern V *bi_synth_set_reverb(V**,in);
+extern V *bi_synth_reverb(V**,in);
+extern V *bi_synth_set_pitch_bend(V**,in);
+extern V *bi_synth_pitch_bend(V**,in);
+extern V *bi_synth_set_mod(V**,in);
+extern V *bi_synth_mod(V**,in);
 extern V *bi_synth_set_seq_row(V**,in);
 extern V *bi_synth_play(V**,in);
 extern V *bi_synth_playing(V**,in);
@@ -230,7 +244,12 @@ static const char *BUILTINS[] = {
     "synth_note_on","synth_note_off","synth_set_bpm","synth_bpm",
     "synth_set_tuning","synth_tuning",
     "synth_set_level","synth_level","synth_set_cutoff","synth_cutoff",
-    "synth_set_reso","synth_reso","synth_set_seq_row","synth_play","synth_playing",
+    "synth_set_reso","synth_reso",
+    "synth_set_attack","synth_attack","synth_set_decay","synth_decay",
+    "synth_set_sustain","synth_sustain","synth_set_release","synth_release",
+    "synth_set_reverb","synth_reverb","synth_set_pitch_bend","synth_pitch_bend",
+    "synth_set_mod","synth_mod",
+    "synth_set_seq_row","synth_play","synth_playing",
     "synth_mouse_press","synth_mouse_release","synth_set_viz","synth_viz_mode","synth_vu",
     "synth_load_sample","synth_sample_loaded","synth_sample_name",
     "synth_set_row_note","synth_row_note",
@@ -1758,8 +1777,12 @@ BI0(synth_set_metro_sound) BI0(synth_metro_sound) BI0(synth_set_mute) BI0(synth_
 BI0(synth_note_on) BI0(synth_note_off) BI0(synth_set_bpm) BI0(synth_bpm)
 BI0(synth_set_tuning) BI0(synth_tuning)
 BI0(synth_set_level) BI0(synth_level) BI0(synth_set_cutoff) BI0(synth_cutoff)
-BI0(synth_set_reso) BI0(synth_reso) BI0(synth_set_seq_row) BI0(synth_play) BI0(synth_playing)
-BI0(synth_mouse_press) BI0(synth_mouse_release) BI0(synth_set_viz) BI0(synth_viz_mode) BI0(synth_vu)
+BI0(synth_set_reso) BI0(synth_reso)
+BI0(synth_set_attack) BI0(synth_attack) BI0(synth_set_decay) BI0(synth_decay)
+BI0(synth_set_sustain) BI0(synth_sustain) BI0(synth_set_release) BI0(synth_release)
+BI0(synth_set_reverb) BI0(synth_reverb) BI0(synth_set_pitch_bend) BI0(synth_pitch_bend)
+BI0(synth_set_mod) BI0(synth_mod)
+BI0(synth_set_seq_row) BI0(synth_play) BI0(synth_playing)BI0(synth_mouse_press) BI0(synth_mouse_release) BI0(synth_set_viz) BI0(synth_viz_mode) BI0(synth_vu)
 BI0(synth_load_sample) BI0(synth_sample_loaded) BI0(synth_sample_name)
 BI0(synth_set_row_note) BI0(synth_row_note)
 BI0(synth_looper_rec) BI0(synth_looper_play) BI0(synth_looper_clear) BI0(synth_looper_overdub)
@@ -2026,9 +2049,11 @@ static const BiEntry bi_tab[] = {
     {"sum", bi_w_sum},
 #ifdef SHAKTI_HAVE_SYNTH
     {"synth_alive", bi_w_synth_alive},
+    {"synth_attack", bi_w_synth_attack},
     {"synth_bpm", bi_w_synth_bpm},
     {"synth_close", bi_w_synth_close},
     {"synth_cutoff", bi_w_synth_cutoff},
+    {"synth_decay", bi_w_synth_decay},
     {"synth_level", bi_w_synth_level},
     {"synth_load_sample", bi_w_synth_load_sample},
     {"synth_looper_clear", bi_w_synth_looper_clear},
@@ -2040,31 +2065,43 @@ static const BiEntry bi_tab[] = {
     {"synth_looper_rec_on", bi_w_synth_looper_rec_on},
     {"synth_metro_on", bi_w_synth_metro_on},
     {"synth_metro_sound", bi_w_synth_metro_sound},
+    {"synth_mod", bi_w_synth_mod},
     {"synth_mouse_press", bi_w_synth_mouse_press},
     {"synth_mouse_release", bi_w_synth_mouse_release},
     {"synth_mute_on", bi_w_synth_mute_on},
     {"synth_note_off", bi_w_synth_note_off},
     {"synth_note_on", bi_w_synth_note_on},
     {"synth_open", bi_w_synth_open},
+    {"synth_pitch_bend", bi_w_synth_pitch_bend},
     {"synth_play", bi_w_synth_play},
     {"synth_playing", bi_w_synth_playing},
+    {"synth_release", bi_w_synth_release},
     {"synth_reso", bi_w_synth_reso},
+    {"synth_reverb", bi_w_synth_reverb},
     {"synth_row_note", bi_w_synth_row_note},
     {"synth_sample_loaded", bi_w_synth_sample_loaded},
     {"synth_sample_name", bi_w_synth_sample_name},
+    {"synth_set_attack", bi_w_synth_set_attack},
     {"synth_set_bpm", bi_w_synth_set_bpm},
     {"synth_set_cutoff", bi_w_synth_set_cutoff},
+    {"synth_set_decay", bi_w_synth_set_decay},
     {"synth_set_level", bi_w_synth_set_level},
     {"synth_set_metro", bi_w_synth_set_metro},
     {"synth_set_metro_sound", bi_w_synth_set_metro_sound},
+    {"synth_set_mod", bi_w_synth_set_mod},
     {"synth_set_mute", bi_w_synth_set_mute},
+    {"synth_set_pitch_bend", bi_w_synth_set_pitch_bend},
+    {"synth_set_release", bi_w_synth_set_release},
     {"synth_set_reso", bi_w_synth_set_reso},
+    {"synth_set_reverb", bi_w_synth_set_reverb},
     {"synth_set_row_note", bi_w_synth_set_row_note},
     {"synth_set_seq_row", bi_w_synth_set_seq_row},
     {"synth_set_steps", bi_w_synth_set_steps},
+    {"synth_set_sustain", bi_w_synth_set_sustain},
     {"synth_set_tuning", bi_w_synth_set_tuning},
     {"synth_set_viz", bi_w_synth_set_viz},
     {"synth_steps", bi_w_synth_steps},
+    {"synth_sustain", bi_w_synth_sustain},
     {"synth_tick", bi_w_synth_tick},
     {"synth_tuning", bi_w_synth_tuning},
     {"synth_viz_mode", bi_w_synth_viz_mode},
