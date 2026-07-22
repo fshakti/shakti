@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 
+
 #define SYNTH_MAC_DESIGN_W 960
 #define SYNTH_MAC_DESIGN_H 540
 #define SYNTH_MAC_MIN_W 640
@@ -243,7 +244,12 @@ void synth_platform_shutdown(void) {
 }
 
 void synth_platform_present(void) {
-    if (g_view) [g_view setNeedsDisplay:YES];
+    if (g_view) {
+        [g_view setNeedsDisplay:YES];
+        /* Manual event pump (distantPast + short CFRunLoopRun) does not reliably
+         * flush AppKit display updates, so force a synchronous redraw. */
+        [g_view displayIfNeeded];
+    }
 }
 
 void synth_platform_request_maximize(void) {

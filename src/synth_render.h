@@ -8,7 +8,8 @@
 #define SYNTH_DRUM_ROWS 4
 #define SYNTH_PADS 16
 #define SYNTH_MAX_KEYS 128
-#define SYNTH_KNOBS 8
+#define SYNTH_KNOBS 9
+#define SYNTH_PRESETS 4
 #define SYNTH_ROW_LABEL_MAX 8
 
 typedef struct SynthLayout {
@@ -23,6 +24,8 @@ typedef struct SynthLayout {
     UiRect step_box;
     UiRect step_plus;
     UiRect knobs[SYNTH_KNOBS];
+    UiRect preset_box;
+    UiRect preset_option[SYNTH_PRESETS];
     UiRect bpm_readout;
     UiRect vu_meter;
     UiRect seq_panel;

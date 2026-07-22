@@ -35,8 +35,14 @@
 #define SYNTH_LOOP_MAX (SYNTH_SR * 32)
 #define SYNTH_SAMPLE_NAME_MAX 48
 #define SYNTH_METRO_VOICE (SYNTH_VOICES - 1)
+#define SYNTH_REVERB_A 1427
+#define SYNTH_REVERB_B 1613
+#define SYNTH_REVERB_C 1789
 #define SYNTH_TONE_DEFAULT 0
 #define SYNTH_TONE_BASS 1
+#define SYNTH_TONE_PIANO 2
+#define SYNTH_TONE_EPIANO 3
+#define SYNTH_TONE_PAD 4
 #define SYNTH_TUNING_12TET 0
 #define SYNTH_TUNING_JUST 1
 #define SYNTH_PI 3.14159265358979323846
@@ -50,6 +56,7 @@ typedef struct SynthVoice {
     int stage;
     float vel;
     float lp;
+    float age;
     int gate; /* samples until auto-release (0 = held until note_off) */
     int tone; /* SYNTH_TONE_* */
 } SynthVoice;
@@ -62,6 +69,8 @@ typedef enum {
     HIT_LEN_M,
     HIT_LEN_P,
     HIT_KNOB,
+    HIT_PRESET,
+    HIT_PRESET_OPTION,
     HIT_STEP,
     HIT_PAD,
     HIT_RIBBON,
@@ -100,8 +109,11 @@ typedef struct SynthState {
     int off_x;
     int off_y;
     float ui_scale;
-    float knobs[8];
+    float knobs[SYNTH_KNOBS];
     float ribbon;
+    float pitch_bend; /* external MIDI bend, -1..1, does not auto-center */
+    float mod;        /* CC1 vibrato depth, 0..1 */
+    float mod_phase;  /* vibrato LFO phase 0..1 */
     int drag_ribbon;
     int ribbon_key_left;
     int ribbon_key_right;
@@ -132,6 +144,12 @@ typedef struct SynthState {
     int loop_overdub;
     int loop_flash;
     float loop_gain;
+    float reverb_a[SYNTH_REVERB_A];
+    float reverb_b[SYNTH_REVERB_B];
+    float reverb_c[SYNTH_REVERB_C];
+    int reverb_ai;
+    int reverb_bi;
+    int reverb_ci;
     SynthVoice voices[SYNTH_VOICES];
     MetroVoice metro;
 #ifdef __linux__
@@ -154,6 +172,8 @@ typedef struct SynthState {
     int synth_keys;
     int base_note;
     int tuning;
+    int preset;
+    int preset_menu_open;
     int key_down[SYNTH_MAX_KEYS];
     int pad_down[SYNTH_PADS];
     int want_maximize;
@@ -169,6 +189,9 @@ static void synth_request_maximize(void);
 static float knob_val(int i);
 static float synth_bpm(void);
 static void synth_recalc_timing(void);
+static const char *const g_preset_names[SYNTH_PRESETS] = {
+    "GRAND PIANO", "CLASSIC SYNTH", "ELECTRIC PIANO", "WARM PAD"
+};
 static void synth_trigger_note(int note, float vel);
 static void synth_release_note(int note);
 static void synth_voice_trigger(int note, float vel);
@@ -211,113 +234,51 @@ static void synth_key_set_note(int note, int down) {
     if (k >= 0 && k < g.synth_keys) g.key_down[k] = down ? 1 : 0;
 }
 static void synth_layout_compute(SynthLayout *L) {
-    const int M = 16;                  /* outer margin */
-    const int CW = DESIGN_W - 2 * M;   /* content width (928) */
-    int row, step, pad, k, j;
-    /* ---- header band: 8..68 ---- */
+    const int M = 12;                  /* outer margin */
+    const int CW = DESIGN_W - 2 * M;   /* content width */
+    int k, j;
+    /* unused chrome zeroed — simple keyboard + sliders only */
+    memset(L, 0, sizeof *L);
+    /* ---- control strip: sound selector + seven controls, pitch, reverb ---- */
     {
-        int by = 22, bh = 30, bx = 98, bw = 54, bgap = 6;
-        L->transport = (UiRect){bx, by, bw, bh};
-        bx += bw + bgap;
-        L->metro_btn = (UiRect){bx, by, bw, bh};
-        bx += bw + bgap;
-        L->metro_sound_btn = (UiRect){bx, by, 58, bh};
-        bx += 58 + bgap;
-        L->mute_btn = (UiRect){bx, by, 52, bh};
-        bx += 52 + 8;
-        L->loop_rec_btn = (UiRect){bx, by, 44, bh};
-        bx += 44 + 4;
-        L->loop_play_btn = (UiRect){bx, by, 50, bh};
-        bx += 50 + 4;
-        L->loop_clr_btn = (UiRect){bx, by, 40, bh};
-        bx += 40 + 8;
-        L->step_minus = (UiRect){bx, by, 24, bh};
-        bx += 24 + 4;
-        L->step_box = (UiRect){bx, by, 50, bh};
-        bx += 50 + 4;
-        L->step_plus = (UiRect){bx, by, 24, bh};
-        L->vu_meter = (UiRect){560, 32, 220, 10};
-        L->bpm_readout = (UiRect){DESIGN_W - M - 86, 18, 86, 40};
+        int ctrl_y = 10, slider_h = 150, gap = 8, preset_w = 180;
+        int sliders_x = M + preset_w + gap;
+        int sliders_w = CW - preset_w - gap;
+        int sw = (sliders_w - 8 * gap) / 9;
+        L->preset_box = (UiRect){M, ctrl_y, preset_w, 42};
+        for (k = 0; k < SYNTH_PRESETS; k++)
+            L->preset_option[k] = (UiRect){M, ctrl_y + 44 + k * 30, preset_w, 28};
+        L->knobs[0] = (UiRect){0, 0, 0, 0}; /* RATE removed */
+        for (k = 1; k < 8; k++)
+            L->knobs[k] = (UiRect){sliders_x + (k - 1) * (sw + gap), ctrl_y, sw, slider_h};
+        L->ribbon_panel = (UiRect){sliders_x + 7 * (sw + gap), ctrl_y, sw, slider_h};
+        L->ribbon_track = L->ribbon_panel;
+        L->knobs[8] = (UiRect){sliders_x + 8 * (sw + gap), ctrl_y, sw, slider_h};
     }
-    /* ---- knob band: 72..158 ---- */
+    /* ---- maximized keyboard ---- */
     {
-        int kgap = 14, ky = 80, kh = 70;
-        int kw = (CW - 7 * kgap) / 8;
-        for (k = 0; k < 8; k++) L->knobs[k] = (UiRect){M + k * (kw + kgap), ky, kw, kh};
-    }
-    /* ---- main band (sequencer | pads): 164..374 ---- */
-    {
-        int my = 164, mh = 210, gap = 12;
-        int seq_w = 556;
-        int row_label_w = 56, step_area_x, step_area_w, step_w;
-        int rows_top, rows_h, rh;
-        L->seq_panel = (UiRect){M, my, seq_w, mh};
-        rows_top = my + 28;
-        rows_h = mh - 36;
-        rh = rows_h / SYNTH_ROWS;
-        step_area_x = L->seq_panel.x + 12 + row_label_w + 8;
-        step_area_w = L->seq_panel.w - (12 + row_label_w + 8) - 14;
-        step_w = g.step_len > 0 ? step_area_w / g.step_len : step_area_w / SYNTH_DEFAULT_STEPS;
-        if (step_w < 6) step_w = 6;
-        for (row = 0; row < SYNTH_ROWS; row++) {
-            int ry = rows_top + row * rh;
-            L->seq_row[row] = (UiRect){L->seq_panel.x + 12, ry, row_label_w, rh - 4};
-            for (step = 0; step < g.step_len; step++)
-                L->seq_step[row][step] = (UiRect){step_area_x + step * step_w, ry + 2, step_w - 3, rh - 8};
-        }
-        /* drum pads */
-        {
-            int px = M + seq_w + gap, pw_panel = DESIGN_W - M - px;
-            int pad_top = 28, pgap = 8, gx0, gy0, grid_w, grid_h, pw;
-            L->pad_panel = (UiRect){px, my, pw_panel, mh};
-            grid_w = pw_panel - 24;
-            grid_h = mh - pad_top - 12;
-            pw = (grid_h - 3 * pgap) / 4;
-            if (pw > (grid_w - 3 * pgap) / 4) pw = (grid_w - 3 * pgap) / 4;
-            if (pw < 16) pw = 16;
-            grid_w = 4 * pw + 3 * pgap;
-            gx0 = L->pad_panel.x + (L->pad_panel.w - grid_w) / 2;
-            gy0 = L->pad_panel.y + pad_top;
-            for (pad = 0; pad < SYNTH_PADS; pad++)
-                L->pads[pad] = (UiRect){gx0 + (pad % 4) * (pw + pgap),
-                                        gy0 + (pad / 4) * (pw + pgap), pw, pw};
-        }
-    }
-    /* ---- viz band: 380..432 ---- */
-    {
-        int vy = 380, vh = 52, gap = 12, sw = 556;
-        L->spectrum_panel = (UiRect){M, vy, sw, vh};
-        L->waveform_panel = (UiRect){M + sw + gap, vy, DESIGN_W - M - (M + sw + gap), vh};
-    }
-    /* ---- ribbon: 438..466 ---- */
-    {
-        int ry = 438, rh = 28;
-        L->ribbon_panel = (UiRect){M, ry, CW, rh};
-        L->ribbon_track = (UiRect){L->ribbon_panel.x + 104, ry + 8, L->ribbon_panel.w - 120, 12};
-    }
-    /* ---- keyboard: 472..648 ---- */
-    {
-        int ky = 472, kh = DESIGN_H - 12 - ky;
+        int ky = 10 + 150 + 8;
+        int kh = DESIGN_H - 8 - ky;
         int kx0, ky0, kh2, white_count = 0, wi, ww, bw, bx, black_h;
         L->keys_panel = (UiRect){M, ky, CW, kh};
-        kx0 = L->keys_panel.x + 6;
-        ky0 = L->keys_panel.y + 24;
-        kh2 = kh - 30;
-        if (kh2 < 24) kh2 = 24;
+        kx0 = L->keys_panel.x + 4;
+        ky0 = L->keys_panel.y + 6;
+        kh2 = kh - 12;
+        if (kh2 < 100) kh2 = 100;
         for (k = 0; k < g.synth_keys; k++)
             if (!synth_key_is_black(k)) white_count++;
-        ww = white_count > 0 ? (L->keys_panel.w - 12) / white_count : 20;
-        if (ww < 14) ww = 14;
+        ww = white_count > 0 ? (L->keys_panel.w - 8) / white_count : 20;
+        if (ww < 20) ww = 20;
         wi = 0;
         for (k = 0; k < g.synth_keys; k++) {
             if (synth_key_is_black(k)) continue;
-            L->keys[k] = (UiRect){kx0 + wi * ww, ky0, ww - 2, kh2};
+            L->keys[k] = (UiRect){kx0 + wi * ww, ky0, ww - 3, kh2};
             wi++;
         }
-        black_h = (kh2 * 60) / 100;
-        if (black_h < 16) black_h = 16;
-        bw = (ww * 64) / 100;
-        if (bw < 8) bw = 8;
+        black_h = (kh2 * 62) / 100;
+        if (black_h < 56) black_h = 56;
+        bw = (ww * 66) / 100;
+        if (bw < 16) bw = 16;
         for (k = 0; k < g.synth_keys; k++) {
             if (!synth_key_is_black(k)) continue;
             wi = 0;
@@ -331,64 +292,26 @@ static void synth_layout_compute(SynthLayout *L) {
 }
 static HitResult synth_hit_test(int dx, int dy) {
     HitResult h = {HIT_NONE, 0, 0};
-    int k, row, step, pad;
-    if (uir_contains(g.layout.transport, dx, dy)) {
-        h.kind = HIT_PLAY;
+    int k;
+    if (g.preset_menu_open) {
+        for (k = 0; k < SYNTH_PRESETS; k++)
+            if (uir_contains(g.layout.preset_option[k], dx, dy)) {
+                h.kind = HIT_PRESET_OPTION;
+                h.a = k;
+                return h;
+            }
+    }
+    if (uir_contains(g.layout.preset_box, dx, dy)) {
+        h.kind = HIT_PRESET;
         return h;
     }
-    if (uir_contains(g.layout.metro_btn, dx, dy)) {
-        h.kind = HIT_METRO;
-        return h;
-    }
-    if (uir_contains(g.layout.metro_sound_btn, dx, dy)) {
-        h.kind = HIT_METRO_SOUND;
-        return h;
-    }
-    if (uir_contains(g.layout.mute_btn, dx, dy)) {
-        h.kind = HIT_MUTE;
-        return h;
-    }
-    if (uir_contains(g.layout.loop_rec_btn, dx, dy)) {
-        h.kind = HIT_LOOP_REC;
-        return h;
-    }
-    if (uir_contains(g.layout.loop_play_btn, dx, dy)) {
-        h.kind = HIT_LOOP_PLAY;
-        return h;
-    }
-    if (uir_contains(g.layout.loop_clr_btn, dx, dy)) {
-        h.kind = HIT_LOOP_CLR;
-        return h;
-    }
-    if (uir_contains(g.layout.step_minus, dx, dy)) {
-        h.kind = HIT_LEN_M;
-        return h;
-    }
-    if (uir_contains(g.layout.step_plus, dx, dy)) {
-        h.kind = HIT_LEN_P;
-        return h;
-    }
-    for (k = 0; k < 8; k++)
+    for (k = 1; k < SYNTH_KNOBS; k++)
         if (uir_contains(g.layout.knobs[k], dx, dy)) {
             h.kind = HIT_KNOB;
             h.a = k;
             return h;
         }
-    for (pad = 0; pad < SYNTH_PADS; pad++)
-        if (uir_contains(g.layout.pads[pad], dx, dy)) {
-            h.kind = HIT_PAD;
-            h.a = pad;
-            return h;
-        }
-    for (row = 0; row < SYNTH_ROWS; row++)
-        for (step = 0; step < SYNTH_MAX_STEPS; step++)
-            if (step < g.step_len && uir_contains(g.layout.seq_step[row][step], dx, dy)) {
-                h.kind = HIT_STEP;
-                h.a = row;
-                h.b = step;
-                return h;
-            }
-    if (uir_contains(g.layout.ribbon_track, dx, dy)) {
+    if (uir_contains(g.layout.ribbon_track, dx, dy) || uir_contains(g.layout.ribbon_panel, dx, dy)) {
         h.kind = HIT_RIBBON;
         return h;
     }
@@ -408,61 +331,23 @@ static HitResult synth_hit_test(int dx, int dy) {
 }
 void synth_core_ui_draw(void) {
     SynthLayout *L = &g.layout;
-    static const char *knob_lbl[8] = {"BPM", "LEVEL", "CUT", "RES", "ATT", "DEC", "SUS", "REL"};
-    float spec[SYNTH_UI_SPECTRUM_BINS];
-    float wave[SYNTH_UI_WAVEFORM_LEN];
-    int spec_n = 0, wave_n = 0;
-    int row, step, k, on, playhead;
+    static const char *knob_lbl[SYNTH_KNOBS] = {
+        "RATE", "LEVEL", "CUT", "RES", "ATT", "DEC", "SUS", "REL", "REVERB"
+    };
+    int k;
     int ncmds;
     const UiCmd *cmds;
-    uint32_t col_play = rgb(255, 146, 40);
-    uint32_t col_amber = rgb(255, 146, 40);
-    uint32_t col_hot = rgb(255, 80, 56);
-    uint32_t col_label = rgb(100, 104, 112);
-    uint32_t col_text = rgb(244, 245, 248);
-    uint32_t col_btn = rgb(32, 34, 38);
-    uint32_t col_btn_lo = rgb(18, 19, 22);
-    int viz;
+    uint32_t col_btn = rgb(36, 40, 48);
+    uint32_t col_btn_lo = rgb(18, 20, 24);
+    uint32_t col_accent = rgb(255, 154, 60);
 
     synth_layout_compute(L);
     synth_ui_begin();
     synth_ui_emit_chassis();
-    synth_ui_emit_header_deck((UiRect){8, 8, DESIGN_W - 16, 60});
-    synth_ui_emit_btn(L->transport, col_play, rgb(200, 100, 24), g.playing, 0, g.playing ? "STOP" : "PLAY");
-    synth_ui_emit_btn(L->metro_btn, col_amber, rgb(180, 90, 20), g.metro_on, g.metro_flash > 0, "METRO");
-    synth_ui_emit_btn(L->metro_sound_btn, col_btn, col_btn_lo, 0, 0, g.metro_sound ? "DRUM" : "CLICK");
-    synth_ui_emit_btn(L->mute_btn, col_hot, rgb(160, 40, 24), g.mute, 0, "MUTE");
-    synth_ui_emit_btn(L->loop_rec_btn, col_hot, rgb(140, 32, 18), g.loop_recording || g.loop_arm, g.loop_flash > 0,
-                      "REC");
-    synth_ui_emit_btn(L->loop_play_btn, col_play, rgb(200, 100, 24), g.loop_playing, 0, "LOOP");
-    synth_ui_emit_btn(L->loop_clr_btn, col_btn, col_btn_lo, 0, 0, "CLR");
-    synth_ui_emit_btn(L->step_minus, col_btn, col_btn_lo, 0, 0, "-");
-    synth_ui_emit_panel(L->step_box);
-    synth_ui_emit_label(L->step_box.x + 4, L->step_box.y + 2, "STEPS", col_label);
-    synth_ui_emit_num(L->step_box.x + 4, L->step_box.y + 12, g.step_len, col_text);
-    synth_ui_emit_btn(L->step_plus, col_btn, col_btn_lo, 0, 0, "+");
-    synth_ui_emit_vu(L->vu_meter, synth_ui_vu_level());
-    i(8, synth_ui_emit_knob(L->knobs[i], knob_val(i), knob_lbl[i]);)
-    synth_ui_emit_label(L->bpm_readout.x, L->bpm_readout.y, "BPM", col_label);
-    synth_ui_emit_num(L->bpm_readout.x, L->bpm_readout.y + 12, (int)synth_bpm(), col_amber);
-    synth_ui_emit_panel(L->seq_panel);
-    synth_ui_emit_label(L->seq_panel.x + 8, L->seq_panel.y + 4, "SEQUENCER", col_label);
-    for (row = 0; row < SYNTH_ROWS; row++) {
-        synth_ui_emit_label(L->seq_row[row].x, L->seq_row[row].y + 2, synth_row_label(row), col_label);
-        for (step = 0; step < g.step_len; step++) {
-            on = (g.seq[row] & (1ULL << step));
-            playhead = g.playing && step == g.step_pos;
-            synth_ui_emit_led_step(L->seq_step[row][step], on, playhead);
-        }
-    }
-    synth_ui_emit_panel(L->pad_panel);
-    synth_ui_emit_label(L->pad_panel.x + 8, L->pad_panel.y + 4, "DRUMS", col_label);
-    i(SYNTH_PADS, synth_ui_emit_pad(L->pads[i], g.pad_down[i], synth_pad_lbl(i));)
-    synth_ui_emit_panel(L->ribbon_panel);
-    synth_ui_emit_label(L->ribbon_panel.x + 8, L->ribbon_panel.y + 4, "PITCH BEND", col_label);
-    synth_ui_emit_ribbon(L->ribbon_track, g.ribbon);
-    synth_ui_emit_panel(L->keys_panel);
-    synth_ui_emit_label(L->keys_panel.x + 8, L->keys_panel.y + 4, "KEYS", col_label);
+    for (k = 1; k < SYNTH_KNOBS; k++)
+        synth_ui_emit_slider(L->knobs[k], knob_val(k), knob_lbl[k]);
+    synth_ui_emit_btn(L->preset_box, col_btn, col_btn_lo, 0, 0, g_preset_names[g.preset]);
+    synth_ui_emit_slider(L->ribbon_panel, (g.pitch_bend + 1.f) * 0.5f, "PITCH");
     for (k = 0; k < g.synth_keys; k++) {
         if (synth_key_is_black(k)) continue;
         synth_ui_emit_piano_key(L->keys[k], g.key_down[k], synth_key_midi(k) == 60 ? 2 : 0);
@@ -471,13 +356,11 @@ void synth_core_ui_draw(void) {
         if (!synth_key_is_black(k)) continue;
         synth_ui_emit_piano_key(L->keys[k], g.key_down[k], 1);
     }
-    viz = synth_ui_viz_mode();
-    synth_ui_get_spectrum(spec, &spec_n);
-    synth_ui_get_waveform(wave, &wave_n);
-    if ((viz == SYNTH_VIZ_SPECTRUM || viz == SYNTH_VIZ_BOTH) && spec_n > 0)
-        synth_ui_emit_spectrum(L->spectrum_panel, spec, spec_n);
-    if ((viz == SYNTH_VIZ_WAVEFORM || viz == SYNTH_VIZ_BOTH) && wave_n > 0)
-        synth_ui_emit_waveform(L->waveform_panel, wave, wave_n);
+    if (g.preset_menu_open) {
+        for (k = 0; k < SYNTH_PRESETS; k++)
+            synth_ui_emit_btn(L->preset_option[k], col_accent, col_btn_lo,
+                              k == g.preset, 0, g_preset_names[k]);
+    }
     if (!g.fb && synth_core_fb_design_init() != 0) return;
     cmds = synth_ui_cmds(&ncmds);
     synth_ui_flush(cmds, ncmds, g.fb, DESIGN_W, DESIGN_H);
@@ -500,7 +383,9 @@ static void synth_ui_blit(void) {
     synth_platform_present();
 }
 #ifdef SYNTH_HAVE_GL
-static const char *const g_knob_lbl[8] = {"BPM", "LEVEL", "CUT", "RES", "ATT", "DEC", "SUS", "REL"};
+static const char *const g_knob_lbl[SYNTH_KNOBS] = {
+    "RATE", "LEVEL", "CUT", "RES", "ATT", "DEC", "SUS", "REL", "REVERB"
+};
 static const char *g_pad_lbl_cache[SYNTH_PADS];
 static void synth_gl_draw(void) {
     SynthRenderState s;
@@ -571,6 +456,16 @@ void synth_core_handle_click(int sx, int sy, int down) {
     synth_core_audio_lock();
     g.dirty = 1;
     h = synth_hit_test(dx, dy);
+    if (down && h.kind == HIT_PRESET) {
+        g.preset_menu_open = !g.preset_menu_open;
+        goto click_done;
+    }
+    if (down && h.kind == HIT_PRESET_OPTION) {
+        g.preset = h.a;
+        g.preset_menu_open = 0;
+        goto click_done;
+    }
+    if (down && g.preset_menu_open) g.preset_menu_open = 0;
     if (down && h.kind == HIT_PLAY) {
         g.playing = !g.playing;
         if (g.playing) g.step_pos = 0;
@@ -617,50 +512,36 @@ void synth_core_handle_click(int sx, int sy, int down) {
         g.loop_arm = 0;
         goto click_done;
     }
-    if (down && h.kind == HIT_LEN_M) {
-        if (g.step_len > 1) g.step_len--;
-        goto click_done;
-    }
-    if (down && h.kind == HIT_LEN_P) {
-        if (g.step_len < SYNTH_MAX_STEPS) g.step_len++;
-        goto click_done;
-    }
     if (down && h.kind == HIT_KNOB) {
+        UiRect *r = &g.layout.knobs[h.a];
+        int track_top = r->y + 16;
+        int track_bot = r->y + r->h - 14;
+        int track_h = track_bot - track_top;
+        float v;
+        if (track_h < 1) track_h = 1;
+        v = 1.f - (float)(dy - track_top) / (float)track_h;
+        if (v < 0.f) v = 0.f;
+        if (v > 1.f) v = 1.f;
         g.drag_knob = h.a + 1;
         g.drag_knob_y = sy;
-        UiRect *r = &g.layout.knobs[h.a];
-        int cx = r->x + r->w / 2;
-        if (dx < cx - 4) {
-            g.knobs[h.a] -= 0.05f;
-            if (g.knobs[h.a] < 0.f) g.knobs[h.a] = 0.f;
-            synth_recalc_timing();
-        } else if (dx > cx + 4) {
-            g.knobs[h.a] += 0.05f;
-            if (g.knobs[h.a] > 1.f) g.knobs[h.a] = 1.f;
-            synth_recalc_timing();
-        }
+        g.knobs[h.a] = v;
+        synth_recalc_timing();
         goto click_done;
     }
     if (!down) {
         g.drag_knob = 0;
+        g.mouse_down = 0;
         memset(g.pad_down, 0, sizeof g.pad_down);
         goto click_done;
     }
-    if (h.kind == HIT_STEP) {
-        g.seq[h.a] ^= (1ULL << h.b);
-        goto click_done;
-    }
-    if (h.kind == HIT_PAD) {
-        g.pad_down[h.a] = 1;
-        synth_voice_trigger(synth_pad_note(h.a), 0.9f);
-        goto click_done;
-    }
+    g.mouse_down = 1;
     if (h.kind == HIT_RIBBON) {
         g.drag_ribbon = 1;
         UiRect *t = &g.layout.ribbon_track;
-        g.ribbon = (float)(dx - t->x) / (float)t->w * 2.f - 1.f;
-        if (g.ribbon < -1.f) g.ribbon = -1.f;
-        if (g.ribbon > 1.f) g.ribbon = 1.f;
+        g.pitch_bend = (1.f - (float)(dy - (t->y + 16)) /
+                    (float)(t->h - 30)) * 2.f - 1.f;
+        if (g.pitch_bend < -1.f) g.pitch_bend = -1.f;
+        if (g.pitch_bend > 1.f) g.pitch_bend = 1.f;
         goto click_done;
     }
     if (h.kind == HIT_KEY && !g.key_down[h.a]) {
@@ -675,11 +556,21 @@ void synth_core_handle_motion(int sx, int sy) {
     UiRect *t;
     synth_core_audio_lock();
     if (g.drag_knob > 0) {
-        float d = (float)(g.drag_knob_y - sy) * 0.005f / g.ui_scale;
         int i = g.drag_knob - 1;
-        g.knobs[i] += d;
-        if (g.knobs[i] < 0.f) g.knobs[i] = 0.f;
-        if (g.knobs[i] > 1.f) g.knobs[i] = 1.f;
+        UiRect *r = &g.layout.knobs[i];
+        int track_top = r->y + 16;
+        int track_bot = r->y + r->h - 14;
+        int track_h = track_bot - track_top;
+        float v;
+        if (!screen_to_design(sx, sy, &dx, &dy)) {
+            synth_core_audio_unlock();
+            return;
+        }
+        if (track_h < 1) track_h = 1;
+        v = 1.f - (float)(dy - track_top) / (float)track_h;
+        if (v < 0.f) v = 0.f;
+        if (v > 1.f) v = 1.f;
+        g.knobs[i] = v;
         g.drag_knob_y = sy;
         g.dirty = 1;
         synth_recalc_timing();
@@ -692,9 +583,10 @@ void synth_core_handle_motion(int sx, int sy) {
     }
     if (g.drag_ribbon) {
         t = &g.layout.ribbon_track;
-        g.ribbon = (float)(dx - t->x) / (float)t->w * 2.f - 1.f;
-        if (g.ribbon < -1.f) g.ribbon = -1.f;
-        if (g.ribbon > 1.f) g.ribbon = 1.f;
+        g.pitch_bend = (1.f - (float)(dy - (t->y + 16)) /
+                    (float)(t->h - 30)) * 2.f - 1.f;
+        if (g.pitch_bend < -1.f) g.pitch_bend = -1.f;
+        if (g.pitch_bend > 1.f) g.pitch_bend = 1.f;
         g.dirty = 1;
     }
     synth_core_audio_unlock();
@@ -708,6 +600,7 @@ void synth_core_handle_release(int sx, int sy, int down) {
     g.dirty = 1;
     g.drag_knob = 0;
     g.drag_ribbon = 0;
+    g.mouse_down = 0;
     for (pad = 0; pad < SYNTH_PADS; pad++) {
         if (g.pad_down[pad])
             i(SYNTH_VOICES, if (g.voices[i].on && g.voices[i].note == synth_pad_note(pad)) g.voices[i].stage = 3)
@@ -858,6 +751,21 @@ static float synth_bpm(void) { return 40.f + knob_val(0) * 200.f; }
 static float synth_master(void) { return knob_val(1); }
 static float synth_cutoff(void) { return 200.f + knob_val(2) * 7800.f; }
 static float synth_reso(void) { return knob_val(3) * 0.72f; }
+static float synth_reverb_amount(void) { return knob_val(8); }
+static float synth_reverb_tick(float input, float amount) {
+    float a = g.reverb_a[g.reverb_ai];
+    float b = g.reverb_b[g.reverb_bi];
+    float c = g.reverb_c[g.reverb_ci];
+    float wet = (a + b + c) * (1.f / 3.f);
+    float feedback = 0.68f + amount * 0.12f;
+    g.reverb_a[g.reverb_ai] = input + a * feedback;
+    g.reverb_b[g.reverb_bi] = input + b * feedback;
+    g.reverb_c[g.reverb_ci] = input + c * feedback;
+    if (++g.reverb_ai >= SYNTH_REVERB_A) g.reverb_ai = 0;
+    if (++g.reverb_bi >= SYNTH_REVERB_B) g.reverb_bi = 0;
+    if (++g.reverb_ci >= SYNTH_REVERB_C) g.reverb_ci = 0;
+    return input * (1.f - amount * 0.18f) + wet * amount * 0.55f;
+}
 static void synth_recalc_timing(void) {
     float bpm = synth_bpm();
     if (bpm < 40.f) bpm = 40.f;
@@ -1062,8 +970,12 @@ static SynthVoice *synth_voice_alloc(int note, float vel) {
     v->stage = 0;
     v->vel = vel;
     v->lp = 0.f;
+    v->age = 0.f;
     v->gate = 0;
-    v->tone = SYNTH_TONE_DEFAULT;
+    if (g.preset == 0) v->tone = SYNTH_TONE_PIANO;
+    else if (g.preset == 2) v->tone = SYNTH_TONE_EPIANO;
+    else if (g.preset == 3) v->tone = SYNTH_TONE_PAD;
+    else v->tone = SYNTH_TONE_DEFAULT;
     return v;
 }
 static void synth_voice_trigger(int note, float vel) {
@@ -1141,7 +1053,7 @@ static float synth_drum_sample(SynthVoice *v) {
     return out;
 }
 static float synth_voice_sample(SynthVoice *v, float cutoff, float reso, float bend) {
-    float a, d, s, r, env, osc, out, f, saw, sin1, fc;
+    float a, d, s, r, env, osc, out, f, saw, sin1, fc, twopi_phase;
     P(!v->on,0.f)
     if (v->gate > 0) {
         v->gate--;
@@ -1164,6 +1076,21 @@ static float synth_voice_sample(SynthVoice *v, float cutoff, float reso, float b
         d = 0.05f + knob_val(5) * 0.1f;
         s = 0.45f + knob_val(6) * 0.3f;
         r = 0.14f + knob_val(7) * 0.4f;
+    } else if (v->tone == SYNTH_TONE_PIANO) {
+        a = knob_val(4) * 0.18f;
+        d = 0.08f + knob_val(5) * 1.2f;
+        s = knob_val(6) * 0.28f;
+        r = 0.04f + knob_val(7) * 1.2f;
+    } else if (v->tone == SYNTH_TONE_EPIANO) {
+        a = knob_val(4) * 0.3f;
+        d = 0.08f + knob_val(5) * 0.8f;
+        s = 0.25f + knob_val(6) * 0.65f;
+        r = 0.08f + knob_val(7) * 1.5f;
+    } else if (v->tone == SYNTH_TONE_PAD) {
+        a = 0.02f + knob_val(4) * 1.4f;
+        d = 0.2f + knob_val(5) * 1.2f;
+        s = 0.35f + knob_val(6) * 0.65f;
+        r = 0.2f + knob_val(7) * 2.4f;
     } else {
         a = knob_val(4) * 0.5f;
         d = 0.001f + knob_val(5) * 0.5f;
@@ -1175,14 +1102,40 @@ static float synth_voice_sample(SynthVoice *v, float cutoff, float reso, float b
     f = v->freq * powf(2.f, bend / 12.f);
     v->phase += f / (float)SYNTH_SR;
     if (v->phase >= 1.f) v->phase -= 1.f;
+    v->age += 1.f / (float)SYNTH_SR;
     saw = 2.f * v->phase - 1.f;
-    sin1 = sinf(2.f * (float)SYNTH_PI * v->phase);
+    twopi_phase = 2.f * (float)SYNTH_PI * v->phase;
+    sin1 = sinf(twopi_phase);
     if (v->tone == SYNTH_TONE_BASS) {
         v->sub_phase += (f * 0.5f) / (float)SYNTH_SR;
         if (v->sub_phase >= 1.f) v->sub_phase -= 1.f;
         osc = 0.4f * saw + 0.25f * sin1 + 0.7f * sinf(2.f * (float)SYNTH_PI * v->sub_phase);
         out = osc * env * v->vel * 1.3f;
         fc = (cutoff * 0.16f) / (float)SYNTH_SR;
+    } else if (v->tone == SYNTH_TONE_PIANO) {
+        float natural_decay = expf(-v->age * (0.7f + (float)v->note * 0.004f));
+        float body = 0.72f * sin1
+                   + 0.25f * sinf(twopi_phase * 2.f)
+                   + 0.11f * sinf(twopi_phase * 3.f)
+                   + 0.05f * sinf(twopi_phase * 4.f);
+        float hammer = sinf(twopi_phase * 7.f) * expf(-v->age * 32.f) * 0.12f;
+        osc = body * (natural_decay + 0.08f * knob_val(6)) + hammer;
+        out = osc * env * v->vel * 1.2f;
+        fc = cutoff / (float)SYNTH_SR;
+    } else if (v->tone == SYNTH_TONE_EPIANO) {
+        float tremolo = 0.86f + 0.14f * sinf(2.f * (float)SYNTH_PI * 4.8f * v->age);
+        osc = (0.78f * sin1
+             + 0.24f * sinf(twopi_phase * 2.f)
+             + 0.09f * sinf(twopi_phase * 3.f)) * tremolo;
+        out = osc * env * v->vel * 1.1f;
+        fc = cutoff / (float)SYNTH_SR;
+    } else if (v->tone == SYNTH_TONE_PAD) {
+        v->sub_phase += (f * 1.006f) / (float)SYNTH_SR;
+        if (v->sub_phase >= 1.f) v->sub_phase -= 1.f;
+        osc = 0.34f * saw + 0.42f * sin1
+            + 0.36f * sinf(2.f * (float)SYNTH_PI * v->sub_phase);
+        out = osc * env * v->vel * 0.9f;
+        fc = (cutoff * 0.65f) / (float)SYNTH_SR;
     } else {
         osc = 0.6f * saw + 0.4f * sin1;
         out = osc * env * v->vel;
@@ -1264,7 +1217,7 @@ static void metro_advance_beat(void) {
 }
 void synth_core_render(float *out, int n) {
     int i;
-    float master, cutoff, reso, bend, mix;
+    float master, cutoff, reso, reverb, bend, mix;
     float rb_dt = (float)n / (float)SYNTH_SR;
 
     synth_core_audio_lock();
@@ -1293,8 +1246,15 @@ void synth_core_render(float *out, int n) {
     master = synth_master();
     cutoff = synth_cutoff();
     reso = synth_reso();
-    bend = g.ribbon * 2.f;
+    reverb = synth_reverb_amount();
+    bend = g.ribbon * 2.f + g.pitch_bend * 2.f;
     for (i = 0; i < n; i++) {
+        float sample_bend = bend;
+        if (g.mod > 0.0001f) {
+            sample_bend += g.mod * 0.5f * sinf(2.f * (float)SYNTH_PI * g.mod_phase);
+            g.mod_phase += 5.5f / (float)SYNTH_SR;
+            if (g.mod_phase >= 1.f) g.mod_phase -= 1.f;
+        }
         while (g.phase_samples >= g.samples_per_step) {
             g.phase_samples -= g.samples_per_step;
             synth_seq_tick();
@@ -1308,7 +1268,7 @@ void synth_core_render(float *out, int n) {
             g.metro_phase_samples += 1.0;
         }
         mix = 0.f;
-        j(SYNTH_METRO_VOICE,mix+=synth_voice_sample(&g.voices[j],cutoff,reso,bend))
+        j(SYNTH_METRO_VOICE,mix+=synth_voice_sample(&g.voices[j],cutoff,reso,sample_bend))
         mix += synth_sample_tick();
         {
             float metro_m = synth_voice_sample(&g.voices[SYNTH_METRO_VOICE], cutoff, reso, 0.f);
@@ -1335,7 +1295,9 @@ void synth_core_render(float *out, int n) {
                     g.dirty = 1;
                 }
             }
-            out[i] = rec_src + loop_s;
+            out[i] = synth_reverb_tick(rec_src + loop_s, reverb);
+            if (out[i] > 1.f) out[i] = 1.f;
+            else if (out[i] < -1.f) out[i] = -1.f;
         }
     }
     synth_ui_push_audio_samples(out, n);
@@ -1640,6 +1602,7 @@ int synth_open(char *err, size_t err_cap) {
     g.knobs[5] = 0.25f;
     g.knobs[6] = 0.7f;
     g.knobs[7] = 0.3f;
+    g.knobs[8] = 0.2f;
     g.row_midi[4] = 36;
     g.row_midi[5] = 60;
     g.row_midi[7] = 67;
@@ -1804,6 +1767,7 @@ int synth_set_level(float level, char *err, size_t err_cap) {
     if (level < 0.f) level = 0.f;
     if (level > 1.f) level = 1.f;
     g.knobs[1] = level;
+    g.dirty = 1;
     return 0;
 }
 float synth_get_level(void) {
@@ -1818,6 +1782,7 @@ int synth_set_cutoff(float cutoff, char *err, size_t err_cap) {
     if (cutoff < 0.f) cutoff = 0.f;
     if (cutoff > 1.f) cutoff = 1.f;
     g.knobs[2] = cutoff;
+    g.dirty = 1;
     return 0;
 }
 float synth_get_cutoff(void) {
@@ -1832,11 +1797,88 @@ int synth_set_reso(float reso, char *err, size_t err_cap) {
     if (reso < 0.f) reso = 0.f;
     if (reso > 1.f) reso = 1.f;
     g.knobs[3] = reso;
+    g.dirty = 1;
     return 0;
 }
 float synth_get_reso(void) {
     P(!g.open,0.2f)
     return knob_val(3);
+}
+static int synth_set_knob01(int idx, float v, char *err, size_t err_cap, const char *name) {
+    if (!g.open || !g.alive) {
+        if (err && err_cap) snprintf(err, err_cap, "%s: synth not open", name);
+        return -1;
+    }
+    if (v < 0.f) v = 0.f;
+    if (v > 1.f) v = 1.f;
+    g.knobs[idx] = v;
+    g.dirty = 1;
+    return 0;
+}
+int synth_set_attack(float attack, char *err, size_t err_cap) {
+    return synth_set_knob01(4, attack, err, err_cap, "synth_set_attack");
+}
+float synth_get_attack(void) {
+    P(!g.open,0.f)
+    return knob_val(4);
+}
+int synth_set_decay(float decay, char *err, size_t err_cap) {
+    return synth_set_knob01(5, decay, err, err_cap, "synth_set_decay");
+}
+float synth_get_decay(void) {
+    P(!g.open,0.25f)
+    return knob_val(5);
+}
+int synth_set_sustain(float sustain, char *err, size_t err_cap) {
+    return synth_set_knob01(6, sustain, err, err_cap, "synth_set_sustain");
+}
+float synth_get_sustain(void) {
+    P(!g.open,0.7f)
+    return knob_val(6);
+}
+int synth_set_release(float release, char *err, size_t err_cap) {
+    return synth_set_knob01(7, release, err, err_cap, "synth_set_release");
+}
+float synth_get_release(void) {
+    P(!g.open,0.3f)
+    return knob_val(7);
+}
+int synth_set_reverb(float reverb, char *err, size_t err_cap) {
+    return synth_set_knob01(8, reverb, err, err_cap, "synth_set_reverb");
+}
+float synth_get_reverb(void) {
+    P(!g.open,0.2f)
+    return knob_val(8);
+}
+int synth_set_pitch_bend(float bend, char *err, size_t err_cap) {
+    if (!g.open || !g.alive) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_set_pitch_bend: synth not open");
+        return -1;
+    }
+    if (bend < -1.f) bend = -1.f;
+    if (bend > 1.f) bend = 1.f;
+    g.pitch_bend = bend;
+    g.dirty = 1;
+    return 0;
+}
+float synth_get_pitch_bend(void) {
+    P(!g.open,0.f)
+    return g.pitch_bend;
+}
+int synth_set_mod(float mod, char *err, size_t err_cap) {
+    if (!g.open || !g.alive) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_set_mod: synth not open");
+        return -1;
+    }
+    if (mod < 0.f) mod = 0.f;
+    if (mod > 1.f) mod = 1.f;
+    g.mod = mod;
+    g.dirty = 1;
+    return 0;
+}
+float synth_get_mod(void) {
+    P(!g.open,0.f)
+    return g.mod;
 }
 int synth_set_seq_row(int row, uint64_t mask, char *err, size_t err_cap) {
     uint64_t limit;
@@ -2143,6 +2185,48 @@ int synth_set_reso(float reso, char *err, size_t err_cap) {
     return -1;
 }
 float synth_get_reso(void) { return 0.2f; }
+int synth_set_attack(float attack, char *err, size_t err_cap) {
+    (void)attack;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_attack(void) { return 0.f; }
+int synth_set_decay(float decay, char *err, size_t err_cap) {
+    (void)decay;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_decay(void) { return 0.25f; }
+int synth_set_sustain(float sustain, char *err, size_t err_cap) {
+    (void)sustain;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_sustain(void) { return 0.7f; }
+int synth_set_release(float release, char *err, size_t err_cap) {
+    (void)release;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_release(void) { return 0.3f; }
+int synth_set_reverb(float reverb, char *err, size_t err_cap) {
+    (void)reverb;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_reverb(void) { return 0.2f; }
+int synth_set_pitch_bend(float bend, char *err, size_t err_cap) {
+    (void)bend;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_pitch_bend(void) { return 0.f; }
+int synth_set_mod(float mod, char *err, size_t err_cap) {
+    (void)mod;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+float synth_get_mod(void) { return 0.f; }
 int synth_set_seq_row(int row, uint64_t mask, char *err, size_t err_cap) {
     (void)row;
     (void)mask;
@@ -2419,6 +2503,75 @@ V *bi_synth_reso(V **a, int n) {
     (void)a;
     (void)n;
     return v_float((double)synth_get_reso());
+}
+static V *bi_synth_set_norm01(V **a, int n, const char *usage,
+                              int (*setter)(float, char *, size_t)) {
+    char err[512];
+    float v;
+    err[0] = 0;
+    P(n < 1, v_err(usage))
+    if (a[0]->t == T_FLOAT) v = (float)a[0]->f;
+    else if (a[0]->t == T_INT) v = (float)a[0]->j;
+    else return v_err(usage);
+    P(setter(v, err, sizeof err) != 0, synth_err(err))
+    return v_nil();
+}
+V *bi_synth_set_attack(V **a, int n) {
+    return bi_synth_set_norm01(a, n, "synth_set_attack(attack)", synth_set_attack);
+}
+V *bi_synth_attack(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_attack());
+}
+V *bi_synth_set_decay(V **a, int n) {
+    return bi_synth_set_norm01(a, n, "synth_set_decay(decay)", synth_set_decay);
+}
+V *bi_synth_decay(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_decay());
+}
+V *bi_synth_set_sustain(V **a, int n) {
+    return bi_synth_set_norm01(a, n, "synth_set_sustain(sustain)", synth_set_sustain);
+}
+V *bi_synth_sustain(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_sustain());
+}
+V *bi_synth_set_release(V **a, int n) {
+    return bi_synth_set_norm01(a, n, "synth_set_release(release)", synth_set_release);
+}
+V *bi_synth_release(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_release());
+}
+V *bi_synth_set_reverb(V **a, int n) {
+    return bi_synth_set_norm01(a, n, "synth_set_reverb(reverb)", synth_set_reverb);
+}
+V *bi_synth_reverb(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_reverb());
+}
+V *bi_synth_set_pitch_bend(V **a, int n) {
+    char err[512];
+    float bend;
+    err[0] = 0;
+    P(n < 1, v_err("synth_set_pitch_bend(bend)"))
+    if (a[0]->t == T_FLOAT) bend = (float)a[0]->f;
+    else if (a[0]->t == T_INT) bend = (float)a[0]->j;
+    else return v_err("synth_set_pitch_bend(bend)");
+    P(synth_set_pitch_bend(bend, err, sizeof err) != 0, synth_err(err))
+    return v_nil();
+}
+V *bi_synth_pitch_bend(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_pitch_bend());
+}
+V *bi_synth_set_mod(V **a, int n) {
+    return bi_synth_set_norm01(a, n, "synth_set_mod(mod)", synth_set_mod);
+}
+V *bi_synth_mod(V **a, int n) {
+    (void)a; (void)n;
+    return v_float((double)synth_get_mod());
 }
 V *bi_synth_set_seq_row(V **a, int n) {
     char err[512];

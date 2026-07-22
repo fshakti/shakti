@@ -1385,6 +1385,17 @@ for ev in input(2):
             synth.note_on(60 + idx, 0.88)
 ```
 
+USB MIDI controller (iRig Keys 2): `examples/synth_midi.ie`
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti examples/synth_midi.ie
+```
+
+Maps notes, pitch bend, Mod (CC1 → vibrato), and knobs CC12–19 (level, reverb,
+cutoff, resonance, ADSR). Select **iRig Keys 2** as the macOS sound output for
+the analog Volume knob.
+
 ## API
 
 Module `lib/synth.ie`: `open`, `close`, `alive`, `tick`, `set_steps`, `steps`, `set_metro`, `metro_on`, `set_metro_sound`, `metro_sound`, `set_mute`, `note_on`, `note_off`, `set_tuning`, `tuning`.
