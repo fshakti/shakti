@@ -84,6 +84,48 @@ def set_reso(reso):
 def reso():
     return synth_reso()
 
+def set_attack(attack):
+    synth_set_attack(attack)
+
+def attack():
+    return synth_attack()
+
+def set_decay(decay):
+    synth_set_decay(decay)
+
+def decay():
+    return synth_decay()
+
+def set_sustain(sustain):
+    synth_set_sustain(sustain)
+
+def sustain():
+    return synth_sustain()
+
+def set_release(release):
+    synth_set_release(release)
+
+def release():
+    return synth_release()
+
+def set_reverb(reverb):
+    synth_set_reverb(reverb)
+
+def reverb():
+    return synth_reverb()
+
+def set_pitch_bend(bend):
+    synth_set_pitch_bend(bend)
+
+def pitch_bend():
+    return synth_pitch_bend()
+
+def set_mod(mod):
+    synth_set_mod(mod)
+
+def mod():
+    return synth_mod()
+
 def set_row(row, mask):
     synth_set_seq_row(row, mask)
 

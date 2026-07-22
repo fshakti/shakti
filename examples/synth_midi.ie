@@ -1,0 +1,71 @@
+# iRig Keys 2 → Shakti synth
+#
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/synth_midi.ie
+#
+# Maps notes, pitch bend, Mod (CC1), and knobs CC12–19.
+# Select "iRig Keys 2" as macOS sound output so the analog Volume knob works.
+# Close the synth window or Ctrl+C to exit.
+
+import synth
+import midi
+
+PORT : getenv("MIDI_PORT")
+if not PORT:
+    PORT : "iRig"
+
+# Knobs CC12–19 follow on-screen order: LEVEL CUT RES ATT DEC SUS REL REVERB.
+# iRig Keys 2: press the 5-8 button to send CC16–19 from the four physical knobs.
+def apply_cc(cc, val):
+    n : val / 127.0
+    if cc = 1:
+        synth.set_mod(n)
+    elif cc = 12:
+        synth.set_level(n)
+    elif cc = 13:
+        synth.set_cutoff(n)
+    elif cc = 14:
+        synth.set_reso(n)
+    elif cc = 15:
+        synth.set_attack(n)
+    elif cc = 16:
+        synth.set_decay(n)
+    elif cc = 17:
+        synth.set_sustain(n)
+    elif cc = 18:
+        synth.set_release(n)
+    elif cc = 19:
+        synth.set_reverb(n)
+
+def drain_midi():
+    while 1:
+        ev : midi.poll()
+        if ev = None:
+            break
+        t : ev["type"]
+        if t = "note_on":
+            synth.note_on(ev["note"], ev["vel"] / 127.0)
+        elif t = "note_off":
+            synth.note_off(ev["note"])
+        elif t = "pitch_bend":
+            synth.set_pitch_bend(ev["bend"])
+        elif t = "cc":
+            apply_cc(ev["cc"], ev["val"])
+
+print("backend:", midi.backend())
+midi.open()
+print("ports:")
+for p in midi.list():
+    print(" ", p["id"], p["name"], p["kind"])
+
+midi.connect(PORT)
+print("connected:", PORT)
+print("Jam — keys, pitch/mod wheels, knobs CC12–19 (= LEVEL…REVERB). Enable iRig 5-8 for knobs 5–8.")
+
+synth.open()
+while synth.alive():
+    drain_midi()
+    synth.tick()
+
+midi.close()
+print("Done")
