@@ -14,6 +14,8 @@
 - [`sql` module](#sql-module)
 - [graph module](#graph-module)
 - [`gfx` module](#gfx-module)
+- [`pyplot` module](#pyplot-module)
+- [`jupyter` module](#jupyter-module)
 - [`input` module](#input-module)
 - [IPC module](#ipc-module)
 - [REST module](#rest-module)
@@ -52,6 +54,8 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/gfx_demo.ie`) |
 | `import gfx` | `examples/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
 | `import gfx` | `examples/gfx_movie.ie` | Animated redraw demo (standalone) |
+| `import pyplot` | `pyplot_demo.ie` / `examples/pyplot_demo.ie` | Line / scatter / bar charts on gfx |
+| `import jupyter` | `jupyter_demo.ie` / `examples/jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
 | `import gfx` + `input` | `examples/infinibattle/` | Infinibattle Omega — craft weapons, armory JSON, duel AI (local) |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
@@ -88,6 +92,8 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `sql` | [sql module](#sql-module) |
 | `graph` | [graph module](#graph-module) |
 | `gfx` | [gfx module](#gfx-module) |
+| `pyplot` | [pyplot module](#pyplot-module) |
+| `jupyter` | [jupyter module](#jupyter-module) |
 | `input` | [input module](#input-module) |
 | `synth` | [synth module](#synth-module) |
 | `dsp` | [dsp module](#dsp-module) |
@@ -107,13 +113,13 @@ When `tests/`, `benchmarks/`, and `Makefile.local` are present:
 
 ```bash
 make prod && export SHAKTI_LIB=$PWD/lib
-make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, module_defaults
+make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter, module_defaults
 make -f Makefile.local bench-modules  # focused suites only
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
 ```
 
-Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`.
+Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`, `test-pyplot`, `bench-pyplot`, `test-jupyter`, `bench-jupyter`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`. Display draw benches skip when `SHAKTI_GFX_SKIP=1`.
 
 Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).
 
@@ -661,6 +667,8 @@ For high-throughput windowed VWAP / averages / exchange stats over dense symbol 
 | `sql` | [sql module](#sql-module) | `sql_demo.ie` |
 | `graph` | [graph module](#graph-module) | `graph_demo.ie` |
 | `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` / `examples/gfx_demo.ie` |
+| `pyplot` | [pyplot module](#pyplot-module) | `pyplot_demo.ie` / `examples/pyplot_demo.ie` |
+| `jupyter` | [jupyter module](#jupyter-module) | `jupyter_demo.ie` / `examples/jupyter_demo.ie` |
 | `input` | [input module](#input-module) | `input_demo.ie` |
 | `synth` | [synth module](#synth-module) | `synth_demo.ie` |
 | `talk` | [talk module](#talk-module-macos) | `talk_demo.ie` |
@@ -946,6 +954,138 @@ Module `lib/gfx.ie`.
 | `gfx.consume_click()` | Clear the pending click |
 
 Colors are packed as `0xRRGGBB`. Clicks are reported in design-buffer coordinates (not raw window pixels). `gfx.text` covers digits, A–Z, a–z (distinct lowercase), and common punctuation; unknown glyphs draw as a hollow box.
+
+---
+
+# `pyplot` module
+
+matplotlib.pyplot-shaped **charting** on top of [`gfx`](#gfx-module) (no separate C backend). Stateful figure/axes dicts mirror pyplot’s implicit current axes. Not a full matplotlib port — no Artist OO, savefig, or GUI backends beyond gfx.
+
+Build from the repo root (`make prod`; see [README](README.md)), then:
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti examples/pyplot_demo.ie
+SHAKTI_GFX_SKIP=1 ./shakti examples/pyplot_demo.ie   # skip gfx window
+```
+
+Or copy the `pyplot_demo.ie` section from [`example.ie`](example.ie).
+
+## Example
+
+```ie
+import pyplot
+
+pyplot.plot([1, 2, 3, 4], [1, 4, 9, 16], color:"C0", label:"sq")
+pyplot.title("demo")
+pyplot.xlabel("x")
+pyplot.ylabel("y")
+pyplot.legend()
+pyplot.grid(1)
+pyplot.show()
+```
+
+Call style is `pyplot.plot(...)` (no `import … as plt` alias).
+
+## Examples
+
+| File | Description |
+|------|-------------|
+| `examples/pyplot_demo.ie` | Line + scatter + bar with legend/grid |
+| `example.ie` (`pyplot_demo.ie` section) | Same charts in the merged examples file |
+| `tests/pyplot_api.ie` | API smoke tests; draws once when a display is available |
+| `benchmarks/suites/pyplot.ie` | CPU + optional draw microbenches (`make -f Makefile.local bench-pyplot`) |
+
+## API
+
+Module `lib/pyplot.ie` (imports `gfx`).
+
+| Form | Meaning |
+|------|---------|
+| `pyplot.plot(y)` / `pyplot.plot(x, y)` | Line series; optional `color`, `label` |
+| `pyplot.scatter(x, y)` | Points; optional `color`, `label` |
+| `pyplot.bar(x, height)` | Bars; optional `color`, `label` |
+| `pyplot.hist(x[, bins])` | Histogram (rendered as bars); optional `color`, `label` |
+| `pyplot.title` / `xlabel` / `ylabel` | Axis chrome text |
+| `pyplot.grid([flag])` | Toggle grid (`1` on, `0` off) |
+| `pyplot.legend()` | Show series labels |
+| `pyplot.xlim(lo, hi)` / `pyplot.ylim(lo, hi)` | Data limits (auto from series when unset) |
+| `pyplot.clf()` / `pyplot.cla()` / `pyplot.figure()` | Clear figure / clear axes / new figure state |
+| `pyplot.gcf()` / `pyplot.gca()` | Current figure dict (same object in v1) |
+| `pyplot.draw()` | Render once into the open gfx buffer |
+| `pyplot.show()` | Open gfx, draw, block until the window closes |
+| `pyplot.close()` | Close the gfx window if open |
+
+Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` strings, or `0xRRGGBB` ints. Auto color cycles when `color` is omitted. Headless demos: set `SHAKTI_GFX_SKIP=1` to skip `show()` in `examples/pyplot_demo.ie`.
+
+---
+
+# `jupyter` module
+
+IPython / Jupyter **Notebook**-shaped interactive cells on top of `eval` + `json_loads` / `json_dump` (optional [`gfx`](#gfx-module) viewer). Not JupyterLab and not a Python kernel — Shakti source in cells, nbformat-ish `.ipynb` round-trip.
+
+Build from the repo root (`make prod`; see [README](README.md)), then:
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti examples/jupyter_demo.ie
+SHAKTI_GFX_SKIP=1 ./shakti examples/jupyter_demo.ie   # skip gfx window
+```
+
+Or copy the `jupyter_demo.ie` section from [`example.ie`](example.ie).
+
+## Example
+
+```ie
+import jupyter
+
+jupyter.new()
+jupyter.markdown("# demo")
+jupyter.code("x : 1 + 2")
+jupyter.code("x * 10")
+jupyter.run_all()
+print(jupyter.get_out()[1], jupyter.get_out()[2])
+jupyter.save("/tmp/demo.ipynb")
+jupyter.show()
+```
+
+IPython-shaped one-shot: `jupyter.run("3 * 4")` appends a code cell and executes it.
+
+## Examples
+
+| File | Description |
+|------|-------------|
+| `examples/jupyter_demo.ie` | Cells, errors, run/run_all, save/load, optional gfx view |
+| `example.ie` (`jupyter_demo.ie` section) | Same flow in the merged examples file |
+| `tests/jupyter_api.ie` | API smoke tests; draws once when a display is available |
+| `benchmarks/suites/jupyter.ie` | CPU + optional draw microbenches (`make -f Makefile.local bench-jupyter`) |
+
+## API
+
+Module `lib/jupyter.ie` (imports `gfx` for `draw` / `show` only).
+
+| Form | Meaning |
+|------|---------|
+| `jupyter.new()` / `jupyter.clear()` | Reset notebook + `In`/`Out` history |
+| `jupyter.code(src)` / `jupyter.markdown(src)` | Append a cell; returns index |
+| `jupyter.run_cell(i)` / `jupyter.run_all()` | `eval` code cells; fills outputs + history |
+| `jupyter.run(src)` | Append code cell and execute (IPython-shaped) |
+| `jupyter.get_in()` / `jupyter.get_out()` | History lists (`[0]` placeholder; first result at `[1]`) |
+| `jupyter.execution_count()` | Last execution count |
+| `jupyter.cell(i)` / `jupyter.ncells()` / `jupyter.gcn()` / `jupyter.get_notebook()` | Inspect notebook (`gcn` ≡ `get_notebook`) |
+| `jupyter.clear_outputs()` / `jupyter.clear_history()` | Clear cell outputs or In/Out (history only; cells kept) |
+| `jupyter.dumps()` / `jupyter.loads(s)` | nbformat-ish JSON string |
+| `jupyter.save(path)` / `jupyter.load(path)` | `.ipynb` via `json_dump` / `json_load` |
+| `jupyter.draw()` / `jupyter.show()` / `jupyter.close()` | Render notebook in gfx (like pyplot) |
+
+Notes:
+
+- Cell `source` may be a string or a list of strings (joined on load). Unknown / non-dict cells in a file are skipped.
+- `loads` / `load` require a JSON **object**; non-objects return `None` and leave the current notebook unchanged. Parse errors return an `error` value.
+- Code outputs use `execute_result` (`text/plain`) or `error`. A `None` result (empty cell / no value) records history but omits `execute_result`.
+- Bindings persist across `eval` calls (root environment), including after `load` + `run_all`.
+- Saved notebooks carry `kernelspec` metadata (`name: shakti`, `language: ie`).
+- `jupyter.show()` no-ops when `SHAKTI_GFX_SKIP=1` (same headless convention as benches).
 
 ---
 
