@@ -4,7 +4,7 @@
 
 Small interpreted language (0.11.0) with vectors, matrices, tables, decorators,
 each (`f@`), load-time time-series indexes (VWAB / windowed avg / stats / asof),
-and optional SQL, graph, IPC, REST, gfx, synth, input, MIDI, PDF, DSP, Sonic Pi,
+and optional SQL, graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
 
 ## grammar
@@ -65,6 +65,8 @@ CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger
 | `sql` | Tables / select | [doc](doc.md#sql-module) |
 | `graph` | Knowledge graph | [doc](doc.md#graph-module) |
 | `gfx` | Pixel window | [doc](doc.md#gfx-module) |
+| `pyplot` | Charts (pyplot-shaped) | [doc](doc.md#pyplot-module) |
+| `jupyter` | Notebook / IPython-shaped | [doc](doc.md#jupyter-module) |
 | `synth` | Softsynth UI | [doc](doc.md#synth-module) |
 | `dsp` | Just intonation | [doc](doc.md#dsp-module) |
 | `sonicpi` | Sonic Pi OSC | [doc](doc.md#sonicpi-module) |
@@ -80,7 +82,8 @@ make test-pong    # pong_test.ie + pong_spell_test.ie
 make bench-pong   # pong_bench.ie (physics / frame / proj / AI)
 ```
 
-Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`, `examples/infinibattle/`.
+Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pyplot_demo.ie`, `examples/jupyter_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`, `examples/infinibattle/`.  
+Merged copy-paste sections also live in [`example.ie`](example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …). Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
 
 ## test & bench (local tree)
 
@@ -88,7 +91,7 @@ When `tests/`, `benchmarks/`, and `Makefile.local` are present:
 
 ```bash
 make -f Makefile.local test
-make -f Makefile.local test-modules   # dsp, pdf, midi, iefs, sonicpi
+make -f Makefile.local test-modules   # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter
 make -f Makefile.local bench-modules  # focused module benches
 make -f Makefile.local bench          # full suite vs baselines
 ```

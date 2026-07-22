@@ -1,0 +1,405 @@
+# pyplot — matplotlib.pyplot-shaped plotting on gfx (pixel window).
+# Requires shakti built with SHAKTI_GFX=1 (default).
+#
+#   import pyplot
+#   pyplot.plot([1, 2, 3], [1, 4, 9], color:"C0", label:"sq")
+#   pyplot.title("demo")
+#   pyplot.show()
+
+import gfx
+
+_W : 960
+_H : 540
+_X0 : 70
+_Y0 : 40
+_X1 : 900
+_Y1 : 480
+
+_COLORS : dict(b:0x1f77b4, g:0x2ca02c, r:0xd62728, c:0x17becf, m:0xe377c2, y:0xbcbd22, k:0x000000, w:0xffffff)
+_COLORS["C0"] : 0x1f77b4
+_COLORS["C1"] : 0xff7f0e
+_COLORS["C2"] : 0x2ca02c
+_COLORS["C3"] : 0xd62728
+_COLORS["C4"] : 0x9467bd
+_COLORS["C5"] : 0x8c564b
+_COLORS["C6"] : 0xe377c2
+_COLORS["C7"] : 0x7f7f7f
+_COLORS["C8"] : 0xbcbd22
+_COLORS["C9"] : 0x17becf
+
+_CYCLE : []
+_CYCLE.append("C0")
+_CYCLE.append("C1")
+_CYCLE.append("C2")
+_CYCLE.append("C3")
+_CYCLE.append("C4")
+_CYCLE.append("C5")
+_CYCLE.append("C6")
+_CYCLE.append("C7")
+_CYCLE.append("C8")
+_CYCLE.append("C9")
+
+_fig : dict(title:"", xlabel:"", ylabel:"", grid:0, legend:0, xmin:None, xmax:None, ymin:None, ymax:None, series:[], color_i:0)
+
+def _reset_fig():
+    _fig["title"] : ""
+    _fig["xlabel"] : ""
+    _fig["ylabel"] : ""
+    _fig["grid"] : 0
+    _fig["legend"] : 0
+    _fig["xmin"] : None
+    _fig["xmax"] : None
+    _fig["ymin"] : None
+    _fig["ymax"] : None
+    _fig["series"] : []
+    _fig["color_i"] : 0
+
+def clf():
+    _reset_fig()
+
+def cla():
+    _fig["series"] : []
+    _fig["title"] : ""
+    _fig["xlabel"] : ""
+    _fig["ylabel"] : ""
+    _fig["grid"] : 0
+    _fig["legend"] : 0
+    _fig["xmin"] : None
+    _fig["xmax"] : None
+    _fig["ymin"] : None
+    _fig["ymax"] : None
+
+def figure(num:1):
+    _reset_fig()
+    return num
+
+def gcf():
+    return _fig
+
+def gca():
+    return _fig
+
+def _parse_color(c):
+    if type(c) = "int":
+        return c
+    if type(c) = "float":
+        return int(c)
+    if c = "":
+        return _COLORS["C0"]
+    if c in _COLORS:
+        return _COLORS[c]
+    if len(c) > 0:
+        if c[0] = "#":
+            return int("0x" + c[1:])
+    return _COLORS["C0"]
+
+def _next_color():
+    name : _CYCLE[_fig["color_i"] % len(_CYCLE)]
+    _fig["color_i"] : _fig["color_i"] + 1
+    return name
+
+def _resolve_color(color):
+    if color = "":
+        return _parse_color(_next_color())
+    return _parse_color(color)
+
+def _as_list(v):
+    out : []
+    for x in v:
+        out.append(x)
+    return out
+
+def plot(a, b:"", color:"", label:""):
+    xs : []
+    ys : []
+    if b = "":
+        ys : _as_list(a)
+        i : 0
+        while i < len(ys):
+            xs.append(i)
+            i : i + 1
+    else:
+        xs : _as_list(a)
+        ys : _as_list(b)
+    col : _resolve_color(color)
+    _fig["series"].append(dict(kind:"plot", x:xs, y:ys, color:col, label:label))
+
+def scatter(x, y, color:"", label:""):
+    xs : _as_list(x)
+    ys : _as_list(y)
+    col : _resolve_color(color)
+    _fig["series"].append(dict(kind:"scatter", x:xs, y:ys, color:col, label:label))
+
+def bar(x, height, color:"", label:""):
+    xs : _as_list(x)
+    ys : _as_list(height)
+    col : _resolve_color(color)
+    _fig["series"].append(dict(kind:"bar", x:xs, y:ys, color:col, label:label))
+
+def hist(x, bins:10, color:"", label:""):
+    vals : _as_list(x)
+    if len(vals) = 0:
+        return
+    if bins < 1:
+        bins : 1
+    lo : min(vals)
+    hi : max(vals)
+    if hi = lo:
+        hi : lo + 1.0
+    w : (hi - lo) / bins
+    counts : []
+    edges : []
+    i : 0
+    while i < bins:
+        counts.append(0)
+        edges.append(lo + w * (i + 0.5))
+        i : i + 1
+    for v in vals:
+        bi : int((v - lo) / w)
+        if bi >= bins:
+            bi : bins - 1
+        if bi < 0:
+            bi : 0
+        counts[bi] : counts[bi] + 1
+    col : _resolve_color(color)
+    _fig["series"].append(dict(kind:"bar", x:edges, y:counts, color:col, label:label, bar_width:w * 0.9))
+
+def title(s):
+    _fig["title"] : s
+
+def xlabel(s):
+    _fig["xlabel"] : s
+
+def ylabel(s):
+    _fig["ylabel"] : s
+
+def grid(flag:1):
+    _fig["grid"] : flag
+
+def legend():
+    _fig["legend"] : 1
+
+def xlim(lo, hi):
+    _fig["xmin"] : lo
+    _fig["xmax"] : hi
+
+def ylim(lo, hi):
+    _fig["ymin"] : lo
+    _fig["ymax"] : hi
+
+def _data_limits():
+    xmin : None
+    xmax : None
+    ymin : None
+    ymax : None
+    for s in _fig["series"]:
+        for v in s["x"]:
+            if xmin = None:
+                xmin : v
+                xmax : v
+            else:
+                if v < xmin:
+                    xmin : v
+                if v > xmax:
+                    xmax : v
+        for v in s["y"]:
+            if ymin = None:
+                ymin : v
+                ymax : v
+            else:
+                if v < ymin:
+                    ymin : v
+                if v > ymax:
+                    ymax : v
+            if s["kind"] = "bar":
+                if 0 < ymin:
+                    ymin : 0
+                if 0 > ymax:
+                    ymax : 0
+    if xmin = None:
+        xmin : 0.0
+        xmax : 1.0
+        ymin : 0.0
+        ymax : 1.0
+    if xmin = xmax:
+        xmin : xmin - 1.0
+        xmax : xmax + 1.0
+    if ymin = ymax:
+        ymin : ymin - 1.0
+        ymax : ymax + 1.0
+    # pad 5%
+    dx : (xmax - xmin) * 0.05
+    dy : (ymax - ymin) * 0.05
+    return dict(xmin:xmin - dx, xmax:xmax + dx, ymin:ymin - dy, ymax:ymax + dy)
+
+def _limits():
+    lim : _data_limits()
+    if not (_fig["xmin"] = None):
+        lim["xmin"] : _fig["xmin"]
+    if not (_fig["xmax"] = None):
+        lim["xmax"] : _fig["xmax"]
+    if not (_fig["ymin"] = None):
+        lim["ymin"] : _fig["ymin"]
+    if not (_fig["ymax"] = None):
+        lim["ymax"] : _fig["ymax"]
+    if lim["xmin"] = lim["xmax"]:
+        lim["xmax"] : lim["xmin"] + 1.0
+    if lim["ymin"] = lim["ymax"]:
+        lim["ymax"] : lim["ymin"] + 1.0
+    return lim
+
+def _sx(x, lim):
+    return int(_X0 + (x - lim["xmin"]) / (lim["xmax"] - lim["xmin"]) * (_X1 - _X0))
+
+def _sy(y, lim):
+    return int(_Y1 - (y - lim["ymin"]) / (lim["ymax"] - lim["ymin"]) * (_Y1 - _Y0))
+
+def _fmt(v):
+    return str(v)
+
+def _draw_grid(lim, color):
+    n : 5
+    i : 0
+    while i <= n:
+        t : i / n
+        x : lim["xmin"] + t * (lim["xmax"] - lim["xmin"])
+        y : lim["ymin"] + t * (lim["ymax"] - lim["ymin"])
+        px : _sx(x, lim)
+        py : _sy(y, lim)
+        gfx.line(px, _Y0, px, _Y1, color)
+        gfx.line(_X0, py, _X1, py, color)
+        i : i + 1
+
+def _draw_axes(lim, fg, muted):
+    gfx.line(_X0, _Y0, _X0, _Y1, fg)
+    gfx.line(_X0, _Y1, _X1, _Y1, fg)
+    n : 4
+    i : 0
+    while i <= n:
+        t : i / n
+        x : lim["xmin"] + t * (lim["xmax"] - lim["xmin"])
+        y : lim["ymin"] + t * (lim["ymax"] - lim["ymin"])
+        px : _sx(x, lim)
+        py : _sy(y, lim)
+        gfx.line(px, _Y1, px, _Y1 + 4, fg)
+        gfx.line(_X0 - 4, py, _X0, py, fg)
+        labx : _fmt(x)
+        gfx.text(px - gfx.text_width(labx) // 2, _Y1 + 8, labx, muted, 1)
+        laby : _fmt(y)
+        gfx.text(_X0 - 6 - gfx.text_width(laby), py - 3, laby, muted, 1)
+        i : i + 1
+
+def _bar_width(s, lim):
+    if "bar_width" in s:
+        return s["bar_width"]
+    n : len(s["x"])
+    if n <= 1:
+        return (lim["xmax"] - lim["xmin"]) * 0.5
+    # median-ish spacing from first gap
+    return (s["x"][1] - s["x"][0]) * 0.8
+
+def _draw_series(lim):
+    for s in _fig["series"]:
+        col : s["color"]
+        if s["kind"] = "plot":
+            n : len(s["x"])
+            if n > 1:
+                i : 0
+                while i < n - 1:
+                    gfx.line(_sx(s["x"][i], lim), _sy(s["y"][i], lim), _sx(s["x"][i + 1], lim), _sy(s["y"][i + 1], lim), col)
+                    i : i + 1
+        if s["kind"] = "scatter":
+            n : len(s["x"])
+            i : 0
+            while i < n:
+                gfx.fill_circle(_sx(s["x"][i], lim), _sy(s["y"][i], lim), 3, col)
+                i : i + 1
+        if s["kind"] = "bar":
+            bw : _bar_width(s, lim)
+            n : len(s["x"])
+            i : 0
+            while i < n:
+                x0 : s["x"][i] - bw * 0.5
+                x1 : s["x"][i] + bw * 0.5
+                y0 : 0.0
+                if lim["ymin"] > 0:
+                    y0 : lim["ymin"]
+                y1 : s["y"][i]
+                px0 : _sx(x0, lim)
+                px1 : _sx(x1, lim)
+                py0 : _sy(y0, lim)
+                py1 : _sy(y1, lim)
+                top : py1
+                bot : py0
+                if top > bot:
+                    tmp : top
+                    top : bot
+                    bot : tmp
+                w : px1 - px0
+                if w < 1:
+                    w : 1
+                h : bot - top
+                if h < 1:
+                    h : 1
+                gfx.fill_rect(px0, top, w, h, col)
+                i : i + 1
+
+def _draw_labels(fg, muted):
+    if not (_fig["title"] = ""):
+        tw : gfx.text_width(_fig["title"], 2)
+        gfx.text((_W - tw) // 2, 10, _fig["title"], fg, 2)
+    if not (_fig["xlabel"] = ""):
+        tw : gfx.text_width(_fig["xlabel"])
+        gfx.text((_X0 + _X1 - tw) // 2, _H - 18, _fig["xlabel"], muted, 1)
+    if not (_fig["ylabel"] = ""):
+        y : _Y0 + 8
+        for ch in _fig["ylabel"]:
+            gfx.text(12, y, ch, muted, 1)
+            y : y + 10
+
+def _draw_legend(fg):
+    if _fig["legend"] = 0:
+        return
+    lx : _X1 - 140
+    ly : _Y0 + 8
+    for s in _fig["series"]:
+        lab : s["label"]
+        if lab = "":
+            lab : s["kind"]
+        gfx.fill_rect(lx, ly, 10, 10, s["color"])
+        gfx.text(lx + 14, ly, lab, fg, 1)
+        ly : ly + 14
+
+def draw():
+    lim : _limits()
+    bg : 0x0a0a12
+    fg : 0xe8e8f0
+    muted : 0x8899aa
+    grid_c : 0x2a3344
+    gfx.clear(bg)
+    gfx.fill_rect(_X0, _Y0, _X1 - _X0, _Y1 - _Y0, 0x12121c)
+    if _fig["grid"]:
+        _draw_grid(lim, grid_c)
+    _draw_axes(lim, fg, muted)
+    _draw_series(lim)
+    _draw_labels(fg, muted)
+    _draw_legend(fg)
+    gfx.tick()
+
+def show():
+    if not gfx.available():
+        print("pyplot: gfx not available")
+        return
+    r : gfx.open("pyplot")
+    if type(r) = "error":
+        print("pyplot: cannot open window:", r)
+        return
+    draw()
+    while gfx.alive():
+        gfx.tick()
+    gfx.close()
+
+def close():
+    if gfx.available():
+        if gfx.alive():
+            gfx.close()

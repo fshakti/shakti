@@ -1,0 +1,342 @@
+# jupyter — IPython / Notebook-shaped cells on eval + json (optional gfx view).
+# Requires no extra C backend. Not JupyterLab — document model + run + .ipynb R/W.
+#
+#   import jupyter
+#   jupyter.new()
+#   jupyter.code("x : 1 + 2")
+#   jupyter.code("x * 10")
+#   jupyter.run_all()
+#   print(jupyter.get_out()[1], jupyter.get_out()[2])
+#   jupyter.save("/tmp/demo.ipynb")
+#   jupyter.show()
+
+import gfx
+
+def _empty_dict():
+    return json_loads("{}")
+
+_state : dict(nb:dict(nbformat:4, nbformat_minor:5, metadata:dict(kernelspec:dict(name:"shakti", display_name:"Shakti", language:"ie")), cells:[]), In:[""], Out:[None], exec_count:0)
+
+def _empty_meta():
+    return dict(kernelspec:dict(name:"shakti", display_name:"Shakti", language:"ie"))
+
+def _empty_nb():
+    return dict(nbformat:4, nbformat_minor:5, metadata:_empty_meta(), cells:[])
+
+def _reset():
+    _state["nb"] : _empty_nb()
+    _state["In"] : [""]
+    _state["Out"] : [None]
+    _state["exec_count"] : 0
+
+def new():
+    _reset()
+    return _state["nb"]
+
+def clear():
+    _reset()
+
+def gcn():
+    return _state["nb"]
+
+def get_notebook():
+    return _state["nb"]
+
+def get_in():
+    return _state["In"]
+
+def get_out():
+    return _state["Out"]
+
+def execution_count():
+    return _state["exec_count"]
+
+def _as_source(src):
+    if type(src) = "list":
+        out : ""
+        for part in src:
+            out : out + str(part)
+        return out
+    if type(src) = "str":
+        return src
+    return str(src)
+
+def _new_code_cell(src):
+    return dict(cell_type:"code", execution_count:None, metadata:_empty_dict(), source:_as_source(src), outputs:[])
+
+def _new_md_cell(src):
+    return dict(cell_type:"markdown", metadata:_empty_dict(), source:_as_source(src))
+
+def code(src):
+    c : _new_code_cell(src)
+    _state["nb"]["cells"].append(c)
+    return len(_state["nb"]["cells"]) - 1
+
+def markdown(src):
+    c : _new_md_cell(src)
+    _state["nb"]["cells"].append(c)
+    return len(_state["nb"]["cells"]) - 1
+
+def cell(i):
+    cells : _state["nb"]["cells"]
+    if i < 0:
+        return None
+    if i >= len(cells):
+        return None
+    return cells[i]
+
+def ncells():
+    return len(_state["nb"]["cells"])
+
+def _is_error(v):
+    return type(v) = "error"
+
+def _plain(v):
+    if _is_error(v):
+        return str(v)
+    return repr(v)
+
+def _make_result_output(v, n):
+    data : _empty_dict()
+    data["text/plain"] : _plain(v)
+    return dict(output_type:"execute_result", data:data, execution_count:n, metadata:_empty_dict())
+
+def _make_error_output(v):
+    return dict(output_type:"error", ename:"Error", evalue:str(v), traceback:[str(v)])
+
+def _run_source(src):
+    src : _as_source(src)
+    n : _state["exec_count"] + 1
+    _state["exec_count"] : n
+    _state["In"].append(src)
+    v : eval(src)
+    _state["Out"].append(v)
+    return dict(n:n, value:v)
+
+def run_cell(i):
+    c : cell(i)
+    if c = None:
+        print("jupyter.run_cell: bad index")
+        return None
+    if c["cell_type"] = "markdown":
+        return None
+    if not (c["cell_type"] = "code"):
+        print("jupyter.run_cell: not a code cell")
+        return None
+    r : _run_source(c["source"])
+    c["execution_count"] : r["n"]
+    c["outputs"] : []
+    if _is_error(r["value"]):
+        c["outputs"].append(_make_error_output(r["value"]))
+    else:
+        if not (r["value"] = None):
+            c["outputs"].append(_make_result_output(r["value"], r["n"]))
+    return r["value"]
+
+def run_all():
+    out : []
+    i : 0
+    cells : _state["nb"]["cells"]
+    while i < len(cells):
+        c : cells[i]
+        if c["cell_type"] = "code":
+            out.append(run_cell(i))
+        i : i + 1
+    return out
+
+def run(src):
+    # IPython-shaped: append a code cell and execute it.
+    i : code(src)
+    return run_cell(i)
+
+def clear_outputs():
+    for c in _state["nb"]["cells"]:
+        if c["cell_type"] = "code":
+            c["outputs"] : []
+            c["execution_count"] : None
+
+def clear_history():
+    _state["In"] : [""]
+    _state["Out"] : [None]
+    _state["exec_count"] : 0
+
+def _normalize_cell(raw):
+    if type(raw) != "dict":
+        return None
+    ct : "code"
+    if "cell_type" in raw:
+        ct : raw["cell_type"]
+    src : ""
+    if "source" in raw:
+        src : _as_source(raw["source"])
+    if ct = "markdown":
+        return _new_md_cell(src)
+    if not (ct = "code"):
+        # raw / unknown → treat as markdown text so source is preserved
+        return _new_md_cell(src)
+    c : _new_code_cell(src)
+    if "execution_count" in raw:
+        c["execution_count"] : raw["execution_count"]
+    if "outputs" in raw:
+        if type(raw["outputs"]) = "list":
+            outs : []
+            for o in raw["outputs"]:
+                if type(o) = "dict":
+                    outs.append(o)
+            c["outputs"] : outs
+    return c
+
+def loads(s):
+    raw : json_loads(s)
+    if type(raw) = "error":
+        return raw
+    if type(raw) != "dict":
+        print("jupyter.loads: expected notebook object")
+        return None
+    nb : _empty_nb()
+    if "nbformat" in raw:
+        nb["nbformat"] : raw["nbformat"]
+    if "nbformat_minor" in raw:
+        nb["nbformat_minor"] : raw["nbformat_minor"]
+    if "metadata" in raw:
+        if type(raw["metadata"]) = "dict":
+            nb["metadata"] : raw["metadata"]
+    if "cells" in raw:
+        if type(raw["cells"]) = "list":
+            for rc in raw["cells"]:
+                c : _normalize_cell(rc)
+                if not (c = None):
+                    nb["cells"].append(c)
+    _state["nb"] : nb
+    _state["In"] : [""]
+    _state["Out"] : [None]
+    _state["exec_count"] : 0
+    return _state["nb"]
+
+def dumps():
+    return json_dumps(_state["nb"])
+
+def load(path):
+    raw : json_load(path)
+    if type(raw) = "error":
+        return raw
+    if type(raw) != "dict":
+        print("jupyter.load: expected notebook object")
+        return None
+    return loads(json_dumps(raw))
+
+def save(path):
+    return json_dump(_state["nb"], path)
+
+def _wrap_line(s, max_w):
+    # gfx font is ~6px/char at scale 1; clip long lines (ASCII ellipsis).
+    if max_w < 8:
+        max_w : 8
+    if len(s) <= max_w:
+        return s
+    return s[0:max_w - 3] + "..."
+
+def _out_plain(o):
+    if not ("data" in o):
+        return ""
+    data : o["data"]
+    if type(data) != "dict":
+        return ""
+    if "text/plain" in data:
+        return str(data["text/plain"])
+    return ""
+
+def _cell_lines(c):
+    lines : []
+    src : _as_source(c["source"])
+    if c["cell_type"] = "markdown":
+        lines.append("md| " + _wrap_line(src, 100))
+        return lines
+    n : c["execution_count"]
+    prefix : "In[ ]:"
+    if not (n = None):
+        prefix : "In[" + str(n) + "]:"
+    lines.append(prefix + " " + _wrap_line(src, 90))
+    if "outputs" in c:
+        for o in c["outputs"]:
+            if type(o) = "dict":
+                ot : ""
+                if "output_type" in o:
+                    ot : o["output_type"]
+                if ot = "error":
+                    ev : ""
+                    if "evalue" in o:
+                        ev : str(o["evalue"])
+                    lines.append("Err: " + _wrap_line(ev, 100))
+                if ot = "execute_result":
+                    plain : _out_plain(o)
+                    en : ""
+                    if "execution_count" in o:
+                        en : str(o["execution_count"])
+                    lines.append("Out[" + en + "]: " + _wrap_line(plain, 90))
+                if ot = "stream":
+                    txt : ""
+                    if "text" in o:
+                        txt : _as_source(o["text"])
+                    lines.append(_wrap_line(txt, 100))
+    return lines
+
+def draw():
+    bg : 0x0a0a12
+    fg : 0xe8e8f0
+    muted : 0x8899aa
+    accent : 0x1f77b4
+    err_c : 0xd62728
+    gfx.clear(bg)
+    title : "jupyter - " + str(ncells()) + " cells"
+    gfx.text(12, 10, title, accent, 2)
+    y : 40
+    i : 0
+    cells : _state["nb"]["cells"]
+    while i < len(cells):
+        if y > 520:
+            gfx.text(12, y, "...", muted, 1)
+            break
+        c : cells[i]
+        clipped : 0
+        for line in _cell_lines(c):
+            col : fg
+            if len(line) >= 3:
+                if line[0:3] = "md|":
+                    col : muted
+                if line[0:3] = "Err":
+                    col : err_c
+                if line[0:3] = "Out":
+                    col : accent
+            gfx.text(12, y, _wrap_line(line, 150), col, 1)
+            y : y + 14
+            if y > 520:
+                clipped : 1
+                break
+        if clipped:
+            gfx.text(12, y, "...", muted, 1)
+            break
+        y : y + 8
+        i : i + 1
+    gfx.tick()
+
+def show():
+    if getenv("SHAKTI_GFX_SKIP") = "1":
+        print("jupyter: show skipped (SHAKTI_GFX_SKIP=1)")
+        return
+    if not gfx.available():
+        print("jupyter: gfx not available")
+        return
+    r : gfx.open("jupyter")
+    if type(r) = "error":
+        print("jupyter: cannot open window:", r)
+        return
+    draw()
+    while gfx.alive():
+        gfx.tick()
+    gfx.close()
+
+def close():
+    if gfx.available():
+        if gfx.alive():
+            gfx.close()
