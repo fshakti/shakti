@@ -82,7 +82,7 @@ make test-pong    # pong_test.ie + pong_spell_test.ie
 make bench-pong   # pong_bench.ie (physics / frame / proj / AI)
 ```
 
-Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pyplot_demo.ie`, `examples/jupyter_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`, `examples/infinibattle/`.  
+Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pyplot_demo.ie`, `examples/jupyter_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`.  
 Merged copy-paste sections also live in [`example.ie`](example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …). Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
 
 ## test & bench (local tree)

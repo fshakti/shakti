@@ -232,7 +232,6 @@ print(roster)
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti example.ie  # section: gfx_demo.ie
 # Also: examples/gfx_demo.ie, examples/gfx_demo_timed.ie, examples/gfx_movie.ie
-# Game (local): examples/infinibattle/ — make gfx-build && make duel
 
 import gfx
 
