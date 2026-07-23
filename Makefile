@@ -133,6 +133,7 @@ SHAKTI_SYNTH ?= 1
 SHAKTI_GFX ?= 1
 SHAKTI_SONICPI ?= 1
 SHAKTI_DSP ?= 1
+SHAKTI_STEM ?= 1
 SHAKTI_PDF ?= 1
 SHAKTI_MIDI ?= 1
 SHAKTI_IEFS ?= 1
@@ -151,6 +152,10 @@ endif
 
 ifeq ($(SHAKTI_DSP),1)
   CFLAGS += -DSHAKTI_HAVE_DSP=1
+endif
+
+ifeq ($(SHAKTI_STEM),1)
+  CFLAGS += -DSHAKTI_HAVE_STEM=1
 endif
 
 ifeq ($(SHAKTI_PDF),1)
@@ -268,6 +273,11 @@ dsp.o: src/dsp.c src/dsp.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/dsp.c
 endif
 
+ifeq ($(SHAKTI_STEM),1)
+stem.o: src/stem.c src/stem.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/stem.c
+endif
+
 ifeq ($(SHAKTI_PDF),1)
 pdf.o: src/pdf.c src/pdf.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/pdf.c
@@ -309,15 +319,16 @@ GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX)))
 GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_x11.o)
 SONICPI_OBJ := $(if $(filter 1,$(SHAKTI_SONICPI)),sonicpi.o)
 DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),dsp.o)
+STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),stem.o)
 PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),pdf.o)
 MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),midi.o)
 IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o)
 
-shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/shakti_c2s_embed.h src/shakti_cs2s_embed.h src/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
+shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/shakti_c2s_embed.h src/shakti_cs2s_embed.h src/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
 SHAKTI_TESTS := $(wildcard tests/*.ie)
@@ -348,7 +359,7 @@ bench-pong: shakti
 	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_bench.ie
 
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o pdf.o midi.o iefs_io.o iefs_format.o shakti_jni.o *.tmp *.plist
+	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o stem.o pdf.o midi.o iefs_io.o iefs_format.o shakti_jni.o *.tmp *.plist
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
 	rm -rf build/ shakti/ *.dSYM shakti.zip $(BUILD)/analyze
 

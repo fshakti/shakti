@@ -138,6 +138,18 @@ extern V *bi_dsp_degree_freq(V**,in);
 extern V *bi_dsp_et_cents(V**,in);
 extern V *bi_dsp_et_delta(V**,in);
 #endif
+#ifdef SHAKTI_HAVE_STEM
+extern V *bi_stem_open(V**,in);
+extern V *bi_stem_close(V**,in);
+extern V *bi_stem_alive(V**,in);
+extern V *bi_stem_process(V**,in);
+extern V *bi_stem_set_gains(V**,in);
+extern V *bi_stem_gains(V**,in);
+extern V *bi_stem_latency_ms(V**,in);
+extern V *bi_stem_mix(V**,in);
+extern V *bi_stem_separate_file(V**,in);
+extern V *bi_stem_info(V**,in);
+#endif
 #ifdef SHAKTI_HAVE_PDF
 extern V *bi_pdf_create(V**,in);
 extern V *bi_pdf_add_page(V**,in);
@@ -262,6 +274,8 @@ static const char *BUILTINS[] = {
     "sonicpi_bpm","sonicpi_configure","sonicpi_play","sonicpi_send","sonicpi_stop","sonicpi_synth",
     "dsp_ratio_freq","dsp_ratio_cents","dsp_ratio_reduce","dsp_perfect7",
     "dsp_degree_freq","dsp_et_cents","dsp_et_delta",
+    "stem_open","stem_close","stem_alive","stem_process","stem_set_gains","stem_gains",
+    "stem_latency_ms","stem_mix","stem_separate_file","stem_info",
     "pdf_create","pdf_add_page","pdf_text_at","pdf_save","pdf_open","pdf_page_count","pdf_info","pdf_text","pdf_close",
     "midi_open","midi_close","midi_alive","midi_backend","midi_list","midi_connect","midi_disconnect",
     "midi_note_on","midi_note_off","midi_cc","midi_program","midi_raw","midi_poll",
@@ -1802,6 +1816,10 @@ BI0(sonicpi_stop) BI0(sonicpi_synth)
 BI0(dsp_ratio_freq) BI0(dsp_ratio_cents) BI0(dsp_ratio_reduce) BI0(dsp_perfect7)
 BI0(dsp_degree_freq) BI0(dsp_et_cents) BI0(dsp_et_delta)
 #endif
+#ifdef SHAKTI_HAVE_STEM
+BI0(stem_open) BI0(stem_close) BI0(stem_alive) BI0(stem_process) BI0(stem_set_gains)
+BI0(stem_gains) BI0(stem_latency_ms) BI0(stem_mix) BI0(stem_separate_file) BI0(stem_info)
+#endif
 #ifdef SHAKTI_HAVE_PDF
 BI0(pdf_create) BI0(pdf_add_page) BI0(pdf_text_at) BI0(pdf_save) BI0(pdf_open)
 BI0(pdf_page_count) BI0(pdf_info) BI0(pdf_text) BI0(pdf_close)
@@ -2045,6 +2063,18 @@ static const BiEntry bi_tab[] = {
     {"sorted", bi_w_sorted},
     {"sqrt", bi_w_sqrt},
     {"stat", bi_w_stat},
+#ifdef SHAKTI_HAVE_STEM
+    {"stem_alive", bi_w_stem_alive},
+    {"stem_close", bi_w_stem_close},
+    {"stem_gains", bi_w_stem_gains},
+    {"stem_info", bi_w_stem_info},
+    {"stem_latency_ms", bi_w_stem_latency_ms},
+    {"stem_mix", bi_w_stem_mix},
+    {"stem_open", bi_w_stem_open},
+    {"stem_process", bi_w_stem_process},
+    {"stem_separate_file", bi_w_stem_separate_file},
+    {"stem_set_gains", bi_w_stem_set_gains},
+#endif
     {"str", bi_w_str},
     {"sum", bi_w_sum},
 #ifdef SHAKTI_HAVE_SYNTH

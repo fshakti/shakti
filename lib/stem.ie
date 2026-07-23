@@ -1,0 +1,40 @@
+# stem — streaming 4-stem separator (drums / bass / vocals / other)
+# Requires shakti built with SHAKTI_STEM=1 (default).
+#
+#   import stem
+#   stem.open(44100, 256)
+#   out : stem.process(block)   # dict of fvecs
+#   stem.set_gains(1, 1, 0, 1)  # mute vocals
+#   mix : stem.mix(out)
+
+def open(sr:44100, block:256):
+    return stem_open(sr, block)
+
+def close():
+    return stem_close()
+
+def alive():
+    return stem_alive()
+
+def process(samples):
+    return stem_process(samples)
+
+def set_gains(drums, bass, vocals, other):
+    return stem_set_gains(drums, bass, vocals, other)
+
+def gains():
+    return stem_gains()
+
+def latency_ms():
+    return stem_latency_ms()
+
+def mix(stems):
+    return stem_mix(stems)
+
+def separate_file(path, outdir:""):
+    if outdir:
+        return stem_separate_file(path, outdir)
+    return stem_separate_file(path)
+
+def info():
+    return stem_info()
