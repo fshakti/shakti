@@ -21,6 +21,7 @@
 - [REST module](#rest-module)
 - [`synth` module](#synth-module)
 - [`dsp` module](#dsp-module)
+- [`stem` module](#stem-module)
 - [`sonicpi` module](#sonicpi-module)
 - [`pdf` module](#pdf-module)
 - [`midi` module](#midi-module)
@@ -62,6 +63,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
 | `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers |
+| `import stem` | `examples/stem_demo.ie` | Streaming 4-stem separator |
 | `import sonicpi` | `sonicpi_demo.ie` / `examples/sonicpi_demo.ie` | Drive Sonic Pi over OSC |
 | `import pdf` | `pdf_demo.ie` / `examples/pdf_smoke.ie` | PDF 1.4 write/read |
 | `import midi` | `midi_demo.ie` / `examples/midi_demo.ie` | ALSA / CoreMIDI I/O |
@@ -96,6 +98,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `input` | [input module](#input-module) |
 | `synth` | [synth module](#synth-module) |
 | `dsp` | [dsp module](#dsp-module) |
+| `stem` | [stem module](#stem-module) |
 | `sonicpi` | [sonicpi module](#sonicpi-module) |
 | `pdf` | [pdf module](#pdf-module) |
 | `midi` | [midi module](#midi-module) |
@@ -1505,6 +1508,55 @@ Disable at build: `SHAKTI_DSP=0 make prod`.
 
 ---
 
+# `stem` module
+
+Streaming 4-stem separator (drums / bass / vocals / other) via STFT + HPSS + band soft-masks. Built by default (`SHAKTI_STEM=1`). Algorithmic look-ahead is about **64–100 ms** (e.g. ~63.9 ms at 44.1 kHz with `n_fft=1024`, `hop=256`, HPSS window 17).
+
+Cross-engine benches (Demucs OSS, optional LALAL.AI proprietary API) live in the sibling [`../stem`](../stem) workspace.
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+./shakti examples/stem_demo.ie
+```
+
+## API
+
+| Call | Role |
+|------|------|
+| `stem.open(sr, block)` | Init streaming engine |
+| `stem.process(samples)` | Feed fvec/list → dict of stem fvecs |
+| `stem.set_gains(d, b, v, o)` | Mute/solo gains (applied on emit) |
+| `stem.gains()` | Current gains dict |
+| `stem.mix(stems)` | Sum stem dict → fvec |
+| `stem.latency_ms()` | Algorithmic latency |
+| `stem.info()` | `n_fft` / `hop` / `hpss_len` / latency |
+| `stem.separate_file(path, outdir)` | Offline file split (same engine) |
+| `stem.close()` / `stem.alive()` | Lifecycle |
+
+## Example
+
+```ie
+import stem
+
+stem.open(44100, 256)
+print(stem.latency_ms())
+out : stem.process(block)
+stem.set_gains(1, 1, 0, 1)   # mute vocals
+mix : stem.mix(out)
+stem.close()
+```
+
+## Tests and benchmarks
+
+```bash
+make -f Makefile.local test-stem
+make -f Makefile.local bench-stem
+```
+
+Disable at build: `SHAKTI_STEM=0 make prod`.
+
+---
+
 # `sonicpi` module
 
 OSC bridge to [Sonic Pi](https://sonic-pi.net/) for live-coded music from Shakti scripts. Built by default (`SHAKTI_SONICPI=1`).
@@ -1750,7 +1802,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it.
 
-Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
+Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_STEM=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 
 
 ## Platform SDKs
