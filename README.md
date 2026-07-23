@@ -38,7 +38,7 @@ export SHAKTI_LIB=$PWD/lib
 `make prod-speed` enables native CPU tuning; `make prod-size` optimizes for size.
 `make check-deps` verifies Homebrew packages on macOS.
 
-Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
+Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_STEM`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
 
 ## run
 
@@ -69,6 +69,7 @@ CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger
 | `jupyter` | Notebook / IPython-shaped | [doc](doc.md#jupyter-module) |
 | `synth` | Softsynth UI | [doc](doc.md#synth-module) |
 | `dsp` | Just intonation | [doc](doc.md#dsp-module) |
+| `stem` | Streaming 4-stem separator | [doc](doc.md#stem-module) |
 | `sonicpi` | Sonic Pi OSC | [doc](doc.md#sonicpi-module) |
 | `pdf` | PDF 1.4 R/W | [doc](doc.md#pdf-module) |
 | `midi` | ALSA / CoreMIDI | [doc](doc.md#midi-module) |
@@ -91,7 +92,7 @@ When `tests/`, `benchmarks/`, and `Makefile.local` are present:
 
 ```bash
 make -f Makefile.local test
-make -f Makefile.local test-modules   # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter
+make -f Makefile.local test-modules   # dsp, stem, pdf, midi, iefs, sonicpi, pyplot, jupyter
 make -f Makefile.local bench-modules  # focused module benches
 make -f Makefile.local bench          # full suite vs baselines
 ```
