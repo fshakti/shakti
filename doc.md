@@ -35,9 +35,13 @@
 
 Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally (that tree is workspace-local / not always published).
 
+**Do not run `example.ie` as a single program.** It concatenates interactive demos. After the early non-GUI sections it reaches `gfx_demo` / `synth_*` / `input` event loops (`while gfx.alive(): gfx.tick()` and similar). `tick` does not sleep, so an unattended run busy-waits at ~100% CPU until the window is closed (or forever if no display interaction). Copy one section into its own file, or run a standalone under `examples/`.
+
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: <name>.ie
+# Good: one demo
+./shakti examples/gfx_demo.ie
+# Or paste a single section from example.ie into /tmp/demo.ie and run that
 ```
 
 Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`.
@@ -771,7 +775,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: sql_demo.ie
+# copy sql_demo.ie section from example.ie, or: ./shakti examples/sql_demo.ie  # if present
 ```
 
 ## Example
@@ -820,7 +824,7 @@ Run from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: graph_demo.ie
+# copy graph_demo.ie section from example.ie
 ```
 
 ## Example
@@ -892,12 +896,15 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: gfx_demo.ie
-# or: ./shakti examples/gfx_demo.ie
+./shakti examples/gfx_demo.ie
+# or copy the gfx_demo.ie section from example.ie into its own file
 ```
 
 Linux needs `libx11-dev`. Disable at build time with `SHAKTI_GFX=0 make prod`.
 
+`gfx.tick()` polls events and presents if dirty; it does **not** sleep. A
+`while gfx.alive(): gfx.tick()` loop is a busy-wait until the window is closed —
+fine for interactive demos, not for unattended scripts.
 ## Example
 
 `gfx_demo.ie`:
@@ -940,7 +947,7 @@ Module `lib/gfx.ie`.
 | `gfx.close()` | Close the window |
 | `gfx.alive()` | `1` while the window is open |
 | `gfx.available()` | `1` when built with a GUI backend |
-| `gfx.tick()` | Poll events and present the framebuffer if dirty |
+| `gfx.tick()` | Poll events and present if dirty (no sleep; event loops busy-wait) |
 | `gfx.sync_keys()` | Refresh GUI-owned key state into the input hub |
 | `gfx.clear(color)` | Fill the full design buffer with `0xRRGGBB` |
 | `gfx.fill_rect(x, y, w, h, color)` | Filled rectangle |
@@ -1098,7 +1105,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: input_demo.ie
+# copy input_demo.ie section from example.ie
 ```
 
 Synth + keyboard jam: `synth_input.ie` (`input_set_own_gui(1)` routes window keys to the hub).
@@ -1351,7 +1358,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: synth_demo.ie
+# copy synth_demo.ie section from example.ie (interactive; busy-waits while alive)
 ```
 
 ## Example
@@ -1455,7 +1462,7 @@ Just-intonation / k-scale ratio primitives. Built by default (`SHAKTI_DSP=1`).
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: dsp_demo.ie
+# copy dsp_demo.ie section from example.ie
 ```
 
 ## Perfect 7 ratio set
@@ -1563,7 +1570,7 @@ OSC bridge to [Sonic Pi](https://sonic-pi.net/) for live-coded music from Shakti
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: sonicpi_demo.ie
+./shakti examples/sonicpi_demo.ie  # or copy section from example.ie
 # or: ./shakti examples/sonicpi_demo.ie
 ```
 
@@ -1621,7 +1628,7 @@ From-scratch PDF 1.4 reader/writer (`src/pdf.c`) — no MuPDF/Poppler/PDFium. Bu
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: pdf_demo.ie
+./shakti examples/pdf_smoke.ie  # or copy pdf_demo.ie section from example.ie
 # or: ./shakti examples/pdf_smoke.ie
 ```
 
@@ -1713,7 +1720,7 @@ Portable durable save/load for Shakti values (`.iefs`). Built by default (`SHAKT
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: iefs_demo.ie
+# copy iefs_demo.ie section from example.ie
 ```
 
 ```ie
@@ -1749,7 +1756,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti example.ie  # section: talk_demo.ie
+# copy talk_demo.ie section from example.ie
 ```
 
 ## Example

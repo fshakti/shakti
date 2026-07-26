@@ -11,10 +11,10 @@ static void xml_start(void*ud,const char*name,const char**atts){
  for(int i=0;atts&&atts[i];i+=2){
   if(!strcmp(atts[i],"id"))idv=atts[i+1]?atts[i+1]:"";
   if(!strcmp(atts[i],"name"))nm=atts[i+1]?atts[i+1]:"";}
- v_list_append(c->tag,v_str(name));
- v_list_append(c->id,v_str(idv));
- v_list_append(c->name,v_str(nm));
- v_list_append(c->text,v_str(""));}
+ v_list_append_own(c->tag,v_str(name));
+ v_list_append_own(c->id,v_str(idv));
+ v_list_append_own(c->name,v_str(nm));
+ v_list_append_own(c->text,v_str(""));}
 static void xml_ch(void*ud,const XML_Char*s,int len){
  struct xml_cb*c=(struct xml_cb*)ud;
  if(c->text->n==0)return;

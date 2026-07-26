@@ -741,7 +741,7 @@ V *bi_ipc_poll(V **a, int n) {
         if (s->kind == IPC_KIND_RDMA_CONN) {
             if (ipc_rdma_has_message(s->rdma)) {
                 V *out = v_list(0);
-                v_list_append(out, v_int(h));
+                v_list_append_own(out, v_int(h));
                 return out;
             }
             continue;
@@ -771,11 +771,11 @@ V *bi_ipc_poll(V **a, int n) {
                 if (ipc_handle_from_elem(handles, j, &rh) != 0) continue;
                 IpcHandle *s = ipc_slot(rh);
                 if (s && s->kind == IPC_KIND_RDMA_CONN && ipc_rdma_has_message(s->rdma))
-                    v_list_append(out, v_int(rh));
+                    v_list_append_own(out, v_int(rh));
             }
 #endif
         } else {
-            v_list_append(out, v_int(h));
+            v_list_append_own(out, v_int(h));
         }
     }
     return out;

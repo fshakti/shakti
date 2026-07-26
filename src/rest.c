@@ -55,6 +55,14 @@ static int rest_make_temp(char *tmpl) {
     return 0;
 }
 
+static void rest_unlink_temps(void) {
+    if (!g_rest_temps_ok) return;
+    unlink(g_rest_hdr_path);
+    unlink(g_rest_body_path);
+    unlink(g_rest_code_path);
+    unlink(g_rest_data_path);
+}
+
 static void rest_init(void) {
     if (g_rest_inited) return;
     g_rest_inited = 1;
@@ -64,8 +72,10 @@ static void rest_init(void) {
     if (rest_make_temp(g_rest_hdr_path) == 0 &&
         rest_make_temp(g_rest_body_path) == 0 &&
         rest_make_temp(g_rest_code_path) == 0 &&
-        rest_make_temp(g_rest_data_path) == 0)
+        rest_make_temp(g_rest_data_path) == 0) {
         g_rest_temps_ok = 1;
+        atexit(rest_unlink_temps);
+    }
 }
 
 /* Reject request-splitting control characters (CR/LF) in values that end up in
@@ -142,15 +152,14 @@ static V *body_value(const char *raw, size_t len) {
 }
 
 static V *make_response(int status, const char *raw_body, size_t body_len, V *headers) {
-    V *resp = v_dict(v_list(0), v_list(0));
-    v_dict_set(resp, "status", v_int(status));
+    V *resp = v_dict_empty();
+    v_dict_put(resp, "status", v_int(status));
     V *body = body_value(raw_body, body_len);
     if (body->t == T_ERR) {
         v_free(resp);
         return body;
     }
-    v_dict_set(resp, "body", body);
-    v_free(body);
+    v_dict_put(resp, "body", body);
     /* Never copy from a NULL source: if raw_body is NULL, force length 0 so a
      * nonzero body_len can't over-read the "" literal. */
     size_t copy_len = raw_body ? body_len : 0;
@@ -163,16 +172,14 @@ static V *make_response(int status, const char *raw_body, size_t body_len, V *he
     raw_copy[copy_len] = 0;
     V *raw = v_str(raw_copy);
     free(raw_copy);
-    v_dict_set(resp, "raw", raw);
-    v_free(raw);
-    if (!headers) headers = v_dict(v_list(0), v_list(0));
-    v_dict_set(resp, "headers", v_ref(headers));
-    v_free(headers);
+    v_dict_put(resp, "raw", raw);
+    if (!headers) headers = v_dict_empty();
+    v_dict_put(resp, "headers", headers);
     return resp;
 }
 
 static V *parse_curl_headers(const char *path) {
-    V *hdrs = v_dict(v_list(0), v_list(0));
+    V *hdrs = v_dict_empty();
     char *text = read_all_file(path, NULL, REST_MAX_HDR);
     if (!text) return hdrs;
     char *line = text;
@@ -198,7 +205,7 @@ static V *parse_curl_headers(const char *path) {
             char *key = line;
             char *val = colon + 1;
             while (*val == ' ' || *val == '\t') val++;
-            v_dict_set(hdrs, key, v_str(val));
+            v_dict_put(hdrs, key, v_str(val));
         }
         line = eol ? eol + 1 : NULL;
     }
@@ -480,7 +487,7 @@ static V *rest_do_read(int conn_h) {
     if (sscanf(line, "%31s %4095s %31s", method, path, version) < 2)
         return v_err("rest_read: bad request line");
 
-    V *hdrs = v_dict(v_list(0), v_list(0));
+    V *hdrs = v_dict_empty();
     size_t hdr_len = 0;
     char hdr_block[REST_MAX_HDR];
     hdr_block[0] = 0;
@@ -508,7 +515,7 @@ static V *rest_do_read(int conn_h) {
             *colon = 0;
             char *val = colon + 1;
             while (*val == ' ' || *val == '\t') val++;
-            v_dict_set(hdrs, line, v_str(val));
+            v_dict_put(hdrs, line, v_str(val));
         }
     }
 
@@ -540,13 +547,12 @@ static V *rest_do_read(int conn_h) {
     }
     body[content_len] = 0;
 
-    V *req = v_dict(v_list(0), v_list(0));
-    v_dict_set(req, "method", v_str(method));
-    v_dict_set(req, "path", v_str(path));
-    v_dict_set(req, "body", v_str(body));
-    v_dict_set(req, "headers", v_ref(hdrs));
+    V *req = v_dict_empty();
+    v_dict_put(req, "method", v_str(method));
+    v_dict_put(req, "path", v_str(path));
+    v_dict_put(req, "body", v_str(body));
+    v_dict_put(req, "headers", hdrs);
     free(body);
-    v_free(hdrs);
     return req;
 }
 

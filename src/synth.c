@@ -1382,6 +1382,7 @@ static int synth_x11_init(char *err, size_t cap) {
     {
         if (synth_core_fb_design_init() != 0 || synth_core_fb_resize(DESIGN_W, DESIGN_H) != 0) {
             snprintf(err, cap, "synth_open: framebuffer init failed");
+            synth_platform_shutdown();
             return -1;
         }
     }
@@ -1419,6 +1420,8 @@ static int synth_alsa_init(char *err, size_t cap) {
                             1, 500000);
     if (rc < 0) {
         snprintf(err, cap, "synth_open: ALSA params %s", snd_strerror(rc));
+        snd_pcm_close(g.pcm);
+        g.pcm = NULL;
         return -1;
     }
     snd_pcm_prepare(g.pcm);
@@ -1551,6 +1554,11 @@ int synth_audio_start(char *err, size_t cap) {
     g.audio_run = 1;
     if (pthread_create(&g.audio_tid, NULL, synth_audio_loop, NULL) != 0) {
         snprintf(err, cap, "synth_open: pthread_create failed");
+        g.audio_run = 0;
+        if (g.pcm) {
+            snd_pcm_close(g.pcm);
+            g.pcm = NULL;
+        }
         return -1;
     }
     return 0;
@@ -1616,11 +1624,15 @@ int synth_open(char *err, size_t err_cap) {
     if (headless) {
         if (synth_core_fb_design_init() != 0) {
             if (err) snprintf(err, err_cap, "synth_open: fb init failed");
+            synth_shutdown();
             return -1;
         }
         synth_core_fb_resize(DESIGN_W, DESIGN_H);
     } else {
-        P(synth_platform_init(err, err_cap) != 0,-1)
+        if (synth_platform_init(err, err_cap) != 0) {
+            synth_shutdown();
+            return -1;
+        }
         if (synth_audio_start(err, err_cap) != 0) {
             synth_shutdown();
             return -1;
