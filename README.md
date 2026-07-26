@@ -58,6 +58,13 @@ C / C# / Java converters reject unterminated strings and `/* ... */` block
 comments with source-line diagnostics instead of emitting partial programs.
 CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger inputs.
 
+**`example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
+It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end
+hits an open-window busy loop (`while gfx.alive(): gfx.tick()` with no sleep) and will
+spin until the window is closed. Copy one section into its own `.ie`, or use
+`examples/gfx_demo.ie` / other standalone demos under `examples/` when present.
+For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where demos support it.
+
 ## modules
 
 | `import` | Role | Doc |
@@ -84,7 +91,7 @@ make bench-pong   # pong_bench.ie (physics / frame / proj / AI)
 ```
 
 Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pyplot_demo.ie`, `examples/jupyter_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`.  
-Merged copy-paste sections also live in [`example.ie`](example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …). Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
+Merged copy-paste sections also live in [`example.ie`](example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
 
 ## test & bench (local tree)
 

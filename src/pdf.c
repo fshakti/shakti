@@ -444,13 +444,16 @@ static PdfObj *pp_parse_dict(PdfParse *p) {
         PdfObj *val = pp_parse_obj(p);
         if (!val) { po_free(key); po_free(o); return NULL; }
         char **nk = realloc(o->keys, (size_t)(o->nkeys + 1) * sizeof(char *));
-        PdfObj **nv = realloc(o->vals, (size_t)(o->nkeys + 1) * sizeof(PdfObj *));
-        if (!nk || !nv) {
-            free(nk); free(nv);
+        if (!nk) {
             po_free(key); po_free(val); po_free(o);
             return NULL;
         }
         o->keys = nk;
+        PdfObj **nv = realloc(o->vals, (size_t)(o->nkeys + 1) * sizeof(PdfObj *));
+        if (!nv) {
+            po_free(key); po_free(val); po_free(o);
+            return NULL;
+        }
         o->vals = nv;
         o->keys[o->nkeys] = key->s;
         key->s = NULL;
@@ -1167,7 +1170,7 @@ V *bi_pdf_info(V **a, int n) {
     for (int i = 0; fields[i]; i++) {
         PdfObj *v = dict_get(info, fields[i]);
         if (v && v->t == PO_STRING && v->s)
-            v_dict_set(res, fields[i], v_str(v->s));
+            v_dict_put(res, fields[i], v_str(v->s));
     }
     po_free(info);
     return res;

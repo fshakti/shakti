@@ -314,7 +314,7 @@ static double stem_latency_ms_calc(int sr) {
 
 static V *stem_dict_from_outs(StemState *st, int n_out) {
     static const char *names[STEM_N] = {"drums", "bass", "vocals", "other"};
-    V *d = v_dict(v_list(0), v_list(0));
+    V *d = v_dict_empty();
     int s, i;
     for (s = 0; s < STEM_N; s++) {
         V *fv = v_fvec(n_out);
@@ -482,16 +482,16 @@ V *bi_stem_info(V **a, int n) {
     V *d;
     (void)a;
     (void)n;
-    d = v_dict(v_list(0), v_list(0));
-    v_dict_set(d, "n_fft", v_int(STEM_NFFT));
-    v_dict_set(d, "hop", v_int(STEM_HOP));
-    v_dict_set(d, "hpss_len", v_int(STEM_HPSS_LEN));
-    v_dict_set(d, "latency_samples", v_int((int)stem_latency_samples(g_stem.open ? g_stem.sr : 44100)));
-    v_dict_set(d, "latency_ms", v_float(stem_latency_ms_calc(g_stem.open ? g_stem.sr : 44100)));
-    v_dict_set(d, "open", v_bool(g_stem.open));
+    d = v_dict_empty();
+    v_dict_put(d, "n_fft", v_int(STEM_NFFT));
+    v_dict_put(d, "hop", v_int(STEM_HOP));
+    v_dict_put(d, "hpss_len", v_int(STEM_HPSS_LEN));
+    v_dict_put(d, "latency_samples", v_int((int)stem_latency_samples(g_stem.open ? g_stem.sr : 44100)));
+    v_dict_put(d, "latency_ms", v_float(stem_latency_ms_calc(g_stem.open ? g_stem.sr : 44100)));
+    v_dict_put(d, "open", v_bool(g_stem.open));
     if (g_stem.open) {
-        v_dict_set(d, "sr", v_int(g_stem.sr));
-        v_dict_set(d, "block", v_int(g_stem.block));
+        v_dict_put(d, "sr", v_int(g_stem.sr));
+        v_dict_put(d, "block", v_int(g_stem.block));
     }
     return d;
 }
@@ -513,11 +513,11 @@ V *bi_stem_gains(V **a, int n) {
     (void)a;
     (void)n;
     if (!g_stem.open) return v_err("stem_gains: not open");
-    d = v_dict(v_list(0), v_list(0));
-    v_dict_set(d, "drums", v_float(g_stem.gains[0]));
-    v_dict_set(d, "bass", v_float(g_stem.gains[1]));
-    v_dict_set(d, "vocals", v_float(g_stem.gains[2]));
-    v_dict_set(d, "other", v_float(g_stem.gains[3]));
+    d = v_dict_empty();
+    v_dict_put(d, "drums", v_float(g_stem.gains[0]));
+    v_dict_put(d, "bass", v_float(g_stem.gains[1]));
+    v_dict_put(d, "vocals", v_float(g_stem.gains[2]));
+    v_dict_put(d, "other", v_float(g_stem.gains[3]));
     return d;
 }
 
@@ -756,7 +756,7 @@ V *bi_stem_separate_file(V **a, int n) {
         }
     }
 
-    result = v_dict(v_list(0), v_list(0));
+    result = v_dict_empty();
     for (s = 0; s < STEM_N; s++) {
         V *fv = v_fvec(out_len);
         for (i = 0; i < out_len; i++) fv->F[i] = acc[s][delay + i];
@@ -764,10 +764,10 @@ V *bi_stem_separate_file(V **a, int n) {
         v_free(fv);
         free(acc[s]);
     }
-    v_dict_set(result, "sr", v_int(sr));
-    v_dict_set(result, "n", v_int(out_len));
-    v_dict_set(result, "latency_ms", v_float(stem_latency_ms_calc(sr)));
-    v_dict_set(result, "latency_samples", v_int(delay));
+    v_dict_put(result, "sr", v_int(sr));
+    v_dict_put(result, "n", v_int(out_len));
+    v_dict_put(result, "latency_ms", v_float(stem_latency_ms_calc(sr)));
+    v_dict_put(result, "latency_samples", v_int(delay));
     free(mono);
     bi_stem_close(NULL, 0);
     return result;

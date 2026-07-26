@@ -152,7 +152,7 @@ V *input_event_dict(int code, int modifiers, const char *utf8, const char *kind)
     vals->L[2] = v_str(utf8 ? utf8 : "");
     keys->L[3] = v_str("kind");
     vals->L[3] = v_str(kind ? kind : "down");
-    return v_dict(keys, vals);
+    return v_dict_own(keys, vals);
 }
 
 static V *event_to_v(const InputEvent *ev) {
@@ -238,7 +238,7 @@ V *input_get_qwerty(void) {
         n++;
     }
     keys->n = vals->n = n;
-    return v_dict(keys, vals);
+    return v_dict_own(keys, vals);
 }
 
 void input_qwerty_reload(void) { qwerty_build(); }

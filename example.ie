@@ -1,7 +1,8 @@
-# Merged Shakti examples — sections below are not meant to run as one script.
-# Copy a section or run a single demo from doc.md instructions.
-#   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie
+# Merged Shakti examples — copy/paste catalog. Do NOT run this file end-to-end:
+# later sections open gfx/synth/input loops (while …: tick() with no sleep) that
+# busy-wait at ~100% CPU until the window is closed.
+# Prefer: copy one section into its own .ie, or run examples/<name>.ie when present.
+# Headless: SHAKTI_GFX_SKIP=1 for demos that honor it. See README.md / doc.md.
 
 # =============================================================================
 # decorators.ie

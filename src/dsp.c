@@ -66,13 +66,13 @@ double dsp_et_delta_cents(int num, int den) {
 }
 
 static V *dsp_ratio_dict(int degree, int num, int den, double root_hz) {
-    V *d = v_dict(v_list(0), v_list(0));
-    v_dict_set(d, "degree", v_int(degree));
-    v_dict_set(d, "num", v_int(num));
-    v_dict_set(d, "den", v_int(den));
+    V *d = v_dict_empty();
+    v_dict_put(d, "degree", v_int(degree));
+    v_dict_put(d, "num", v_int(num));
+    v_dict_put(d, "den", v_int(den));
     if (root_hz > 0.0)
-        v_dict_set(d, "hz", v_float(dsp_ratio_freq(root_hz, num, den)));
-    v_dict_set(d, "cents", v_float(dsp_ratio_cents(num, den)));
+        v_dict_put(d, "hz", v_float(dsp_ratio_freq(root_hz, num, den)));
+    v_dict_put(d, "cents", v_float(dsp_ratio_cents(num, den)));
     return d;
 }
 

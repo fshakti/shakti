@@ -63,7 +63,7 @@ static void mput(V *d, const char *k, V *v) {
     v_free(v);
 }
 
-static V *mdict(void) { return v_dict(v_list(0), v_list(0)); }
+static V *mdict(void) { return v_dict_empty(); }
 
 static void mput_out(V *d, const char *k, const char *label, const char *value) {
     char buf[384];
