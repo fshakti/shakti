@@ -144,7 +144,7 @@ static V*tbl_filter_mask(V*tbl,V*mask){
             new_data->L[c] = v_ref(col);
         }
     }
-    return v_table(v_copy(tbl->keys), new_data);
+    return v_table_own(v_copy(tbl->keys), new_data);
 }
 static V *tbl_project_names(V *tbl, V *names) {
     if (names->t == T_STR) {
@@ -157,7 +157,7 @@ static V *tbl_project_names(V *tbl, V *names) {
         V *data = v_list(1);
         data->L[0] = tbl->vals->L[idx];
         tbl->vals->L[idx] = v_ivec(0);
-        return v_table(keys, data);
+        return v_table_own(keys, data);
     }
     if (names->t != T_LIST) {
         return v_err("select: columns must be names");
@@ -180,7 +180,7 @@ static V *tbl_project_names(V *tbl, V *names) {
         data->L[i] = tbl->vals->L[idx];
         tbl->vals->L[idx] = v_ivec(0);
     }
-    return v_table(keys, data);
+    return v_table_own(keys, data);
 }
 static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
     if (!cols || cols->t == T_NIL) {
@@ -1243,7 +1243,7 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
             }
         }
     }
-    return v_table(keys, data);
+    return v_table_own(keys, data);
 }
 static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by, V *row_mask) {
     /* row_mask: optional T_BVEC; when set, only rows with mask[r] participate (no materialize). */
@@ -1513,7 +1513,7 @@ V *table_sql_update(V *from, V *cols, V *where) {
         new_data->L[idx] = merged;
     }
     v_free(mask);
-    return v_table(v_copy(from->keys), new_data);
+    return v_table_own(v_copy(from->keys), new_data);
 }
 V *table_sql_delete(V *from, V *cols, V *where) {
     (void)cols;
@@ -1559,7 +1559,7 @@ V *table_sql_delete(V *from, V *cols, V *where) {
             empty_data->L[c] = v_ref(col);
         }
     }
-    return v_table(v_copy(from->keys), empty_data);
+    return v_table_own(v_copy(from->keys), empty_data);
 }
 static inline V*empty_column_like(V*sample){
     if(!sample)return v_list(0);
@@ -1610,7 +1610,9 @@ static V *append_cell(V *col, V *cell) {
             int cap = (int)col->_ht_cap >= (int)col->n ? (int)col->_ht_cap : (int)col->n;
             if (col->n >= cap) {
                 cap = cap ? cap * 2 : 8;
-                col->J = realloc(col->J, (size_t)cap * sizeof(int64_t));
+                int64_t *nj = realloc(col->J, (size_t)cap * sizeof(int64_t));
+                if (!nj) return v_err("insert: out of memory");
+                col->J = nj;
                 col->_ht_cap = cap;
             }
             col->J[col->n++] = val;
@@ -1637,28 +1639,30 @@ static V *append_cell(V *col, V *cell) {
         int64_t cols = mat_cols(col);
         V *out = v_imat(col->n + 1, cols);
         if (col->n > 0) memcpy(out->J, col->J, (size_t)col->n * cols * 8);
-        if (!mat_append_row(out, col, cell)) return col;
+        if (!mat_append_row(out, col, cell)) { v_free(out); return col; }
         return out;
     }
     if (col->t == T_FMAT) {
         int64_t cols = mat_cols(col);
         V *out = v_fmat(col->n + 1, cols);
         if (col->n > 0) memcpy(out->F, col->F, (size_t)col->n * cols * 8);
-        if (!mat_append_row(out, col, cell)) return col;
+        if (!mat_append_row(out, col, cell)) { v_free(out); return col; }
         return out;
     }
     if (col->t == T_BMAT) {
         int64_t cols = mat_cols(col);
         V *out = v_bmat(col->n + 1, cols);
         if (col->n > 0) memcpy(out->B, col->B, (size_t)col->n * cols);
-        if (!mat_append_row(out, col, cell)) return col;
+        if (!mat_append_row(out, col, cell)) { v_free(out); return col; }
         return out;
     }
     if (col->t == T_LIST) {
         if (col->rc == 1) {
             if (col->n >= col->_ht_cap) {
                 int cap = col->_ht_cap ? col->_ht_cap * 2 : 8;
-                col->L = realloc(col->L, (size_t)cap * sizeof(V*));
+                V **nl = realloc(col->L, (size_t)cap * sizeof(V*));
+                if (!nl) return v_err("insert: out of memory");
+                col->L = nl;
                 col->_ht_cap = cap;
             }
             if (cell->t == T_STR) {
@@ -1690,23 +1694,23 @@ V *table_sql_create_table(V *name, V *cols) {
     V *data = v_list(0);
     if (cols->t == T_DICT) {
         for (int64_t i = 0; i < cols->keys->n; i++) {
-            v_list_append(keys, v_ref(cols->keys->L[i]));
+            v_list_append(keys, cols->keys->L[i]);
             V *def = cols->vals->L[i];
             if (!def || def->t == T_NIL) {
-                v_list_append(data, v_ivec(0));
+                v_list_append_own(data, v_ivec(0));
             } else if (def->t == T_INT) {
-                v_list_append(data, v_ivec(0));
+                v_list_append_own(data, v_ivec(0));
             } else if (def->t == T_FLOAT) {
-                v_list_append(data, v_fvec(0));
+                v_list_append_own(data, v_fvec(0));
             } else if (def->t == T_STR) {
-                v_list_append(data, v_list(0));
+                v_list_append_own(data, v_list(0));
             } else if (def->t == T_LIST) {
-                v_list_append(data, v_list(0));
+                v_list_append_own(data, v_list(0));
             } else {
-                v_list_append(data, empty_column_like(def));
+                v_list_append_own(data, empty_column_like(def));
             }
         }
-        return v_table(keys, data);
+        return v_table_own(keys, data);
     }
     for (int64_t i = 0; i < cols->n; i++) {
         if (cols->L[i]->t != T_STR) {
@@ -1714,10 +1718,10 @@ V *table_sql_create_table(V *name, V *cols) {
             v_free(data);
             return v_err("create table: column names must be strings");
         }
-        v_list_append(keys, v_ref(cols->L[i]));
-        v_list_append(data, v_ivec(0));
+        v_list_append(keys, cols->L[i]);
+        v_list_append_own(data, v_ivec(0));
     }
-    return v_table(keys, data);
+    return v_table_own(keys, data);
 }
 V *table_sql_insert(V *table, V *cols, V *vals) {
     if (!table || table->t == T_ERR) {
@@ -1761,7 +1765,11 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
                 return v_errf("insert: unknown column '%s'", name);
             }
             V *col = table->vals->L[idx];
-            V *next = append_cell(col, vals->L[i]);
+            V *next = append_cell(col, vals_list->L[i]);
+            if (next && next->t == T_ERR) {
+                if (free_vals_list) v_free(vals_list);
+                return next;
+            }
             if (next != col) {
                 v_free(table->vals->L[idx]);
                 table->vals->L[idx] = next;
@@ -1786,14 +1794,19 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
             return v_errf("insert: unknown column '%s'", name);
         }
         V *col = new_data->L[idx];
-        V *next = append_cell(col, vals->L[i]);
+        V *next = append_cell(col, vals_list->L[i]);
+        if (next && next->t == T_ERR) {
+            v_free(new_data);
+            if (free_vals_list) v_free(vals_list);
+            return next;
+        }
         if (next != col) {
             v_free(new_data->L[idx]);
             new_data->L[idx] = next;
         }
     }
     if (free_vals_list) v_free(vals_list);
-    return v_table(v_copy(table->keys), new_data);
+    return v_table_own(v_copy(table->keys), new_data);
 }
 V *table_sql_join(V *left, V *right, V *on_col) {
     (void)left;

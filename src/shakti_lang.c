@@ -409,10 +409,37 @@ V *v_dict(V *keys, V *vals) {
     v->keys=v_ref(keys); v->vals=v_ref(vals);
     return v;
 }
+/* Build an empty dict with balanced refs on the temporary key/val lists. */
+V *v_dict_empty(void) {
+    V *k = v_list(0), *vl = v_list(0);
+    V *d = v_dict(k, vl);
+    v_free(k); v_free(vl);
+    return d;
+}
+/* Like v_dict, but drops the caller's refs on keys/vals (for fresh construction). */
+V *v_dict_own(V *keys, V *vals) {
+    V *d = v_dict(keys, vals);
+    v_free(keys); v_free(vals);
+    return d;
+}
 V *v_table(V *cols, V *data) {
     V *v=v_alloc(T_TABLE); v->n = (data->n>0 && data->L && data->L[0]) ? data->L[0]->n : 0;
     v->keys=v_ref(cols); v->vals=v_ref(data);
     return v;
+}
+/* Like v_table, but drops the caller's refs on cols/data (for fresh construction). */
+V *v_table_own(V *cols, V *data) {
+    V *t = v_table(cols, data);
+    v_free(cols); v_free(data);
+    return t;
+}
+void v_list_append_own(V *v, V *item) {
+    v_list_append(v, item);
+    v_free(item);
+}
+void v_dict_put(V *d, const char *key, V *val) {
+    v_dict_set(d, key, val);
+    v_free(val);
 }
 V *v_fn(V *params, V *defaults, Node *body_ast, Env *closure) {
     V *v=v_alloc(T_FN);
@@ -519,6 +546,7 @@ void v_free(V *v) {
     case T_DICT: case T_TABLE:
         free(v->_ht); v_free(v->keys); v_free(v->vals); break;
     case T_FN:
+        free(v->s); /* builtin-name wrappers (N_NAME) store strdup'd name here */
         v_free(v->params);
         if(v->defaults) v_free(v->defaults);
         if(v->closure) env_free(v->closure);
@@ -580,7 +608,7 @@ V *v_copy(V *v) {
     case T_TABLE: {
         V *kc = v_copy(v->keys);
         V *vl = v_copy(v->vals);
-        return v_table(kc, vl);
+        return v_table_own(kc, vl);
     }
     default: return v_ref(v);
     }
@@ -3437,7 +3465,11 @@ static V *table_filter(V *tbl, V *mask) {
             new_data->L[c] = v_ref(col);
         }
     }
-    return v_table(tbl->keys, new_data);
+    {
+        V *r = v_table(tbl->keys, new_data);
+        v_free(new_data);
+        return r;
+    }
 }
 static V *eval_slice(V *obj, V *start_v, V *stop_v, V *step_v) {
     int64_t len = 0;
@@ -3586,6 +3618,7 @@ static V *do_import(const char *name, Env *e) {
     Node *prog = parse(buf);
     V *r = eval(prog, mod_env);
     v_free(r);
+    node_free(prog);
     free(buf);
     V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
     i(mod_env->len,{
@@ -3679,7 +3712,7 @@ static V *eval_insert_values(Node *n, Env *e) {
     return r;
 }
 static V *eval_update_cols(Node *n, V *tbl, Env *e) {
-    P(!n || n->type == N_NONE,v_dict(v_list(0), v_list(0)))
+    P(!n || n->type == N_NONE,v_dict_empty())
     Env *inner = env_new(e);
     if(tbl && tbl->t == T_TABLE) {
         V *cn = tbl->keys, *dv = tbl->vals;
@@ -3692,8 +3725,8 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e) {
     i(nitems,{
         Node *item = items[i];
         if(item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME) {
-            v_list_append(keys, v_str(item->ch[0]->sval));
-            v_list_append(vals, eval(item->ch[1], inner));
+            v_list_append_own(keys, v_str(item->ch[0]->sval));
+            v_list_append_own(vals, eval(item->ch[1], inner));
         } else {
             env_free(inner);
             v_free(keys);
@@ -3702,10 +3735,7 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e) {
         }
     })
     env_free(inner);
-    V *r = v_dict(keys, vals);
-    v_free(keys);
-    v_free(vals);
-    return r;
+    return v_dict_own(keys, vals);
 }
 static V *eval_create_schema(Node *n, Env *e) {
     P(!n || n->type != N_LIST,v_err("create table: bad schema"))
@@ -3716,16 +3746,13 @@ static V *eval_create_schema(Node *n, Env *e) {
             v_free(keys); v_free(vals);
             return v_err("create table: bad column");
         }
-        v_list_append(keys, v_str(col->sval));
+        v_list_append_own(keys, v_str(col->sval));
         if(col->nch > 0 && col->ch[0]->type != N_NONE)
-            v_list_append(vals, eval(col->ch[0], e));
+            v_list_append_own(vals, eval(col->ch[0], e));
         else
-            v_list_append(vals, v_nil());
+            v_list_append_own(vals, v_nil());
     })
-    V *r = v_dict(keys, vals);
-    v_free(keys);
-    v_free(vals);
-    return r;
+    return v_dict_own(keys, vals);
 }
 static int select_sym_is_agg_kw(const char *s) {
     static const char *kws[] = {"count", "sum", "avg", "min", "max", NULL};
@@ -3746,7 +3773,7 @@ static void select_strlist_add_unique(V *acc, const char *s) {
             return;
         }
     }
-    v_list_append(acc, v_str(s));
+    v_list_append_own(acc, v_str(s));
 }
 static void select_collect_syms(Node *n, V *acc) {
     if (!n) {
@@ -5290,7 +5317,10 @@ V *eval(Node *n, Env *e) {
                 defaults->L[i] = v_nil();
             }
         }
-        V *fn = v_fn(params, defaults, n->ch[1], e);
+        /* Steal body so node_free(prog) won't free the fn_ast entry. */
+        Node *body = n->ch[1];
+        n->ch[1] = NULL;
+        V *fn = v_fn(params, defaults, body, e);
         env_set(e, n->sval, fn);
         v_free(params); v_free(defaults); v_free(fn);
         return v_nil();
@@ -5306,7 +5336,9 @@ V *eval(Node *n, Env *e) {
                 defaults->L[i] = v_nil();
             }
         }
-        V *fn = v_fn(params, defaults, n->ch[1], e);
+        Node *body = n->ch[1];
+        n->ch[1] = NULL;
+        V *fn = v_fn(params, defaults, body, e);
         v_free(params); v_free(defaults);
         return fn;
     }
@@ -5323,7 +5355,13 @@ V *eval(Node *n, Env *e) {
     case N_RAISE: {
         V *val = n->nch > 0 ? eval(n->ch[0], e) : v_err("Exception");
         g_error = 1;
-        g_error_val = val->t == T_ERR ? v_ref(val) : v_errf("%s", v_to_str(val));
+        if (val->t == T_ERR) {
+            g_error_val = v_ref(val);
+        } else {
+            char *s = v_to_str(val);
+            g_error_val = v_errf("%s", s ? s : "");
+            free(s);
+        }
         v_free(val);
         return v_nil();
     }
@@ -5908,6 +5946,7 @@ static void run_repl(Env *e) {
             fprintf(stderr, "Error: %s\n", result->s);
         }
         v_free(result);
+        node_free(prog);
     }
 }
 static char *read_file(const char *path) {
@@ -5967,10 +6006,12 @@ static char *shakti_transpile_embedded(const char *src_text, const char *filenam
             else
                 fprintf(stderr, "Error: failed to load embedded %s converter\n", label);
             v_free(er);
+            node_free(prog);
             env_free(mod_env);
             return NULL;
         }
         v_free(er);
+        node_free(prog);
 
         V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
         for (int i = 0; i < mod_env->len; i++) {
@@ -6134,6 +6175,7 @@ int shakti_lang_main(int argc, char **argv) {
             putchar('\n');
         }
         v_free(r);
+        node_free(prog);
         if(interactive) run_repl(global);
     } else if(i < argc) {
         strncpy(g_script_dir, argv[i], sizeof(g_script_dir)-1);
@@ -6177,6 +6219,7 @@ int shakti_lang_main(int argc, char **argv) {
         if(g_error && g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
         if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
         v_free(r);
+        node_free(prog);
         free(src);
         env_free(global);
         return script_err ? 1 : 0;

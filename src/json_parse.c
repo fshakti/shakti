@@ -100,7 +100,7 @@ static V*parse_object(const char*s,const char**end_out,int depth){
  s=skip_ws(s+1);
  V*keys=v_list(0);
  V*vals=v_list(0);
- if(*s=='}'){*end_out=s+1;return v_dict(keys,vals);}
+ if(*s=='}'){*end_out=s+1;return v_dict_own(keys,vals);}
  size_t count=0;
  for(;;){
   const char*e=NULL;
@@ -117,7 +117,7 @@ static V*parse_object(const char*s,const char**end_out,int depth){
   v_free(val);
   if(++count>SHAKTI_JSON_MAX_ELEMS){v_free(keys);v_free(vals);return v_err("json: too many object members");}
   s=skip_ws(e);
-  if(*s=='}'){*end_out=s+1;return v_dict(keys,vals);}
+  if(*s=='}'){*end_out=s+1;return v_dict_own(keys,vals);}
   Pr(*s!=',',v_free(keys);v_free(vals);v_err("json: expected , or }");)s=skip_ws(s+1);}}
 static V*parse_value(const char*s,const char**end_out,int depth){
  s=skip_ws(s);

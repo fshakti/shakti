@@ -110,7 +110,7 @@ V *bi_readlines(V **a, in) {
     while (fgets(buf, sizeof buf, f)) {
         size_t L = strlen(buf);
         W(L&&(buf[L-1]=='\n'||buf[L-1]=='\r'),buf[--L]=0)
-        v_list_append(r, v_str(buf));
+        v_list_append_own(r, v_str(buf));
     }
     fclose(f);
     return r;
@@ -162,7 +162,7 @@ V *bi_listdir(V **a, in) {
     V *r = v_list(0);
     do {
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
-        v_list_append(r, v_str(fd.cFileName));
+        v_list_append_own(r, v_str(fd.cFileName));
     } while (FindNextFileA(h, &fd));
     FindClose(h);
     return r;
@@ -174,8 +174,14 @@ V *bi_listdir(V **a, in) {
 typedef struct { char **paths; int n, cap; } WalkPaths;
 static void walk_paths_add(WalkPaths *wp, char *path) {
     if (wp->n >= wp->cap) {
-        wp->cap = wp->cap ? wp->cap * 2 : 512;
-        wp->paths = realloc(wp->paths, (size_t)wp->cap * sizeof(char*));
+        int cap = wp->cap ? wp->cap * 2 : 512;
+        char **np = realloc(wp->paths, (size_t)cap * sizeof(char*));
+        if (!np) {
+            free(path);
+            return;
+        }
+        wp->paths = np;
+        wp->cap = cap;
     }
     wp->paths[wp->n++] = path;
 }
@@ -218,8 +224,15 @@ static void walk_inner(const char *base, V *out) {
     WalkPaths wp = {0};
     walk_inner_paths(base, &wp);
     if (out->_ht_cap < (uint32_t)wp.n) {
-        out->_ht_cap = wp.n > 0 ? wp.n : 8;
-        out->L = realloc(out->L, (size_t)out->_ht_cap * sizeof(V*));
+        uint32_t cap = wp.n > 0 ? (uint32_t)wp.n : 8;
+        V **nl = realloc(out->L, (size_t)cap * sizeof(V*));
+        if (!nl) {
+            for (int i = 0; i < wp.n; i++) free(wp.paths[i]);
+            free(wp.paths);
+            return;
+        }
+        out->L = nl;
+        out->_ht_cap = cap;
     }
     for (int i = 0; i < wp.n; i++) {
         out->L[out->n++] = v_str_take(wp.paths[i]);
@@ -236,7 +249,7 @@ static void walk_inner(const char *base, V *out) {
         char path[4096];
         if (!win_join_path(base, fd.cFileName, path, sizeof path)) continue;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) walk_inner(path, out);
-        v_list_append(out, v_str(path));
+        v_list_append_own(out, v_str(path));
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
@@ -403,7 +416,7 @@ V *bi_re_findall(V **a, in) {
         char *chunk = malloc((size_t)len + 1);
         memcpy(chunk, s + off + m[0].rm_so, (size_t)len);
         chunk[len] = 0;
-        v_list_append(out, v_str(chunk));
+        v_list_append_own(out, v_str(chunk));
         free(chunk);
         off += (int)m[0].rm_eo;
         if (m[0].rm_eo == 0) break;
@@ -488,13 +501,13 @@ V *bi_re_split(V **a, in) {
             char *chunk = malloc((size_t)pre + 1);
             memcpy(chunk, s + off, (size_t)pre);
             chunk[pre] = 0;
-            v_list_append(out, v_str(chunk));
+            v_list_append_own(out, v_str(chunk));
             free(chunk);
         }
         off += (int)m[0].rm_eo;
         if (m[0].rm_eo == 0) break;
     }
-    v_list_append(out, v_str(s + off));
+    v_list_append_own(out, v_str(s + off));
     regfree(&rx);
     return out;
 }
@@ -751,7 +764,7 @@ V *bi_set(V **a, in) {
             free(y);
             if (dup) break;
         }
-        if (!dup) v_list_append(r, v_ref(a[i]));
+        if (!dup) v_list_append_own(r, v_ref(a[i]));
     }
     return r;
 }

@@ -395,11 +395,14 @@ static V *vec_reduce_sum(V *v) {
 }
 static V *vec_reduce_avg(V *v) {
     V *s = vec_reduce_sum(v);
-    P(s->t == T_ERR,s)
+    if (s->t == T_ERR) return s;
     int64_t cnt = v->t >= T_IMAT && v->t <= T_BMAT ? mat_nelem(v) : v->n;
-    P(cnt == 0,v_float(0))
-    P(s->t == T_INT,v_float((double)s->j / (double)cnt))
-    return v_float(s->f / (double)cnt);
+    if (cnt == 0) { v_free(s); return v_float(0); }
+    V *r;
+    if (s->t == T_INT) r = v_float((double)s->j / (double)cnt);
+    else r = v_float(s->f / (double)cnt);
+    v_free(s);
+    return r;
 }
 static V *vec_reduce_min(V *v) {
     if (v->t == T_IMAT) {
@@ -1531,7 +1534,7 @@ static V *bi_filter(V**a,in,Env*e){
     V*r=v_list(out);memcpy(r->L,tmp,out*sizeof(V*));free(tmp);return r;
 }
 static V *bi_append(V**a,in){P(n<2||a[0]->t!=T_LIST,v_err("append(list,val)"))
-    a[0]->L=realloc(a[0]->L,(a[0]->n+1)*sizeof(V*));a[0]->L[a[0]->n++]=v_ref(a[1]);return v_nil();}
+    v_list_append(a[0], a[1]); return v_nil();}
 static V *bi_pop(V**a,in){P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
     return a[0]->L[--a[0]->n];}
 static V *bi_keys(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->keys):v_list(0);}

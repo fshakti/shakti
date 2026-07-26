@@ -324,7 +324,11 @@ V *bi_graph_query(V **a, int n) {
         if (hn >= hcap) {
             int64_t cap = hcap ? hcap * 2 : 8;
             int64_t *nh = realloc(hits, (size_t)cap * sizeof(int64_t));
-            P(!nh, (free(cand), v_err("graph_query: out of memory")))
+            if (!nh) {
+                free(cand);
+                free(hits);
+                return v_err("graph_query: out of memory");
+            }
             hits = nh;
             hcap = cap;
         }
@@ -357,7 +361,10 @@ V *bi_graph_neighbors(V **a, int n) {
         if (hn >= hcap) {
             int64_t cap = hcap ? hcap * 2 : 8;
             int64_t *nh = realloc(hits, (size_t)cap * sizeof(int64_t));
-            P(!nh, v_err("graph_neighbors: out of memory"))
+            if (!nh) {
+                free(hits);
+                return v_err("graph_neighbors: out of memory");
+            }
             hits = nh;
             hcap = cap;
         }

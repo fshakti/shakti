@@ -114,7 +114,7 @@ static void dput(V *d, const char *k, V *v) {
 }
 
 static V *midi_ev_dict(const MidiEv *ev) {
-    V *d = v_dict(v_list(0), v_list(0));
+    V *d = v_dict_empty();
     const char *type = "raw";
     if (ev->type == MIDI_EV_NOTE_ON) type = "note_on";
     else if (ev->type == MIDI_EV_NOTE_OFF) type = "note_off";
@@ -246,7 +246,7 @@ static V *midi_alsa_list(void) {
             int port = snd_seq_port_info_get_port(pinfo);
             char id[32];
             snprintf(id, sizeof id, "%d:%d", client, port);
-            V *d = v_dict(v_list(0), v_list(0));
+            V *d = v_dict_empty();
             dput(d, "id", v_str(id));
             dput(d, "client", v_int(client));
             dput(d, "port", v_int(port));
@@ -499,7 +499,7 @@ static V *midi_cm_endpoint_dict(MIDIEndpointRef ep, const char *kind, ItemCount 
     if (name) CFRelease(name);
     char id[32];
     snprintf(id, sizeof id, "%s:%lu", kind, (unsigned long)idx);
-    V *d = v_dict(v_list(0), v_list(0));
+    V *d = v_dict_empty();
     dput(d, "id", v_str(id));
     dput(d, "name", v_str(cname));
     dput(d, "kind", v_str(kind));
