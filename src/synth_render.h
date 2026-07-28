@@ -78,13 +78,5 @@ typedef struct SynthRenderState {
 
 const char *synth_row_label(int row);
 
-#ifdef SYNTH_HAVE_GL
-int synth_gl_create_window(void *dpy, int scr, const char *title, int w, int h,
-                           unsigned long *out_win);
-void synth_gl_resize(int w, int h);
-void synth_gl_render(const SynthRenderState *s);
-void synth_gl_swap(void);
-void synth_gl_shutdown(void);
-#endif
 
 #endif

@@ -1,5 +1,6 @@
-# s2p — strict Python 3 subset to Shakti.
+# p2s — strict Python 3 subset to Shakti.
 
+import converter_shared
 import transpile_cli
 
 python_reserved : ["def", "return", "if", "elif", "else", "while", "for", "in",
@@ -10,24 +11,22 @@ shakti_reserved : ["select", "update", "delete", "by", "from", "where",
                    "create", "insert", "into", "values", "join", "on"]
 
 def tok(kind, text, val, line, col):
-    return {"kind":kind, "text":text, "val":val, "line":line, "col":col}
+    return converter_shared.tok(kind, text, val, line, col)
 
 def node(t, x):
-    return {"t":t, "line":x["line"], "col":x["col"]}
+    return converter_shared.node(t, x)
 
 def starts(s, p):
-    if len(s) < len(p):
-        return False
-    return s[0:len(p)] = p
+    return converter_shared.starts(s, p)
 
 def is_alpha(c):
-    return ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or c = "_"
+    return converter_shared.is_alpha(c)
 
 def is_digit(c):
-    return "0" <= c and c <= "9"
+    return converter_shared.is_digit(c)
 
 def is_alnum(c):
-    return is_alpha(c) or is_digit(c)
+    return converter_shared.is_alnum(c)
 
 def trim_left(s):
     i : 0
@@ -36,22 +35,7 @@ def trim_left(s):
     return s[i:]
 
 def quote_string(s):
-    out : ""
-    i : 0
-    while i < len(s):
-        c : s[i]
-        if c = "\\":
-            out += "\\\\"
-        elif c = "\"":
-            out += "\\\""
-        elif c = "\n":
-            out += "\\n"
-        elif c = "\t":
-            out += "\\t"
-        else:
-            out += c
-        i += 1
-    return "\"" + out + "\""
+    return converter_shared.quote_string(s)
 
 def lex_string(line, i, ln):
     start : i
@@ -212,11 +196,11 @@ def ident(p, x):
     if x["text"] in python_reserved:
         fail(p, "identifier '" + x["text"] + "' is reserved in Shakti", x)
     # Mangle Shakti keywords. Also mangle any name that already starts with
-    # the mangling prefix so user identifiers like __s2p_values cannot collide
-    # with a mangled reserved word (values -> __s2p_values).
+    # the mangling prefix so user identifiers like __p2s_values cannot collide
+    # with a mangled reserved word (values -> __p2s_values).
     name : x["text"]
-    if name in shakti_reserved or starts(name, "__s2p_"):
-        name : "__s2p_" + name
+    if name in shakti_reserved or starts(name, "__p2s_"):
+        name : "__p2s_" + name
     x["text"] : name
     return name
 
@@ -262,10 +246,25 @@ def parse_suite(p):
         fail(p, "empty block", peek(p))
     return xs
 
+def parse_class(p):
+    x : take(p)
+    name : need_kind(p, "NAME")
+    ident(p, name)
+    if at(p, "("):
+        take(p)
+        if not at(p, ")"):
+            fail(p, "inheritance is unsupported", peek(p))
+        need(p, ")")
+    body : parse_suite(p)
+    z : node("ClassShell", x)
+    z["name"] : name["text"]
+    z["body"] : body
+    return z
+
 def parse_compound(p):
     x : peek(p)
     if at(p, "class"):
-        fail(p, "classes are unsupported", x)
+        return parse_class(p)
     if at(p, "async"):
         fail(p, "async functions are unsupported", x)
     if at(p, "with"):
@@ -604,7 +603,7 @@ def parse_factor(p):
     if peek(p)["text"] in ["+", "-", "~"]:
         x : take(p)
         if x["text"] = "+":
-            fail(p, "unary plus is unsupported", x)
+            return parse_factor(p)
         if x["text"] = "~":
             fail(p, "bitwise invert is unsupported", x)
         z : node("Unary", x)
@@ -861,8 +860,16 @@ def render_stmt(s, st, ind):
         return [p + target_text(s["target"], st) + " " + s["op"] + " " + expr_text(s["value"], st)]
     if t = "Return":
         return [p + ("return" if s["value"] = None else "return " + expr_text(s["value"], st))]
-    if t = "break" or t = "continue" or t = "pass":
+    if t = "pass" or t = "break" or t = "continue":
         return [p + t]
+    if t = "ClassShell":
+        out : []
+        for c in s["body"]:
+            for q in render_stmt(c, st, ind):
+                out.append(q)
+        if len(out) = 0:
+            return [p + "pass"]
+        return out
     if t = "Import":
         return ["" if s["erase"] else p + "import " + s["name"]]
     if t = "Assert":
@@ -1059,8 +1066,8 @@ def transpile(source, filename):
     return render(ast, {"aliases":ast["aliases"]})
 
 def main():
-    return transpile_cli.run(argv, "s2p.ie", "py", transpile)
+    return transpile_cli.run(argv, "p2s.ie", "py", transpile)
 
 # Run CLI only when this file is the entry script.
-if re_match("s2p\\.ie$", argv[0]):
+if re_match("p2s\\.ie$", argv[0]):
     main()

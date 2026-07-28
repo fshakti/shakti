@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Optional JVM bridge — not linked into ./shakti. Build via `make shakti_jni.o`
+ * when an external Java/Android host needs Java_com_shakti_shakti_ShaktiNative_runFile. */
+
 extern int shakti_lang_main(int argc, char **argv);
 
 JNIEXPORT jint JNICALL
