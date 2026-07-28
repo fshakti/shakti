@@ -37,8 +37,8 @@ export SHAKTI_LIB=$PWD/lib
 
 `make prod-speed` enables native CPU tuning; `make prod-size` optimizes for size.
 `make check-deps` verifies Homebrew packages on macOS.
-Embedded converter headers are generated under `gen/` from `s2p.ie`, `c2s.ie`,
-`cs2s.ie`, and `j2s.ie`.
+Embedded converter headers are generated under `gen/` from `converters/p2s.ie`,
+`converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
 
 Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_STEM`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
 
@@ -53,18 +53,18 @@ Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `S
 ./shakti file.java  # supported Java subset → Shakti, then run
 ```
 
-Converters: [`s2p.ie`](s2p.ie) (Python), [`c2s.ie`](c2s.ie) (C), [`cs2s.ie`](cs2s.ie) (C#), [`j2s.ie`](j2s.ie) (Java). Their embedded CLI copies are generated into `gen/`.  
-More detail: [doc.md](doc.md). Examples: [example.ie](example.ie), [example.py](example.py), [example.c](example.c), [example.cs](example.cs), [example.java](example.java).  
-Tiny converter demos: [python.py](python.py), [c.c](c.c), [csharp.cs](csharp.cs), [java.java](java.java).
+Converters: [`converters/p2s.ie`](converters/p2s.ie) (Python), [`converters/c2s.ie`](converters/c2s.ie) (C), [`converters/cs2s.ie`](converters/cs2s.ie) (C#), [`converters/j2s.ie`](converters/j2s.ie) (Java). Their embedded CLI copies are generated into `gen/`.  
+More detail: [doc.md](doc.md). Examples: [examples/example.ie](examples/example.ie), [examples/example.py](examples/example.py), [examples/example.c](examples/example.c), [examples/example.cs](examples/example.cs), [examples/example.java](examples/example.java).  
+Tiny converter demos: [examples/python.py](examples/python.py), [examples/c.c](examples/c.c), [examples/csharp.cs](examples/csharp.cs), [examples/java.java](examples/java.java).
 C / C# / Java converters reject unterminated strings and `/* ... */` block
 comments with source-line diagnostics instead of emitting partial programs.
 CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger inputs.
 
-**`example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
+**`examples/example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
 It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end
 hits an open-window busy loop (`while gfx.alive(): gfx.tick()` with no sleep) and will
 spin until the window is closed. Copy one section into its own `.ie`, or use
-`examples/gfx_demo.ie` / other standalone demos under `examples/` when present.
+`examples/_local/gfx_demo.ie` / other standalone demos under `examples/_local/` when present.
 For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where demos support it.
 
 ## modules
@@ -85,15 +85,15 @@ For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where 
 | `iefs` | Durable `.iefs` | [doc](doc.md#iefs-module) |
 | `input` / `ipc` / `rest` / `talk` | IO / network / STT | see [doc.md](doc.md) |
 
-Demo game: [`import pong`](lib/pong.ie) then `pong.run()` (gfx; needs `SHAKTI_GFX=1`). Terminal: `pong.run_terminal()`. Launcher: [`pong_demo.ie`](pong_demo.ie).
+Demo game: [`import pong`](lib/pong.ie) then `pong.run()` (gfx; needs `SHAKTI_GFX=1`). Terminal: `pong.run_terminal()`. Launcher: [`examples/pong_demo.ie`](examples/pong_demo.ie).
 
 ```bash
-make test-pong    # pong_test.ie + pong_spell_test.ie
-make bench-pong   # pong_bench.ie (physics / frame / proj / AI)
+make test-pong    # examples/pong_test.ie + examples/pong_spell_test.ie
+make bench-pong   # examples/pong_bench.ie (physics / frame / proj / AI)
 ```
 
-Local demos (when `examples/` is present): `examples/gfx_demo.ie`, `examples/pyplot_demo.ie`, `examples/jupyter_demo.ie`, `examples/pdf_smoke.ie`, `examples/midi_demo.ie`, `examples/sonicpi_demo.ie`.  
-Merged copy-paste sections also live in [`example.ie`](example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
+Local demos (when `examples/_local/` is present): `examples/_local/gfx_demo.ie`, `examples/_local/pyplot_demo.ie`, `examples/_local/jupyter_demo.ie`, `examples/_local/pdf_smoke.ie`, `examples/_local/midi_demo.ie`, `examples/_local/sonicpi_demo.ie`.  
+Merged copy-paste sections also live in [`examples/example.ie`](examples/example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
 
 ## test & bench (local tree)
 
@@ -105,6 +105,7 @@ make -f Makefile.local test-modules   # dsp, stem, pdf, midi, iefs, sonicpi, pyp
 make -f Makefile.local bench-modules  # focused module benches
 make -f Makefile.local bench          # full suite vs baselines
 make -f Makefile.local test-c         # C converter regression script
+make -f Makefile.local test-transpile-matrix  # shared converter feature matrix
 make -f Makefile.local bench-transpile-all
 ```
 

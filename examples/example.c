@@ -2,6 +2,15 @@
 
 #include <stdio.h>
 
+#define SCALE 1
+
+enum Kind { SMALL, MEDIUM=2, LARGE };
+
+struct Pair {
+    int a;
+    int b;
+};
+
 int Square(int x) {
     return x * x;
 }
@@ -13,6 +22,17 @@ int Clamp(int x, int low, int high) {
         return high;
     }
     return x;
+}
+
+int Rank(int k) {
+    switch (k) {
+    case SMALL:
+        return 1;
+    case MEDIUM:
+        return 2;
+    default:
+        return 3;
+    }
 }
 
 int main(int argc, char **argv) {
@@ -38,6 +58,12 @@ int main(int argc, char **argv) {
         printf("while " + countdown);
         countdown -= 1;
     }
+
+    // K&R-flavored: struct, enum/switch, macro, bitwise.
+    struct Pair p = {3, 5};
+    int mix = (p.a << SCALE) | p.b;
+    printf("mix " + mix);
+    printf("rank " + Rank(MEDIUM));
 
     if (argc > 0) {
         printf("arg " + argv[0]);

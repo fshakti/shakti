@@ -216,7 +216,8 @@ extern V *bi_pcm_write(V**,in);
 extern V *bi_pcm_close(V**,in);
 static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
-    "sum","avg","min","max","dot","mmul","abs","sqrt","floor","ceil","exp","log","sin","cos","tan",
+    "sum","avg","min","max","dot","mmul","abs","band","bor","bxor","bnot","shl","shr",
+    "sqrt","floor","ceil","exp","log","sin","cos","tan",
     "bin","asof_sort","asof_bin","asof_index","asof_index_count","shakti_winavg_index","shakti_winavg_query",
     "shakti_stats_index","shakti_stats_agg","shakti_stats_ui",
     "shakti_vwbid","shakti_vwbid_index","shakti_hibid","shakti_hibid_index","shakti_nbbo","shakti_nbbo_index","shakti_theopl",
@@ -645,6 +646,47 @@ static V *bi_abs(V **a, in) {
     P(v->t == T_INT,v_int(v->j < 0 ? -v->j : v->j))
     P(v->t == T_FLOAT,v_float(fabs(v->f)))
     return v_int(0);
+}
+/* Integer bitwise helpers for converters (logical shifts on uint64 bits). */
+static int64_t bi_as_i64(V *v) {
+    if (v->t == T_INT) return v->j;
+    if (v->t == T_FLOAT) return (int64_t)v->f;
+    if (v->t == T_BOOL) return v->b ? 1 : 0;
+    return 0;
+}
+static V *bi_band(V **a, in) {
+    P(n < 2, v_err("band(a, b)"))
+    return v_int(bi_as_i64(a[0]) & bi_as_i64(a[1]));
+}
+static V *bi_bor(V **a, in) {
+    P(n < 2, v_err("bor(a, b)"))
+    return v_int(bi_as_i64(a[0]) | bi_as_i64(a[1]));
+}
+static V *bi_bxor(V **a, in) {
+    P(n < 2, v_err("bxor(a, b)"))
+    return v_int(bi_as_i64(a[0]) ^ bi_as_i64(a[1]));
+}
+static V *bi_bnot(V **a, in) {
+    P(n < 1, v_err("bnot(a)"))
+    return v_int(~bi_as_i64(a[0]));
+}
+static V *bi_shl(V **a, in) {
+    uint64_t x;
+    int64_t s;
+    P(n < 2, v_err("shl(a, b)"))
+    s = bi_as_i64(a[1]);
+    P(s < 0 || s >= 64, v_err("shl: shift out of range"))
+    x = (uint64_t)bi_as_i64(a[0]);
+    return v_int((int64_t)(x << (unsigned)s));
+}
+static V *bi_shr(V **a, in) {
+    uint64_t x;
+    int64_t s;
+    P(n < 2, v_err("shr(a, b)"))
+    s = bi_as_i64(a[1]);
+    P(s < 0 || s >= 64, v_err("shr: shift out of range"))
+    x = (uint64_t)bi_as_i64(a[0]);
+    return v_int((int64_t)(x >> (unsigned)s));
 }
 #define V_MAP_FUNC(NAME, FUNC) \
 static V *bi_##NAME(V **a, in) { \
@@ -1727,6 +1769,7 @@ BIKW(print)
 BI0(len) BI0(range) BI0(type) BI0(int) BI0(float) BI0(str) BI0(list) BI0(bool)
 BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
+BI0(band) BI0(bor) BI0(bxor) BI0(bnot) BI0(shl) BI0(shr)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
 BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(asof_index) BI0(asof_index_count) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
 BI0(shakti_stats_index) BI0(shakti_stats_agg) BI0(shakti_stats_ui)
@@ -1864,8 +1907,12 @@ static const BiEntry bi_tab[] = {
     {"asof_index_count", bi_w_asof_index_count},
     {"asof_sort", bi_w_asof_sort},
     {"avg", bi_w_avg},
+    {"band", bi_w_band},
     {"bin", bi_w_bin},
+    {"bnot", bi_w_bnot},
     {"bool", bi_w_bool},
+    {"bor", bi_w_bor},
+    {"bxor", bi_w_bxor},
     {"ceil", bi_w_ceil},
     {"chr", bi_w_chr},
     {"columns", bi_w_columns},
@@ -2053,6 +2100,8 @@ static const BiEntry bi_tab[] = {
     {"shakti_winavg_index", bi_w_shakti_winavg_index},
     {"shakti_winavg_query", bi_w_shakti_winavg_query},
     {"shape", bi_w_shape},
+    {"shl", bi_w_shl},
+    {"shr", bi_w_shr},
     {"sin", bi_w_sin},
 #ifdef SHAKTI_HAVE_SONICPI
     {"sonicpi_bpm", bi_w_sonicpi_bpm},
