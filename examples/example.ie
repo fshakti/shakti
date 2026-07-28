@@ -780,7 +780,7 @@ print("rest demo done")
 #   ./shakti example.py
 #
 # Regenerate this section with:
-#   ./shakti s2p.ie example.py -o /tmp/example_python.ie
+#   ./shakti p2s.ie example.py -o /tmp/example_python.ie
 
 # Python 3 subset examples runnable by CPython or `./shakti example.py`.
 def traced(f):
@@ -803,16 +803,16 @@ print("clamp", clamp(15, high:12))
 increment : (lambda x: (x + 1))
 print("lambda", increment(9))
 # Lists, slices, tuple unpacking, dictionaries, loops, and augmented assignment.
-__s2p_values : [2, 4, 6, 8]
-size : len(__s2p_values)
-print("slice", __s2p_values[1:3])
+__p2s_values : [2, 4, 6, 8]
+size : len(__p2s_values)
+print("slice", __p2s_values[1:3])
 first, second : (10, 20)
 print("tuple", (first + second))
 record : {"name": "shakti", "count": size}
 print("dict", record["name"], record["count"])
 total : 0
-for i in range(len(__s2p_values)):
-    total += __s2p_values[i]
+for i in range(len(__p2s_values)):
+    total += __p2s_values[i]
 print("for", total)
 countdown : 3
 while (countdown > 0):

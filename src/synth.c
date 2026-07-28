@@ -182,9 +182,6 @@ typedef struct SynthState {
 } SynthState;
 static SynthState g;
 static int g_mu_inited;
-#ifdef SYNTH_HAVE_GL
-static int g_use_gl;
-#endif
 static void synth_request_maximize(void);
 static float knob_val(int i);
 static float synth_bpm(void);
@@ -201,9 +198,6 @@ static void metro_reset_unlocked(int on);
 static void metro_reset(int on);
 static void metro_reset(int on);
 static int synth_pad_note(int pad);
-#ifdef SYNTH_HAVE_GL
-static const char *synth_pad_lbl(int pad);
-#endif
 static void synth_sample_trigger(void);
 static float synth_sample_tick(void);
 static void synth_loop_sync_target(void);
@@ -384,70 +378,7 @@ static void synth_ui_blit(void) {
     if (g.fb && g.present) synth_core_present_scale();
     synth_platform_present();
 }
-#ifdef SYNTH_HAVE_GL
-static const char *const g_knob_lbl[SYNTH_KNOBS] = {
-    "RATE", "LEVEL", "CUT", "RES", "ATT", "DEC", "SUS", "REL", "REVERB"
-};
-static const char *g_pad_lbl_cache[SYNTH_PADS];
-static void synth_gl_draw(void) {
-    SynthRenderState s;
-    int i, n = 0;
-    memset(&s, 0, sizeof s);
-    synth_layout_compute(&g.layout);
-    s.L = &g.layout;
-    s.design_w = DESIGN_W;
-    s.design_h = DESIGN_H;
-    s.win_w = g.win_w;
-    s.win_h = g.win_h;
-    s.ui_scale = g.ui_scale;
-    s.off_x = g.off_x;
-    s.off_y = g.off_y;
-    synth_core_audio_lock();
-    for (i = 0; i < 8; i++) s.knobs[i] = knob_val(i);
-    s.knob_lbl = g_knob_lbl;
-    for (i = 0; i < SYNTH_ROWS; i++) s.seq[i] = g.seq[i];
-    s.step_len = g.step_len;
-    s.step_pos = g.step_pos;
-    s.playing = g.playing;
-    s.metro_on = g.metro_on;
-    s.metro_flash = g.metro_flash;
-    s.metro_sound = g.metro_sound;
-    s.mute = g.mute;
-    s.loop_rec = g.loop_recording || g.loop_arm;
-    s.loop_play = g.loop_playing;
-    s.loop_has = g.loop_len > 0;
-    s.loop_flash = g.loop_flash;
-    s.sample_loaded = g.sample_n > 0;
-    if (g.sample_name[0])
-        snprintf(s.sample_name, sizeof s.sample_name, "%s", g.sample_name);
-    for (i = 0; i < SYNTH_PADS; i++) {
-        s.pad_down[i] = g.pad_down[i];
-        g_pad_lbl_cache[i] = synth_pad_lbl(i);
-    }
-    s.pad_lbl = g_pad_lbl_cache;
-    for (i = 0; i < SYNTH_MAX_KEYS; i++) s.key_down[i] = g.key_down[i];
-    s.synth_keys = g.synth_keys;
-    s.base_note = g.base_note;
-    s.ribbon = g.ribbon;
-    s.bpm = (int)synth_bpm();
-    s.viz = synth_ui_viz_mode();
-    synth_core_audio_unlock();
-    s.vu = synth_ui_vu_level();
-    synth_ui_get_spectrum(s.spectrum, &n);
-    s.spectrum_n = n;
-    synth_ui_get_waveform(s.waveform, &n);
-    s.waveform_n = n;
-    synth_gl_render(&s);
-    synth_gl_swap();
-}
-#endif
 static void synth_present_frame(void) {
-#ifdef SYNTH_HAVE_GL
-    if (g_use_gl) {
-        synth_gl_draw();
-        return;
-    }
-#endif
     synth_core_ui_draw();
     synth_ui_blit();
 }
@@ -698,11 +629,6 @@ void synth_core_present_scale(void) {
 int synth_core_fb_resize(int w, int h) {
     if (w < SYNTH_MIN_W) w = SYNTH_MIN_W;
     if (h < SYNTH_MIN_H) h = SYNTH_MIN_H;
-#ifdef SYNTH_HAVE_GL
-    if (g_use_gl) {
-        P(w == g.win_w && h == g.win_h,0)
-    } else
-#endif
     P(w == g.win_w && h == g.win_h && g.present,0)
     g.win_w = w;
     g.win_h = h;
@@ -714,13 +640,6 @@ int synth_core_fb_resize(int w, int h) {
 
     synth_letterbox_update();
     synth_layout_compute(&g.layout);
-#ifdef SYNTH_HAVE_GL
-    if (g_use_gl) {
-        synth_gl_resize(w, h);
-        g.dirty = 1;
-        return 0;
-    }
-#endif
 #ifdef __linux__
     if (g.dpy && g.img) {
         g.img->data = NULL;
@@ -920,19 +839,6 @@ static int synth_row_midi_note(int row) {
     if (row == 6) return 60;
     return g.row_midi[row] > 0 ? g.row_midi[row] : 60;
 }
-#ifdef SYNTH_HAVE_GL
-static const char *synth_pad_lbl(int pad) {
-    /* 4x4 grid, row-major; labels match GM-ish voice (see synth_pad_note). */
-    static const char *lbls[16] = {
-        "CYM",  "CYM",  "TOM",  "OPEN", /* 47, 47, 46, 44 — metallic / open */
-        "SNARE", "CHH",  "SNARE", "SNARE", /* 43, 42, 41, 40 — snare + closed hat */
-        "CLAP", "TOM",  "CLAP", "SNARE", /* 39, 45, 39, 40 */
-        "KICK", "RIM",  "SNARE", "OPEN"  /* 36, 37, 38, 44 — core kit row */
-    };
-    P(pad < 0 || pad >= 16,"")
-    return lbls[pad];
-}
-#endif
 static int synth_pad_note(int pad) {
     static const int map[16] = {
         47, 47, 46, 44,
@@ -1356,17 +1262,6 @@ static int synth_x11_init(char *err, size_t cap) {
     }
     scr = DefaultScreen(g.dpy);
     g.scr = scr;
-#ifdef SYNTH_HAVE_GL
-    g_use_gl = getenv("SHAKTI_SYNTH_NOGL") ? 0 : 1;
-    if (g_use_gl) {
-        unsigned long win = 0;
-        if (synth_gl_create_window(g.dpy, scr, "Shakti Synth", DESIGN_W, DESIGN_H, &win) == 0) {
-            g.win = (Window)win;
-        } else {
-            g_use_gl = 0;
-        }
-    }
-#endif
     if (!g.win) {
         g.win = XCreateSimpleWindow(g.dpy, RootWindow(g.dpy, scr), 100, 100, DESIGN_W, DESIGN_H, 1,
                                     BlackPixel(g.dpy, scr), COL_CHASSIS);
@@ -1376,13 +1271,6 @@ static int synth_x11_init(char *err, size_t cap) {
     swa.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask |
                      ButtonReleaseMask | PointerMotionMask | StructureNotifyMask;
     XSelectInput(g.dpy, g.win, swa.event_mask);
-#ifdef SYNTH_HAVE_GL
-    if (g_use_gl) {
-        g.win_w = DESIGN_W;
-        g.win_h = DESIGN_H;
-        synth_core_fb_resize(DESIGN_W, DESIGN_H);
-    } else
-#endif
     {
         if (synth_core_fb_design_init() != 0 || synth_core_fb_resize(DESIGN_W, DESIGN_H) != 0) {
             snprintf(err, cap, "synth_open: framebuffer init failed");
@@ -1534,13 +1422,6 @@ int synth_platform_poll(int *cfg_w, int *cfg_h, int *cfg_count) {
     return g.alive;
 }
 void synth_platform_shutdown(void) {
-#ifdef SYNTH_HAVE_GL
-    if (g_use_gl) {
-        synth_gl_shutdown();
-        g.win = 0;
-        g_use_gl = 0;
-    }
-#endif
     if (g.img) {
         g.img->data = NULL;
         XDestroyImage(g.img);

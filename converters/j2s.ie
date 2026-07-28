@@ -1,31 +1,36 @@
-# c2s -- strict C subset to Shakti.
+# j2s — strict Java subset to Shakti.
+# Accepts one top-level class as a shell for static fields/methods.
 
 import converter_shared
 import transpile_cli
 
 shakti_reserved : ["select", "update", "delete", "by", "from", "where",
                    "create", "insert", "into", "values", "join", "on"]
-c_keywords : ["if", "else", "while", "for", "do", "switch", "case", "default",
-              "return", "break", "continue", "goto", "typedef", "struct",
-              "union", "enum", "sizeof", "static", "extern", "register",
-              "auto", "volatile", "restrict", "inline", "const", "signed",
-              "unsigned", "void", "int", "long", "short", "double", "float",
-              "char", "bool", "_Bool", "true", "false", "NULL"]
-c_type_keywords : ["void", "int", "long", "short", "double", "float", "char",
-                   "bool", "_Bool", "size_t"]
-c_type_modifiers : ["const", "unsigned", "signed", "short", "long"]
-c_forbidden_names : ["malloc", "free", "sizeof"]
+java_keywords : ["if", "else", "while", "for", "do", "switch", "case",
+                 "default", "return", "break", "continue", "goto", "package",
+                 "import", "class", "interface", "enum", "record", "new",
+                 "var", "true", "false", "null", "this", "super", "instanceof",
+                 "public", "private", "protected", "static", "final", "abstract",
+                 "synchronized", "volatile", "transient", "native", "strictfp",
+                 "void", "int", "long", "short", "byte", "double", "float",
+                 "boolean", "char", "throws", "throw", "try", "catch", "finally",
+                 "extends", "implements", "assert", "const"]
+java_type_keywords : ["var", "void", "int", "long", "short", "byte", "double",
+                      "float", "boolean", "char"]
+java_modifiers : ["public", "private", "protected", "static", "final",
+                  "abstract", "synchronized", "volatile", "transient",
+                  "native", "strictfp"]
 two_ops : ["==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=",
-           "/=", "->", "<<", ">>"]
+           "/=", "->"]
 
 def is_kw(text):
-    return text in c_keywords
+    return text in java_keywords
 
 def is_type_kw(text):
-    return text in c_type_keywords
+    return text in java_type_keywords
 
-def is_type_mod(text):
-    return text in c_type_modifiers
+def is_mod(text):
+    return text in java_modifiers
 
 def tok(kind, text, val, line, col):
     return converter_shared.tok(kind, text, val, line, col)
@@ -53,7 +58,7 @@ def num_clean(t):
     i : 0
     while i < len(t):
         c : t[i]
-        if c != "_":
+        if c != "_" and c != "L" and c != "l" and c != "F" and c != "f" and c != "D" and c != "d":
             out += c
         i += 1
     return out
@@ -115,15 +120,6 @@ def lex(source):
             i += 1
             continue
         col : i - line_start + 1
-        if c = "#":
-            j : i + 1
-            while j < n and source[j] != "\n":
-                j += 1
-            line : source[i:j]
-            if starts(line, "#include"):
-                i : j
-                continue
-            raise str(ln) + ":" + str(col) + ": unsupported preprocessor directive"
         if c = "/" and i + 1 < n and source[i + 1] = "/":
             j : i + 2
             while j < n and source[j] != "\n":
@@ -222,76 +218,86 @@ def need_kind(p, k):
 
 def ident(p, x):
     name : x["text"]
-    if name in shakti_reserved or starts(name, "__c_"):
-        name : "__c_" + name
+    if name in shakti_reserved or starts(name, "__j_"):
+        name : "__j_" + name
     x["text"] : name
     return name
 
-def reject_pointer_type(p):
-    if at(p, "*"):
-        fail(p, "pointer types are unsupported", peek(p))
+def skip_generics(p):
+    depth : 1
+    take(p)
+    while depth > 0:
+        if kind(p, "END"):
+            fail(p, "unterminated generic arguments", peek(p))
+        t : peek(p)["text"]
+        if t = "<":
+            depth += 1
+        elif t = ">":
+            depth += -1
+        take(p)
 
 def skip_type(p):
     if not kind(p, "NAME"):
         return False
-    saw : False
-    while kind(p, "NAME"):
-        t : peek(p)["text"]
-        if is_type_mod(t):
-            take(p)
-        elif is_type_kw(t) or t = "size_t":
-            take(p)
-            saw : True
-        elif is_kw(t):
-            return False
-        else:
-            break
-    if not saw:
+    if is_kw(peek(p)["text"]) and not is_type_kw(peek(p)["text"]):
         return False
-    return True
-
-def skip_main_param_type(p):
-    if not skip_type(p):
-        return False
-    while at(p, "*"):
+    take(p)
+    while at(p, "."):
         take(p)
+        if not kind(p, "NAME"):
+            return False
+        take(p)
+    if at(p, "<"):
+        skip_generics(p)
     while at(p, "["):
         take(p)
         if not at(p, "]"):
-            fail(p, "sized array parameters are unsupported", peek(p))
+            return False
         take(p)
     return True
 
-def parse_main_params(p):
-    need(p, "(")
-    if at(p, "void"):
+def skip_modifiers(p):
+    saw_static : False
+    while kind(p, "NAME") and is_mod(peek(p)["text"]):
+        if peek(p)["text"] = "static":
+            saw_static : True
         take(p)
-        need(p, ")")
-        return []
-    if at(p, ")"):
-        take(p)
-        return []
-    args : []
-    while not at(p, ")"):
-        if not skip_main_param_type(p):
-            fail(p, "expected main parameter type", peek(p))
-        if kind(p, "NAME"):
-            a : take(p)
-            ident(p, a)
-            args.append(a["text"])
-        if not at(p, ")"):
-            need(p, ",")
-    need(p, ")")
-    return args
+    return saw_static
+
+def const_true(x):
+    z : node("Const", x)
+    z["value"] : "True"
+    z["kind"] : "number"
+    return z
+
+def name_node(x, s):
+    z : node("Name", x)
+    z["value"] : s
+    return z
+
+def assign_name(x, name, value):
+    z : node("Assign", x)
+    z["target"] : name_node(x, name)
+    z["value"] : value
+    return z
 
 def parse(source, filename):
     lx : lex(source)
     p : {"tokens":lx["tokens"], "pos":0, "filename":filename, "aliases":{},
          "comments":lx["comments"], "inline":lx["inline"], "has_main":False,
-         "main_arity":0}
+         "class_name":None, "goto_tmp":0}
     body : []
-    while not kind(p, "END"):
-        body.append(parse_stmt(p))
+    while at(p, "package"):
+        body.append(parse_package(p))
+    while at(p, "import"):
+        body.append(parse_import(p))
+    if kind(p, "END"):
+        fail(p, "expected class declaration", peek(p))
+    members : parse_class(p)
+    for m in members:
+        body.append(m)
+    if not kind(p, "END"):
+        fail(p, "only one top-level class is supported", peek(p))
     if p["has_main"]:
         x : peek(p)
         call : node("Expr", x)
@@ -300,55 +306,100 @@ def parse(source, filename):
         fn["value"] : "main"
         c["func"] : fn
         c["args"] : []
+        sl : node("Subscript", x)
+        av : node("Name", x)
+        av["value"] : "argv"
+        sl["value"] : av
+        slice : node("Slice", x)
+        one : node("Const", x)
+        one["value"] : "1"
+        one["kind"] : "number"
+        slice["lower"] : one
+        slice["upper"] : None
+        slice["step"] : None
+        sl["slice"] : slice
+        c["args"].append(sl)
         c["kwargs"] : []
-        if p["main_arity"] >= 1:
-            sl : node("Subscript", x)
-            av : node("Name", x)
-            av["value"] : "argv"
-            sl["value"] : av
-            slice : node("Slice", x)
-            one : node("Const", x)
-            one["value"] : "1"
-            one["kind"] : "number"
-            slice["lower"] : one
-            slice["upper"] : None
-            slice["step"] : None
-            sl["slice"] : slice
-            if p["main_arity"] >= 2:
-                ln : node("Call", x)
-                lf : node("Name", x)
-                lf["value"] : "len"
-                ln["func"] : lf
-                ln["args"] : [sl]
-                ln["kwargs"] : []
-                c["args"].append(ln)
-                # second argv[1:] needs a fresh Subscript node
-                sl2 : node("Subscript", x)
-                av2 : node("Name", x)
-                av2["value"] : "argv"
-                sl2["value"] : av2
-                slice2 : node("Slice", x)
-                one2 : node("Const", x)
-                one2["value"] : "1"
-                one2["kind"] : "number"
-                slice2["lower"] : one2
-                slice2["upper"] : None
-                slice2["step"] : None
-                sl2["slice"] : slice2
-                c["args"].append(sl2)
-            else:
-                c["args"].append(sl)
         call["value"] : c
         body.append(call)
     return {"t":"Module", "body":body, "comments":p["comments"], "inline":p["inline"],
             "aliases":p["aliases"], "filename":filename, "has_main":p["has_main"]}
 
+def parse_package(p):
+    x : take(p)
+    while not at(p, ";") and not kind(p, "END"):
+        take(p)
+    if at(p, ";"):
+        take(p)
+    z : node("Import", x)
+    z["name"] : ""
+    z["alias"] : None
+    z["erase"] : True
+    return z
+
+def parse_import(p):
+    x : take(p)
+    while not at(p, ";") and not kind(p, "END"):
+        take(p)
+    if at(p, ";"):
+        take(p)
+    z : node("Import", x)
+    z["name"] : ""
+    z["alias"] : None
+    z["erase"] : True
+    return z
+
+def parse_class(p):
+    skip_modifiers(p)
+    x : peek(p)
+    if not at(p, "class"):
+        fail(p, "expected class declaration", x)
+    take(p)
+    nm : need_kind(p, "NAME")
+    p["class_name"] : nm["text"]
+    if at(p, "extends") or at(p, "implements"):
+        fail(p, "inheritance and interfaces are unsupported", peek(p))
+    need(p, "{")
+    members : []
+    while not at(p, "}") and not kind(p, "END"):
+        members.append(parse_member(p))
+    need(p, "}")
+    return members
+
+def parse_member(p):
+    x : peek(p)
+    if at(p, "class") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, "nested " + x["text"] + " declarations are unsupported", x)
+    saw_static : skip_modifiers(p)
+    if at(p, "class") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, "nested " + peek(p)["text"] + " declarations are unsupported", peek(p))
+    # Constructor: ClassName(...)
+    if kind(p, "NAME") and peek(p)["text"] = p["class_name"] and peekn(p, 1)["text"] = "(":
+        fail(p, "constructors are unsupported", peek(p))
+    save : p["pos"]
+    fn : try_parse_func(p)
+    if fn != None:
+        if not saw_static:
+            fail(p, "instance methods are unsupported; mark methods static", x)
+        if fn["name"] = "main":
+            p["has_main"] : True
+        return fn
+    p["pos"] : save
+    d : try_parse_decl(p)
+    if d != None:
+        if not saw_static:
+            fail(p, "instance fields are unsupported; mark fields static", x)
+        return d
+    fail(p, "unsupported class member", x)
+
 def parse_stmt(p):
     x : peek(p)
-    if at(p, "struct") or at(p, "union") or at(p, "enum") or at(p, "typedef"):
-        fail(p, x["text"] + " declarations are unsupported", x)
-    if at(p, "try") or at(p, "switch") or at(p, "do") or at(p, "goto"):
+    if at(p, "try") or at(p, "throw") or at(p, "synchronized") or at(p, "assert"):
         fail(p, x["text"] + " statements are unsupported", x)
+    if at(p, "do"):
+        return parse_do_while(p)
+    if at(p, "switch"):
+        return parse_switch(p)
     if at(p, "if"):
         return parse_if(p)
     if at(p, "while"):
@@ -364,9 +415,6 @@ def parse_stmt(p):
         return z
     if at(p, "{"):
         fail(p, "unexpected block", x)
-    fn : try_parse_func(p)
-    if fn != None:
-        return fn
     d : try_parse_decl(p)
     if d != None:
         return d
@@ -378,7 +426,6 @@ def try_parse_func(p):
     if not ok:
         p["pos"] : save
         return None
-    reject_pointer_type(p)
     if not kind(p, "NAME") or is_kw(peek(p)["text"]):
         p["pos"] : save
         return None
@@ -389,43 +436,34 @@ def try_parse_func(p):
     x : name_tok
     take(p)
     ident(p, name_tok)
+    need(p, "(")
+    args : []
+    defaults : []
+    if not at(p, ")"):
+        while True:
+            skip_type(p)
+            # Java varargs: Type... name
+            if at(p, "."):
+                fail(p, "varargs are unsupported", peek(p))
+            a : need_kind(p, "NAME")
+            # Array brackets after name: String args[]
+            while at(p, "["):
+                take(p)
+                need(p, "]")
+            ident(p, a)
+            args.append(a["text"])
+            defaults.append(None)
+            if not at(p, ","):
+                break
+            take(p)
+    need(p, ")")
+    if at(p, "throws"):
+        fail(p, "throws clauses are unsupported", peek(p))
     z : node("FunctionDef", x)
     z["name"] : name_tok["text"]
+    z["args"] : args
+    z["defaults"] : defaults
     z["decorators"] : []
-    z["defaults"] : []
-    if name_tok["text"] = "main":
-        p["has_main"] : True
-        args : parse_main_params(p)
-        z["args"] : args
-        defaults : []
-        for a in args:
-            defaults.append(None)
-        z["defaults"] : defaults
-        p["main_arity"] : len(args)
-    else:
-        need(p, "(")
-        args : []
-        defaults : []
-        if not at(p, ")"):
-            while True:
-                if not skip_type(p):
-                    fail(p, "expected parameter type", peek(p))
-                reject_pointer_type(p)
-                a : need_kind(p, "NAME")
-                while at(p, "["):
-                    take(p)
-                    if not at(p, "]"):
-                        fail(p, "sized array parameters are unsupported", peek(p))
-                    take(p)
-                ident(p, a)
-                args.append(a["text"])
-                defaults.append(None)
-                if not at(p, ","):
-                    break
-                take(p)
-        need(p, ")")
-        z["args"] : args
-        z["defaults"] : defaults
     z["body"] : parse_block(p)
     return z
 
@@ -435,20 +473,16 @@ def try_parse_decl(p):
     if not ok:
         p["pos"] : save
         return None
-    reject_pointer_type(p)
     if not kind(p, "NAME") or is_kw(peek(p)["text"]):
         p["pos"] : save
         return None
     name_tok : peek(p)
+    # Array brackets after name: int xs[] = ...
     j : 1
     while peekn(p, j)["text"] = "[":
-        if peekn(p, j + 1)["text"] = "]":
-            j += 2
-        elif peekn(p, j + 1)["kind"] = "NUMBER" and peekn(p, j + 2)["text"] = "]":
-            j += 3
-        else:
-            p["pos"] : save
-            return None
+        if peekn(p, j + 1)["text"] != "]":
+            break
+        j += 2
     if peekn(p, j)["text"] != "=":
         p["pos"] : save
         return None
@@ -456,11 +490,6 @@ def try_parse_decl(p):
     take(p)
     while at(p, "["):
         take(p)
-        if not at(p, "]"):
-            if kind(p, "NUMBER"):
-                take(p)
-            else:
-                fail(p, "sized array declarations require a numeric bound or []", peek(p))
         need(p, "]")
     ident(p, name_tok)
     need(p, "=")
@@ -531,9 +560,130 @@ def parse_while(p):
     z["body"] : parse_block_or_stmt(p)
     return z
 
+def parse_do_while(p):
+    x : take(p)
+    body : parse_block_or_stmt(p)
+    need(p, "while")
+    need(p, "(")
+    cond : parse_expr(p)
+    need(p, ")")
+    need(p, ";")
+    w : node("While", x)
+    w["test"] : const_true(x)
+    b2 : []
+    for s in body:
+        b2.append(s)
+    iff : node("If", x)
+    un : node("Unary", x)
+    un["op"] : "not"
+    un["value"] : cond
+    iff["test"] : un
+    iff["body"] : [node("break", x)]
+    iff["elifs"] : []
+    iff["orelse"] : []
+    b2.append(iff)
+    w["body"] : b2
+    return w
+
+def parse_switch(p):
+    x : take(p)
+    need(p, "(")
+    expr : parse_expr(p)
+    need(p, ")")
+    need(p, "{")
+    p["goto_tmp"] += 1
+    tmp : "__j_sw" + str(p["goto_tmp"])
+    seq : node("Seq", x)
+    seq["body"] : [assign_name(x, tmp, expr)]
+    cases : []
+    default_body : None
+    while not at(p, "}") and not kind(p, "END"):
+        if at(p, "case"):
+            cx : take(p)
+            val : parse_expr(p)
+            need(p, ":")
+            cb : []
+            while not at(p, "case") and not at(p, "default") and not at(p, "}") and not kind(p, "END"):
+                cb.append(parse_stmt(p))
+            if len(cb) = 0:
+                fail(p, "switch fall-through is unsupported", cx)
+            last : cb[len(cb) - 1]
+            if last["t"] != "break":
+                if last["t"] != "Return":
+                    fail(p, "switch fall-through is unsupported (missing break)", last)
+            body_out : []
+            i : 0
+            while i < len(cb):
+                if i = len(cb) - 1 and cb[i]["t"] = "break":
+                    break
+                body_out.append(cb[i])
+                i += 1
+            if len(body_out) = 0:
+                body_out.append(node("pass", cx))
+            cases.append({"test":val, "body":body_out, "line":cx["line"], "col":cx["col"]})
+        elif at(p, "default"):
+            dx : take(p)
+            need(p, ":")
+            db : []
+            while not at(p, "case") and not at(p, "default") and not at(p, "}") and not kind(p, "END"):
+                db.append(parse_stmt(p))
+            if len(db) > 0:
+                last : db[len(db) - 1]
+                if last["t"] = "break":
+                    db : db[:len(db) - 1]
+            if len(db) = 0:
+                db : [node("pass", dx)]
+            default_body : db
+        else:
+            fail(p, "expected case or default in switch", peek(p))
+    need(p, "}")
+    if len(cases) = 0 and default_body = None:
+        return seq
+    first : cases[0] if len(cases) > 0 else None
+    if first != None:
+        iff : node("If", x)
+        cmp : node("Compare", x)
+        cmp["left"] : name_node(x, tmp)
+        cmp["op"] : "=="
+        cmp["right"] : first["test"]
+        iff["test"] : cmp
+        iff["body"] : first["body"]
+        iff["elifs"] : []
+        i : 1
+        while i < len(cases):
+            c : cases[i]
+            cmpi : node("Compare", x)
+            cmpi["left"] : name_node(x, tmp)
+            cmpi["op"] : "=="
+            cmpi["right"] : c["test"]
+            iff["elifs"].append({"test":cmpi, "body":c["body"], "line":c["line"], "col":c["col"]})
+            i += 1
+        iff["orelse"] : default_body if default_body != None else []
+        seq["body"].append(iff)
+    elif default_body != None:
+        for s in default_body:
+            seq["body"].append(s)
+    return seq
+
 def parse_for(p):
     x : take(p)
     need(p, "(")
+    # Enhanced for: for (Type name : expr)
+    save : p["pos"]
+    if skip_type(p) and kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = ":":
+        a : take(p)
+        ident(p, a)
+        need(p, ":")
+        it : parse_expr(p)
+        need(p, ")")
+        z : node("For", x)
+        tgt : node("Name", a)
+        tgt["value"] : a["text"]
+        z["target"] : tgt
+        z["iter"] : it
+        z["body"] : parse_block_or_stmt(p)
+        return z
+    p["pos"] : save
     init : None
     if not at(p, ";"):
         init : parse_for_clause(p)
@@ -572,24 +722,34 @@ def parse_for(p):
 def parse_for_clause(p):
     x : peek(p)
     save : p["pos"]
-    if skip_type(p):
-        reject_pointer_type(p)
-        if kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "=":
-            nt : take(p)
-            ident(p, nt)
-            need(p, "=")
-            v : parse_expr(p)
-            z : node("Assign", x)
-            tg : node("Name", x)
-            tg["value"] : nt["text"]
-            z["target"] : tg
-            z["value"] : v
-            return z
+    if skip_type(p) and kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "=":
+        nt : take(p)
+        ident(p, nt)
+        need(p, "=")
+        v : parse_expr(p)
+        z : node("Assign", x)
+        tg : node("Name", x)
+        tg["value"] : nt["text"]
+        z["target"] : tg
+        z["value"] : v
+        return z
     p["pos"] : save
     return parse_assign_no_semi(p)
 
 def parse_assign_no_semi(p):
     x : peek(p)
+    if at(p, "++") or at(p, "--"):
+        tt : take(p)["text"]
+        left : parse_postfix(p)
+        validate_target(p, left)
+        z : node("AugAssign", x)
+        z["target"] : left
+        z["op"] : "+=" if tt = "++" else "-="
+        one : node("Const", x)
+        one["value"] : "1"
+        one["kind"] : "number"
+        z["value"] : one
+        return z
     left : parse_expr(p)
     tt : peek(p)["text"]
     if tt = "=":
@@ -633,8 +793,61 @@ def validate_target(p, x):
         return
     fail(p, "unsupported assignment target", x)
 
+def is_lambda_ahead(p):
+    if kind(p, "NAME") and not is_kw(peek(p)["text"]) and peekn(p, 1)["text"] = "->":
+        return True
+    if peek(p)["text"] = "(":
+        depth : 0
+        j : 0
+        while True:
+            t : peekn(p, j)
+            if t["kind"] = "END":
+                return False
+            tx : t["text"]
+            if tx = "(":
+                depth += 1
+            elif tx = ")":
+                depth += -1
+                if depth = 0:
+                    return peekn(p, j + 1)["text"] = "->"
+            j += 1
+    return False
+
 def parse_expr(p):
+    if is_lambda_ahead(p):
+        return parse_lambda(p)
     return parse_ternary(p)
+
+def parse_lambda_param(p):
+    if kind(p, "NAME") and peekn(p, 1)["kind"] = "NAME":
+        skip_type(p)
+    a : need_kind(p, "NAME")
+    return ident(p, a)
+
+def parse_lambda(p):
+    x : peek(p)
+    args : []
+    if at(p, "("):
+        take(p)
+        if not at(p, ")"):
+            while True:
+                args.append(parse_lambda_param(p))
+                if not at(p, ","):
+                    break
+                take(p)
+        need(p, ")")
+    else:
+        a : need_kind(p, "NAME")
+        args.append(ident(p, a))
+    need(p, "->")
+    if at(p, "{"):
+        fail(p, "block-bodied lambdas are unsupported", peek(p))
+    if len(args) > 1:
+        fail(p, "multi-argument lambdas are unsupported", x)
+    z : node("Lambda", x)
+    z["args"] : args
+    z["body"] : parse_expr(p)
+    return z
 
 def parse_ternary(p):
     c : parse_or(p)
@@ -664,11 +877,11 @@ def parse_or(p):
     return z
 
 def parse_and(p):
-    xs : [parse_bitand(p)]
+    xs : [parse_compare(p)]
     x : xs[0]
     while at(p, "&&"):
         take(p)
-        xs.append(parse_bitand(p))
+        xs.append(parse_compare(p))
     if len(xs) = 1:
         return x
     z : node("BoolOp", x)
@@ -676,29 +889,17 @@ def parse_and(p):
     z["values"] : xs
     return z
 
-def parse_bitand(p):
-    x : peek(p)
-    if at(p, "&") or at(p, "|") or at(p, "^") or at(p, "~"):
-        fail(p, "bitwise operators are unsupported", peek(p))
-    return parse_compare(p)
-
 def parse_compare(p):
-    left : parse_shift(p)
+    left : parse_add(p)
     if peek(p)["text"] in ["==", "!=", "<", "<=", ">", ">="]:
         op : take(p)["text"]
-        right : parse_shift(p)
+        right : parse_add(p)
         z : node("Compare", left)
         z["left"] : left
         z["op"] : op
         z["right"] : right
         return z
     return left
-
-def parse_shift(p):
-    x : peek(p)
-    if at(p, "<<") or at(p, ">>"):
-        fail(p, "bitwise shift operators are unsupported", peek(p))
-    return parse_add(p)
 
 def parse_add(p):
     z : parse_mul(p)
@@ -737,15 +938,10 @@ def parse_unary(p):
         z["value"] : parse_unary(p)
         return z
     if tt = "+":
-        fail(p, "unary plus is unsupported", peek(p))
+        take(p)
+        return parse_unary(p)
     if tt = "++" or tt = "--":
-        fail(p, "prefix increment is unsupported", peek(p))
-    if tt = "&":
-        fail(p, "address-of is unsupported", peek(p))
-    if tt = "*":
-        fail(p, "pointer dereference is unsupported", peek(p))
-    if tt = "~":
-        fail(p, "bitwise operators are unsupported", peek(p))
+        fail(p, "prefix increment/decrement only supported as a statement", peek(p))
     return parse_postfix(p)
 
 def parse_postfix(p):
@@ -758,8 +954,6 @@ def parse_postfix(p):
             q["value"] : z
             q["attr"] : a["text"]
             z : q
-        elif at(p, "->"):
-            fail(p, "pointer member access is unsupported", peek(p))
         elif at(p, "("):
             x : take(p)
             q : node("Call", x)
@@ -792,6 +986,98 @@ def parse_index(p):
         lower : parse_expr(p)
     return lower
 
+def parse_new(p):
+    x : take(p)
+    if kind(p, "NAME"):
+        tn : take(p)["text"]
+        while at(p, "."):
+            take(p)
+            tn += "." + need_kind(p, "NAME")["text"]
+        if at(p, "<"):
+            skip_generics(p)
+        if at(p, "["):
+            take(p)
+            if at(p, "]"):
+                take(p)
+                while at(p, "["):
+                    take(p)
+                    need(p, "]")
+                return parse_array_init(p, x)
+            fail(p, "sized array 'new " + tn + "[N]' is unsupported", x)
+        if at(p, "("):
+            take(p)
+            if not at(p, ")"):
+                # Allow empty or reject constructor args for collections
+                if is_map_type(tn) or is_list_type(tn):
+                    fail(p, "constructed " + tn + " with arguments is unsupported; use Map.of/List.of or initializer", x)
+                depth : 1
+                while depth > 0 and not kind(p, "END"):
+                    tt : peek(p)["text"]
+                    if tt = "(":
+                        depth += 1
+                    elif tt = ")":
+                        depth += -1
+                    take(p)
+            else:
+                take(p)
+            if is_map_type(tn):
+                if at(p, "{"):
+                    return parse_dict_init(p, x)
+                z : node("Dict", x)
+                z["keys"] : []
+                z["values"] : []
+                return z
+            if is_list_type(tn):
+                if at(p, "{"):
+                    return parse_array_init(p, x)
+                z : node("List", x)
+                z["elts"] : []
+                return z
+            fail(p, "unsupported 'new " + tn + "(...)' expression", x)
+        if at(p, "{"):
+            if is_map_type(tn):
+                return parse_dict_init(p, x)
+            return parse_array_init(p, x)
+        fail(p, "unsupported 'new " + tn + "' expression", x)
+    fail(p, "unsupported 'new' expression", x)
+
+def is_map_type(tn):
+    return tn = "HashMap" or tn = "Map" or tn = "LinkedHashMap" or tn = "TreeMap" or ends_with(tn, ".HashMap") or ends_with(tn, ".Map")
+
+def is_list_type(tn):
+    return tn = "ArrayList" or tn = "List" or tn = "LinkedList" or ends_with(tn, ".ArrayList") or ends_with(tn, ".List")
+
+def ends_with(s, suf):
+    if len(s) < len(suf):
+        return False
+    return s[len(s) - len(suf):len(s)] = suf
+
+def parse_dict_init(p, x):
+    need(p, "{")
+    z : node("Dict", x)
+    z["keys"] : []
+    z["values"] : []
+    if not at(p, "}"):
+        while True:
+            # Java double-brace / put style is unsupported; accept {k, v} pairs like C#
+            if at(p, "{"):
+                take(p)
+                k : parse_expr(p)
+                need(p, ",")
+                v : parse_expr(p)
+                need(p, "}")
+                z["keys"].append(k)
+                z["values"].append(v)
+            else:
+                fail(p, "dictionary initializers must use {key, value} entries", peek(p))
+            if not at(p, ","):
+                break
+            take(p)
+            if at(p, "}"):
+                break
+    need(p, "}")
+    return z
+
 def parse_array_init(p, x):
     need(p, "{")
     z : node("List", x)
@@ -807,6 +1093,15 @@ def parse_array_init(p, x):
     need(p, "}")
     return z
 
+def looking_at_cast(p):
+    save : p["pos"]
+    if not skip_type(p):
+        p["pos"] : save
+        return False
+    ok : at(p, ")")
+    p["pos"] : save
+    return ok
+
 def parse_atom(p):
     x : peek(p)
     if kind(p, "NUMBER"):
@@ -821,29 +1116,34 @@ def parse_atom(p):
         z["value"] : x["val"]["s"]
         z["kind"] : "string"
         return z
-    if at(p, "true") or at(p, "false") or at(p, "NULL"):
+    if at(p, "true") or at(p, "false") or at(p, "null"):
         take(p)
         z : node("Const", x)
         z["value"] : "True" if x["text"] = "true" else ("False" if x["text"] = "false" else "None")
         z["kind"] : "number"
         return z
+    if at(p, "new"):
+        return parse_new(p)
     if kind(p, "NAME"):
         take(p)
         if is_kw(x["text"]):
             fail(p, "unexpected keyword '" + x["text"] + "'", x)
-        if x["text"] in c_forbidden_names:
-            fail(p, x["text"] + " is unsupported", x)
         z : node("Name", x)
         z["value"] : ident(p, x)
         x["text"] : z["value"]
         return z
     if at(p, "("):
         take(p)
+        if looking_at_cast(p):
+            skip_type(p)
+            need(p, ")")
+            return parse_unary(p)
         z : parse_expr(p)
         need(p, ")")
         return z
     if at(p, "{"):
-        return parse_array_init(p, x)
+        # Bare array initializer in decl context handled by parse_new; reject here
+        fail(p, "unsupported expression", x)
     fail(p, "unsupported expression", x)
 
 def pad(n):
@@ -909,6 +1209,8 @@ def render_stmt(s, st, ind):
         return [p + ("return" if s["value"] = None else "return " + expr_text(s["value"], st))]
     if t = "break" or t = "continue" or t = "pass":
         return [p + t]
+    if t = "Import":
+        return ["" if s["erase"] else p + "import " + s["name"]]
     if t = "Expr":
         return [p + expr_text(s["value"], st)]
     if t = "FunctionDef":
@@ -942,6 +1244,11 @@ def render_stmt(s, st, ind):
         return out
     if t = "While":
         out : [p + "while " + expr_text(s["test"], st) + ":"]
+        for q in render_body(s["body"], st, ind + 1, False):
+            out.append(q)
+        return out
+    if t = "For":
+        out : [p + "for " + target_text(s["target"], st) + " in " + expr_text(s["iter"], st) + ":"]
         for q in render_body(s["body"], st, ind + 1, False):
             out.append(q)
         return out
@@ -988,7 +1295,18 @@ def expr_text(x, st):
         for e in x["elts"]:
             parts.append(expr_text(e, st))
         return "[" + join_text(parts, ", ") + "]"
+    if t = "Dict":
+        parts : []
+        i : 0
+        while i < len(x["keys"]):
+            parts.append(expr_text(x["keys"][i], st) + ": " + expr_text(x["values"][i], st))
+            i += 1
+        return "{" + join_text(parts, ", ") + "}"
     if t = "Attr":
+        if x["attr"] = "length" or x["attr"] = "Length" or x["attr"] = "size":
+            # .length on arrays; .size() is a call, handled in lower_call
+            if x["attr"] = "length" or x["attr"] = "Length":
+                return "len(" + expr_text(x["value"], st) + ")"
         return expr_text(x["value"], st) + "." + x["attr"]
     if t = "Subscript":
         return expr_text(x["value"], st) + "[" + slice_text(x["slice"], st) + "]"
@@ -1008,6 +1326,8 @@ def expr_text(x, st):
         return "(" + expr_text(x["left"], st) + " " + op + " " + expr_text(x["right"], st) + ")"
     if t = "IfExp":
         return expr_text(x["body"], st) + " if " + expr_text(x["test"], st) + " else " + expr_text(x["orelse"], st)
+    if t = "Lambda":
+        return "(lambda " + join_text(x["args"], ", ") + ": " + expr_text(x["body"], st) + ")"
     if t = "Call":
         lowered : lower_call(x, st)
         if lowered != None:
@@ -1015,6 +1335,8 @@ def expr_text(x, st):
         parts : []
         for e in x["args"]:
             parts.append(expr_text(e, st))
+        for kv in x["kwargs"]:
+            parts.append(kv[0]["text"] + ":" + expr_text(kv[1], st))
         return expr_text(x["func"], st) + "(" + join_text(parts, ", ") + ")"
     return ""
 
@@ -1034,13 +1356,49 @@ def string_operand(x, st):
 
 def lower_call(x, st):
     f : x["func"]
-    if f["t"] = "Name":
-        name : f["value"]
-        if name = "printf" or name = "puts":
+    # System.out.println / System.out.print
+    if f["t"] = "Attr" and f["value"]["t"] = "Attr":
+        outer : f["value"]
+        if outer["value"]["t"] = "Name" and outer["value"]["value"] = "System" and outer["attr"] = "out":
+            if f["attr"] = "println" or f["attr"] = "print":
+                parts : []
+                for e in x["args"]:
+                    parts.append(expr_text(e, st))
+                return "print(" + join_text(parts, ", ") + ")"
+            raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": System.out." + f["attr"] + " is unsupported"
+    if f["t"] = "Attr" and f["value"]["t"] = "Name":
+        base : f["value"]["value"]
+        name : f["attr"]
+        if base = "Math":
+            maps : {"max":"max", "min":"min", "abs":"abs", "sqrt":"sqrt", "exp":"exp",
+                    "log":"log", "sin":"sin", "cos":"cos", "tan":"tan", "floor":"floor",
+                    "ceil":"ceil", "pow":"pow"}
+            if not name in maps:
+                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Math." + name + " is unsupported"
             parts : []
             for e in x["args"]:
                 parts.append(expr_text(e, st))
-            return "print(" + join_text(parts, ", ") + ")"
+            return maps[name] + "(" + join_text(parts, ", ") + ")"
+        if base = "List" and name = "of":
+            parts : []
+            for e in x["args"]:
+                parts.append(expr_text(e, st))
+            return "[" + join_text(parts, ", ") + "]"
+        if base = "Map" and name = "of":
+            if len(x["args"]) % 2 != 0:
+                raise st["filename"] + ":" + str(x["line"]) + ":" + str(x["col"]) + ": Map.of requires an even number of arguments"
+            parts : []
+            i : 0
+            while i < len(x["args"]):
+                parts.append(expr_text(x["args"][i], st) + ": " + expr_text(x["args"][i + 1], st))
+                i += 2
+            return "{" + join_text(parts, ", ") + "}"
+        if name = "size" and len(x["args"]) = 0:
+            return "len(" + expr_text(f["value"], st) + ")"
+        if name = "length" and len(x["args"]) = 0:
+            return "len(" + expr_text(f["value"], st) + ")"
+        if name = "get" and len(x["args"]) = 1:
+            return expr_text(f["value"], st) + "[" + expr_text(x["args"][0], st) + "]"
     return None
 
 def transpile(source, filename):
@@ -1048,8 +1406,8 @@ def transpile(source, filename):
     return render(ast, {"aliases":ast["aliases"]})
 
 def main():
-    return transpile_cli.run(argv, "c2s.ie", "c", transpile)
+    return transpile_cli.run(argv, "j2s.ie", "java", transpile)
 
 # Run CLI only when this file is the entry script.
-if re_match("c2s\\.ie$", argv[0]):
+if re_match("j2s\\.ie$", argv[0]):
     main()

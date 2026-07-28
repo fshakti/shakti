@@ -33,18 +33,18 @@
 
 # Examples index
 
-Most demo sections live in [`example.ie`](example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/`](examples/) when present locally (that tree is workspace-local / not always published).
+Most demo sections live in [`examples/example.ie`](examples/example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/_local/`](examples/_local/) when present locally (that tree is workspace-local / not published).
 
-**Do not run `example.ie` as a single program.** It concatenates interactive demos. After the early non-GUI sections it reaches `gfx_demo` / `synth_*` / `input` event loops (`while gfx.alive(): gfx.tick()` and similar). `tick` does not sleep, so an unattended run busy-waits at ~100% CPU until the window is closed (or forever if no display interaction). Copy one section into its own file, or run a standalone under `examples/`.
+**Do not run `examples/example.ie` as a single program.** It concatenates interactive demos. After the early non-GUI sections it reaches `gfx_demo` / `synth_*` / `input` event loops (`while gfx.alive(): gfx.tick()` and similar). `tick` does not sleep, so an unattended run busy-waits at ~100% CPU until the window is closed (or forever if no display interaction). Copy one section into its own file, or run a standalone under `examples/`.
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
 # Good: one demo
-./shakti examples/gfx_demo.ie
-# Or paste a single section from example.ie into /tmp/demo.ie and run that
+./shakti examples/_local/gfx_demo.ie
+# Or paste a single section from examples/example.ie into /tmp/demo.ie and run that
 ```
 
-Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/gfx_demo_timed.ie`, `examples/gfx_movie.ie`.
+Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/_local/gfx_demo_timed.ie`, `examples/_local/gfx_movie.ie`.
 
 ## By module
 
@@ -56,21 +56,21 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` (numeric + string columns) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
-| `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/gfx_demo.ie`) |
-| `import gfx` | `examples/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
-| `import gfx` | `examples/gfx_movie.ie` | Animated redraw demo (standalone) |
-| `import pyplot` | `pyplot_demo.ie` / `examples/pyplot_demo.ie` | Line / scatter / bar charts on gfx |
-| `import jupyter` | `jupyter_demo.ie` / `examples/jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
+| `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/_local/gfx_demo.ie`) |
+| `import gfx` | `examples/_local/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
+| `import gfx` | `examples/_local/gfx_movie.ie` | Animated redraw demo (standalone) |
+| `import pyplot` | `pyplot_demo.ie` / `examples/_local/pyplot_demo.ie` | Line / scatter / bar charts on gfx |
+| `import jupyter` | `jupyter_demo.ie` / `examples/_local/jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
 | `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers |
-| `import stem` | `examples/stem_demo.ie` | Streaming 4-stem separator |
-| `import sonicpi` | `sonicpi_demo.ie` / `examples/sonicpi_demo.ie` | Drive Sonic Pi over OSC |
-| `import pdf` | `pdf_demo.ie` / `examples/pdf_smoke.ie` | PDF 1.4 write/read |
-| `import midi` | `midi_demo.ie` / `examples/midi_demo.ie` | ALSA / CoreMIDI I/O |
+| `import stem` | `examples/_local/stem_demo.ie` | Streaming 4-stem separator |
+| `import sonicpi` | `sonicpi_demo.ie` / `examples/_local/sonicpi_demo.ie` | Drive Sonic Pi over OSC |
+| `import pdf` | `pdf_demo.ie` / `examples/_local/pdf_smoke.ie` | PDF 1.4 write/read |
+| `import midi` | `midi_demo.ie` / `examples/_local/midi_demo.ie` | ALSA / CoreMIDI I/O |
 | `import iefs` | `iefs_demo.ie` | Durable `.iefs` save/load |
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
@@ -83,12 +83,12 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 
 | Tool | Description |
 |------|-------------|
-| `s2p.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
-| `c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
-| `cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
-| `j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
-| `python.py` / `c.c` / `csharp.cs` / `java.java` | Tiny demos for each converter |
-| `example.py` / `example.c` / `example.cs` / `example.java` | Broader subset demos (`./shakti example.py` / `example.c` / `example.cs` / `example.java`) |
+| `converters/p2s.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
+| `converters/c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
+| `converters/cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
+| `converters/j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
+| `examples/python.py` / `examples/c.c` / `examples/csharp.cs` / `examples/java.java` | Tiny demos for each converter |
+| `example.py` / `example.c` / `example.cs` / `example.java` | Broader subset demos (`./shakti examples/example.py` / `example.c` / `example.cs` / `example.java`) |
 
 ## Module docs
 
@@ -122,6 +122,7 @@ make prod && export SHAKTI_LIB=$PWD/lib
 make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter, module_defaults
 make -f Makefile.local bench-modules  # focused suites only
 make -f Makefile.local test-c         # C converter regression script
+make -f Makefile.local test-transpile-matrix
 make -f Makefile.local bench-transpile-all
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
@@ -133,7 +134,9 @@ Time-series index correctness tests live under local `tests/` when that tree is 
 
 Build note: the direct-run converters (`./shakti file.py`, `./shakti file.c`,
 `./shakti file.cs`, `./shakti file.java`) use embedded copies generated into
-`gen/` from `s2p.ie`, `c2s.ie`, `cs2s.ie`, and `j2s.ie`.
+`gen/` from `converters/p2s.ie`, `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`. Shared converter
+feature matrix: `scripts/transpile_feature_matrix.py` (via
+`make -f Makefile.local test-transpile-matrix`).
 
 ---
 
@@ -141,13 +144,13 @@ Build note: the direct-run converters (`./shakti file.py`, `./shakti file.c`,
 
 Strict subset converter written in Shakti. Embedded in the executable from
 generated headers under `gen/` for direct runs, and still available as
-`s2p.ie` for emit-only conversion.
+`converters/p2s.ie` for emit-only conversion.
 
 ```bash
 ./shakti file.py                 # transpile + run (supported subset)
-./shakti python.py
-./shakti s2p.ie input.py -o out.ie
-./shakti s2p.ie python.py -o python.ie
+./shakti examples/python.py
+./shakti converters/p2s.ie input.py -o out.ie
+./shakti converters/p2s.ie examples/python.py -o python.ie
 SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
 
@@ -165,17 +168,19 @@ diagnostics (original `.py` path preserved).
 | `f(k=1)` | `f(k:1)` |
 | `a @ b` | `mmul(a, b)` |
 | `assert x` | `assert(x)` |
+| `+x` | `x` |
+| `class C:` (no bases) | body flattened (`pass` / nested `def` → top-level) |
 
 Also converts functions, one-argument lambdas, `if`/`elif`/`else`, `while`, `for`, break/continue/pass, lists/tuples/dicts, indexing/slices, attributes, calls, decorators, f-strings (without format specs), augmented `+= -= *= /=`, and `import name`.
 
-`python.py` demonstrates NumPy and pandas lowering. `numpy.array`/`asarray`
+`examples/python.py` demonstrates NumPy and pandas lowering. `numpy.array`/`asarray`
 become native vectors or matrices; common reducers map to Shakti builtins;
 `pandas.Series` becomes a vector and `pandas.DataFrame({...})` becomes
 `table(...)`. Other NumPy/pandas calls fail with a source location.
 
 ## Rejected
 
-Chained assignment/comparisons, annotations, classes, comprehensions/generators, sets/bytes/complex, `is`/`is not`, bitwise ops, unary `+`, `*args`/`**kwargs`, keyword-only/positional-only args, multi-argument lambdas, loop `else`, from-import/aliases, nested/starred unpacking, exceptions/`with`/`yield`/`async`, and `del`/`global`/`nonlocal`.
+Chained assignment/comparisons, annotations, class inheritance/bases, comprehensions/generators, sets/bytes/complex, `is`/`is not`, bitwise ops, `*args`/`**kwargs`, keyword-only/positional-only args, multi-argument lambdas, loop `else`, from-import/aliases, nested/starred unpacking, exceptions/`with`/`yield`/`async`, and `del`/`global`/`nonlocal`.
 
 Docstrings become `#` comments.
 
@@ -185,7 +190,7 @@ Docstrings become `#` comments.
 
 Strict subset converter written in Shakti. Embedded in the executable from
 generated headers under `gen/` for direct runs, and still available as
-`c2s.ie` for emit-only conversion.
+`converters/c2s.ie` for emit-only conversion.
 
 If `main` is present, the converter appends a call so the program runs.
 `int main(void)` / `int main()` become `def main():` plus `main()`.
@@ -194,9 +199,9 @@ If `main` is present, the converter appends a call so the program runs.
 
 ```bash
 ./shakti file.c                  # transpile + run (supported subset)
-./shakti example.c
-./shakti c2s.ie input.c -o out.ie
-./shakti c2s.ie c.c -o c.ie
+./shakti examples/example.c
+./shakti converters/c2s.ie input.c -o out.ie
+./shakti converters/c2s.ie examples/c.c -o c.ie
 SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
 
@@ -209,25 +214,42 @@ subset to Shakti and evaluates that. Unsupported syntax exits nonzero with
 | C | Shakti |
 |---|--------|
 | `int x = 1;` | `x : 1` |
+| `int a=1, b, c=3;` | `a : 1` / `b : 0` / `c : 3` |
 | `x == 1` | `x = 1` |
 | `int f(int n) { ... }` | `def f(n): ...` |
+| K&R `f(a,b) int a; int b; {…}` | `def f(a, b): …` |
 | `printf(...)` / `puts(...)` | `print(...)` |
 | `true` / `false` / `NULL` | `True` / `False` / `None` |
 | `&&` / `\|\|` / `!` | `and` / `or` / `not` |
+| `&` / `\|` / `^` / `~` / `<<` / `>>` | `band` / `bor` / `bxor` / `bnot` / `shl` / `shr` |
+| `&=` `\|=` `^=` `<<=` `>>=` | `x : band(x, y)` (etc.) |
 | `for (int i = 0; i < n; i++)` | `i : 0` + `while (i < n): ...; i += 1` |
+| `do { … } while (c);` | `while True:` body + `if not c: break` |
+| `switch` / `case` / `default` | temp + `if`/`elif`/`else` (no fall-through) |
+| `enum E { A, B=3, C };` | `A : 0` / `B : 3` / `C : 4` |
+| `typedef int MyInt;` / `typedef struct …` | recorded aliases (no emit) |
+| `struct S { int x; };` / `struct S s = {1};` | field map + `s : {"x": 1}`; `s.x` → `s["x"]` |
+| `(int)x` / `(T)x` | erased (operand only) |
+| `+x` | `x` |
+| prefix `++x;` / `--x;` as stmt | `x += 1` / `x -= 1` |
 | `int nums[] = {2, 4}` | `nums : [2, 4]` |
 | `#include ...` | erased |
+| `#define NAME rest` (object-like) | expand `NAME` during lex |
 | `main` | `def main(...):` + trailing call (`main()` or `main(len(argv[1:]), argv[1:])`) |
 
 Also converts `if`/`else if`/`else`, `while`, break/continue, indexing,
-calls, augmented `+= -= *= /=`, and postfix `++`/`--` (as `+= 1` / `-= 1`).
+calls, augmented `+= -= *= /= %=`, postfix `++`/`--` (as `+= 1` / `-= 1`),
+and same-function `label:` / `goto label;` via a `__c_goto` string state
+(`while True` + `continue` jumps). Storage-class keywords
+`static`/`extern`/`register`/`auto` are ignored when parsing types.
 
 ## Rejected
 
-Pointers/`*` deref/`&`/`->`, structs/unions/enums/typedefs, preprocessor
-beyond `#include` (`#define`/`#if`/…), `switch`/`goto`/`do`, `malloc`/`free`/
-`sizeof`, bitwise ops, unary `+`, prefix `++`/`--`, and arbitrary libc APIs
-outside the mapped `printf`/`puts` surface.
+Pointers/`*` deref/`&`/`->` (except `main` argv sugar), unions, function-like
+`#define NAME(`, conditional preprocessor (`#if`/`#ifdef`/`#ifndef`/`#endif`/
+`#undef`), switch fall-through, `malloc`/`free`/`sizeof`, prefix `++`/`--`
+inside larger expressions, and arbitrary libc APIs outside the mapped
+`printf`/`puts` surface.
 
 `//` comments become `#` comments; closed `/* ... */` block comments are
 discarded. An unterminated block comment exits nonzero with the opening
@@ -239,13 +261,13 @@ discarded. An unterminated block comment exits nonzero with the opening
 
 Strict subset converter written in Shakti. Embedded in the executable from
 generated headers under `gen/` for direct runs, and still available as
-`cs2s.ie` for emit-only conversion.
+`converters/cs2s.ie` for emit-only conversion.
 
 ```bash
 ./shakti file.cs                 # transpile + run (supported subset)
-./shakti csharp.cs
-./shakti cs2s.ie input.cs -o out.ie
-./shakti cs2s.ie csharp.cs -o csharp.ie
+./shakti examples/csharp.cs
+./shakti converters/cs2s.ie input.cs -o out.ie
+./shakti converters/cs2s.ie examples/csharp.cs -o csharp.ie
 SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
 
@@ -268,6 +290,11 @@ Shakti and evaluates that. Unsupported syntax exits nonzero with
 | `&&` / `\|\|` / `!` | `and` / `or` / `not` |
 | `x => x + 1` | `lambda x: (x + 1)` |
 | `for (int i = 0; i < n; i++)` | `i : 0` + `while (i < n): ...; i += 1` |
+| `switch (x) { case ... }` | temp + `if`/`elif`/`else` (no fall-through) |
+| `(T)x` | `x` (cast erased) |
+| `+x` | `x` |
+| `++x;` / `--x;` | `x += 1` / `x -= 1` (statements only) |
+| `class C { ... }` | flattened fields/methods (no inheritance) |
 | `new[] { 1, 2 }` | `[1, 2]` |
 | `new Dictionary<...> { {k, v} }` | `{k: v}` |
 | `new { a = x, b = y }` | `{ "a": x, "b": y }` (via `table` for DataFrames) |
@@ -279,18 +306,19 @@ Also converts expression-bodied methods (`=>`), `if`/`else if`/`else`, `while`,
 arguments, augmented `+= -= *= /=`, postfix `++`/`--` (as `+= 1` / `-= 1`),
 and one-argument lambdas.
 
-`csharp.cs` demonstrates NumPy/pandas-style lowering via `Np.*` / `Pd.*`
+`examples/csharp.cs` demonstrates NumPy/pandas-style lowering via `Np.*` / `Pd.*`
 (paralleling Python's `numpy`/`pandas` aliases). `Np.Array` becomes a native
 vector; common reducers map to Shakti builtins; `Pd.DataFrame(new { ... })`
 becomes `table(...)`. Other `Np`/`Pd` calls fail with a source location.
 
 ## Rejected
 
-Classes/structs/interfaces/enums/records/namespaces, `try`/`catch`/`switch`/
-`do`/`throw`/`lock`/`yield`/`async`/`await`, multi-argument/block lambdas,
-format specs in interpolations, bitwise ops, unary `+`, prefix `++`/`--`,
-generics beyond ignored type arguments on declarations/calls, and arbitrary
-.NET library APIs outside the mapped `Console`/`Np`/`Pd` surface.
+Structs/interfaces/enums/records/namespaces, inheritance (`class B : A`),
+`try`/`catch`/`do`/`throw`/`lock`/`yield`/`async`/`await`, switch fall-through,
+prefix `++`/`--` inside larger expressions, multi-argument/block lambdas,
+format specs in interpolations, bitwise ops, generics beyond ignored type
+arguments on declarations/calls, and arbitrary .NET library APIs outside the
+mapped `Console`/`Np`/`Pd` surface.
 
 `//` comments become `#` comments; closed `/* ... */` block comments are
 discarded. An unterminated block comment exits nonzero with the opening
@@ -302,7 +330,7 @@ discarded. An unterminated block comment exits nonzero with the opening
 
 Strict subset converter written in Shakti. Embedded in the executable from
 generated headers under `gen/` for direct runs, and still available as
-`j2s.ie` for emit-only conversion.
+`converters/j2s.ie` for emit-only conversion.
 
 One top-level class is accepted as a non-runtime shell for `static` fields and
 methods. If `main` is present, the converter appends `main(argv[1:])` so CLI
@@ -310,10 +338,10 @@ arguments match Java (no program name).
 
 ```bash
 ./shakti file.java               # transpile + run (supported subset)
-./shakti java.java
-./shakti example.java
-./shakti j2s.ie input.java -o out.ie
-./shakti j2s.ie java.java -o java.ie
+./shakti examples/java.java
+./shakti examples/example.java
+./shakti converters/j2s.ie input.java -o out.ie
+./shakti converters/j2s.ie examples/java.java -o java.ie
 SHAKTI_LIB=$PWD/lib ./shakti out.ie
 ```
 
@@ -335,6 +363,11 @@ diagnostics (original `.java` path preserved).
 | `x -> x + 1` | `lambda x: (x + 1)` |
 | `for (int i = 0; i < n; i++)` | `i : 0` + `while (i < n): ...; i += 1` |
 | `for (int x : xs)` | `for x in xs:` |
+| `do { ... } while (c)` | `while True: ...; if not c: break` |
+| `switch (x) { case ... }` | temp + `if`/`elif`/`else` (no fall-through) |
+| `(T)x` | `x` (cast erased) |
+| `+x` | `x` |
+| `++x;` / `--x;` | `x += 1` / `x -= 1` (statements only) |
 | `new int[]{1, 2}` | `[1, 2]` |
 | `List.of(1, 2)` | `[1, 2]` |
 | `Map.of("k", v)` | `{"k": v}` |
@@ -351,10 +384,11 @@ attributes, calls, augmented `+= -= *= /=`, postfix `++`/`--` (as `+= 1` /
 ## Rejected
 
 Inheritance/`implements`, constructors, instance fields/methods, nested types,
-overloading, `try`/`catch`/`switch`/`do`/`throw`/`synchronized`/`assert`,
-multi-argument/block lambdas, sized arrays `new T[n]`, bitwise ops, unary `+`,
-prefix `++`/`--`, generics beyond ignored type arguments, and arbitrary JDK
-APIs outside the mapped `System.out` / `Math` / `List.of` / `Map.of` surface.
+overloading, `try`/`catch`/`throw`/`synchronized`/`assert`, switch fall-through,
+prefix `++`/`--` inside larger expressions, multi-argument/block lambdas, sized
+arrays `new T[n]`, bitwise ops, generics beyond ignored type arguments, and
+arbitrary JDK APIs outside the mapped `System.out` / `Math` / `List.of` /
+`Map.of` surface.
 
 `//` comments become `#` comments; closed `/* ... */` block comments are
 discarded. An unterminated block comment exits nonzero with the opening
@@ -370,6 +404,9 @@ discarded. An unterminated block comment exits nonzero with the opening
 - **Compare** with `=` — `if x = 1:`, `while i < len(s):`
 - Dict literals and slices keep `:` — `{k: v}`, `a[1:3]`
 - `==` is not supported
+- Integer bitwise helpers (used by the C converter): `band(a,b)`, `bor(a,b)`,
+  `bxor(a,b)`, `bnot(a)`, `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical
+  shifts on the low 64 bits; shift counts must be in `0..63`
 
 String and formatted-string token text is limited to 8191 bytes, and source
 indentation is limited to 255 nested levels. Inputs beyond either limit fail
@@ -682,9 +719,9 @@ For high-throughput windowed VWAP / averages / exchange stats over dense symbol 
 |--------|-----|---------|
 | `sql` | [sql module](#sql-module) | `sql_demo.ie` |
 | `graph` | [graph module](#graph-module) | `graph_demo.ie` |
-| `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` / `examples/gfx_demo.ie` |
-| `pyplot` | [pyplot module](#pyplot-module) | `pyplot_demo.ie` / `examples/pyplot_demo.ie` |
-| `jupyter` | [jupyter module](#jupyter-module) | `jupyter_demo.ie` / `examples/jupyter_demo.ie` |
+| `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` / `examples/_local/gfx_demo.ie` |
+| `pyplot` | [pyplot module](#pyplot-module) | `pyplot_demo.ie` / `examples/_local/pyplot_demo.ie` |
+| `jupyter` | [jupyter module](#jupyter-module) | `jupyter_demo.ie` / `examples/_local/jupyter_demo.ie` |
 | `input` | [input module](#input-module) | `input_demo.ie` |
 | `synth` | [synth module](#synth-module) | `synth_demo.ie` |
 | `talk` | [talk module](#talk-module-macos) | `talk_demo.ie` |
@@ -785,7 +822,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy sql_demo.ie section from example.ie, or: ./shakti examples/sql_demo.ie  # if present
+# copy sql_demo.ie section from examples/example.ie, or: ./shakti examples/_local/sql_demo.ie  # if present
 ```
 
 ## Example
@@ -834,7 +871,7 @@ Run from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy graph_demo.ie section from example.ie
+# copy graph_demo.ie section from examples/example.ie
 ```
 
 ## Example
@@ -906,8 +943,8 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/gfx_demo.ie
-# or copy the gfx_demo.ie section from example.ie into its own file
+./shakti examples/_local/gfx_demo.ie
+# or copy the gfx_demo.ie section from examples/example.ie into its own file
 ```
 
 Linux needs `libx11-dev`. Disable at build time with `SHAKTI_GFX=0 make prod`.
@@ -942,9 +979,9 @@ else:
 
 | File | Description |
 |------|-------------|
-| `gfx_demo.ie` | Minimal open/draw/click loop ([`example.ie`](example.ie) section; also `examples/gfx_demo.ie`) |
-| `examples/gfx_demo_timed.ie` | Reports open/draw/tick timing |
-| `examples/gfx_movie.ie` | Animated redraw stress demo |
+| `gfx_demo.ie` | Minimal open/draw/click loop ([`examples/example.ie`](examples/example.ie) section; also `examples/_local/gfx_demo.ie`) |
+| `examples/_local/gfx_demo_timed.ie` | Reports open/draw/tick timing |
+| `examples/_local/gfx_movie.ie` | Animated redraw stress demo |
 | `tests/gfx_api.ie` | Smoke test for API and reopen/close behavior |
 
 ## API
@@ -983,11 +1020,11 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/pyplot_demo.ie
-SHAKTI_GFX_SKIP=1 ./shakti examples/pyplot_demo.ie   # skip gfx window
+./shakti examples/_local/pyplot_demo.ie
+SHAKTI_GFX_SKIP=1 ./shakti examples/_local/pyplot_demo.ie   # skip gfx window
 ```
 
-Or copy the `pyplot_demo.ie` section from [`example.ie`](example.ie).
+Or copy the `pyplot_demo.ie` section from [`examples/example.ie`](examples/example.ie).
 
 ## Example
 
@@ -1009,8 +1046,8 @@ Call style is `pyplot.plot(...)` (no `import … as plt` alias).
 
 | File | Description |
 |------|-------------|
-| `examples/pyplot_demo.ie` | Line + scatter + bar with legend/grid |
-| `example.ie` (`pyplot_demo.ie` section) | Same charts in the merged examples file |
+| `examples/_local/pyplot_demo.ie` | Line + scatter + bar with legend/grid |
+| `examples/example.ie` (`pyplot_demo.ie` section) | Same charts in the merged examples file |
 | `tests/pyplot_api.ie` | API smoke tests; draws once when a display is available |
 | `benchmarks/suites/pyplot.ie` | CPU + optional draw microbenches (`make -f Makefile.local bench-pyplot`) |
 
@@ -1034,7 +1071,7 @@ Module `lib/pyplot.ie` (imports `gfx`).
 | `pyplot.show()` | Open gfx, draw, block until the window closes |
 | `pyplot.close()` | Close the gfx window if open |
 
-Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` strings, or `0xRRGGBB` ints. Auto color cycles when `color` is omitted. Headless demos: set `SHAKTI_GFX_SKIP=1` to skip `show()` in `examples/pyplot_demo.ie`.
+Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` strings, or `0xRRGGBB` ints. Auto color cycles when `color` is omitted. Headless demos: set `SHAKTI_GFX_SKIP=1` to skip `show()` in `examples/_local/pyplot_demo.ie`.
 
 ---
 
@@ -1046,11 +1083,11 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/jupyter_demo.ie
-SHAKTI_GFX_SKIP=1 ./shakti examples/jupyter_demo.ie   # skip gfx window
+./shakti examples/_local/jupyter_demo.ie
+SHAKTI_GFX_SKIP=1 ./shakti examples/_local/jupyter_demo.ie   # skip gfx window
 ```
 
-Or copy the `jupyter_demo.ie` section from [`example.ie`](example.ie).
+Or copy the `jupyter_demo.ie` section from [`examples/example.ie`](examples/example.ie).
 
 ## Example
 
@@ -1073,8 +1110,8 @@ IPython-shaped one-shot: `jupyter.run("3 * 4")` appends a code cell and executes
 
 | File | Description |
 |------|-------------|
-| `examples/jupyter_demo.ie` | Cells, errors, run/run_all, save/load, optional gfx view |
-| `example.ie` (`jupyter_demo.ie` section) | Same flow in the merged examples file |
+| `examples/_local/jupyter_demo.ie` | Cells, errors, run/run_all, save/load, optional gfx view |
+| `examples/example.ie` (`jupyter_demo.ie` section) | Same flow in the merged examples file |
 | `tests/jupyter_api.ie` | API smoke tests; draws once when a display is available |
 | `benchmarks/suites/jupyter.ie` | CPU + optional draw microbenches (`make -f Makefile.local bench-jupyter`) |
 
@@ -1115,7 +1152,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy input_demo.ie section from example.ie
+# copy input_demo.ie section from examples/example.ie
 ```
 
 Synth + keyboard jam: `synth_input.ie` (`input_set_own_gui(1)` routes window keys to the hub).
@@ -1368,7 +1405,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy synth_demo.ie section from example.ie (interactive; busy-waits while alive)
+# copy synth_demo.ie section from examples/example.ie (interactive; busy-waits while alive)
 ```
 
 ## Example
@@ -1472,7 +1509,7 @@ Just-intonation / k-scale ratio primitives. Built by default (`SHAKTI_DSP=1`).
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy dsp_demo.ie section from example.ie
+# copy dsp_demo.ie section from examples/example.ie
 ```
 
 ## Perfect 7 ratio set
@@ -1533,7 +1570,7 @@ Cross-engine benches (Demucs OSS, optional LALAL.AI proprietary API) live in the
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/stem_demo.ie
+./shakti examples/_local/stem_demo.ie
 ```
 
 ## API
@@ -1580,14 +1617,14 @@ OSC bridge to [Sonic Pi](https://sonic-pi.net/) for live-coded music from Shakti
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/sonicpi_demo.ie  # or copy section from example.ie
-# or: ./shakti examples/sonicpi_demo.ie
+./shakti examples/_local/sonicpi_demo.ie  # or copy section from examples/example.ie
+# or: ./shakti examples/_local/sonicpi_demo.ie
 ```
 
 ## Prerequisites
 
 1. Install **Sonic Pi** separately from [sonic-pi.net](https://sonic-pi.net/) (not bundled with Shakti).
-2. Start Sonic Pi and run the bridge in `examples/sonicpi_bridge.rb` when that tree is present locally.
+2. Start Sonic Pi and run the bridge in `examples/_local/sonicpi_bridge.rb` when that tree is present locally.
 3. By default Sonic Pi listens for OSC on **`127.0.0.1:4560`**. For remote hosts, enable **Preferences → IO → Networked OSC → Allow OSC from other computers**.
 
 ## Example
@@ -1638,8 +1675,8 @@ From-scratch PDF 1.4 reader/writer (`src/pdf.c`) — no MuPDF/Poppler/PDFium. Bu
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/pdf_smoke.ie  # or copy pdf_demo.ie section from example.ie
-# or: ./shakti examples/pdf_smoke.ie
+./shakti examples/_local/pdf_smoke.ie  # or copy pdf_demo.ie section from examples/example.ie
+# or: ./shakti examples/_local/pdf_smoke.ie
 ```
 
 ## Example
@@ -1690,8 +1727,8 @@ MIDI I/O via ALSA sequencer (Linux) or CoreMIDI (macOS). Built by default (`SHAK
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/midi_demo.ie
-# optional: MIDI_PORT='Scarlett' ./shakti examples/midi_demo.ie
+./shakti examples/_local/midi_demo.ie
+# optional: MIDI_PORT='Scarlett' ./shakti examples/_local/midi_demo.ie
 ```
 
 ## vs `synth` / `sonicpi`
@@ -1730,7 +1767,7 @@ Portable durable save/load for Shakti values (`.iefs`). Built by default (`SHAKT
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy iefs_demo.ie section from example.ie
+# copy iefs_demo.ie section from examples/example.ie
 ```
 
 ```ie
@@ -1766,7 +1803,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy talk_demo.ie section from example.ie
+# copy talk_demo.ie section from examples/example.ie
 ```
 
 ## Example

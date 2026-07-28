@@ -19,6 +19,9 @@ csharp_keywords : ["if", "else", "while", "for", "foreach", "do", "switch",
 csharp_type_keywords : ["var", "void", "int", "long", "short", "byte", "sbyte",
                         "uint", "ulong", "ushort", "double", "float", "decimal",
                         "bool", "char", "string", "object", "dynamic"]
+csharp_modifiers : ["public", "private", "protected", "internal", "static",
+                    "readonly", "const", "virtual", "override", "abstract",
+                    "sealed", "partial", "async", "extern", "unsafe"]
 two_ops : ["==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=",
            "/=", "=>", ".."]
 
@@ -27,6 +30,9 @@ def is_kw(text):
 
 def is_type_kw(text):
     return text in csharp_type_keywords
+
+def is_mod(text):
+    return text in csharp_modifiers
 
 def tok(kind, text, val, line, col):
     return converter_shared.tok(kind, text, val, line, col)
@@ -225,11 +231,33 @@ def ident(p, x):
 
 def parse(source, filename):
     lx : lex(source)
-    p : {"tokens":lx["tokens"], "pos":0, "filename":filename, "aliases":{"Np":"numpy", "Pd":"pandas"}, "comments":lx["comments"], "inline":lx["inline"]}
+    p : {"tokens":lx["tokens"], "pos":0, "filename":filename, "aliases":{"Np":"numpy", "Pd":"pandas"},
+         "comments":lx["comments"], "inline":lx["inline"], "goto_tmp":0, "class_name":None}
     body : []
     while not kind(p, "END"):
         body.append(parse_stmt(p))
     return {"t":"Module", "body":body, "comments":p["comments"], "inline":p["inline"], "aliases":p["aliases"], "filename":filename}
+
+def skip_modifiers(p):
+    while kind(p, "NAME") and is_mod(peek(p)["text"]):
+        take(p)
+
+def const_true(x):
+    z : node("Const", x)
+    z["value"] : "True"
+    z["kind"] : "number"
+    return z
+
+def name_node(x, s):
+    z : node("Name", x)
+    z["value"] : s
+    return z
+
+def assign_name(x, name, value):
+    z : node("Assign", x)
+    z["target"] : name_node(x, name)
+    z["value"] : value
+    return z
 
 def skip_generics(p):
     depth : 1
@@ -263,10 +291,18 @@ def parse_stmt(p):
     x : peek(p)
     if at(p, "using"):
         return parse_using(p)
-    if at(p, "namespace") or at(p, "class") or at(p, "struct") or at(p, "interface") or at(p, "enum") or at(p, "record"):
-        fail(p, x["text"] + " declarations are unsupported", x)
-    if at(p, "try") or at(p, "switch") or at(p, "do") or at(p, "throw") or at(p, "lock") or at(p, "yield"):
+    save : p["pos"]
+    skip_modifiers(p)
+    if at(p, "class"):
+        return parse_class(p)
+    if at(p, "namespace") or at(p, "struct") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, peek(p)["text"] + " declarations are unsupported", peek(p))
+    p["pos"] : save
+    x : peek(p)
+    if at(p, "try") or at(p, "do") or at(p, "throw") or at(p, "lock") or at(p, "yield"):
         fail(p, x["text"] + " statements are unsupported", x)
+    if at(p, "switch"):
+        return parse_switch(p)
     if at(p, "if"):
         return parse_if(p)
     if at(p, "while"):
@@ -291,6 +327,123 @@ def parse_stmt(p):
     if d != None:
         return d
     return parse_expr_stmt(p)
+
+def parse_class(p):
+    x : take(p)
+    nm : need_kind(p, "NAME")
+    p["class_name"] : nm["text"]
+    if at(p, ":"):
+        fail(p, "inheritance is unsupported", peek(p))
+    need(p, "{")
+    members : []
+    while not at(p, "}") and not kind(p, "END"):
+        members.append(parse_class_member(p))
+    need(p, "}")
+    p["class_name"] : None
+    if len(members) = 0:
+        return node("pass", x)
+    seq : node("Seq", x)
+    seq["body"] : members
+    return seq
+
+def parse_class_member(p):
+    x : peek(p)
+    if at(p, "class") or at(p, "struct") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, "nested " + x["text"] + " declarations are unsupported", x)
+    skip_modifiers(p)
+    if at(p, "class") or at(p, "struct") or at(p, "interface") or at(p, "enum") or at(p, "record"):
+        fail(p, "nested " + peek(p)["text"] + " declarations are unsupported", peek(p))
+    if kind(p, "NAME") and p["class_name"] != None and peek(p)["text"] = p["class_name"] and peekn(p, 1)["text"] = "(":
+        fail(p, "constructors are unsupported", peek(p))
+    save : p["pos"]
+    fn : try_parse_func(p)
+    if fn != None:
+        return fn
+    p["pos"] : save
+    d : try_parse_decl(p)
+    if d != None:
+        return d
+    fail(p, "unsupported class member", x)
+
+def parse_switch(p):
+    x : take(p)
+    need(p, "(")
+    expr : parse_expr(p)
+    need(p, ")")
+    need(p, "{")
+    p["goto_tmp"] += 1
+    tmp : "__cs_sw" + str(p["goto_tmp"])
+    seq : node("Seq", x)
+    seq["body"] : [assign_name(x, tmp, expr)]
+    cases : []
+    default_body : None
+    while not at(p, "}") and not kind(p, "END"):
+        if at(p, "case"):
+            cx : take(p)
+            val : parse_expr(p)
+            need(p, ":")
+            cb : []
+            while not at(p, "case") and not at(p, "default") and not at(p, "}") and not kind(p, "END"):
+                cb.append(parse_stmt(p))
+            if len(cb) = 0:
+                fail(p, "switch fall-through is unsupported", cx)
+            last : cb[len(cb) - 1]
+            if last["t"] != "break":
+                if last["t"] != "Return":
+                    fail(p, "switch fall-through is unsupported (missing break)", last)
+            body_out : []
+            i : 0
+            while i < len(cb):
+                if i = len(cb) - 1 and cb[i]["t"] = "break":
+                    break
+                body_out.append(cb[i])
+                i += 1
+            if len(body_out) = 0:
+                body_out.append(node("pass", cx))
+            cases.append({"test":val, "body":body_out, "line":cx["line"], "col":cx["col"]})
+        elif at(p, "default"):
+            dx : take(p)
+            need(p, ":")
+            db : []
+            while not at(p, "case") and not at(p, "default") and not at(p, "}") and not kind(p, "END"):
+                db.append(parse_stmt(p))
+            if len(db) > 0:
+                last : db[len(db) - 1]
+                if last["t"] = "break":
+                    db : db[:len(db) - 1]
+            if len(db) = 0:
+                db : [node("pass", dx)]
+            default_body : db
+        else:
+            fail(p, "expected case or default in switch", peek(p))
+    need(p, "}")
+    if len(cases) = 0 and default_body = None:
+        return seq
+    first : cases[0] if len(cases) > 0 else None
+    if first != None:
+        iff : node("If", x)
+        cmp : node("Compare", x)
+        cmp["left"] : name_node(x, tmp)
+        cmp["op"] : "=="
+        cmp["right"] : first["test"]
+        iff["test"] : cmp
+        iff["body"] : first["body"]
+        iff["elifs"] : []
+        i : 1
+        while i < len(cases):
+            c : cases[i]
+            cmpi : node("Compare", x)
+            cmpi["left"] : name_node(x, tmp)
+            cmpi["op"] : "=="
+            cmpi["right"] : c["test"]
+            iff["elifs"].append({"test":cmpi, "body":c["body"], "line":c["line"], "col":c["col"]})
+            i += 1
+        iff["orelse"] : default_body if default_body != None else []
+        seq["body"].append(iff)
+    elif default_body != None:
+        for s in default_body:
+            seq["body"].append(s)
+    return seq
 
 def parse_using(p):
     x : take(p)
@@ -512,6 +665,18 @@ def parse_for_clause(p):
 
 def parse_assign_no_semi(p):
     x : peek(p)
+    if at(p, "++") or at(p, "--"):
+        tt : take(p)["text"]
+        left : parse_postfix(p)
+        validate_target(p, left)
+        z : node("AugAssign", x)
+        z["target"] : left
+        z["op"] : "+=" if tt = "++" else "-="
+        one : node("Const", x)
+        one["value"] : "1"
+        one["kind"] : "number"
+        z["value"] : one
+        return z
     left : parse_expr(p)
     tt : peek(p)["text"]
     if tt = "=":
@@ -700,9 +865,10 @@ def parse_unary(p):
         z["value"] : parse_unary(p)
         return z
     if tt = "+":
-        fail(p, "unary plus is unsupported", peek(p))
+        take(p)
+        return parse_unary(p)
     if tt = "++" or tt = "--":
-        fail(p, "prefix increment is unsupported", peek(p))
+        fail(p, "prefix increment/decrement only supported as a statement", peek(p))
     return parse_postfix(p)
 
 def parse_postfix(p):
@@ -863,6 +1029,15 @@ def parse_array_init(p, x):
     need(p, "}")
     return z
 
+def looking_at_cast(p):
+    save : p["pos"]
+    if not skip_type(p):
+        p["pos"] : save
+        return False
+    ok : at(p, ")")
+    p["pos"] : save
+    return ok
+
 def parse_atom(p):
     x : peek(p)
     if kind(p, "NUMBER"):
@@ -915,6 +1090,10 @@ def parse_atom(p):
         return z
     if at(p, "("):
         take(p)
+        if looking_at_cast(p):
+            skip_type(p)
+            need(p, ")")
+            return parse_unary(p)
         z : parse_expr(p)
         need(p, ")")
         return z

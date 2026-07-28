@@ -48,8 +48,16 @@ gfx_tests_terminal.mp4
 CONTEXT.md
 /*audit*.md
 /*benchmark*.md
+/transpile_coverage*.md
+
+# never recommit generated converter emit artifacts at repo root
+/c.ie
+/python.ie
+/csharp.ie
+/java.ie
 
 # local-only workspace trees (not in published repo)
+local/
 tests/
 scripts/
 benchmarks/
@@ -58,7 +66,7 @@ samples/
 android/
 cmake/
 editors/
-examples/
+examples/_local/
 docs/
 Makefile.local
 

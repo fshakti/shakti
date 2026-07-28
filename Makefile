@@ -28,7 +28,7 @@ else
 endif
 
 CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
-	-I$(BUILD) -Isrc -Igen \
+	-I$(BUILD) -Igen -Isrc \
 	$(OMP_CFLAGS)
 
 # Optional JNI headers for src/shakti_jni.c (Homebrew OpenJDK or JAVA_HOME).
@@ -213,20 +213,20 @@ $(BUILD)/shakti_version.h: src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
-# Regenerated from the top-level converter sources when a local embed helper
-# exists (scripts/ is gitignored). src/shakti_lang.c includes these files via
-# ../gen/... explicitly so stale src/shakti_*_embed.h copies cannot shadow them.
+# Regenerated from converters/ when a local embed helper exists (scripts/ is
+# gitignored). src/shakti_lang.c includes these files via ../gen/... explicitly
+# so stale src/shakti_*_embed.h copies cannot shadow them.
 define make_embed_rule
-gen/shakti_$(1)_embed.h: $(1).ie
+gen/shakti_$(1)_embed.h: converters/$(1).ie
 	@mkdir -p gen
 ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py $(1).ie shakti_$(1)_source $$@
+	python3 scripts/embed_text.py converters/$(1).ie shakti_$(1)_source $$@
 else
-	@test -f $$@ || (echo "error: missing $$@ — restore scripts/embed_text.py to regenerate from $(1).ie" >&2; exit 1)
+	@test -f $$@ || (echo "error: missing $$@ — restore scripts/embed_text.py to regenerate from converters/$(1).ie" >&2; exit 1)
 endif
 endef
 
-$(foreach stem,s2p c2s cs2s j2s,$(eval $(call make_embed_rule,$(stem))))
+$(foreach stem,p2s c2s cs2s j2s,$(eval $(call make_embed_rule,$(stem))))
 
 ifeq ($(SHAKTI_TALK),1)
 talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
@@ -307,7 +307,7 @@ PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),pdf.o)
 MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),midi.o)
 IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o)
 
-shakti: $(BUILD)/shakti_version.h gen/shakti_s2p_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
+shakti: $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
@@ -332,14 +332,14 @@ test-parse: shakti
 	@bash scripts/parse_golden.sh
 
 test-pong: shakti
-	@echo "Running pong_test.ie..."
-	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_test.ie
-	@echo "Running pong_spell_test.ie..."
-	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_spell_test.ie
+	@echo "Running examples/pong_test.ie..."
+	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_test.ie
+	@echo "Running examples/pong_spell_test.ie..."
+	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_spell_test.ie
 	@echo "PONG TESTS PASSED"
 
 bench-pong: shakti
-	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti pong_bench.ie
+	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_bench.ie
 
 clean:
 	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o stem.o pdf.o midi.o iefs_io.o iefs_format.o shakti_jni.o *.tmp *.plist
@@ -417,7 +417,10 @@ endif
 
 .PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse test-pong bench-pong
 
-# Optional JNI bridge (not linked into the CLI). Requires JAVA_HOME or Homebrew OpenJDK.
+# Optional JNI bridge for embedding Shakti in a JVM host
+# (Java_com_shakti_shakti_ShaktiNative_runFile). Not linked into the CLI
+# binary; build only when an external Android/Java consumer needs it.
+# Requires JAVA_HOME or Homebrew OpenJDK (jni.h).
 shakti_jni.o: src/shakti_jni.c src/a.h
 	@if [ -z "$(JNI_CFLAGS)" ]; then \
 	  echo "error: jni.h not found — set JAVA_HOME or install openjdk" >&2; exit 1; \

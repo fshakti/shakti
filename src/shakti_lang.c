@@ -11,7 +11,7 @@
 #endif
 /* Resolve embedded converter sources from the generated tree explicitly so
  * stale src/shakti_*_embed.h files can never shadow them via include order. */
-#include "../gen/shakti_s2p_embed.h"
+#include "../gen/shakti_p2s_embed.h"
 #include "../gen/shakti_c2s_embed.h"
 #include "../gen/shakti_cs2s_embed.h"
 #include "../gen/shakti_j2s_embed.h"
@@ -6066,8 +6066,8 @@ static char *shakti_transpile_embedded(const char *src_text, const char *filenam
     return ie;
 }
 static char *shakti_transpile_python(const char *py_src, const char *filename, Env *global) {
-    return shakti_transpile_embedded(py_src, filename, global, shakti_s2p_source,
-                                     "__shakti_s2p__", "s2p");
+    return shakti_transpile_embedded(py_src, filename, global, shakti_p2s_source,
+                                     "__shakti_p2s__", "p2s");
 }
 static char *shakti_transpile_c(const char *c_src, const char *filename, Env *global) {
     return shakti_transpile_embedded(c_src, filename, global, shakti_c2s_source,
