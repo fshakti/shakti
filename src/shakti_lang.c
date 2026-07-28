@@ -7,7 +7,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.11.0"
+#define SHAKTI_PKG_VERSION "0.11.1"
 #endif
 #include "shakti_s2p_embed.h"
 #include "shakti_c2s_embed.h"
