@@ -46,8 +46,8 @@ gfx_tests_terminal.mp4
 
 # local workspace notes (never publish)
 CONTEXT.md
-/PYTHON_VS_SHAKTI_BENCHMARK.md
-/CSHARP_VS_SHAKTI_BENCHMARK.md
+/*audit*.md
+/*benchmark*.md
 
 # local-only workspace trees (not in published repo)
 tests/
