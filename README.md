@@ -60,6 +60,14 @@ C / C# / Java converters reject unterminated strings and `/* ... */` block
 comments with source-line diagnostics instead of emitting partial programs.
 CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger inputs.
 
+`./shakti file.c` is **subset lowering + interpret**, not a C compiler. Repeated
+`.c` / `.py` / `.cs` / `.java` runs use a disk transpile cache under
+`~/.cache/shakti/transpile/` (`SHAKTI_NO_TRANSPILE_CACHE=1` to disable). Prefer
+emitting `.ie` once for hot loops. Fast numeric work belongs on large vectors /
+`dot` / `mmul` / `make prod-speed` — scalar `for`/`while` micros stay in the AST
+interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performance-vs-cc--o2-methodology)
+and local `make -f Makefile.local compare-langs`.
+
 **`examples/example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
 It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end
 hits an open-window busy loop (`while gfx.alive(): gfx.tick()` with no sleep) and will
@@ -107,6 +115,7 @@ make -f Makefile.local bench          # full suite vs baselines
 make -f Makefile.local test-c         # C converter regression script
 make -f Makefile.local test-transpile-matrix  # shared converter feature matrix
 make -f Makefile.local bench-transpile-all
+make -f Makefile.local compare-langs  # vs host runtimes; C .c/.ie/eval~ split
 ```
 
 Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).

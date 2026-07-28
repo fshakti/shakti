@@ -124,6 +124,7 @@ make -f Makefile.local bench-modules  # focused suites only
 make -f Makefile.local test-c         # C converter regression script
 make -f Makefile.local test-transpile-matrix
 make -f Makefile.local bench-transpile-all
+make -f Makefile.local compare-langs  # vs CPython / cc -O2 / .NET / JVM (decomposed C table)
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
 ```
@@ -136,7 +137,9 @@ Build note: the direct-run converters (`./shakti file.py`, `./shakti file.c`,
 `./shakti file.cs`, `./shakti file.java`) use embedded copies generated into
 `gen/` from `converters/p2s.ie`, `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`. Shared converter
 feature matrix: `scripts/transpile_feature_matrix.py` (via
-`make -f Makefile.local test-transpile-matrix`).
+`make -f Makefile.local test-transpile-matrix`). Repeated source runs write a
+transpile cache under `~/.cache/shakti/transpile/` (or `$XDG_CACHE_HOME/shakti/transpile/`);
+set `SHAKTI_NO_TRANSPILE_CACHE=1` to force a fresh convert each process.
 
 ---
 
@@ -208,6 +211,28 @@ SHAKTI_LIB=$PWD/lib ./shakti out.ie
 `./shakti file.c` is not a C compiler or libc runtime: it lowers the supported
 subset to Shakti and evaluates that. Unsupported syntax exits nonzero with
 `file:line:col` diagnostics (original `.c` path preserved).
+
+### Performance vs `cc -O2` (methodology)
+
+Local `make -f Makefile.local compare-langs` / `scripts/bench_c_vs_shakti.py`
+compares **already-built** `cc -O2` binaries (compile untimed) to Shakti.
+
+| Path | What is timed | How to read it |
+|------|---------------|----------------|
+| `./shakti file.c` | process start + transpile + parse + eval | Historical headline; mixes converter cost |
+| `./shakti file.ie` | process start + parse + eval | Fairer interpreter-vs-binary gap |
+| `eval~` | batch `.ie` minus single `.ie`, per rep | Approximates loop body cost |
+
+Fair peer for “language VM” cost is **CPython** (~parity on the same harness).
+Expect **gcc -O2** to win scalar micros by a wide margin: Shakti is an AST
+interpreter with bulk SIMD/OpenMP only on large vectors (`make prod-speed`).
+Tips: emit `.ie` once for hot runs; repeated `./shakti file.c` uses a disk
+transpile cache under `~/.cache/shakti/transpile/` (disable with
+`SHAKTI_NO_TRANSPILE_CACHE=1`). Counting `while (i < N): …; i += 1` loops
+lowered from C are specialized in the evaluator.
+
+Latest local numbers: `benchmarks/local/langs.md`, profile notes in
+`benchmarks/local/c_gap_profile.md`.
 
 ## Rewrites
 
