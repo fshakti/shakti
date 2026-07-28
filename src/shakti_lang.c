@@ -25,6 +25,7 @@
 #endif
 #include <sys/stat.h>
 #include <time.h>
+#include <errno.h>
 
 /* fopen() may succeed on directories (Linux); reject non-regular files. */
 static FILE *fopen_regular(const char *path, char *err, size_t err_cap) {
@@ -699,6 +700,44 @@ Env *env_new(Env *parent) {
     if(parent) parent->rc++;
     return e;
 }
+#define SHAKTI_ENV_POOL_MAX 64
+static Env *shakti_env_pool[SHAKTI_ENV_POOL_MAX];
+static int shakti_env_pool_n;
+static Env *env_acquire(Env *parent) {
+    Env *e;
+    if(shakti_env_pool_n > 0) {
+        e = shakti_env_pool[--shakti_env_pool_n];
+        for(int i = 0; i < e->len; i++) {
+            free(e->names[i]);
+            v_free(e->vals[i]);
+        }
+        e->len = 0;
+        e->rc = 1;
+        e->parent = parent;
+        if(parent) parent->rc++;
+        return e;
+    }
+    return env_new(parent);
+}
+static void env_release(Env *e) {
+    if(!e) return;
+    if(e->rc != 1 || shakti_env_pool_n >= SHAKTI_ENV_POOL_MAX) {
+        env_free(e);
+        return;
+    }
+    Env *parent = e->parent;
+    e->parent = NULL;
+    if(parent) env_free(parent);
+    for(int i = 0; i < e->len; i++) {
+        free(e->names[i]);
+        v_free(e->vals[i]);
+        e->names[i] = NULL;
+        e->vals[i] = NULL;
+    }
+    e->len = 0;
+    e->rc = 1;
+    shakti_env_pool[shakti_env_pool_n++] = e;
+}
 void env_set(Env *e, const char *name, V *val) {
     uint32_t h = fnv1a(name);
     for(int i=0; i<e->len; i++) {
@@ -718,6 +757,30 @@ void env_set(Env *e, const char *name, V *val) {
     e->vals[e->len]   = v_ref(val);
     e->hashes[e->len] = h;
     e->len++;
+}
+/* Mutate an existing INT binding in place when uniquely owned (rc==1). */
+static int env_set_int_inplace(Env *e, const char *name, int64_t j) {
+    uint32_t h = fnv1a(name);
+    for(; e; e=e->parent)
+        for(int i=0; i<e->len; i++)
+            if(e->hashes[i] == h && strcmp(e->names[i], name)==0) {
+                V *cur = e->vals[i];
+                if(cur && cur->t == T_INT && cur->rc == 1) {
+                    cur->j = j;
+                    return 1;
+                }
+                V *nv = v_int(j);
+                v_free(cur);
+                e->vals[i] = nv;
+                return 1;
+            }
+    return 0;
+}
+static int env_get_int(Env *e, const char *name, int64_t *out) {
+    V *v = env_get(e, name);
+    if(!v || v->t != T_INT) return 0;
+    *out = v->j;
+    return 1;
 }
 void env_set_local(Env *e, const char *name, V *val) {
     env_set(e, name, val);
@@ -4406,6 +4469,73 @@ static V *eval_each(Node *n, Env *e) {
     return v_err("each: bad arity");
 }
 
+/* True if node is an INT expression using only INT literals and `iname`. */
+static int int_expr_uses_only(Node *n, const char *iname) {
+    if(!n) return 0;
+    if(n->type == N_INT) return 1;
+    if(n->type == N_NAME) return iname && strcmp(n->sval, iname) == 0;
+    if(n->type == N_BINOP && n->nch >= 2 &&
+       (n->op == OP_ADD || n->op == OP_SUB || n->op == OP_MUL))
+        return int_expr_uses_only(n->ch[0], iname) && int_expr_uses_only(n->ch[1], iname);
+    return 0;
+}
+static int eval_int_expr_i(Node *n, int64_t i, int64_t *out) {
+    if(n->type == N_INT) { *out = n->ival; return 1; }
+    if(n->type == N_NAME) { *out = i; return 1; }
+    if(n->type == N_BINOP && n->nch >= 2) {
+        int64_t a, b;
+        if(!eval_int_expr_i(n->ch[0], i, &a) || !eval_int_expr_i(n->ch[1], i, &b)) return 0;
+        switch(n->op) {
+        case OP_ADD: *out = a + b; return 1;
+        case OP_SUB: *out = a - b; return 1;
+        case OP_MUL: *out = a * b; return 1;
+        default: return 0;
+        }
+    }
+    return 0;
+}
+/* Specialize C-lowered counting loops:
+ *   while (i < N):
+ *       total += <int expr in i>
+ *       i += 1
+ * Returns a result V* if handled, or NULL to fall back to generic while.
+ */
+static V *try_fast_counting_while(Node *n, Env *e) {
+    if(!n || n->nch < 2) return NULL;
+    Node *cond = n->ch[0], *body = n->ch[1];
+    if(cond->type != N_BINOP || cond->op != OP_LT || cond->nch < 2) return NULL;
+    if(cond->ch[0]->type != N_NAME || cond->ch[1]->type != N_INT) return NULL;
+    if(body->type != N_BLOCK || body->nch < 1) return NULL;
+    const char *iname = cond->ch[0]->sval;
+    int64_t limit = cond->ch[1]->ival;
+    Node *last = body->ch[body->nch - 1];
+    if(last->type != N_AUGASSIGN || last->op != OP_ADD) return NULL;
+    if(last->ch[0]->type != N_NAME || strcmp(last->ch[0]->sval, iname) != 0) return NULL;
+    if(last->ch[1]->type != N_INT || last->ch[1]->ival != 1) return NULL;
+    for(int s = 0; s < body->nch - 1; s++) {
+        Node *stmt = body->ch[s];
+        if(stmt->type != N_AUGASSIGN || stmt->op != OP_ADD || stmt->ch[0]->type != N_NAME)
+            return NULL;
+        if(!int_expr_uses_only(stmt->ch[1], iname)) return NULL;
+        int64_t cur;
+        if(!env_get_int(e, stmt->ch[0]->sval, &cur)) return NULL;
+    }
+    int64_t i;
+    if(!env_get_int(e, iname, &i)) return NULL;
+    while(i < limit) {
+        for(int s = 0; s < body->nch - 1; s++) {
+            Node *stmt = body->ch[s];
+            int64_t delta, cur;
+            if(!eval_int_expr_i(stmt->ch[1], i, &delta)) return NULL;
+            if(!env_get_int(e, stmt->ch[0]->sval, &cur)) return NULL;
+            if(!env_set_int_inplace(e, stmt->ch[0]->sval, cur + delta)) return NULL;
+        }
+        i += 1;
+    }
+    if(!env_set_int_inplace(e, iname, i)) return NULL;
+    return v_nil();
+}
+
 V *eval(Node *n, Env *e) {
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
@@ -4954,7 +5084,27 @@ V *eval(Node *n, Env *e) {
         if(target->type == N_NAME) {
             V *cur = env_get(e, target->sval);
             P(!cur,v_errf("name '%s' is not defined", target->sval))
+            /* Fast path: uniquely-owned INT += INT (common in C-lowered loops). */
+            if(cur->t == T_INT && cur->rc == 1 && n->ch[1]->type == N_INT && n->op == OP_ADD) {
+                cur->j += n->ch[1]->ival;
+                return v_ref(cur);
+            }
+            if(cur->t == T_INT && cur->rc == 1 && n->ch[1]->type == N_NAME && n->op == OP_ADD) {
+                V *rhs = env_get(e, n->ch[1]->sval);
+                if(rhs && rhs->t == T_INT) {
+                    cur->j += rhs->j;
+                    return v_ref(cur);
+                }
+            }
             V *delta = eval(n->ch[1], e);
+            if(cur->t == T_INT && cur->rc == 1 && delta->t == T_INT &&
+               (n->op == OP_ADD || n->op == OP_SUB || n->op == OP_MUL)) {
+                if(n->op == OP_ADD) cur->j += delta->j;
+                else if(n->op == OP_SUB) cur->j -= delta->j;
+                else cur->j *= delta->j;
+                v_free(delta);
+                return v_ref(cur);
+            }
             V *newval = vec_binop(cur, delta, n->op);
             env_set(e, target->sval, newval);
             v_free(delta);
@@ -5174,7 +5324,7 @@ V *eval(Node *n, Env *e) {
             free(args); free(kwnames); free(kwvals);
             return v_errf("'%s' is not callable", fn_node->sval ? fn_node->sval : "?");
         }
-        Env *call_env = env_new(fn->closure);
+        Env *call_env = env_acquire(fn->closure);
         V *params = fn->params;
         for(int i=0; i<params->n; i++) {
             if(i < nargs) {
@@ -5193,7 +5343,7 @@ V *eval(Node *n, Env *e) {
             result = g_retval ? g_retval : v_nil();
             g_retval = NULL;
         }
-        env_free(call_env);
+        env_release(call_env);
         v_free(fn);
         for(int i=0;i<nargs;i++) v_free(args[i]);
         for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
@@ -5210,6 +5360,8 @@ V *eval(Node *n, Env *e) {
         return v_nil();
     }
     case N_WHILE: {
+        V *fast = try_fast_counting_while(n, e);
+        if(fast) return fast;
         V *r = v_nil();
         for(;;) {
             V *cond = eval(n->ch[0], e);
@@ -5990,9 +6142,78 @@ static int shakti_path_is_java(const char *path) {
  * transpile a language-subset source to Shakti. `label` names the converter for
  * error messages. Returns a malloc'd Shakti source string, or NULL after
  * printing an Error: line. */
+static uint64_t shakti_fnv1a64(const void *data, size_t n) {
+    const unsigned char *p = data;
+    uint64_t h = 14695981039346656037ULL;
+    for(size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
+    return h;
+}
+static int shakti_mkdir_p(const char *path) {
+    char tmp[512];
+    size_t len = strlen(path);
+    if(len >= sizeof(tmp)) return -1;
+    memcpy(tmp, path, len + 1);
+    for(char *p = tmp + 1; *p; p++) {
+        if(*p != '/') continue;
+        *p = 0;
+        if(mkdir(tmp, 0755) != 0 && errno != EEXIST) return -1;
+        *p = '/';
+    }
+    if(mkdir(tmp, 0755) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+static int shakti_transpile_cache_path(char *out, size_t out_n, const char *label,
+                                       uint64_t hash) {
+    const char *xdg = getenv("XDG_CACHE_HOME");
+    const char *home = getenv("HOME");
+    char dir[400];
+    if(xdg && xdg[0])
+        snprintf(dir, sizeof(dir), "%s/shakti/transpile", xdg);
+    else if(home && home[0])
+        snprintf(dir, sizeof(dir), "%s/.cache/shakti/transpile", home);
+    else
+        snprintf(dir, sizeof(dir), "/tmp/shakti-transpile-cache");
+    if(shakti_mkdir_p(dir) != 0) return -1;
+    snprintf(out, out_n, "%s/%s-%016llx.ie", dir, label, (unsigned long long)hash);
+    return 0;
+}
+static char *shakti_read_all_file(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if(!fp) return NULL;
+    if(fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return NULL; }
+    long sz = ftell(fp);
+    if(sz < 0 || sz > 64 * 1024 * 1024) { fclose(fp); return NULL; }
+    rewind(fp);
+    char *buf = malloc((size_t)sz + 1);
+    if(!buf) { fclose(fp); return NULL; }
+    if(fread(buf, 1, (size_t)sz, fp) != (size_t)sz) { free(buf); fclose(fp); return NULL; }
+    buf[sz] = 0;
+    fclose(fp);
+    return buf;
+}
+static void shakti_write_all_file(const char *path, const char *text) {
+    FILE *fp = fopen(path, "wb");
+    if(!fp) return;
+    size_t n = strlen(text);
+    if(fwrite(text, 1, n, fp) != n) { fclose(fp); unlink(path); return; }
+    fclose(fp);
+}
 static char *shakti_transpile_embedded(const char *src_text, const char *filename,
                                        Env *global, const char *converter_source,
                                        const char *cache_key, const char *label) {
+    int use_cache = !getenv("SHAKTI_NO_TRANSPILE_CACHE");
+    char cache_path[512];
+    uint64_t hash = 0;
+    if(use_cache) {
+        hash = shakti_fnv1a64(label, strlen(label));
+        hash ^= shakti_fnv1a64(src_text, strlen(src_text));
+        if(shakti_transpile_cache_path(cache_path, sizeof(cache_path), label, hash) == 0) {
+            char *hit = shakti_read_all_file(cache_path);
+            if(hit) return hit;
+        } else {
+            use_cache = 0;
+        }
+    }
     V *mod = env_get(global, cache_key);
     if (!mod || mod->t != T_DICT) {
         Env *mod_env = env_new(global);
@@ -6061,6 +6282,7 @@ static char *shakti_transpile_embedded(const char *src_text, const char *filenam
     } else {
         ie = strdup(out->s);
         if (!ie) fprintf(stderr, "Error: out of memory\n");
+        else if(use_cache) shakti_write_all_file(cache_path, ie);
     }
     v_free(out);
     return ie;
