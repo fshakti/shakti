@@ -213,41 +213,20 @@ $(BUILD)/shakti_version.h: src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
-# Regenerated from s2p.ie when a local embed helper exists (scripts/ is gitignored).
-gen/shakti_s2p_embed.h: s2p.ie
+# Regenerated from the top-level converter sources when a local embed helper
+# exists (scripts/ is gitignored). src/shakti_lang.c includes these files via
+# ../gen/... explicitly so stale src/shakti_*_embed.h copies cannot shadow them.
+define make_embed_rule
+gen/shakti_$(1)_embed.h: $(1).ie
 	@mkdir -p gen
 ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py s2p.ie shakti_s2p_source $@
+	python3 scripts/embed_text.py $(1).ie shakti_$(1)_source $$@
 else
-	@test -f $@ || (echo "error: missing $@ — restore scripts/embed_text.py to regenerate from s2p.ie" >&2; exit 1)
+	@test -f $$@ || (echo "error: missing $$@ — restore scripts/embed_text.py to regenerate from $(1).ie" >&2; exit 1)
 endif
+endef
 
-# Regenerated from c2s.ie when a local embed helper exists (scripts/ is gitignored).
-gen/shakti_c2s_embed.h: c2s.ie
-	@mkdir -p gen
-ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py c2s.ie shakti_c2s_source $@
-else
-	@test -f $@ || (echo "error: missing $@ — restore scripts/embed_text.py to regenerate from c2s.ie" >&2; exit 1)
-endif
-
-# Regenerated from cs2s.ie when a local embed helper exists (scripts/ is gitignored).
-gen/shakti_cs2s_embed.h: cs2s.ie
-	@mkdir -p gen
-ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py cs2s.ie shakti_cs2s_source $@
-else
-	@test -f $@ || (echo "error: missing $@ — restore scripts/embed_text.py to regenerate from cs2s.ie" >&2; exit 1)
-endif
-
-# Regenerated from j2s.ie when a local embed helper exists (scripts/ is gitignored).
-gen/shakti_j2s_embed.h: j2s.ie
-	@mkdir -p gen
-ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py j2s.ie shakti_j2s_source $@
-else
-	@test -f $@ || (echo "error: missing $@ — restore scripts/embed_text.py to regenerate from j2s.ie" >&2; exit 1)
-endif
+$(foreach stem,s2p c2s cs2s j2s,$(eval $(call make_embed_rule,$(stem))))
 
 ifeq ($(SHAKTI_TALK),1)
 talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h

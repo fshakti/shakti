@@ -1,5 +1,7 @@
 # s2p — strict Python 3 subset to Shakti.
 
+import transpile_cli
+
 python_reserved : ["def", "return", "if", "elif", "else", "while", "for", "in",
                    "break", "continue", "and", "or", "not", "import", "try", "except",
                    "finally", "as", "lambda", "pass", "class", "global", "del", "raise",
@@ -1057,31 +1059,7 @@ def transpile(source, filename):
     return render(ast, {"aliases":ast["aliases"]})
 
 def main():
-    if len(argv) < 2:
-        raise "usage: s2p.ie input.py [-o out.ie]"
-    inp : None
-    out : None
-    i : 1
-    while i < len(argv):
-        if argv[i] = "-o" or argv[i] = "--output":
-            if i + 1 >= len(argv):
-                raise "missing output path"
-            out : argv[i + 1]
-            i += 2
-        elif argv[i][0] = "-":
-            raise "unknown option: " + argv[i]
-        elif inp = None:
-            inp : argv[i]
-            i += 1
-        else:
-            raise "unexpected argument: " + argv[i]
-    if inp = None:
-        raise "usage: s2p.ie input.py [-o out.ie]"
-    result : transpile(read(inp), inp)
-    if out = None:
-        write("/dev/stdout", result)
-    else:
-        write(out, result)
+    return transpile_cli.run(argv, "s2p.ie", "py", transpile)
 
 # Run CLI only when this file is the entry script.
 if re_match("s2p\\.ie$", argv[0]):

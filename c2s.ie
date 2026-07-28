@@ -1,5 +1,8 @@
 # c2s -- strict C subset to Shakti.
 
+import converter_shared
+import transpile_cli
+
 shakti_reserved : ["select", "update", "delete", "by", "from", "where",
                    "create", "insert", "into", "values", "join", "on"]
 c_keywords : ["if", "else", "while", "for", "do", "switch", "case", "default",
@@ -25,42 +28,25 @@ def is_type_mod(text):
     return text in c_type_modifiers
 
 def tok(kind, text, val, line, col):
-    return {"kind":kind, "text":text, "val":val, "line":line, "col":col}
+    return converter_shared.tok(kind, text, val, line, col)
 
 def node(t, x):
-    return {"t":t, "line":x["line"], "col":x["col"]}
+    return converter_shared.node(t, x)
 
 def starts(s, p):
-    if len(s) < len(p):
-        return False
-    return s[0:len(p)] = p
+    return converter_shared.starts(s, p)
 
 def is_alpha(c):
-    return ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or c = "_"
+    return converter_shared.is_alpha(c)
 
 def is_digit(c):
-    return "0" <= c and c <= "9"
+    return converter_shared.is_digit(c)
 
 def is_alnum(c):
-    return is_alpha(c) or is_digit(c)
+    return converter_shared.is_alnum(c)
 
 def quote_string(s):
-    out : ""
-    i : 0
-    while i < len(s):
-        c : s[i]
-        if c = "\\":
-            out += "\\\\"
-        elif c = "\"":
-            out += "\\\""
-        elif c = "\n":
-            out += "\\n"
-        elif c = "\t":
-            out += "\\t"
-        else:
-            out += c
-        i += 1
-    return "\"" + out + "\""
+    return converter_shared.quote_string(s)
 
 def num_clean(t):
     out : ""
@@ -1062,31 +1048,7 @@ def transpile(source, filename):
     return render(ast, {"aliases":ast["aliases"]})
 
 def main():
-    if len(argv) < 2:
-        raise "usage: c2s.ie input.c [-o out.ie]"
-    inp : None
-    out : None
-    i : 1
-    while i < len(argv):
-        if argv[i] = "-o" or argv[i] = "--output":
-            if i + 1 >= len(argv):
-                raise "missing output path"
-            out : argv[i + 1]
-            i += 2
-        elif argv[i][0] = "-":
-            raise "unknown option: " + argv[i]
-        elif inp = None:
-            inp : argv[i]
-            i += 1
-        else:
-            raise "unexpected argument: " + argv[i]
-    if inp = None:
-        raise "usage: c2s.ie input.c [-o out.ie]"
-    result : transpile(read(inp), inp)
-    if out = None:
-        write("/dev/stdout", result)
-    else:
-        write(out, result)
+    return transpile_cli.run(argv, "c2s.ie", "c", transpile)
 
 # Run CLI only when this file is the entry script.
 if re_match("c2s\\.ie$", argv[0]):

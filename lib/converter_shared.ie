@@ -1,0 +1,39 @@
+# Shared low-level converter helpers used by the C-family transpilers.
+
+def tok(kind, text, val, line, col):
+    return {"kind":kind, "text":text, "val":val, "line":line, "col":col}
+
+def node(t, x):
+    return {"t":t, "line":x["line"], "col":x["col"]}
+
+def starts(s, p):
+    if len(s) < len(p):
+        return False
+    return s[0:len(p)] = p
+
+def is_alpha(c):
+    return ("a" <= c and c <= "z") or ("A" <= c and c <= "Z") or c = "_"
+
+def is_digit(c):
+    return "0" <= c and c <= "9"
+
+def is_alnum(c):
+    return is_alpha(c) or is_digit(c)
+
+def quote_string(s):
+    out : ""
+    i : 0
+    while i < len(s):
+        c : s[i]
+        if c = "\\":
+            out += "\\\\"
+        elif c = "\"":
+            out += "\\\""
+        elif c = "\n":
+            out += "\\n"
+        elif c = "\t":
+            out += "\\t"
+        else:
+            out += c
+        i += 1
+    return "\"" + out + "\""
