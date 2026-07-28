@@ -28,7 +28,7 @@ else
 endif
 
 CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
-	-I$(BUILD) -Isrc \
+	-I$(BUILD) -Isrc -Igen \
 	$(OMP_CFLAGS)
 
 # Optional JNI headers for src/shakti_jni.c (Homebrew OpenJDK or JAVA_HOME).
@@ -214,7 +214,8 @@ $(BUILD)/shakti_version.h: src/VERSION
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
 # Regenerated from s2p.ie when a local embed helper exists (scripts/ is gitignored).
-src/shakti_s2p_embed.h: s2p.ie
+gen/shakti_s2p_embed.h: s2p.ie
+	@mkdir -p gen
 ifneq ($(wildcard scripts/embed_text.py),)
 	python3 scripts/embed_text.py s2p.ie shakti_s2p_source $@
 else
@@ -222,7 +223,8 @@ else
 endif
 
 # Regenerated from c2s.ie when a local embed helper exists (scripts/ is gitignored).
-src/shakti_c2s_embed.h: c2s.ie
+gen/shakti_c2s_embed.h: c2s.ie
+	@mkdir -p gen
 ifneq ($(wildcard scripts/embed_text.py),)
 	python3 scripts/embed_text.py c2s.ie shakti_c2s_source $@
 else
@@ -230,7 +232,8 @@ else
 endif
 
 # Regenerated from cs2s.ie when a local embed helper exists (scripts/ is gitignored).
-src/shakti_cs2s_embed.h: cs2s.ie
+gen/shakti_cs2s_embed.h: cs2s.ie
+	@mkdir -p gen
 ifneq ($(wildcard scripts/embed_text.py),)
 	python3 scripts/embed_text.py cs2s.ie shakti_cs2s_source $@
 else
@@ -238,7 +241,8 @@ else
 endif
 
 # Regenerated from j2s.ie when a local embed helper exists (scripts/ is gitignored).
-src/shakti_j2s_embed.h: j2s.ie
+gen/shakti_j2s_embed.h: j2s.ie
+	@mkdir -p gen
 ifneq ($(wildcard scripts/embed_text.py),)
 	python3 scripts/embed_text.py j2s.ie shakti_j2s_source $@
 else
@@ -324,7 +328,7 @@ PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),pdf.o)
 MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),midi.o)
 IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o)
 
-shakti: $(BUILD)/shakti_version.h src/shakti_s2p_embed.h src/shakti_c2s_embed.h src/shakti_cs2s_embed.h src/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
+shakti: $(BUILD)/shakti_version.h gen/shakti_s2p_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi

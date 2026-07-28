@@ -120,22 +120,6 @@ static void fill_chassis(UiCtx *c) {
     drect_fill(c, (UiRect){0, 1, c->w, 1}, rgb(28, 30, 36));
     drect_fill(c, (UiRect){0, c->h - 1, c->w, 1}, rgb(4, 5, 7));
 }
-static void dcircle_fill(UiCtx *c, int cx, int cy, int rad, uint32_t col) {
-    int x, y;
-    for (y = -rad; y <= rad; y++)
-        for (x = -rad; x <= rad; x++)
-            if (x * x + y * y <= rad * rad) pix(c, cx + x, cy + y, col);
-}
-static void dcircle_radial(UiCtx *c, int cx, int cy, int rad, uint32_t inner, uint32_t outer) {
-    int x, y;
-    float inv = rad > 0 ? 1.f / (float)rad : 1.f;
-    for (y = -rad; y <= rad; y++)
-        for (x = -rad; x <= rad; x++) {
-            float d = sqrtf((float)(x * x + y * y));
-            if (d > (float)rad) continue;
-            pix(c, cx + x, cy + y, rgb_lerp(inner, outer, d * inv));
-        }
-}
 static int glyph_idx(char ch) {
     if (ch >= '0' && ch <= '9') return ch - '0';
     if (ch == '-') return 10;
@@ -240,9 +224,6 @@ static void draw_slider(UiCtx *c, UiRect r, float val, const char *label) {
     lx = r.x + (r.w - (int)strlen(label) * 6) / 2;
     if (lx < r.x) lx = r.x;
     text_label(c, lx, r.y + 2, label, COL_LABEL);
-}
-static void draw_knob(UiCtx *c, UiRect r, float val, const char *label) {
-    draw_slider(c, r, val, label);
 }
 static void draw_led_step(UiCtx *c, UiRect r, int on, int playhead) {
     UiRect pad = {r.x + 1, r.y + 1, r.w - 2, r.h - 2};

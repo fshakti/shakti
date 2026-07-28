@@ -121,6 +121,8 @@ When `tests/`, `benchmarks/`, and `Makefile.local` are present:
 make prod && export SHAKTI_LIB=$PWD/lib
 make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter, module_defaults
 make -f Makefile.local bench-modules  # focused suites only
+make -f Makefile.local test-c         # C converter regression script
+make -f Makefile.local bench-transpile-all
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
 SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
 ```
@@ -129,12 +131,17 @@ Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi
 
 Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).
 
+Build note: the direct-run converters (`./shakti file.py`, `./shakti file.c`,
+`./shakti file.cs`, `./shakti file.java`) use embedded copies generated into
+`gen/` from `s2p.ie`, `c2s.ie`, `cs2s.ie`, and `j2s.ie`.
+
 ---
 
 # Python 3 → Shakti converter
 
-Strict subset converter written in Shakti. Embedded in the executable for
-direct runs, and still available as `s2p.ie` for emit-only conversion.
+Strict subset converter written in Shakti. Embedded in the executable from
+generated headers under `gen/` for direct runs, and still available as
+`s2p.ie` for emit-only conversion.
 
 ```bash
 ./shakti file.py                 # transpile + run (supported subset)
@@ -176,8 +183,9 @@ Docstrings become `#` comments.
 
 # C → Shakti converter
 
-Strict subset converter written in Shakti. Embedded in the executable for
-direct runs, and still available as `c2s.ie` for emit-only conversion.
+Strict subset converter written in Shakti. Embedded in the executable from
+generated headers under `gen/` for direct runs, and still available as
+`c2s.ie` for emit-only conversion.
 
 If `main` is present, the converter appends a call so the program runs.
 `int main(void)` / `int main()` become `def main():` plus `main()`.
@@ -229,8 +237,9 @@ discarded. An unterminated block comment exits nonzero with the opening
 
 # C# → Shakti converter
 
-Strict subset converter written in Shakti. Embedded in the executable for
-direct runs, and still available as `cs2s.ie` for emit-only conversion.
+Strict subset converter written in Shakti. Embedded in the executable from
+generated headers under `gen/` for direct runs, and still available as
+`cs2s.ie` for emit-only conversion.
 
 ```bash
 ./shakti file.cs                 # transpile + run (supported subset)
@@ -291,8 +300,9 @@ discarded. An unterminated block comment exits nonzero with the opening
 
 # Java → Shakti converter
 
-Strict subset converter written in Shakti. Embedded in the executable for
-direct runs, and still available as `j2s.ie` for emit-only conversion.
+Strict subset converter written in Shakti. Embedded in the executable from
+generated headers under `gen/` for direct runs, and still available as
+`j2s.ie` for emit-only conversion.
 
 One top-level class is accepted as a non-runtime shell for `static` fields and
 methods. If `main` is present, the converter appends `main(argv[1:])` so CLI

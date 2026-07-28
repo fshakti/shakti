@@ -2,7 +2,7 @@
 
 [Discord](https://discord.gg/PkKwUk9Tf)
 
-Small interpreted language (0.11.0) with vectors, matrices, tables, decorators,
+Small interpreted language (0.11.1) with vectors, matrices, tables, decorators,
 each (`f@`), load-time time-series indexes (VWAB / windowed avg / stats / asof),
 and optional SQL, graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
@@ -37,6 +37,8 @@ export SHAKTI_LIB=$PWD/lib
 
 `make prod-speed` enables native CPU tuning; `make prod-size` optimizes for size.
 `make check-deps` verifies Homebrew packages on macOS.
+Embedded converter headers are generated under `gen/` from `s2p.ie`, `c2s.ie`,
+`cs2s.ie`, and `j2s.ie`.
 
 Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_STEM`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
 
@@ -51,7 +53,7 @@ Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `S
 ./shakti file.java  # supported Java subset → Shakti, then run
 ```
 
-Converters: [`s2p.ie`](s2p.ie) (Python), [`c2s.ie`](c2s.ie) (C), [`cs2s.ie`](cs2s.ie) (C#), [`j2s.ie`](j2s.ie) (Java).  
+Converters: [`s2p.ie`](s2p.ie) (Python), [`c2s.ie`](c2s.ie) (C), [`cs2s.ie`](cs2s.ie) (C#), [`j2s.ie`](j2s.ie) (Java). Their embedded CLI copies are generated into `gen/`.  
 More detail: [doc.md](doc.md). Examples: [example.ie](example.ie), [example.py](example.py), [example.c](example.c), [example.cs](example.cs), [example.java](example.java).  
 Tiny converter demos: [python.py](python.py), [c.c](c.c), [csharp.cs](csharp.cs), [java.java](java.java).
 C / C# / Java converters reject unterminated strings and `/* ... */` block
@@ -102,6 +104,8 @@ make -f Makefile.local test
 make -f Makefile.local test-modules   # dsp, stem, pdf, midi, iefs, sonicpi, pyplot, jupyter
 make -f Makefile.local bench-modules  # focused module benches
 make -f Makefile.local bench          # full suite vs baselines
+make -f Makefile.local test-c         # C converter regression script
+make -f Makefile.local bench-transpile-all
 ```
 
 Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).

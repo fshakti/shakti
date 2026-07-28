@@ -201,7 +201,9 @@ static void metro_reset_unlocked(int on);
 static void metro_reset(int on);
 static void metro_reset(int on);
 static int synth_pad_note(int pad);
+#ifdef SYNTH_HAVE_GL
 static const char *synth_pad_lbl(int pad);
+#endif
 static void synth_sample_trigger(void);
 static float synth_sample_tick(void);
 static void synth_loop_sync_target(void);
@@ -918,6 +920,7 @@ static int synth_row_midi_note(int row) {
     if (row == 6) return 60;
     return g.row_midi[row] > 0 ? g.row_midi[row] : 60;
 }
+#ifdef SYNTH_HAVE_GL
 static const char *synth_pad_lbl(int pad) {
     /* 4x4 grid, row-major; labels match GM-ish voice (see synth_pad_note). */
     static const char *lbls[16] = {
@@ -929,6 +932,7 @@ static const char *synth_pad_lbl(int pad) {
     P(pad < 0 || pad >= 16,"")
     return lbls[pad];
 }
+#endif
 static int synth_pad_note(int pad) {
     static const int map[16] = {
         47, 47, 46, 44,
