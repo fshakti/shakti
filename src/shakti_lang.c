@@ -9,10 +9,12 @@
 #ifndef SHAKTI_PKG_VERSION
 #define SHAKTI_PKG_VERSION "0.11.1"
 #endif
-#include "shakti_s2p_embed.h"
-#include "shakti_c2s_embed.h"
-#include "shakti_cs2s_embed.h"
-#include "shakti_j2s_embed.h"
+/* Resolve embedded converter sources from the generated tree explicitly so
+ * stale src/shakti_*_embed.h files can never shadow them via include order. */
+#include "../gen/shakti_s2p_embed.h"
+#include "../gen/shakti_c2s_embed.h"
+#include "../gen/shakti_cs2s_embed.h"
+#include "../gen/shakti_j2s_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
