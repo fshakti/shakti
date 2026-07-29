@@ -1504,7 +1504,9 @@ the analog Volume knob.
 
 ## API
 
-Module `lib/synth.ie`: `open`, `close`, `alive`, `tick`, `set_steps`, `steps`, `set_metro`, `metro_on`, `set_metro_sound`, `metro_sound`, `set_mute`, `note_on`, `note_off`, `set_tuning`, `tuning`.
+Module `lib/synth.ie`: `open`, `close`, `alive`, `tick`, `set_steps`, `steps`, `set_metro`, `metro_on`, `set_metro_sound`, `metro_sound`, `set_mute`, `note_on`, `note_off`, `set_tuning`, `tuning`, `set_skin`, `skin`.
+
+`synth.set_skin(name)` selects a UI palette (`"default"` or `"irish"`). `synth.skin()` returns the active name. `synth.set_preset(0..3)` selects GRAND PIANO / CLASSIC SYNTH / ELECTRIC PIANO / WARM PAD.
 
 ## Tuning
 
