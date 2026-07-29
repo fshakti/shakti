@@ -8,6 +8,59 @@ extern int isolde_device;
 extern void kd_synth_rasterize(const UiCmd *cmds, int n, uint32_t *fb, int w, int h);
 #endif
 
+typedef struct {
+    uint32_t label, text, amber, led_on, led_off, hot, play;
+    uint32_t panel, pad_face, pad_press, accent, slot, metal;
+    uint32_t chassis_hi, chassis_lo;
+    /* material slots for life-like rendering */
+    uint32_t bevel_hi, bevel_lo, face, face_bot, inset;
+    uint32_t ivory_hi, ivory_lo, ivory_edge, ebony_hi, ebony_lo;
+    uint32_t glow;
+    uint32_t trim_a, trim_b, trim_c; /* top rail tricolour (irish) or accent stripe */
+    float grain_stretch;             /* >1 = anisotropic wood grain along X */
+    float grain_amt;                 /* grain noise amplitude */
+    float vignette;                  /* edge darkening strength 0..1 */
+} SynthUiPalette;
+
+static const SynthUiPalette PAL_DEFAULT = {
+    0x8a909au, 0xf2f4f7u, 0xff9a3cu, 0xffa840u, 0x12141au, 0xff5a42u, 0xff9a3cu,
+    0x0c0e12u, 0x1c1e24u, 0x2a2e36u, 0x5ec8ffu, 0x06070au, 0x2a2e36u,
+    0x0e1014u, 0x08090cu,
+    /* bevel hi/lo, face, face_bot, inset */
+    0x3a3e46u, 0x12141au, 0x20242cu, 0x12141au, 0x161a1eu,
+    /* ivory hi/lo/edge, ebony hi/lo */
+    0xf6f8fcu, 0xdce0e6u, 0x969aa0u, 0x1c1e24u, 0x0c0d10u,
+    /* glow */
+    0xff9a3cu,
+    /* trim a/b/c — subtle accent line on default */
+    0x5ec8ffu, 0x2a2e36u, 0x2a2e36u,
+    /* grain_stretch, grain_amt, vignette */
+    1.0f, 0.03f, 0.12f
+};
+
+/* Lacquered timber + warm orange + cream — feels like a real instrument */
+static const SynthUiPalette PAL_IRISH = {
+    0xb0ccaau, 0xf5ecdcu, 0xff8812u, 0xffa020u, 0x081210u, 0xff6020u, 0xff8812u,
+    0x0e1e16u, 0x1a3828u, 0x244a36u, 0x30d070u, 0x060e0au, 0x1e3a2fu,
+    0x1a3c26u, 0x0a1c10u,
+    /* bevel hi/lo — warm dark wood tones */
+    0x3a5040u, 0x0e1e14u,
+    /* face, face_bot — slightly lighter green-brown */
+    0x1e3828u, 0x0e1e14u,
+    /* inset — deep cavity */
+    0x0c1a12u,
+    /* ivory: warm cream keys, not cold white */
+    0xf8f0e0u, 0xe8dcc8u, 0xa89878u,
+    /* ebony: charcoal with green tint */
+    0x1e2e24u, 0x0c1810u,
+    /* glow — rich warm orange for meters/LEDs */
+    0xffaa30u,
+    /* trim a/b/c — tricolour: green / cream / orange (subtle, 1px each) */
+    0x169b62u, 0xf5ecdcu, 0xff8812u,
+    /* grain_stretch (anisotropic wood), grain_amt, vignette */
+    4.0f, 0.06f, 0.22f
+};
+
 static UiCmd g_cmds[SYNTH_UI_MAX_CMDS];
 static int g_ncmds;
 static SynthVizMode g_viz_mode = SYNTH_VIZ_SPECTRUM;
@@ -15,20 +68,31 @@ static float g_waveform[SYNTH_UI_WAVEFORM_LEN];
 static int g_wave_pos;
 static float g_spectrum[SYNTH_UI_SPECTRUM_BINS];
 static float g_vu_level;
+static SynthUiPalette g_pal;
+static int g_pal_init;
+static char g_skin_name[16] = "default";
 
-#define COL_LABEL 0x8a909au
-#define COL_TEXT 0xf2f4f7u
-#define COL_AMBER 0xff9a3cu
-#define COL_LED_ON 0xffa840u
-#define COL_LED_OFF 0x12141au
-#define COL_HOT 0xff5a42u
-#define COL_PLAY 0xff9a3cu
-#define COL_PANEL 0x0c0e12u
-#define COL_PAD_FACE 0x1c1e24u
-#define COL_PAD_PRESS 0x2a2e36u
-#define COL_ACCENT 0x5ec8ffu
-#define COL_SLOT 0x06070au
-#define COL_METAL 0x2a2e36u
+static void ensure_pal(void) { if (!g_pal_init) { g_pal = PAL_DEFAULT; g_pal_init = 1; } }
+
+#define COL_LABEL (g_pal.label)
+#define COL_TEXT (g_pal.text)
+#define COL_AMBER (g_pal.amber)
+#define COL_LED_ON (g_pal.led_on)
+#define COL_LED_OFF (g_pal.led_off)
+#define COL_HOT (g_pal.hot)
+#define COL_PLAY (g_pal.play)
+#define COL_PANEL (g_pal.panel)
+#define COL_PAD_FACE (g_pal.pad_face)
+#define COL_PAD_PRESS (g_pal.pad_press)
+#define COL_ACCENT (g_pal.accent)
+#define COL_SLOT (g_pal.slot)
+#define COL_METAL (g_pal.metal)
+#define COL_BEVEL_HI (g_pal.bevel_hi)
+#define COL_BEVEL_LO (g_pal.bevel_lo)
+#define COL_FACE (g_pal.face)
+#define COL_FACE_BOT (g_pal.face_bot)
+#define COL_INSET (g_pal.inset)
+#define COL_GLOW (g_pal.glow)
 
 static uint32_t rgb(int r, int g, int b) {
     if (r < 0) r = 0;
@@ -93,32 +157,47 @@ static void drect_glow_border(UiCtx *c, UiRect r, uint32_t col, int thick) {
     }
 }
 static void draw_panel_recessed(UiCtx *c, UiRect r) {
-    drect_fill(c, r, rgb(18, 20, 24));
-    drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, rgb(48, 52, 60));
-    drect_fill(c, (UiRect){r.x, r.y, 1, r.h}, rgb(48, 52, 60));
-    drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, rgb(4, 5, 7));
-    drect_fill(c, (UiRect){r.x + r.w - 1, r.y, 1, r.h}, rgb(4, 5, 7));
+    ensure_pal();
+    drect_fill(c, r, COL_INSET);
+    drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, COL_BEVEL_HI);
+    drect_fill(c, (UiRect){r.x, r.y, 1, r.h}, COL_BEVEL_HI);
+    drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, COL_BEVEL_LO);
+    drect_fill(c, (UiRect){r.x + r.w - 1, r.y, 1, r.h}, COL_BEVEL_LO);
     drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, COL_PANEL);
-    drect_fill(c, (UiRect){r.x + 2, r.y + 2, r.w - 4, 1}, rgb(22, 24, 30));
-    drect_fill(c, (UiRect){r.x + 2, r.y + 2, 1, r.h - 4}, rgb(22, 24, 30));
+    drect_fill(c, (UiRect){r.x + 2, r.y + 2, r.w - 4, 1}, rgb_mul(COL_PANEL, 0.75f));
+    drect_fill(c, (UiRect){r.x + 2, r.y + 2, 1, r.h - 4}, rgb_mul(COL_PANEL, 0.75f));
 }
 static void fill_chassis(UiCtx *c) {
     int x, y;
+    float gs = g_pal.grain_stretch;
+    float ga = g_pal.grain_amt;
+    float vig = g_pal.vignette;
+    ensure_pal();
     for (y = 0; y < c->h; y++) {
         float vy = (float)y / (float)(c->h > 1 ? c->h - 1 : 1);
-        uint32_t row = rgb_lerp(rgb(14, 16, 20), rgb(8, 9, 12), vy);
+        uint32_t row = rgb_lerp(g_pal.chassis_hi, g_pal.chassis_lo, vy);
         for (x = 0; x < c->w; x++) {
             float vx = (float)x / (float)(c->w > 1 ? c->w - 1 : 1);
+            /* vignette: darken edges */
             float edge = 1.f;
-            if (vx < 0.02f) edge = 0.88f + vx * 6.f;
-            if (vx > 0.98f) edge = 0.88f + (1.f - vx) * 6.f;
-            float grain = hash2f(x, y) * 0.03f;
-            pix(c, x, y, rgb_mul(rgb_lerp(row, rgb(20, 24, 30), grain), edge));
+            float dx = vx - 0.5f, dy = vy - 0.5f;
+            float dist2 = dx * dx + dy * dy;
+            edge = 1.f - vig * dist2 * 4.f;
+            if (vx < 0.02f) edge *= 0.88f + vx * 6.f;
+            if (vx > 0.98f) edge *= 0.88f + (1.f - vx) * 6.f;
+            if (edge < 0.5f) edge = 0.5f;
+            /* anisotropic wood grain: stretch hash along X */
+            int gx = (int)((float)x / gs);
+            float grain = hash2f(gx, y) * ga + hash2f(gx + 1000, y * 3) * ga * 0.5f;
+            pix(c, x, y, rgb_mul(rgb_lerp(row, g_pal.metal, grain), edge));
         }
     }
-    drect_fill(c, (UiRect){0, 0, c->w, 1}, rgb(70, 76, 86));
-    drect_fill(c, (UiRect){0, 1, c->w, 1}, rgb(28, 30, 36));
-    drect_fill(c, (UiRect){0, c->h - 1, c->w, 1}, rgb(4, 5, 7));
+    /* top trim: 3 lines — tricolour for irish, accent stripe for default */
+    drect_fill(c, (UiRect){0, 0, c->w, 1}, g_pal.trim_a);
+    drect_fill(c, (UiRect){0, 1, c->w, 1}, g_pal.trim_b);
+    drect_fill(c, (UiRect){0, 2, c->w, 1}, g_pal.trim_c);
+    /* bottom shadow */
+    drect_fill(c, (UiRect){0, c->h - 1, c->w, 1}, g_pal.chassis_lo);
 }
 static int glyph_idx(char ch) {
     if (ch >= '0' && ch <= '9') return ch - '0';
@@ -165,24 +244,24 @@ static void text_label(UiCtx *c, int x, int y, const char *s, uint32_t col) {
     for (i = 0; s[i]; i++) glyph5x7(c, x + i * adv, y, s[i], col, 1);
 }
 static void draw_btn(UiCtx *c, UiRect r, uint32_t hi, uint32_t lo, int lit, int pressed, const char *txt) {
-    uint32_t face = lit ? hi : rgb(32, 36, 42);
-    uint32_t face_bot = lit ? lo : rgb(18, 20, 24);
+    uint32_t face_c = lit ? hi : COL_FACE;
+    uint32_t face_bot = lit ? lo : COL_FACE_BOT;
     int tx, radius_shade;
     if (pressed) {
         drect_fill(c, r, rgb_mul(face_bot, 0.9f));
-        drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, rgb_mul(face, 0.84f));
+        drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, rgb_mul(face_c, 0.84f));
     } else {
-        drect_grad_v(c, r, face, face_bot);
+        drect_grad_v(c, r, face_c, face_bot);
         drect_fill(c, (UiRect){r.x + 1, r.y + 1, r.w - 2, 1},
-                   lit ? rgb_mul(hi, 1.15f) : rgb(58, 62, 70));
-        drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, rgb(6, 7, 9));
+                   lit ? rgb_mul(hi, 1.15f) : COL_BEVEL_HI);
+        drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, COL_BEVEL_LO);
         if (lit) drect_glow_border(c, r, hi, 1);
     }
     for (radius_shade = 0; radius_shade < 2 && r.w > 8 && r.h > 8; radius_shade++) {
-        pix(c, r.x + radius_shade, r.y, rgb(6, 7, 9));
-        pix(c, r.x + r.w - 1 - radius_shade, r.y, rgb(6, 7, 9));
-        pix(c, r.x + radius_shade, r.y + r.h - 1, rgb(6, 7, 9));
-        pix(c, r.x + r.w - 1 - radius_shade, r.y + r.h - 1, rgb(6, 7, 9));
+        pix(c, r.x + radius_shade, r.y, COL_BEVEL_LO);
+        pix(c, r.x + r.w - 1 - radius_shade, r.y, COL_BEVEL_LO);
+        pix(c, r.x + radius_shade, r.y + r.h - 1, COL_BEVEL_LO);
+        pix(c, r.x + r.w - 1 - radius_shade, r.y + r.h - 1, COL_BEVEL_LO);
     }
     tx = r.x + (r.w - (int)strlen(txt) * 6) / 2;
     if (tx < r.x + 2) tx = r.x + 2;
@@ -202,25 +281,25 @@ static void draw_slider(UiCtx *c, UiRect r, float val, const char *label) {
     track_h = track_bot - track_top;
     if (track_h < 24) track_h = 24;
     slot = (UiRect){track_x, track_top, track_w, track_h};
-    drect_fill(c, (UiRect){slot.x - 3, slot.y - 2, slot.w + 6, slot.h + 4}, rgb(22, 24, 30));
+    drect_fill(c, (UiRect){slot.x - 3, slot.y - 2, slot.w + 6, slot.h + 4}, rgb_mul(COL_PANEL, 0.75f));
     drect_fill(c, slot, COL_SLOT);
-    drect_fill(c, (UiRect){slot.x, slot.y, slot.w, 1}, rgb(4, 5, 7));
-    drect_fill(c, (UiRect){slot.x, slot.y + slot.h - 1, slot.w, 1}, rgb(40, 44, 52));
-    drect_fill(c, (UiRect){slot.x + slot.w / 2 - 1, slot.y + 2, 2, slot.h - 4}, rgb(16, 18, 22));
+    drect_fill(c, (UiRect){slot.x, slot.y, slot.w, 1}, COL_BEVEL_LO);
+    drect_fill(c, (UiRect){slot.x, slot.y + slot.h - 1, slot.w, 1}, COL_BEVEL_HI);
+    drect_fill(c, (UiRect){slot.x + slot.w / 2 - 1, slot.y + 2, 2, slot.h - 4}, rgb_mul(COL_SLOT, 0.6f));
     fill_h = (int)(val * (float)(slot.h - 4));
     if (fill_h > 0) {
         fill = (UiRect){slot.x + 2, slot.y + slot.h - 2 - fill_h, slot.w - 4, fill_h};
-        drect_grad_v(c, fill, rgb(255, 190, 110), COL_AMBER);
-        drect_fill(c, (UiRect){fill.x, fill.y, 1, fill.h}, rgb_mul(COL_AMBER, 0.55f));
+        drect_grad_v(c, fill, rgb_mul(COL_GLOW, 1.15f), COL_GLOW);
+        drect_fill(c, (UiRect){fill.x, fill.y, 1, fill.h}, rgb_mul(COL_GLOW, 0.55f));
     }
     thumb_y = slot.y + slot.h - 2 - fill_h - 7;
     if (thumb_y < slot.y - 2) thumb_y = slot.y - 2;
     if (thumb_y > slot.y + slot.h - 12) thumb_y = slot.y + slot.h - 12;
     thumb = (UiRect){slot.x - 5, thumb_y, slot.w + 10, 14};
-    drect_grad_v(c, thumb, rgb(58, 62, 70), rgb(28, 30, 36));
-    drect_fill(c, (UiRect){thumb.x, thumb.y, thumb.w, 1}, rgb(90, 96, 108));
-    drect_fill(c, (UiRect){thumb.x, thumb.y + thumb.h - 1, thumb.w, 1}, rgb(10, 11, 14));
-    drect_fill(c, (UiRect){thumb.x + 3, thumb.y + thumb.h / 2 - 1, thumb.w - 6, 2}, COL_AMBER);
+    drect_grad_v(c, thumb, rgb_mul(COL_METAL, 1.6f), COL_METAL);
+    drect_fill(c, (UiRect){thumb.x, thumb.y, thumb.w, 1}, rgb_mul(COL_METAL, 2.2f));
+    drect_fill(c, (UiRect){thumb.x, thumb.y + thumb.h - 1, thumb.w, 1}, rgb_mul(COL_METAL, 0.4f));
+    drect_fill(c, (UiRect){thumb.x + 3, thumb.y + thumb.h / 2 - 1, thumb.w - 6, 2}, COL_GLOW);
     lx = r.x + (r.w - (int)strlen(label) * 6) / 2;
     if (lx < r.x) lx = r.x;
     text_label(c, lx, r.y + 2, label, COL_LABEL);
@@ -229,13 +308,13 @@ static void draw_led_step(UiCtx *c, UiRect r, int on, int playhead) {
     UiRect pad = {r.x + 1, r.y + 1, r.w - 2, r.h - 2};
     if (pad.w < 3) pad = r;
     if (pad.h < 3) pad.h = 3;
-    drect_fill(c, pad, on ? rgb(40, 32, 20) : COL_LED_OFF);
+    drect_fill(c, pad, on ? rgb_mul(COL_GLOW, 0.15f) : COL_LED_OFF);
     if (on) {
-        drect_grad_v(c, pad, rgb(255, 168, 56), rgb(200, 110, 28));
-        drect_glow_border(c, pad, COL_LED_ON, 1);
+        drect_grad_v(c, pad, rgb_mul(COL_LED_ON, 1.15f), rgb_mul(COL_LED_ON, 0.75f));
+        drect_glow_border(c, pad, COL_LED_ON, 2);
     } else {
-        drect_fill(c, (UiRect){pad.x, pad.y, pad.w, 1}, rgb(28, 28, 32));
-        drect_fill(c, (UiRect){pad.x, pad.y + pad.h - 1, pad.w, 1}, rgb(8, 8, 10));
+        drect_fill(c, (UiRect){pad.x, pad.y, pad.w, 1}, rgb_mul(COL_PANEL, 1.4f));
+        drect_fill(c, (UiRect){pad.x, pad.y + pad.h - 1, pad.w, 1}, rgb_mul(COL_PANEL, 0.4f));
     }
     if (playhead) drect_glow_border(c, (UiRect){pad.x - 1, pad.y - 1, pad.w + 2, pad.h + 2}, COL_TEXT, 1);
 }
@@ -244,21 +323,21 @@ static void draw_pad(UiCtx *c, UiRect r, int pressed, const char *lbl) {
     uint32_t top, bot;
     if (pressed) face.y += 1;
     top = pressed ? COL_PAD_PRESS : COL_PAD_FACE;
-    bot = pressed ? rgb(16, 16, 20) : rgb(12, 12, 16);
+    bot = pressed ? rgb_mul(COL_PANEL, 0.8f) : rgb_mul(COL_PANEL, 0.6f);
     drect_fill(c, face, bot);
     drect_grad_v(c, face, top, bot);
     if (pressed) {
-        drect_glow_border(c, face, COL_AMBER, 2);
+        drect_glow_border(c, face, COL_GLOW, 2);
         drect_fill(c, (UiRect){face.x + 2, face.y + 2, face.w - 4, face.h - 4},
-                   rgb_mul(COL_AMBER, 0.12f));
+                   rgb_mul(COL_GLOW, 0.12f));
     } else {
-        drect_fill(c, (UiRect){face.x, face.y, face.w, 1}, rgb(36, 38, 44));
-        drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, rgb(6, 6, 8));
+        drect_fill(c, (UiRect){face.x, face.y, face.w, 1}, COL_BEVEL_HI);
+        drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, COL_BEVEL_LO);
     }
     if (lbl && lbl[0]) {
         int w = (int)strlen(lbl) * 6;
         text_label(c, face.x + (face.w - w) / 2, face.y + (face.h - 7) / 2, lbl,
-                   pressed ? COL_TEXT : rgb(90, 94, 102));
+                   pressed ? COL_TEXT : COL_LABEL);
     }
 }
 static void draw_piano_key(UiCtx *c, UiRect r, int down, int style) {
@@ -266,35 +345,38 @@ static void draw_piano_key(UiCtx *c, UiRect r, int down, int style) {
     uint32_t top, bot, edge_r, edge_b;
     if (down) face.y += 2;
     if (style == 1) {
-        top = down ? rgb(18, 18, 22) : rgb(28, 30, 36);
-        bot = down ? rgb(8, 8, 10) : rgb(12, 13, 16);
-        edge_r = rgb(8, 8, 10);
-        edge_b = rgb(4, 4, 6);
+        /* black / ebony key */
+        top = down ? rgb_mul(g_pal.ebony_hi, 0.7f) : g_pal.ebony_hi;
+        bot = down ? rgb_mul(g_pal.ebony_lo, 0.7f) : g_pal.ebony_lo;
+        edge_r = g_pal.ebony_lo;
+        edge_b = rgb_mul(g_pal.ebony_lo, 0.5f);
         drect_grad_v(c, face, top, bot);
-        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 1}, rgb(48, 50, 56));
+        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 1}, rgb_mul(g_pal.ebony_hi, 1.5f));
         drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
         drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
         if (down) drect_glow_border(c, face, COL_ACCENT, 1);
     } else if (style == 2) {
-        top = down ? rgb(210, 214, 220) : rgb(246, 248, 252);
-        bot = down ? rgb(188, 192, 198) : rgb(220, 224, 230);
-        edge_r = rgb(150, 154, 160);
-        edge_b = rgb(120, 124, 130);
+        /* white / ivory key with C marker */
+        top = down ? rgb_mul(g_pal.ivory_hi, 0.88f) : g_pal.ivory_hi;
+        bot = down ? rgb_mul(g_pal.ivory_lo, 0.88f) : g_pal.ivory_lo;
+        edge_r = g_pal.ivory_edge;
+        edge_b = rgb_mul(g_pal.ivory_edge, 0.8f);
         drect_grad_v(c, face, top, bot);
-        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 2}, rgb(255, 255, 255));
+        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 2}, rgb_mul(g_pal.ivory_hi, 1.02f));
         drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
         drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
         if (down) drect_fill(c, (UiRect){face.x + 2, face.y + 2, face.w - 4, face.h - 4},
                              rgb_mul(COL_ACCENT, 0.12f));
         text_label(c, face.x + (face.w - 6) / 2, face.y + face.h - 16, "C",
-                   down ? rgb(60, 70, 90) : rgb(90, 100, 120));
+                   down ? rgb_mul(g_pal.ivory_edge, 0.7f) : g_pal.ivory_edge);
     } else {
-        top = down ? rgb(220, 222, 226) : rgb(250, 250, 252);
-        bot = down ? rgb(198, 200, 204) : rgb(228, 230, 234);
-        edge_r = rgb(160, 162, 166);
-        edge_b = rgb(130, 132, 136);
+        /* white / ivory key (no C marker) */
+        top = down ? rgb_mul(g_pal.ivory_hi, 0.9f) : g_pal.ivory_hi;
+        bot = down ? rgb_mul(g_pal.ivory_lo, 0.9f) : g_pal.ivory_lo;
+        edge_r = g_pal.ivory_edge;
+        edge_b = rgb_mul(g_pal.ivory_edge, 0.85f);
         drect_grad_v(c, face, top, bot);
-        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 2}, rgb(255, 255, 255));
+        drect_fill(c, (UiRect){face.x + 1, face.y + 1, face.w - 2, 2}, rgb_mul(g_pal.ivory_hi, 1.02f));
         drect_fill(c, (UiRect){face.x + face.w - 1, face.y, 1, face.h}, edge_r);
         drect_fill(c, (UiRect){face.x, face.y + face.h - 1, face.w, 1}, edge_b);
         if (down) drect_fill(c, (UiRect){face.x + 2, face.y + 2, face.w - 4, face.h - 4},
@@ -305,16 +387,16 @@ static void draw_ribbon_track(UiCtx *c, UiRect track, float val) {
     UiRect cap, rail;
     int cap_x;
     rail = (UiRect){track.x, track.y + track.h / 2 - 2, track.w, 4};
-    drect_fill(c, track, rgb(10, 11, 14));
-    drect_fill(c, (UiRect){track.x, track.y, track.w, 1}, rgb(36, 40, 48));
-    drect_fill(c, (UiRect){track.x, track.y + track.h - 1, track.w, 1}, rgb(4, 5, 7));
-    drect_fill(c, rail, rgb(20, 22, 28));
-    drect_fill(c, (UiRect){rail.x + rail.w / 2 - 1, rail.y - 3, 2, rail.h + 6}, rgb(70, 76, 86));
+    drect_fill(c, track, COL_INSET);
+    drect_fill(c, (UiRect){track.x, track.y, track.w, 1}, COL_BEVEL_HI);
+    drect_fill(c, (UiRect){track.x, track.y + track.h - 1, track.w, 1}, COL_BEVEL_LO);
+    drect_fill(c, rail, rgb_mul(COL_INSET, 0.8f));
+    drect_fill(c, (UiRect){rail.x + rail.w / 2 - 1, rail.y - 3, 2, rail.h + 6}, COL_METAL);
     cap_x = track.x + (int)((val * 0.5f + 0.5f) * (float)(track.w - 18));
     cap = (UiRect){cap_x, track.y - 3, 18, track.h + 6};
-    drect_grad_v(c, cap, rgb(255, 190, 110), rgb(210, 110, 36));
-    drect_fill(c, (UiRect){cap.x + 1, cap.y + 1, cap.w - 2, 1}, rgb(255, 220, 160));
-    drect_glow_border(c, cap, COL_AMBER, 1);
+    drect_grad_v(c, cap, rgb_mul(COL_GLOW, 1.15f), rgb_mul(COL_GLOW, 0.75f));
+    drect_fill(c, (UiRect){cap.x + 1, cap.y + 1, cap.w - 2, 1}, rgb_mul(COL_GLOW, 1.25f));
+    drect_glow_border(c, cap, COL_GLOW, 1);
 }
 static void draw_spectrum(UiCtx *c, UiRect r, const float *mags, int n) {
     int i, bar_w, x0, h, bh;
@@ -322,7 +404,7 @@ static void draw_spectrum(UiCtx *c, UiRect r, const float *mags, int n) {
     if (n < 1) return;
     draw_panel_recessed(c, r);
     text_label(c, r.x + 8, r.y + 4, "SPECTRUM", COL_LABEL);
-    drect_fill(c, inner, rgb(4, 4, 6));
+    drect_fill(c, inner, rgb_mul(COL_INSET, 0.5f));
     bar_w = (inner.w - 12) / n;
     if (bar_w < 2) bar_w = 2;
     x0 = inner.x + 6;
@@ -333,8 +415,9 @@ static void draw_spectrum(UiCtx *c, UiRect r, const float *mags, int n) {
         if (m > 1.f) m = 1.f;
         bh = (int)(m * (float)h);
         if (bh < 1 && m > 0.01f) bh = 1;
-        drect_grad_v(c, (UiRect){x0 + i * bar_w, inner.y + inner.h - 4 - bh, bar_w - 1, bh},
-                     rgb(255, 200, 120), COL_AMBER);
+        UiRect bar = {x0 + i * bar_w, inner.y + inner.h - 4 - bh, bar_w - 1, bh};
+        drect_grad_v(c, bar, rgb_mul(COL_GLOW, 1.3f), COL_GLOW);
+        if (bh > 3) drect_glow_border(c, bar, COL_GLOW, 1);
     }
 }
 static void draw_waveform(UiCtx *c, UiRect r, const float *samples, int n) {
@@ -343,7 +426,7 @@ static void draw_waveform(UiCtx *c, UiRect r, const float *samples, int n) {
     if (n < 2) return;
     draw_panel_recessed(c, r);
     text_label(c, r.x + 8, r.y + 4, "WAVEFORM", COL_LABEL);
-    drect_fill(c, inner, rgb(4, 4, 6));
+    drect_fill(c, inner, rgb_mul(COL_INSET, 0.5f));
     mid = inner.y + inner.h / 2;
     for (i = 0; i < n; i++) {
         float s = samples[i];
@@ -355,7 +438,7 @@ static void draw_waveform(UiCtx *c, UiRect r, const float *samples, int n) {
             int y0 = last_y, y1 = py;
             int ymin = y0 < y1 ? y0 : y1, ymax = y0 > y1 ? y0 : y1;
             int y;
-            for (y = ymin; y <= ymax; y++) pix(c, x, y, COL_AMBER);
+            for (y = ymin; y <= ymax; y++) pix(c, x, y, COL_GLOW);
         }
         last_y = py;
     }
@@ -365,13 +448,14 @@ static void draw_vu(UiCtx *c, UiRect r, float level) {
     int fw;
     if (level < 0.f) level = 0.f;
     if (level > 1.f) level = 1.f;
-    drect_fill(c, r, rgb(10, 10, 12));
-    drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, rgb(44, 46, 52));
-    drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, rgb(4, 4, 6));
+    drect_fill(c, r, COL_INSET);
+    drect_fill(c, (UiRect){r.x, r.y, r.w, 1}, COL_BEVEL_HI);
+    drect_fill(c, (UiRect){r.x, r.y + r.h - 1, r.w, 1}, COL_BEVEL_LO);
     fw = (int)(level * (float)(inner.w - 2));
     if (fw > 0) {
         fill = (UiRect){inner.x + 1, inner.y + 1, fw, inner.h - 2};
-        drect_grad_v(c, fill, rgb(255, 200, 120), COL_AMBER);
+        drect_grad_v(c, fill, rgb_mul(COL_GLOW, 1.3f), COL_GLOW);
+        drect_glow_border(c, fill, COL_GLOW, 1);
     }
 }
 
@@ -383,7 +467,7 @@ static void ui_emit(UiCmdKind kind) {
 }
 static void ui_set_rect(UiRect r) { g_cmds[g_ncmds - 1].r = r; }
 
-void synth_ui_begin(void) { g_ncmds = 0; }
+void synth_ui_begin(void) { ensure_pal(); g_ncmds = 0; }
 const UiCmd *synth_ui_cmds(int *n) {
     if (n) *n = g_ncmds;
     return g_cmds;
@@ -470,8 +554,8 @@ static void replay_cmd(UiCtx *c, const UiCmd *cmd) {
     case UI_CHASSIS: fill_chassis(c); break;
     case UI_HEADER_DECK:
         draw_panel_recessed(c, cmd->r);
-        drect_fill(c, (UiRect){cmd->r.x + 2, cmd->r.y + 2, cmd->r.w - 4, cmd->r.h - 4}, rgb(10, 10, 12));
-        drect_fill(c, (UiRect){cmd->r.x + 2, cmd->r.y + 2, cmd->r.w - 4, 1}, rgb(32, 34, 40));
+        drect_fill(c, (UiRect){cmd->r.x + 2, cmd->r.y + 2, cmd->r.w - 4, cmd->r.h - 4}, COL_INSET);
+        drect_fill(c, (UiRect){cmd->r.x + 2, cmd->r.y + 2, cmd->r.w - 4, 1}, COL_BEVEL_HI);
         break;
     case UI_PANEL_RECESSED: draw_panel_recessed(c, cmd->r); break;
     case UI_BTN: draw_btn(c, cmd->r, cmd->c0, cmd->c1, cmd->idx0, cmd->idx1, cmd->text); break;
@@ -546,6 +630,24 @@ void synth_ui_set_viz_mode(int mode) {
     g_viz_mode = (SynthVizMode)mode;
 }
 int synth_ui_viz_mode(void) { return (int)g_viz_mode; }
+
+void synth_ui_set_skin(const char *name) {
+    if (name && (!strcmp(name, "irish") || !strcmp(name, "eire") || !strcmp(name, "ireland"))) {
+        g_pal = PAL_IRISH;
+        g_pal_init = 1;
+        snprintf(g_skin_name, sizeof g_skin_name, "irish");
+        return;
+    }
+    g_pal = PAL_DEFAULT;
+    g_pal_init = 1;
+    snprintf(g_skin_name, sizeof g_skin_name, "default");
+}
+const char *synth_ui_skin(void) { return g_skin_name; }
+uint32_t synth_ui_color_accent(void) { ensure_pal(); return g_pal.amber; }
+uint32_t synth_ui_color_chassis(void) { ensure_pal(); return g_pal.panel; }
+const char *synth_ui_window_title(void) {
+    return !strcmp(g_skin_name, "irish") ? "Shakti Synth \xe2\x80\x94 Eire" : "Shakti Synth";
+}
 
 void synth_ui_get_spectrum(float *out, int *n) {
     int i;

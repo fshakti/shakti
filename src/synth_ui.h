@@ -83,6 +83,11 @@ void synth_ui_flush_text_overlay(const UiCmd *cmds, int n, uint32_t *fb, int w, 
 void synth_ui_push_audio_samples(const float *mono, int n);
 void synth_ui_set_viz_mode(int mode);
 int synth_ui_viz_mode(void);
+void synth_ui_set_skin(const char *name);
+const char *synth_ui_skin(void);
+uint32_t synth_ui_color_accent(void);
+uint32_t synth_ui_color_chassis(void);
+const char *synth_ui_window_title(void);
 void synth_ui_get_spectrum(float *out, int *n);
 void synth_ui_get_waveform(float *out, int *n);
 float synth_ui_vu_level(void);

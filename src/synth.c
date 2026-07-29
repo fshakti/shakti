@@ -201,7 +201,7 @@ static int synth_pad_note(int pad);
 static void synth_sample_trigger(void);
 static float synth_sample_tick(void);
 static void synth_loop_sync_target(void);
-#define COL_CHASSIS rgb(10, 10, 12)
+#define COL_CHASSIS synth_ui_color_chassis()
 static uint32_t rgb(int r, int g, int b) {
     if (r < 0) r = 0;
     if (g < 0) g = 0;
@@ -335,7 +335,7 @@ void synth_core_ui_draw(void) {
     const UiCmd *cmds;
     uint32_t col_btn = rgb(36, 40, 48);
     uint32_t col_btn_lo = rgb(18, 20, 24);
-    uint32_t col_accent = rgb(255, 154, 60);
+    uint32_t col_accent = synth_ui_color_accent();
 
     synth_layout_compute(L);
     synth_ui_begin();
@@ -1023,15 +1023,21 @@ static float synth_voice_sample(SynthVoice *v, float cutoff, float reso, float b
         out = osc * env * v->vel * 1.3f;
         fc = (cutoff * 0.16f) / (float)SYNTH_SR;
     } else if (v->tone == SYNTH_TONE_PIANO) {
-        float natural_decay = expf(-v->age * (0.7f + (float)v->note * 0.004f));
-        float body = 0.72f * sin1
-                   + 0.25f * sinf(twopi_phase * 2.f)
-                   + 0.11f * sinf(twopi_phase * 3.f)
-                   + 0.05f * sinf(twopi_phase * 4.f);
-        float hammer = sinf(twopi_phase * 7.f) * expf(-v->age * 32.f) * 0.12f;
-        osc = body * (natural_decay + 0.08f * knob_val(6)) + hammer;
-        out = osc * env * v->vel * 1.2f;
-        fc = cutoff / (float)SYNTH_SR;
+        float natural_decay = expf(-v->age * (0.55f + (float)v->note * 0.0035f));
+        float body = 0.62f * sin1
+                   + 0.28f * sinf(twopi_phase * 2.f)
+                   + 0.16f * sinf(twopi_phase * 3.f)
+                   + 0.09f * sinf(twopi_phase * 4.f)
+                   + 0.05f * sinf(twopi_phase * 5.f)
+                   + 0.03f * sinf(twopi_phase * 6.f);
+        /* slight unison detune for body width */
+        float det = sinf(twopi_phase * 1.003f) * 0.18f;
+        float hammer = (sinf(twopi_phase * 8.f) + 0.45f * sinf(twopi_phase * 12.f))
+                     * expf(-v->age * 28.f) * 0.16f;
+        float sympat = sinf(twopi_phase * 0.5f) * expf(-v->age * 1.8f) * 0.08f;
+        osc = (body + det) * (natural_decay + 0.12f * knob_val(6)) + hammer + sympat;
+        out = osc * env * v->vel * 1.35f;
+        fc = (cutoff * 1.05f) / (float)SYNTH_SR;
     } else if (v->tone == SYNTH_TONE_EPIANO) {
         float tremolo = 0.86f + 0.14f * sinf(2.f * (float)SYNTH_PI * 4.8f * v->age);
         osc = (0.78f * sin1
@@ -1267,7 +1273,7 @@ static int synth_x11_init(char *err, size_t cap) {
                                     BlackPixel(g.dpy, scr), COL_CHASSIS);
         g.gc = XCreateGC(g.dpy, g.win, 0, NULL);
     }
-    XStoreName(g.dpy, g.win, "Shakti Synth");
+    XStoreName(g.dpy, g.win, synth_ui_window_title());
     swa.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask |
                      ButtonReleaseMask | PointerMotionMask | StructureNotifyMask;
     XSelectInput(g.dpy, g.win, swa.event_mask);
@@ -1829,6 +1835,35 @@ int synth_set_viz(int mode, char *err, size_t err_cap) {
 int synth_viz_mode(void) { return synth_ui_viz_mode(); }
 float synth_vu(void) { return synth_ui_vu_level(); }
 
+int synth_set_skin(const char *name, char *err, size_t err_cap) {
+    (void)err;
+    (void)err_cap;
+    synth_ui_set_skin(name);
+#ifdef __linux__
+    if (g.open && g.dpy && g.win) XStoreName(g.dpy, g.win, synth_ui_window_title());
+#endif
+    g.dirty = 1;
+    return 0;
+}
+const char *synth_skin(void) { return synth_ui_skin(); }
+
+int synth_set_preset(int idx, char *err, size_t err_cap) {
+    if (idx < 0 || idx >= SYNTH_PRESETS) {
+        if (err && err_cap)
+            snprintf(err, err_cap, "synth_set_preset: index must be 0..%d", SYNTH_PRESETS - 1);
+        return -1;
+    }
+    g.preset = idx;
+    g.preset_menu_open = 0;
+    g.dirty = 1;
+    return 0;
+}
+int synth_preset(void) { return g.preset; }
+const char *synth_preset_name(void) {
+    if (g.preset < 0 || g.preset >= SYNTH_PRESETS) return g_preset_names[0];
+    return g_preset_names[g.preset];
+}
+
 int synth_load_sample(const char *path, char *err, size_t err_cap) {
     int n = 0;
     if (!path || !path[0]) {
@@ -2160,6 +2195,19 @@ int synth_set_viz(int mode, char *err, size_t err_cap) {
 }
 int synth_viz_mode(void) { return 0; }
 float synth_vu(void) { return 0.f; }
+int synth_set_skin(const char *name, char *err, size_t err_cap) {
+    (void)name;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+const char *synth_skin(void) { return "default"; }
+int synth_set_preset(int idx, char *err, size_t err_cap) {
+    (void)idx;
+    if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
+    return -1;
+}
+int synth_preset(void) { return 0; }
+const char *synth_preset_name(void) { return "GRAND PIANO"; }
 int synth_load_sample(const char *path, char *err, size_t err_cap) {
     (void)path;
     if (err && err_cap) snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
@@ -2521,6 +2569,35 @@ V *bi_synth_viz_mode(V **a, int n) {
     (void)a;
     (void)n;
     return v_int(synth_viz_mode());
+}
+V *bi_synth_set_skin(V **a, int n) {
+    char err[256];
+    err[0] = 0;
+    P(n < 1 || a[0]->t != T_STR, v_err("synth_set_skin(name)"))
+    P(synth_set_skin(a[0]->s, err, sizeof err) != 0, synth_err(err))
+    return v_nil();
+}
+V *bi_synth_skin(V **a, int n) {
+    (void)a;
+    (void)n;
+    return v_str(synth_skin());
+}
+V *bi_synth_set_preset(V **a, int n) {
+    char err[256];
+    err[0] = 0;
+    P(n < 1, v_err("synth_set_preset(index)"))
+    P(synth_set_preset(synth_arg_int(a, n, 0, 0), err, sizeof err) != 0, synth_err(err))
+    return v_nil();
+}
+V *bi_synth_preset(V **a, int n) {
+    (void)a;
+    (void)n;
+    return v_int(synth_preset());
+}
+V *bi_synth_preset_name(V **a, int n) {
+    (void)a;
+    (void)n;
+    return v_str(synth_preset_name());
 }
 V *bi_synth_vu(V **a, int n) {
     (void)a;
