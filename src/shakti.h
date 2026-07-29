@@ -45,6 +45,7 @@ typedef struct Lexer {
     int indent_stack[SHAKTI_INDENT_STACK];
     int indent_top;
     int paren_depth;
+    int parse_depth;
     int emit_newline;
     int pending_dedents;
     int has_peek;
@@ -344,6 +345,8 @@ const char *type_name(int t);
 V *vec_cmp(V *a, V *b, int op);
 Node *parse(const char *src);
 V *eval(Node *n, Env *e);
+/* Evaluate a user-function body with interpreter call-depth accounting. */
+V *eval_fn(Node *body, Env *e);
 int shakti_lang_main(int argc, char **argv);
 V *table_load(const char *path, V *columns_opt);
 int table_save(V *table, const char *path);
