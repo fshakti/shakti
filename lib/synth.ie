@@ -147,6 +147,21 @@ def set_viz(mode):
 def viz_mode():
     return synth_viz_mode()
 
+def set_skin(name):
+    synth_set_skin(name)
+
+def skin():
+    return synth_skin()
+
+def set_preset(idx):
+    synth_set_preset(idx)
+
+def preset():
+    return synth_preset()
+
+def preset_name():
+    return synth_preset_name()
+
 def vu():
     return synth_vu()
 

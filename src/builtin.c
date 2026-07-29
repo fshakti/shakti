@@ -91,6 +91,11 @@ extern V *bi_synth_mouse_press(V**,in);
 extern V *bi_synth_mouse_release(V**,in);
 extern V *bi_synth_set_viz(V**,in);
 extern V *bi_synth_viz_mode(V**,in);
+extern V *bi_synth_set_skin(V**,in);
+extern V *bi_synth_skin(V**,in);
+extern V *bi_synth_set_preset(V**,in);
+extern V *bi_synth_preset(V**,in);
+extern V *bi_synth_preset_name(V**,in);
 extern V *bi_synth_vu(V**,in);
 extern V *bi_synth_load_sample(V**,in);
 extern V *bi_synth_sample_loaded(V**,in);
@@ -263,7 +268,7 @@ static const char *BUILTINS[] = {
     "synth_set_reverb","synth_reverb","synth_set_pitch_bend","synth_pitch_bend",
     "synth_set_mod","synth_mod",
     "synth_set_seq_row","synth_play","synth_playing",
-    "synth_mouse_press","synth_mouse_release","synth_set_viz","synth_viz_mode","synth_vu",
+    "synth_mouse_press","synth_mouse_release","synth_set_viz","synth_viz_mode","synth_set_skin","synth_skin","synth_set_preset","synth_preset","synth_preset_name","synth_vu",
     "synth_load_sample","synth_sample_loaded","synth_sample_name",
     "synth_set_row_note","synth_row_note",
     "synth_looper_rec","synth_looper_play","synth_looper_clear","synth_looper_overdub",
@@ -2252,7 +2257,7 @@ BI0(synth_set_attack) BI0(synth_attack) BI0(synth_set_decay) BI0(synth_decay)
 BI0(synth_set_sustain) BI0(synth_sustain) BI0(synth_set_release) BI0(synth_release)
 BI0(synth_set_reverb) BI0(synth_reverb) BI0(synth_set_pitch_bend) BI0(synth_pitch_bend)
 BI0(synth_set_mod) BI0(synth_mod)
-BI0(synth_set_seq_row) BI0(synth_play) BI0(synth_playing)BI0(synth_mouse_press) BI0(synth_mouse_release) BI0(synth_set_viz) BI0(synth_viz_mode) BI0(synth_vu)
+    BI0(synth_set_seq_row) BI0(synth_play) BI0(synth_playing)BI0(synth_mouse_press) BI0(synth_mouse_release) BI0(synth_set_viz) BI0(synth_viz_mode) BI0(synth_set_skin) BI0(synth_skin) BI0(synth_set_preset) BI0(synth_preset) BI0(synth_preset_name) BI0(synth_vu)
 BI0(synth_load_sample) BI0(synth_sample_loaded) BI0(synth_sample_name)
 BI0(synth_set_row_note) BI0(synth_row_note)
 BI0(synth_looper_rec) BI0(synth_looper_play) BI0(synth_looper_clear) BI0(synth_looper_overdub)
@@ -2567,6 +2572,8 @@ static const BiEntry bi_tab[] = {
     {"synth_pitch_bend", bi_w_synth_pitch_bend},
     {"synth_play", bi_w_synth_play},
     {"synth_playing", bi_w_synth_playing},
+    {"synth_preset", bi_w_synth_preset},
+    {"synth_preset_name", bi_w_synth_preset_name},
     {"synth_release", bi_w_synth_release},
     {"synth_reso", bi_w_synth_reso},
     {"synth_reverb", bi_w_synth_reverb},
@@ -2583,15 +2590,18 @@ static const BiEntry bi_tab[] = {
     {"synth_set_mod", bi_w_synth_set_mod},
     {"synth_set_mute", bi_w_synth_set_mute},
     {"synth_set_pitch_bend", bi_w_synth_set_pitch_bend},
+    {"synth_set_preset", bi_w_synth_set_preset},
     {"synth_set_release", bi_w_synth_set_release},
     {"synth_set_reso", bi_w_synth_set_reso},
     {"synth_set_reverb", bi_w_synth_set_reverb},
     {"synth_set_row_note", bi_w_synth_set_row_note},
     {"synth_set_seq_row", bi_w_synth_set_seq_row},
+    {"synth_set_skin", bi_w_synth_set_skin},
     {"synth_set_steps", bi_w_synth_set_steps},
     {"synth_set_sustain", bi_w_synth_set_sustain},
     {"synth_set_tuning", bi_w_synth_set_tuning},
     {"synth_set_viz", bi_w_synth_set_viz},
+    {"synth_skin", bi_w_synth_skin},
     {"synth_steps", bi_w_synth_steps},
     {"synth_sustain", bi_w_synth_sustain},
     {"synth_tick", bi_w_synth_tick},

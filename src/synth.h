@@ -57,6 +57,11 @@ int synth_mouse_release(int x, int y, char *err, size_t err_cap);
 int synth_set_viz(int mode, char *err, size_t err_cap);
 int synth_viz_mode(void);
 float synth_vu(void);
+int synth_set_skin(const char *name, char *err, size_t err_cap);
+const char *synth_skin(void);
+int synth_set_preset(int idx, char *err, size_t err_cap);
+int synth_preset(void);
+const char *synth_preset_name(void);
 
 int synth_load_sample(const char *path, char *err, size_t err_cap);
 int synth_sample_loaded(void);
