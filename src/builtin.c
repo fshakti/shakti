@@ -1,7 +1,7 @@
 #include "shakti.h"
 #include "vec_kernels.h"
 #include "input.h"
-#include <time.h>
+#include <limits.h>
 extern int is_isolde_builtin(const char *name);
 extern V *isolde_builtin_call(const char *name, V **args, int nargs);
 extern V *bi_fread(V**,in);
@@ -748,6 +748,7 @@ static V *bi_bin(V**a,in){
     return v_err("bin: keys must be ivec or fvec");
 }
 
+/* Dyadic `,` / `union` / `outer` table joins and list `union`. */
 static int asof_time_key_name(const char *s){
     return s && (!strcmp(s,"time") || !strcmp(s,"time_ns"));
 }
@@ -787,22 +788,8 @@ static V *asof_gather_col(V *col,const int64_t *idx,int64_t n){
     for(int64_t i=0;i<n;i++)r->L[i]=asof_cell(col,idx[i]);
     return r;
 }
-/* Dyadic comma is currently reserved for this one join shape only:
- * left,right where both tables' first column is the same ascending integer
- * time key. SQL JOIN and all other join forms remain unimplemented. */
-V *table_asof_comma_join(V *left,V *right){
-    if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
-        return v_err(",: asof join requires two tables");
-    if(left->keys->n<1||right->keys->n<1)
-        return v_err(",: both tables must be keyed by time");
-    V *lk=left->keys->L[0],*rk=right->keys->L[0];
-    if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))
-        return v_err(",: first column of both tables must be the same time/time_ns key");
+static V *table_asof_join_impl(V *left,V *right){
     V *lt=left->vals->L[0],*rt=right->vals->L[0];
-    if(lt->t!=T_IVEC||rt->t!=T_IVEC)
-        return v_err(",: time keys must be integer vectors");
-    if(!asof_ascending_i64(lt)||!asof_ascending_i64(rt))
-        return v_err(",: both time keys must be sorted ascending");
     for(int64_t c=1;c<right->keys->n;c++){
         V *name=right->keys->L[c];
         if(name->t!=T_STR)return v_err(",: right column name must be string");
@@ -826,6 +813,429 @@ V *table_asof_comma_join(V *left,V *right){
     free(idx);
     V *r=v_table(keys,data);
     v_free(keys);v_free(data);
+    return r;
+}
+
+typedef struct { int64_t key, row; } JoinI64Pair;
+static int join_i64_pair_cmp(const void *a,const void *b){
+    const JoinI64Pair *x=a,*y=b;
+    if(x->key<y->key)return -1;
+    if(x->key>y->key)return 1;
+    if(x->row<y->row)return -1;
+    if(x->row>y->row)return 1;
+    return 0;
+}
+static int join_i64_unique(const JoinI64Pair *p,int64_t n){
+    for(int64_t i=1;i<n;i++)if(p[i].key==p[i-1].key)return 0;
+    return 1;
+}
+static int64_t join_i64_lower(const JoinI64Pair *p,int64_t n,int64_t key){
+    int64_t lo=0,hi=n;
+    while(lo<hi){int64_t mid=lo+((hi-lo)>>1);if(p[mid].key<key)lo=mid+1;else hi=mid;}
+    return lo;
+}
+static int64_t join_i64_upper(const JoinI64Pair *p,int64_t n,int64_t key){
+    int64_t lo=0,hi=n;
+    while(lo<hi){int64_t mid=lo+((hi-lo)>>1);if(p[mid].key<=key)lo=mid+1;else hi=mid;}
+    return lo;
+}
+static int join_keys_match(V *left,V *right,const char **err){
+    if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE){*err="join requires two tables";return 0;}
+    if(left->keys->n<1||right->keys->n<1){*err="both tables need a first-column key";return 0;}
+    V *lk=left->keys->L[0],*rk=right->keys->L[0];
+    if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)){*err="first column names must match";return 0;}
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    if(lt->t!=rt->t){*err="first column types must match";return 0;}
+    if(lt->t!=T_IVEC&&lt->t!=T_FVEC&&lt->t!=T_LIST){*err="join key must be ivec, fvec, or list";return 0;}
+    return 1;
+}
+static V *join_check_payload_dups(V *left,V *right,const char *op){
+    for(int64_t c=1;c<right->keys->n;c++){
+        V *name=right->keys->L[c];
+        if(name->t!=T_STR)return v_errf("%s: right column name must be string",op);
+        if(asof_col_named(left,name->s))
+            return v_errf("%s: duplicate payload column '%s'",op,name->s);
+    }
+    return NULL;
+}
+static int join_cell_is_nil(V *v){return !v||v->t==T_NIL;}
+/* Grow join index buffers with overflow + NULL checks. Returns 0 on failure. */
+static int join_grow_idx(int64_t **lidx, int64_t **ridx, int64_t *cap, int64_t need) {
+    if (need <= *cap) return 1;
+    int64_t ncap = *cap > 0 ? *cap : 8;
+    while (ncap < need) {
+        if (ncap > INT64_MAX / 2) return 0;
+        ncap *= 2;
+    }
+    size_t bytes = 0;
+    if (__builtin_mul_overflow((size_t)ncap, sizeof(int64_t), &bytes)) return 0;
+    int64_t *nl = realloc(*lidx, bytes);
+    int64_t *nr = realloc(*ridx, bytes);
+    if (!nl || !nr) {
+        if (nl && nl != *lidx) free(nl);
+        if (nr && nr != *ridx) free(nr);
+        return 0;
+    }
+    *lidx = nl;
+    *ridx = nr;
+    *cap = ncap;
+    return 1;
+}
+/* Safe initial capacity for equi-join index arrays. Returns 0 on overflow.
+ * Starts modest (left+right+8) and grows via join_grow_idx; for cross joins
+ * also reject if left*right would overflow as a hard output-size guard. */
+static int join_init_cap(int64_t left_n, int64_t right_n, int cross, int64_t *cap_out) {
+    if (cross) {
+        int64_t rn = right_n ? right_n : 1;
+        int64_t prod, worst;
+        if (__builtin_mul_overflow(left_n, rn, &prod)) return 0;
+        if (__builtin_add_overflow(prod, right_n, &worst)) return 0;
+        if (__builtin_add_overflow(worst, (int64_t)8, &worst)) return 0;
+        (void)worst; /* preflight only; allocate modestly and grow */
+    }
+    int64_t cap;
+    if (__builtin_add_overflow(left_n, right_n, &cap)) return 0;
+    if (__builtin_add_overflow(cap, (int64_t)8, &cap)) return 0;
+    if (cap < 8) cap = 8;
+    *cap_out = cap;
+    return 1;
+}
+static V *union_coalesce_col(V *lcol,V *rcol,const int64_t *lidx,const int64_t *ridx,int64_t nout){
+    V *r=v_list(nout);
+    for(int64_t i=0;i<nout;i++){
+        V *lv=lidx[i]>=0&&lcol?asof_cell(lcol,lidx[i]):v_nil();
+        V *rv=ridx[i]>=0&&rcol?asof_cell(rcol,ridx[i]):v_nil();
+        if(!join_cell_is_nil(lv)){v_free(rv);r->L[i]=lv;}
+        else{v_free(lv);r->L[i]=rv;}
+    }
+    return r;
+}
+static V *join_build_from_pairs(V *left,V *right,const int64_t *lidx,const int64_t *ridx,int64_t nout){
+    int64_t nc=left->keys->n+right->keys->n-1;
+    V *keys=v_list(nc),*data=v_list(nc);
+    int64_t out=0;
+    int need_key_coalesce=0;
+    for(int64_t i=0;i<nout;i++)if(lidx[i]<0){need_key_coalesce=1;break;}
+    keys->L[out]=v_ref(left->keys->L[0]);
+    data->L[out]=need_key_coalesce
+        ? union_coalesce_col(left->vals->L[0],right->vals->L[0],lidx,ridx,nout)
+        : asof_gather_col(left->vals->L[0],lidx,nout);
+    out++;
+    /* Right-only outer rows need None in left payloads; asof_gather_col demotes
+     * typed ivec/fvec/bvec → list (same as asof right-side misses). When every
+     * lidx is non-negative, typed columns are preserved. */
+    for(int64_t c=1;c<left->keys->n;c++,out++){
+        keys->L[out]=v_ref(left->keys->L[c]);
+        data->L[out]=asof_gather_col(left->vals->L[c],lidx,nout);
+    }
+    for(int64_t c=1;c<right->keys->n;c++,out++){
+        keys->L[out]=v_ref(right->keys->L[c]);
+        data->L[out]=asof_gather_col(right->vals->L[c],ridx,nout);
+    }
+    V *r=v_table(keys,data);
+    v_free(keys);v_free(data);
+    return r;
+}
+static V *join_equi_i64(V *left,V *right,int mode){
+    /* mode: 0=auto (left if unique else inner), 1=force left, 2=force inner, 3=outer */
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    JoinI64Pair *rp=malloc((size_t)(right->n?right->n:1)*sizeof(JoinI64Pair));
+    if(!rp)return v_err("join: allocation failed");
+    for(int64_t i=0;i<right->n;i++){rp[i].key=rt->J[i];rp[i].row=i;}
+    qsort(rp,(size_t)right->n,sizeof(JoinI64Pair),join_i64_pair_cmp);
+    int unique=join_i64_unique(rp,right->n);
+    int do_left=(mode==1)||(mode==0&&unique);
+    int do_inner=(mode==2)||(mode==0&&!unique);
+    int do_outer=(mode==3);
+
+    int64_t cap=0;
+    if(!join_init_cap(left->n,right->n,do_inner||do_outer,&cap)){
+        free(rp);return v_err("join: output too large");
+    }
+    int64_t *lidx=malloc((size_t)cap*sizeof(int64_t));
+    int64_t *ridx=malloc((size_t)cap*sizeof(int64_t));
+    int64_t *rmatched=NULL;
+    if(do_outer){
+        rmatched=calloc((size_t)(right->n?right->n:1),sizeof(int64_t));
+        if(!rmatched){free(rp);free(lidx);free(ridx);return v_err("join: allocation failed");}
+    }
+    if(!lidx||!ridx){free(rp);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");}
+
+    int64_t nout=0;
+    for(int64_t i=0;i<left->n;i++){
+        int64_t key=lt->J[i];
+        int64_t lo=join_i64_lower(rp,right->n,key);
+        int64_t hi=join_i64_upper(rp,right->n,key);
+        if(lo>=hi){
+            if(do_left||do_outer){
+                if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                    free(rp);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+                }
+                lidx[nout]=i;ridx[nout]=-1;nout++;
+            }
+        }else if(do_left){
+            if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                free(rp);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+            }
+            lidx[nout]=i;ridx[nout]=rp[lo].row;nout++;
+            if(rmatched)rmatched[rp[lo].row]=1;
+        }else{
+            for(int64_t k=lo;k<hi;k++){
+                if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                    free(rp);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+                }
+                lidx[nout]=i;ridx[nout]=rp[k].row;nout++;
+                if(rmatched)rmatched[rp[k].row]=1;
+            }
+        }
+    }
+    if(do_outer){
+        for(int64_t j=0;j<right->n;j++){
+            if(rmatched[j])continue;
+            if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                free(rp);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+            }
+            lidx[nout]=-1;ridx[nout]=j;nout++;
+        }
+    }
+    V *err=join_check_payload_dups(left,right,do_outer?"outer":",");
+    if(err){free(rp);free(lidx);free(ridx);free(rmatched);return err;}
+    V *r=join_build_from_pairs(left,right,lidx,ridx,nout);
+    free(rp);free(lidx);free(ridx);free(rmatched);
+    return r;
+}
+static int join_vals_equal(V *a,V *b){
+    V *c=vec_cmp(a,b,OP_EQ);
+    if(!c||c->t==T_ERR){if(c)v_free(c);return 0;}
+    int ok=(c->t==T_BOOL&&c->b)||(c->t==T_INT&&c->j);
+    v_free(c);
+    return ok;
+}
+static int64_t join_find_list(V *col,V *needle,int64_t start){
+    if(col->t==T_LIST){
+        for(int64_t i=start;i<col->n;i++)if(join_vals_equal(col->L[i],needle))return i;
+    }else if(col->t==T_FVEC&&needle->t==T_FLOAT){
+        for(int64_t i=start;i<col->n;i++)if(col->F[i]==needle->f)return i;
+    }else if(col->t==T_FVEC&&needle->t==T_INT){
+        for(int64_t i=start;i<col->n;i++)if(col->F[i]==(double)needle->j)return i;
+    }
+    return -1;
+}
+static int join_key_unique_generic(V *col){
+    if(col->t==T_IVEC){
+        JoinI64Pair *p=malloc((size_t)(col->n?col->n:1)*sizeof(JoinI64Pair));
+        if(!p)return 0;
+        for(int64_t i=0;i<col->n;i++){p[i].key=col->J[i];p[i].row=i;}
+        qsort(p,(size_t)col->n,sizeof(JoinI64Pair),join_i64_pair_cmp);
+        int u=join_i64_unique(p,col->n);
+        free(p);return u;
+    }
+    for(int64_t i=0;i<col->n;i++){
+        V *cell=asof_cell(col,i);
+        for(int64_t j=i+1;j<col->n;j++){
+            V *other=asof_cell(col,j);
+            int eq=join_vals_equal(cell,other);
+            v_free(other);
+            if(eq){v_free(cell);return 0;}
+        }
+        v_free(cell);
+    }
+    return 1;
+}
+static V *join_equi_generic(V *left,V *right,int mode){
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    if(lt->t==T_IVEC)return join_equi_i64(left,right,mode);
+    int unique=join_key_unique_generic(rt);
+    int do_left=(mode==1)||(mode==0&&unique);
+    int do_inner=(mode==2)||(mode==0&&!unique);
+    int do_outer=(mode==3);
+    (void)do_inner;
+    int64_t cap=0;
+    if(!join_init_cap(left->n,right->n,0,&cap))
+        return v_err("join: output too large");
+    int64_t *lidx=malloc((size_t)cap*sizeof(int64_t));
+    int64_t *ridx=malloc((size_t)cap*sizeof(int64_t));
+    int64_t *rmatched=NULL;
+    if(do_outer)rmatched=calloc((size_t)(right->n?right->n:1),sizeof(int64_t));
+    if(!lidx||!ridx||(do_outer&&!rmatched)){free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");}
+    int64_t nout=0;
+    for(int64_t i=0;i<left->n;i++){
+        V *needle=asof_cell(lt,i);
+        int found=0;
+        int64_t j=0;
+        while((j=join_find_list(rt,needle,j))>=0){
+            found=1;
+            if(do_left){
+                if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                    v_free(needle);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+                }
+                lidx[nout]=i;ridx[nout]=j;nout++;
+                if(rmatched)rmatched[j]=1;
+                break;
+            }else{
+                if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                    v_free(needle);free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+                }
+                lidx[nout]=i;ridx[nout]=j;nout++;
+                if(rmatched)rmatched[j]=1;
+                j++;
+            }
+        }
+        v_free(needle);
+        if(!found&&(do_left||do_outer)){
+            if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+            }
+            lidx[nout]=i;ridx[nout]=-1;nout++;
+        }
+    }
+    if(do_outer){
+        for(int64_t j=0;j<right->n;j++){
+            if(rmatched[j])continue;
+            if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+                free(lidx);free(ridx);free(rmatched);return v_err("join: allocation failed");
+            }
+            lidx[nout]=-1;ridx[nout]=j;nout++;
+        }
+    }
+    V *err=join_check_payload_dups(left,right,do_outer?"outer":",");
+    if(err){free(lidx);free(ridx);free(rmatched);return err;}
+    V *r=join_build_from_pairs(left,right,lidx,ridx,nout);
+    free(lidx);free(ridx);free(rmatched);
+    return r;
+}
+static int join_is_asof_shape(V *left,V *right){
+    if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)return 0;
+    if(left->keys->n<1||right->keys->n<1)return 0;
+    V *lk=left->keys->L[0],*rk=right->keys->L[0];
+    if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))return 0;
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    return lt->t==T_IVEC&&rt->t==T_IVEC;
+}
+V *table_asof_comma_join(V *left,V *right){
+    if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
+        return v_err(",: asof join requires two tables");
+    if(left->keys->n<1||right->keys->n<1)
+        return v_err(",: both tables must be keyed by time");
+    V *lk=left->keys->L[0],*rk=right->keys->L[0];
+    if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))
+        return v_err(",: first column of both tables must be the same time/time_ns key");
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    if(lt->t!=T_IVEC||rt->t!=T_IVEC)
+        return v_err(",: time keys must be integer vectors");
+    if(!asof_ascending_i64(lt)||!asof_ascending_i64(rt))
+        return v_err(",: both time keys must be sorted ascending");
+    return table_asof_join_impl(left,right);
+}
+V *table_comma_join(V *left,V *right){
+    if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
+        return v_err(",: join requires two tables");
+    if(join_is_asof_shape(left,right))
+        return table_asof_comma_join(left,right);
+    const char *err=NULL;
+    if(!join_keys_match(left,right,&err))
+        return v_errf(",: %s",err?err:"bad join keys");
+    return join_equi_generic(left,right,0);
+}
+V *table_outer_join(V *left,V *right){
+    const char *err=NULL;
+    if(!join_keys_match(left,right,&err))
+        return v_errf("outer: %s",err?err:"bad join keys");
+    return join_equi_generic(left,right,3);
+}
+V *table_union_join(V *left,V *right){
+    const char *err=NULL;
+    if(!join_keys_match(left,right,&err))
+        return v_errf("union: %s",err?err:"bad join keys");
+    V *lt=left->vals->L[0],*rt=right->vals->L[0];
+    /* Unique key universe: left order, then unmatched right keys. */
+    int64_t cap=0;
+    if(!join_init_cap(left->n,right->n,0,&cap))
+        return v_err("union: output too large");
+    int64_t *lidx=malloc((size_t)cap*sizeof(int64_t));
+    int64_t *ridx=malloc((size_t)cap*sizeof(int64_t));
+    if(!lidx||!ridx){free(lidx);free(ridx);return v_err("union: allocation failed");}
+    int64_t nout=0;
+    for(int64_t i=0;i<left->n;i++){
+        V *needle=asof_cell(lt,i);
+        int64_t j=-1;
+        if(lt->t==T_IVEC){
+            for(int64_t k=0;k<right->n;k++)if(rt->J[k]==lt->J[i]){j=k;break;}
+        }else j=join_find_list(rt,needle,0);
+        v_free(needle);
+        if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+            free(lidx);free(ridx);return v_err("union: allocation failed");
+        }
+        lidx[nout]=i;ridx[nout]=j;nout++;
+    }
+    for(int64_t j=0;j<right->n;j++){
+        V *needle=asof_cell(rt,j);
+        int found=0;
+        if(lt->t==T_IVEC){
+            for(int64_t i=0;i<left->n;i++)if(lt->J[i]==rt->J[j]){found=1;break;}
+        }else found=join_find_list(lt,needle,0)>=0;
+        v_free(needle);
+        if(found)continue;
+        if(!join_grow_idx(&lidx,&ridx,&cap,nout+1)){
+            free(lidx);free(ridx);return v_err("union: allocation failed");
+        }
+        lidx[nout]=-1;ridx[nout]=j;nout++;
+    }
+    /* Column set = left ∪ right; shared names coalesce. */
+    int64_t nc=left->keys->n;
+    for(int64_t c=1;c<right->keys->n;c++){
+        V *name=right->keys->L[c];
+        if(name->t!=T_STR){free(lidx);free(ridx);return v_err("union: column name must be string");}
+        if(!asof_col_named(left,name->s))nc++;
+    }
+    V *keys=v_list(nc),*data=v_list(nc);
+    int64_t out=0;
+    for(int64_t c=0;c<left->keys->n;c++,out++){
+        const char *nm=left->keys->L[c]->s;
+        keys->L[out]=v_ref(left->keys->L[c]);
+        V *rcol=NULL;
+        for(int64_t rc=0;rc<right->keys->n;rc++)
+            if(right->keys->L[rc]->t==T_STR&&!strcmp(right->keys->L[rc]->s,nm)){rcol=right->vals->L[rc];break;}
+        data->L[out]=union_coalesce_col(left->vals->L[c],rcol,lidx,ridx,nout);
+    }
+    for(int64_t c=1;c<right->keys->n;c++){
+        V *name=right->keys->L[c];
+        if(asof_col_named(left,name->s))continue;
+        keys->L[out]=v_ref(name);
+        data->L[out]=union_coalesce_col(NULL,right->vals->L[c],lidx,ridx,nout);
+        out++;
+    }
+    free(lidx);free(ridx);
+    V *r=v_table(keys,data);
+    v_free(keys);v_free(data);
+    return r;
+}
+static V *list_from_vec(V *v){
+    if(v->t==T_LIST)return v_ref(v);
+    if(v->t==T_IVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_int(v->J[i]);return r;}
+    if(v->t==T_FVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_float(v->F[i]);return r;}
+    return NULL;
+}
+V *list_union(V *left,V *right){
+    V *a=list_from_vec(left),*b=list_from_vec(right);
+    if(!a||!b){if(a)v_free(a);if(b)v_free(b);return v_err("union: list operands required");}
+    int64_t sum=0;
+    int add_ov=__builtin_add_overflow(a->n,b->n,&sum);
+    if(add_ov){v_free(a);v_free(b);return v_err("union: list too large");}
+    V *r=v_list(sum);
+    int64_t n=0;
+    for(int64_t i=0;i<a->n;i++){
+        int seen=0;
+        for(int64_t j=0;j<n;j++)if(join_vals_equal(r->L[j],a->L[i])){seen=1;break;}
+        if(!seen)r->L[n++]=v_ref(a->L[i]);
+    }
+    for(int64_t i=0;i<b->n;i++){
+        int seen=0;
+        for(int64_t j=0;j<n;j++)if(join_vals_equal(r->L[j],b->L[i])){seen=1;break;}
+        if(!seen)r->L[n++]=v_ref(b->L[i]);
+    }
+    r->n=n;
+    v_free(a);v_free(b);
     return r;
 }
 /* Sort (eq,time) → list [eq_sorted, time_sorted] for asof_bin. */

@@ -174,6 +174,8 @@ enum {
     T_COMMA_ = 76,
     T_COLON_ = 77,
     T_SEMI_ = 78,
+    T_UNION_ = 79,
+    T_OUTER_ = 80,
 };
 
 enum {
@@ -244,6 +246,8 @@ enum {
     N_UPDATE = 41,
     N_WHILE = 42,
     N_WITH = 43,
+    N_UNION_JOIN = 44,
+    N_OUTER_JOIN = 45,
 };
 
 enum {
@@ -351,6 +355,10 @@ V *table_sql_delete(V *from, V *cols, V *where);
 V *table_sql_create_table(V *name, V *cols);
 V *table_sql_insert(V *table, V *cols, V *vals);
 V *table_sql_join(V *left, V *right, V *on_col);
+V *table_comma_join(V *left, V *right);
+V *table_outer_join(V *left, V *right);
+V *table_union_join(V *left, V *right);
+V *list_union(V *left, V *right);
 V *table_asof_comma_join(V *left, V *right);
 int is_builtin(const char *name);
 void builtin_register(Env *e);
