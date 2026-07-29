@@ -247,6 +247,7 @@ V *bi_pcm_open(V **a, int n) {
 V *bi_pcm_write(V **a, int n) {
     if (n < 1) return v_err("pcm_write(samples): expected fvec or list of floats");
 #ifndef PCM_HAVE
+    (void)a;
     return v_err("pcm_write: no audio backend on this platform");
 #else
     {

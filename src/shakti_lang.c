@@ -879,6 +879,13 @@ void v_serialize(V *v, FILE *fp) {
 #define SHAKTI_DESER_MAX_VARS  65536
 #define SHAKTI_ENV_MAX_NAME    4096
 #define SHAKTI_PRINT_MAX_DEPTH 512
+#define SHAKTI_PARSE_MAX_DEPTH 40
+#ifndef SHAKTI_CALL_MAX_DEPTH
+#define SHAKTI_CALL_MAX_DEPTH  3000
+#endif
+
+static int g_call_depth;
+static int g_call_depth_limit = -1;
 
 static int deser_read_i64(FILE *fp, int64_t *out) {
     return fread(out, 8, 1, fp) == 1;
@@ -1726,11 +1733,29 @@ static Token lex_raw(Lexer *l) {
     case '!': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_NE_); } break;
     case '<': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_LE_); } return make_tok(T_LT_);
     case '>': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_GE_); } return make_tok(T_GT_);
-    case '(': l->paren_depth++; return make_tok(T_LPAREN_);
+    case '(':
+        if (l->paren_depth >= SHAKTI_PARSE_MAX_DEPTH) {
+            lex_fail(l, "nesting too deep");
+            return make_tok(T_EOF_);
+        }
+        l->paren_depth++;
+        return make_tok(T_LPAREN_);
     case ')': l->paren_depth--; return make_tok(T_RPAREN_);
-    case '[': l->paren_depth++; return make_tok(T_LBRACKET_);
+    case '[':
+        if (l->paren_depth >= SHAKTI_PARSE_MAX_DEPTH) {
+            lex_fail(l, "nesting too deep");
+            return make_tok(T_EOF_);
+        }
+        l->paren_depth++;
+        return make_tok(T_LBRACKET_);
     case ']': l->paren_depth--; return make_tok(T_RBRACKET_);
-    case '{': l->paren_depth++; return make_tok(T_LBRACE_);
+    case '{':
+        if (l->paren_depth >= SHAKTI_PARSE_MAX_DEPTH) {
+            lex_fail(l, "nesting too deep");
+            return make_tok(T_EOF_);
+        }
+        l->paren_depth++;
+        return make_tok(T_LBRACE_);
     case '}': l->paren_depth--; return make_tok(T_RBRACE_);
     case ',': return make_tok(T_COMMA_);
     case ':': return make_tok(T_COLON_);
@@ -1802,6 +1827,7 @@ static Node *parse_jux_arg(Lexer *l) {
 }
 
 static void expect(Lexer *l, int type) {
+    if (l->failed) return;
     Token t = lex_next(l);
     if(t.type != type) {
         fprintf(stderr, "parse error: expected token %d, got %d", type, t.type);
@@ -1809,7 +1835,7 @@ static void expect(Lexer *l, int type) {
         fprintf(stderr, "\n");
     }
 }
-static Node *parse_atom(Lexer *l) {
+static Node *parse_atom_body(Lexer *l) {
     Token t = lex_next(l);
     Node *n;
     switch(t.type) {
@@ -1928,8 +1954,20 @@ static Node *parse_atom(Lexer *l) {
         return node_new(N_NONE);
     }
 }
+static Node *parse_atom(Lexer *l) {
+    if (l->failed) return NULL;
+    if (l->parse_depth >= SHAKTI_PARSE_MAX_DEPTH) {
+        lex_fail(l, "nesting too deep");
+        return NULL;
+    }
+    l->parse_depth++;
+    Node *n = parse_atom_body(l);
+    l->parse_depth--;
+    return n;
+}
 static Node *parse_postfix(Lexer *l) {
     Node *n = parse_atom(l);
+    if (!n) return NULL;
     /* q/k-style numeric vectors: 1 2 3 or 1 -2 3 → N_LIST */
     if((n->type == N_INT || n->type == N_FLOAT)) {
         Token pk0 = lex_peek(l);
@@ -2818,13 +2856,13 @@ Node *parse(const char *src) {
     Lexer l;
     lex_init(&l, src);
     Node *prog = node_new(N_BLOCK);
-    W(lex_peek(&l).type != T_EOF_,{
+    W(lex_peek(&l).type != T_EOF_ && !l.failed,{
         Node *s = parse_stmt(&l);
         if(s) node_add(prog, s);
     })
     if(l.failed && !g_error) {
         g_error = 1;
-        g_error_val = v_errf("lexer: %s", l.error[0] ? l.error : "invalid input");
+        g_error_val = v_errf("parse: %s", l.error[0] ? l.error : "invalid input");
     }
     return prog;
 }
@@ -4568,6 +4606,24 @@ static V *try_fast_counting_while(Node *n, Env *e) {
     return v_nil();
 }
 
+static int shakti_call_depth_limit(void) {
+    if (g_call_depth_limit < 0) {
+        const char *e = getenv("SHAKTI_CALL_MAX_DEPTH");
+        int v = e && e[0] ? atoi(e) : 0;
+        g_call_depth_limit = v > 0 ? v : SHAKTI_CALL_MAX_DEPTH;
+    }
+    return g_call_depth_limit;
+}
+
+V *eval_fn(Node *body, Env *e) {
+    if (g_call_depth >= shakti_call_depth_limit())
+        return v_err("recursion limit exceeded");
+    g_call_depth++;
+    V *r = eval(body, e);
+    g_call_depth--;
+    return r;
+}
+
 V *eval(Node *n, Env *e) {
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
@@ -5312,7 +5368,7 @@ V *eval(Node *n, Env *e) {
                     }
                 }
                 Node *body = fn_ast[(int)attr->j];
-                V *result = eval(body, call_env);
+                V *result = eval_fn(body, call_env);
                 if(g_returning) {
                     g_returning = 0; v_free(result);
                     result = g_retval ? g_retval : v_nil();
@@ -5390,7 +5446,7 @@ V *eval(Node *n, Env *e) {
         for(int i=0;i<nkw;i++)
             env_set(call_env, kwnames[i]->s, kwvals[i]);
         Node *body = fn_ast[(int)fn->j];
-        V *result = eval(body, call_env);
+        V *result = eval_fn(body, call_env);
         if(g_returning) {
             g_returning = 0;
             v_free(result);

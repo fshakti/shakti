@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(SHAKTI_HAVE_LIBEXPAT)
+/* Unlock expat ≥2.6 amplification-protection prototypes (symbols are in libexpat). */
+#ifndef XML_GE
+#define XML_GE 1
+#endif
 #include <expat.h>
 struct xml_cb{V*tag;V*id;V*name;V*text;};
 static void xml_start(void*ud,const char*name,const char**atts){
@@ -56,6 +60,11 @@ V*table_xml_load(const char*path,V*columns_opt){
   v_free(cb.name);
   v_free(cb.text);
   return v_err("xml: parser");}
+ XML_SetParamEntityParsing(p, XML_PARAM_ENTITY_PARSING_NEVER);
+#if defined(XML_DTD) || (defined(XML_GE) && XML_GE == 1)
+ XML_SetBillionLaughsAttackProtectionMaximumAmplification(p, 100.0f);
+ XML_SetBillionLaughsAttackProtectionActivationThreshold(p, 8388608ull);
+#endif
  XML_SetUserData(p,&cb);
  XML_SetElementHandler(p,xml_start,NULL);
  XML_SetCharacterDataHandler(p,xml_ch);

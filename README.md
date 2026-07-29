@@ -72,6 +72,17 @@ CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger
 interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performance-vs-cc--o2-methodology)
 and local `make -f Makefile.local compare-langs`.
 
+## security
+
+Shakti trusts the `.ie` programs it runs. A script can call `sh(cmd)` (shell),
+read/write files, and use network builtins — treat untrusted input like an
+untrusted shell script.
+
+- Set `SHAKTI_SAFE=1` (or `SHAKTI_ALLOW_EXEC=0`) to disable `sh()`.
+- Parser nesting and interpreter recursion are capped (defaults 40 / 3000;
+  override call depth with `SHAKTI_CALL_MAX_DEPTH`).
+- REST temps use `$XDG_RUNTIME_DIR` / `$TMPDIR` when set, mode `0600`.
+
 **`examples/example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
 It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end
 hits an open-window busy loop (`while gfx.alive(): gfx.tick()` with no sleep) and will

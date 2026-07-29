@@ -14,12 +14,14 @@
 #if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #endif
 
 #define REST_MAX_HANDLES 128
 #define REST_MAX_HDR 65536
 #define REST_MAX_BODY (1024 * 1024)
+#define REST_TEMP_PATH_CAP 512
 
 typedef enum {
     REST_KIND_NONE = 0,
@@ -38,10 +40,10 @@ static char g_rest_token[4096];
 static int g_rest_inited;
 
 /* Process-lifetime temp paths for curl I/O — created once, truncated per request. */
-static char g_rest_hdr_path[] = "/tmp/shakti-rest-hdr-XXXXXX";
-static char g_rest_body_path[] = "/tmp/shakti-rest-body-XXXXXX";
-static char g_rest_code_path[] = "/tmp/shakti-rest-code-XXXXXX";
-static char g_rest_data_path[] = "/tmp/shakti-rest-data-XXXXXX";
+static char g_rest_hdr_path[REST_TEMP_PATH_CAP];
+static char g_rest_body_path[REST_TEMP_PATH_CAP];
+static char g_rest_code_path[REST_TEMP_PATH_CAP];
+static char g_rest_data_path[REST_TEMP_PATH_CAP];
 static int g_rest_temps_ok;
 
 #ifndef SHAKTI_WASM
@@ -51,8 +53,16 @@ static RestHandle g_rest_handles[REST_MAX_HANDLES];
 static int rest_make_temp(char *tmpl) {
     int fd = mkstemp(tmpl);
     if (fd < 0) return -1;
+#if !defined(_WIN32)
+    (void)fchmod(fd, 0600);
+#endif
     close(fd);
     return 0;
+}
+
+static int rest_fill_temp_tmpl(char *out, size_t cap, const char *dir, const char *leaf) {
+    int n = snprintf(out, cap, "%s/%s", dir, leaf);
+    return n > 0 && (size_t)n < cap;
 }
 
 static void rest_unlink_temps(void) {
@@ -69,6 +79,15 @@ static void rest_init(void) {
     g_rest_token[0] = 0;
     const char *env = getenv("SHAKTI_REST_TOKEN");
     if (env && env[0]) strncpy(g_rest_token, env, sizeof g_rest_token - 1);
+    const char *dir = getenv("XDG_RUNTIME_DIR");
+    if (!dir || !dir[0]) dir = getenv("TMPDIR");
+    if (!dir || !dir[0]) dir = "/tmp";
+    if (!rest_fill_temp_tmpl(g_rest_hdr_path, sizeof g_rest_hdr_path, dir, "shakti-rest-hdr-XXXXXX") ||
+        !rest_fill_temp_tmpl(g_rest_body_path, sizeof g_rest_body_path, dir, "shakti-rest-body-XXXXXX") ||
+        !rest_fill_temp_tmpl(g_rest_code_path, sizeof g_rest_code_path, dir, "shakti-rest-code-XXXXXX") ||
+        !rest_fill_temp_tmpl(g_rest_data_path, sizeof g_rest_data_path, dir, "shakti-rest-data-XXXXXX")) {
+        return;
+    }
     if (rest_make_temp(g_rest_hdr_path) == 0 &&
         rest_make_temp(g_rest_body_path) == 0 &&
         rest_make_temp(g_rest_code_path) == 0 &&

@@ -164,10 +164,9 @@ static int stem_ring_pop(float *buf, int *r, int *w, int *n, float *out) {
 
 static void stem_ola_add(StemState *st, int stem, const float *frame) {
     int i;
-    for (i = 0; i < STEM_NFFT; i++) {
-        if (i >= STEM_OLA_CAP) break;
+    /* STEM_NFFT (1024) is always <= STEM_OLA_CAP (8192); loop bound is the real guard. */
+    for (i = 0; i < STEM_NFFT; i++)
         st->ola[stem][i] += frame[i];
-    }
     if (st->ola_len < STEM_NFFT) st->ola_len = STEM_NFFT;
 }
 
