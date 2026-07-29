@@ -373,12 +373,16 @@ prod-size: clean-shakti-artifacts shakti
 SHAKTI_PORTABLE_CPU ?= 0
 ifeq ($(SHAKTI_PORTABLE_CPU),1)
   ifeq ($(UNAME_M),arm64)
-    PROD_SPEED_ARCH := -mcpu=apple-m1
+    # Floor for redistributable arm64 builds. Current Xcode clang rejects
+    # -mcpu=apple-m5; bump when the toolchain adds it.
+    PROD_SPEED_ARCH := -mcpu=apple-m4
   else
     PROD_SPEED_ARCH := -march=x86-64-v2 -mtune=generic
   endif
 else
   ifeq ($(UNAME_M),arm64)
+    # Host tuning (Apple Silicon M5 and peers) — use native until clang
+    # exposes -mcpu=apple-m5.
     PROD_SPEED_ARCH := -mcpu=native
   else
     PROD_SPEED_ARCH := -march=native
@@ -386,15 +390,34 @@ else
 endif
 PROD_SPEED_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -O3 -DNDEBUG $(PROD_RELEASE_CFLAGS) $(PROD_SPEED_ARCH)
 PROD_SPEED_LDFLAGS := $(LDFLAGS)
+# ObjC units hardcode -O2 -g; mirror C prod-speed so talk/synth/gfx match.
+ifneq ($(TALK_OBJC_FLAGS),)
+  PROD_SPEED_TALK_OBJC_FLAGS := $(filter-out -O2 -g,$(TALK_OBJC_FLAGS)) -O3 -DNDEBUG $(PROD_RELEASE_CFLAGS) $(PROD_SPEED_ARCH)
+endif
+ifneq ($(SYNTH_OBJC_FLAGS),)
+  PROD_SPEED_SYNTH_OBJC_FLAGS := $(filter-out -O2 -g,$(SYNTH_OBJC_FLAGS)) -O3 -DNDEBUG $(PROD_RELEASE_CFLAGS) $(PROD_SPEED_ARCH)
+endif
+ifneq ($(GFX_OBJC_FLAGS),)
+  PROD_SPEED_GFX_OBJC_FLAGS := $(filter-out -O2 -g,$(GFX_OBJC_FLAGS)) -O3 -DNDEBUG $(PROD_RELEASE_CFLAGS) $(PROD_SPEED_ARCH)
+endif
 
 prod-speed: CFLAGS := $(PROD_SPEED_CFLAGS)
 prod-speed: LDFLAGS := $(PROD_SPEED_LDFLAGS)
+ifneq ($(PROD_SPEED_TALK_OBJC_FLAGS),)
+prod-speed: TALK_OBJC_FLAGS := $(PROD_SPEED_TALK_OBJC_FLAGS)
+endif
+ifneq ($(PROD_SPEED_SYNTH_OBJC_FLAGS),)
+prod-speed: SYNTH_OBJC_FLAGS := $(PROD_SPEED_SYNTH_OBJC_FLAGS)
+endif
+ifneq ($(PROD_SPEED_GFX_OBJC_FLAGS),)
+prod-speed: GFX_OBJC_FLAGS := $(PROD_SPEED_GFX_OBJC_FLAGS)
+endif
 prod-speed: clean-shakti-artifacts shakti
 	strip shakti
 	$(MACOS_RESIGN)
 
 clean-shakti-artifacts:
-	rm -f shakti talk.o synth.o synth_mac.o
+	rm -f shakti talk.o synth.o synth_ui.o synth_mac.o gfx.o gfx_mac.o
 
 check-deps:
 ifeq ($(UNAME_S),Darwin)
