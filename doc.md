@@ -1,5 +1,7 @@
 # Shakti documentation
 
+Version **0.12.0**.
+
 ## Contents
 
 - [Examples index](#examples-index)
@@ -577,7 +579,7 @@ print(sum(a * b))      # same math; allocates a * b first
 `.` selects attributes or columns. `dot(a, b)` is inner product.
 `mmul(a, b)` is matrix multiply. Leading `@` decorates; expression `@` is each.
 
-Large vector operations use OpenMP. `make prod-speed` enables native SIMD.
+Large vector operations use OpenMP. `make prod-speed` enables SIMD (`-march=x86-64-v3` / AVX2 on x86).
 With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
 For windowed VWAP / averages over many symbols, see [time-series indexes](#time-series-indexes).
 
@@ -626,9 +628,9 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 
 ### Performance
 
-On x86-64, `make prod-speed` enables AVX-512 paths for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters when the CPU supports them. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
+On x86-64, `make prod-speed` enables AVX2 paths for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters. On arm64 (Apple Silicon), the same matrix operations use NEON (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
-The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (AVX-512/NEON when `prod-speed` enables those ISAs). There is no GPU backend in the standalone binary.
+The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (AVX2/NEON when `prod-speed` enables those ISAs). There is no GPU backend in the standalone binary.
 
 OpenMP thread count affects short vector timings. Keep `OMP_NUM_THREADS`
 fixed when comparing local runs.
@@ -734,7 +736,7 @@ update name : "ADA" from u where id = 1
 delete from u where id = 2
 ```
 
-`by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Join (`t1 join t2 on col`) is not yet implemented.
+`by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Prefer core `,` / `union` / `outer` table joins (see [Table joins](#table-joins----union--outer)); SQL `t1 join t2 on col` is not yet implemented.
 
 For high-throughput windowed VWAP / averages / exchange stats over dense symbol ids, prefer the [time-series indexes](#time-series-indexes) instead of a full SQL scan.
 
@@ -825,6 +827,25 @@ For the first `n_trades` rows with positive `size`, scan forward within `horizon
 | Builtin | Role |
 |---------|------|
 | `shakti_theopl(sym_id, time_ns, size, n_trades, horizon_ns)` | Return hit count (int) |
+
+## Table joins (`,` / `union` / `outer`)
+
+Dyadic `,` joins two tables on the **first column** when names and types match:
+
+| Shape | Behavior |
+|-------|----------|
+| First cols are matching sorted `time` / `time_ns` `ivec` | Asof (left-preserving; miss → `None`) |
+| Right first-column values are unique | Left equi-join |
+| Right first-column has duplicates | Inner equi-join (1:N expands) |
+
+Explicit forms (same first-column key; no `on` clause):
+
+| Form | Behavior |
+|------|----------|
+| `a outer b` | Full outer equi-join (tables only) |
+| `a union b` | Keyed union-join on tables; order-preserving unique concat on lists/`ivec`/`fvec` |
+
+SQL `t1 join t2 on col` remains unimplemented.
 
 ## Asof join helpers
 
