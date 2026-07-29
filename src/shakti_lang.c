@@ -7,7 +7,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.11.1"
+#define SHAKTI_PKG_VERSION "0.12.0"
 #endif
 /* Resolve embedded converter sources from the generated tree explicitly so
  * stale src/shakti_*_embed.h files can never shadow them via include order. */
@@ -1705,6 +1705,8 @@ static Token lex_raw(Lexer *l) {
         else if(!strcmp(t.sval,"values"))   t.type=T_VALUES_;
         else if(!strcmp(t.sval,"join"))     t.type=T_JOIN_;
         else if(!strcmp(t.sval,"on"))       t.type=T_ON_;
+        else if(!strcmp(t.sval,"union"))    t.type=T_UNION_;
+        else if(!strcmp(t.sval,"outer"))    t.type=T_OUTER_;
         return t;
     }
     l->pos = p+1;
@@ -1776,6 +1778,7 @@ static Node *parse_query(Lexer *l);
 static Node *parse_create_table(Lexer *l);
 static Node *parse_insert(Lexer *l);
 static Node *parse_join(Lexer *l, Node *left);
+static Node *parse_union_outer(Lexer *l, Node *left, int ntype);
 static Node *parse_atom(Lexer *l);
 
 static int is_jux_arg_token(int tt) {
@@ -2382,18 +2385,41 @@ static Node *parse_join(Lexer *l, Node *left) {
     W(lex_peek(l).type == T_NEWLINE_ || lex_peek(l).type == T_SEMI_,lex_next(l))
     return n;
 }
+static Node *parse_union_outer(Lexer *l, Node *left, int ntype) {
+    lex_next(l);
+    Node *right = parse_ternary(l);
+    Node *n = node_new(ntype);
+    node_add(n, left);
+    node_add(n, right);
+    W(lex_peek(l).type == T_NEWLINE_ || lex_peek(l).type == T_SEMI_,lex_next(l))
+    return n;
+}
 static Node *parse_expr(Lexer *l) {
     return parse_ternary(l);
 }
 static Node *parse_asof_comma(Lexer *l) {
     Node *n=parse_ternary(l);
-    while(lex_peek(l).type==T_COMMA_){
-        lex_next(l);
-        Node *r=node_new(N_BINOP);
-        r->op=OP_ASOF_COMMA;
-        node_add(r,n);
-        node_add(r,parse_ternary(l));
-        n=r;
+    for(;;){
+        if(lex_peek(l).type==T_COMMA_){
+            lex_next(l);
+            Node *r=node_new(N_BINOP);
+            r->op=OP_ASOF_COMMA;
+            node_add(r,n);
+            node_add(r,parse_ternary(l));
+            n=r;
+        }else if(lex_peek(l).type==T_UNION_){
+            lex_next(l);
+            Node *r=node_new(N_UNION_JOIN);
+            node_add(r,n);
+            node_add(r,parse_ternary(l));
+            n=r;
+        }else if(lex_peek(l).type==T_OUTER_){
+            lex_next(l);
+            Node *r=node_new(N_OUTER_JOIN);
+            node_add(r,n);
+            node_add(r,parse_ternary(l));
+            n=r;
+        }else break;
     }
     return n;
 }
@@ -2722,6 +2748,12 @@ static Node *parse_stmt(Lexer *l) {
     Node *expr = parse_expr(l);
     if(lex_peek(l).type == T_JOIN_) {
         return parse_join(l, expr);
+    }
+    if(lex_peek(l).type == T_UNION_) {
+        return parse_union_outer(l, expr, N_UNION_JOIN);
+    }
+    if(lex_peek(l).type == T_OUTER_) {
+        return parse_union_outer(l, expr, N_OUTER_JOIN);
     }
     pk = lex_peek(l);
     if(pk.type == T_COMMA_ && expr->type == N_NAME) {
@@ -4635,6 +4667,28 @@ V *eval(Node *n, Env *e) {
         v_free(left); v_free(right); v_free(on_col);
         return r;
     }
+    case N_UNION_JOIN: {
+        V *left = eval(n->ch[0], e);
+        V *right = eval(n->ch[1], e);
+        P(left->t==T_ERR,(v_free(right),left))
+        P(right->t==T_ERR,(v_free(left),right))
+        V *r;
+        if(left->t==T_TABLE&&right->t==T_TABLE) r=table_union_join(left,right);
+        else if((left->t==T_LIST||left->t==T_IVEC||left->t==T_FVEC)&&
+                (right->t==T_LIST||right->t==T_IVEC||right->t==T_FVEC)) r=list_union(left,right);
+        else r=v_err("union: requires two tables or two lists/vectors");
+        v_free(left); v_free(right);
+        return r;
+    }
+    case N_OUTER_JOIN: {
+        V *left = eval(n->ch[0], e);
+        V *right = eval(n->ch[1], e);
+        P(left->t==T_ERR,(v_free(right),left))
+        P(right->t==T_ERR,(v_free(left),right))
+        V *r=table_outer_join(left,right);
+        v_free(left); v_free(right);
+        return r;
+    }
     case N_NAME: {
         V *v = env_get(e, n->sval);
         P(v,v_ref(v))
@@ -4821,7 +4875,7 @@ V *eval(Node *n, Env *e) {
             V *b=eval(n->ch[1],e);
             P(a->t==T_ERR,(v_free(b),a))
             P(b->t==T_ERR,(v_free(a),b))
-            V *r=table_asof_comma_join(a,b);
+            V *r=table_comma_join(a,b);
             v_free(a);v_free(b);
             return r;
         }
@@ -6205,8 +6259,11 @@ static char *shakti_transpile_embedded(const char *src_text, const char *filenam
     char cache_path[512];
     uint64_t hash = 0;
     if(use_cache) {
+        /* Include converter_source so reserved-word / emitter changes invalidate
+         * stale .ie cache entries from older converter builds. */
         hash = shakti_fnv1a64(label, strlen(label));
         hash ^= shakti_fnv1a64(src_text, strlen(src_text));
+        hash ^= shakti_fnv1a64(converter_source, strlen(converter_source));
         if(shakti_transpile_cache_path(cache_path, sizeof(cache_path), label, hash) == 0) {
             char *hit = shakti_read_all_file(cache_path);
             if(hit) return hit;

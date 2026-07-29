@@ -8,7 +8,8 @@ python_reserved : ["def", "return", "if", "elif", "else", "while", "for", "in",
                    "finally", "as", "lambda", "pass", "class", "global", "del", "raise",
                    "with", "yield", "True", "False", "None"]
 shakti_reserved : ["select", "update", "delete", "by", "from", "where",
-                   "create", "insert", "into", "values", "join", "on"]
+                   "create", "insert", "into", "values", "join", "on",
+                   "union", "outer"]
 
 def tok(kind, text, val, line, col):
     return converter_shared.tok(kind, text, val, line, col)

@@ -2,10 +2,10 @@
 
 [Discord](https://discord.gg/PkKwUk9Tf)
 
-Small interpreted language (0.11.1) with vectors, matrices, tables, decorators,
-each (`f@`), load-time time-series indexes (VWAB / windowed avg / stats / asof),
-and optional SQL, graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
-and IEFS modules.
+Small interpreted language (0.12.0) with vectors, matrices, tables, decorators,
+each (`f@`), table joins (`,` / `union` / `outer`), load-time time-series indexes
+(VWAB / windowed avg / stats / asof), and optional SQL, graph, IPC, REST, gfx,
+pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi, and IEFS modules.
 
 ## grammar
 
@@ -35,7 +35,7 @@ make prod
 export SHAKTI_LIB=$PWD/lib
 ```
 
-`make prod-speed` enables native CPU tuning; `make prod-size` optimizes for size.
+`make prod-speed` enables x86-64-v3 (AVX2) / native arm64 tuning; `make prod-size` optimizes for size.
 `make check-deps` verifies Homebrew packages on macOS.
 Embedded converter headers are generated under `gen/` from `converters/p2s.ie`,
 `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
@@ -62,8 +62,8 @@ CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger
 
 `./shakti file.c` is **subset lowering + interpret**, not a C compiler. Repeated
 `.c` / `.py` / `.cs` / `.java` runs use a disk transpile cache under
-`~/.cache/shakti/transpile/` (`SHAKTI_NO_TRANSPILE_CACHE=1` to disable). Prefer
-emitting `.ie` once for hot loops. Fast numeric work belongs on large vectors /
+`~/.cache/shakti/transpile/` (keyed by source and converter; set
+`SHAKTI_NO_TRANSPILE_CACHE=1` to disable). Prefer emitting `.ie` once for hot loops. Fast numeric work belongs on large vectors /
 `dot` / `mmul` / `make prod-speed` — scalar `for`/`while` micros stay in the AST
 interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performance-vs-cc--o2-methodology)
 and local `make -f Makefile.local compare-langs`.
