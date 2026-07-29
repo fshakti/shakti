@@ -1359,8 +1359,8 @@ def lower_call(x, st):
     f : x["func"]
     # System.out.println / System.out.print
     if f["t"] = "Attr" and f["value"]["t"] = "Attr":
-        outer : f["value"]
-        if outer["value"]["t"] = "Name" and outer["value"]["value"] = "System" and outer["attr"] = "out":
+        recv : f["value"]
+        if recv["value"]["t"] = "Name" and recv["value"]["value"] = "System" and recv["attr"] = "out":
             if f["attr"] = "println" or f["attr"] = "print":
                 parts : []
                 for e in x["args"]:
