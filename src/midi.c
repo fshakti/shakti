@@ -141,6 +141,9 @@ static V *midi_ev_dict(const MidiEv *ev) {
     return d;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
 static void midi_decode_bytes(const unsigned char *data, int len) {
     if (len < 1) return;
     MidiEv ev;
@@ -663,6 +666,7 @@ static int midi_platform_connect(const char *target, char *err, size_t err_cap) 
 #elif defined(MIDI_HAVE_COREMIDI)
     return midi_cm_connect(target, err, err_cap);
 #else
+    (void)target;
     snprintf(err, err_cap, "no MIDI backend");
     return -1;
 #endif

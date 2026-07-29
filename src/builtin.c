@@ -1956,7 +1956,7 @@ static V *bi_map(V**a,in,Env*e){
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);v_free(item);
-            V*rv=eval(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
+            V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             r->L[i]=rv;env_free(ce);
         }
     }
@@ -1983,7 +1983,7 @@ static V *bi_filter(V**a,in,Env*e){
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
-            V*rv=eval(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
+            V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             int keep=rv&&((rv->t==T_BOOL&&rv->b)||(rv->t==T_INT&&rv->j)||(rv->t!=T_NIL&&rv->t!=T_BOOL&&rv->t!=T_INT));
             v_free(rv);env_free(ce);if(keep)tmp[out++]=item;else v_free(item);
         }
@@ -2669,7 +2669,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         P(fnv->n == -1,builtin_call(fnv->s, al->L, al->n, NULL, NULL, 0, e))
         Env*ce=env_new(fnv->closure);V*p=fnv->params;
         for(int i=0;i<p->n && i<al->n;i++) env_set(ce,p->L[i]->s,al->L[i]);
-        Node*body=fn_ast[(int)fnv->j];V*rv=eval(body,ce);
+        Node*body=fn_ast[(int)fnv->j];V*rv=eval_fn(body,ce);
         if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
         env_free(ce);return rv;
     }

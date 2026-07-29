@@ -398,6 +398,13 @@ V *bi_sh(V **a, in) {
 #if defined(__EMSCRIPTEN__)
     return v_err("sh: not available in WASM builds");
 #else
+    {
+        const char *safe = getenv("SHAKTI_SAFE");
+        const char *allow = getenv("SHAKTI_ALLOW_EXEC");
+        if ((safe && safe[0] && strcmp(safe, "0") != 0) ||
+            (allow && allow[0] == '0' && allow[1] == '\0'))
+            return v_err("sh: disabled (SHAKTI_SAFE or SHAKTI_ALLOW_EXEC=0)");
+    }
     int rc = system(a[0]->s);
     return v_int(rc);
 #endif
