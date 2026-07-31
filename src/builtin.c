@@ -123,6 +123,9 @@ extern V *bi_gfx_click_pending(V**,in);
 extern V *bi_gfx_click_x(V**,in);
 extern V *bi_gfx_click_y(V**,in);
 extern V *bi_gfx_consume_click(V**,in);
+extern V *bi_gfx_mouse_x(V**,in);
+extern V *bi_gfx_mouse_y(V**,in);
+extern V *bi_gfx_mouse_down(V**,in);
 extern V *bi_gfx_text(V**,in);
 extern V *bi_gfx_text_width(V**,in);
 extern V *bi_gfx_copy_rect(V**,in);
@@ -277,6 +280,7 @@ static const char *BUILTINS[] = {
     "gfx_open","gfx_close","gfx_alive","gfx_available","gfx_tick","gfx_sync_keys",
     "gfx_clear","gfx_fill_rect","gfx_line","gfx_fill_circle",
     "gfx_click_pending","gfx_click_x","gfx_click_y","gfx_consume_click",
+    "gfx_mouse_x","gfx_mouse_y","gfx_mouse_down",
     "gfx_text","gfx_text_width","gfx_copy_rect",
     "sonicpi_bpm","sonicpi_configure","sonicpi_play","sonicpi_send","sonicpi_stop","sonicpi_synth",
     "dsp_ratio_freq","dsp_ratio_cents","dsp_ratio_reduce","dsp_perfect7",
@@ -2268,6 +2272,7 @@ BI0(synth_looper_rec_on) BI0(synth_looper_play_on) BI0(synth_looper_has_loop)
 BI0(gfx_open) BI0(gfx_close) BI0(gfx_alive) BI0(gfx_available) BI0(gfx_tick) BI0(gfx_sync_keys)
 BI0(gfx_clear) BI0(gfx_fill_rect) BI0(gfx_line) BI0(gfx_fill_circle)
 BI0(gfx_click_pending) BI0(gfx_click_x) BI0(gfx_click_y) BI0(gfx_consume_click)
+BI0(gfx_mouse_x) BI0(gfx_mouse_y) BI0(gfx_mouse_down)
 BI0(gfx_text) BI0(gfx_text_width) BI0(gfx_copy_rect)
 #endif
 #ifdef SHAKTI_HAVE_SONICPI
@@ -2371,6 +2376,9 @@ static const BiEntry bi_tab[] = {
     {"gfx_fill_circle", bi_w_gfx_fill_circle},
     {"gfx_fill_rect", bi_w_gfx_fill_rect},
     {"gfx_line", bi_w_gfx_line},
+    {"gfx_mouse_down", bi_w_gfx_mouse_down},
+    {"gfx_mouse_x", bi_w_gfx_mouse_x},
+    {"gfx_mouse_y", bi_w_gfx_mouse_y},
     {"gfx_open", bi_w_gfx_open},
     {"gfx_sync_keys", bi_w_gfx_sync_keys},
     {"gfx_text", bi_w_gfx_text},

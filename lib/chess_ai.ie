@@ -1,0 +1,232 @@
+# chess_ai — negamax + alpha-beta + material / PST eval
+
+import chess_core
+import gfx
+import input
+
+KEY_ESC : 65307
+
+VAL : [0, 100, 320, 330, 500, 900, 20000]
+
+# piece-square tables for white; black uses mirrored ranks
+PST_P : [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [50, 50, 50, 50, 50, 50, 50, 50],
+    [10, 10, 20, 30, 30, 20, 10, 10],
+    [5, 5, 10, 25, 25, 10, 5, 5],
+    [0, 0, 0, 20, 20, 0, 0, 0],
+    [5, -5, -10, 0, 0, -10, -5, 5],
+    [5, 10, 10, -20, -20, 10, 10, 5],
+    [0, 0, 0, 0, 0, 0, 0, 0]
+]
+
+PST_N : [
+    [-50, -40, -30, -30, -30, -30, -40, -50],
+    [-40, -20, 0, 0, 0, 0, -20, -40],
+    [-30, 0, 10, 15, 15, 10, 0, -30],
+    [-30, 5, 15, 20, 20, 15, 5, -30],
+    [-30, 0, 15, 20, 20, 15, 0, -30],
+    [-30, 5, 10, 15, 15, 10, 5, -30],
+    [-40, -20, 0, 5, 5, 0, -20, -40],
+    [-50, -40, -30, -30, -30, -30, -40, -50]
+]
+
+PST_B : [
+    [-20, -10, -10, -10, -10, -10, -10, -20],
+    [-10, 0, 0, 0, 0, 0, 0, -10],
+    [-10, 0, 5, 10, 10, 5, 0, -10],
+    [-10, 5, 5, 10, 10, 5, 5, -10],
+    [-10, 0, 10, 10, 10, 10, 0, -10],
+    [-10, 10, 10, 10, 10, 10, 10, -10],
+    [-10, 5, 0, 0, 0, 0, 5, -10],
+    [-20, -10, -10, -10, -10, -10, -10, -20]
+]
+
+PST_R : [
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [5, 10, 10, 10, 10, 10, 10, 5],
+    [-5, 0, 0, 0, 0, 0, 0, -5],
+    [-5, 0, 0, 0, 0, 0, 0, -5],
+    [-5, 0, 0, 0, 0, 0, 0, -5],
+    [-5, 0, 0, 0, 0, 0, 0, -5],
+    [-5, 0, 0, 0, 0, 0, 0, -5],
+    [0, 0, 0, 5, 5, 0, 0, 0]
+]
+
+PST_Q : [
+    [-20, -10, -10, -5, -5, -10, -10, -20],
+    [-10, 0, 0, 0, 0, 0, 0, -10],
+    [-10, 0, 5, 5, 5, 5, 0, -10],
+    [-5, 0, 5, 5, 5, 5, 0, -5],
+    [0, 0, 5, 5, 5, 5, 0, -5],
+    [-10, 5, 5, 5, 5, 5, 0, -10],
+    [-10, 0, 5, 0, 0, 0, 0, -10],
+    [-20, -10, -10, -5, -5, -10, -10, -20]
+]
+
+PST_K : [
+    [-30, -40, -40, -50, -50, -40, -40, -30],
+    [-30, -40, -40, -50, -50, -40, -40, -30],
+    [-30, -40, -40, -50, -50, -40, -40, -30],
+    [-30, -40, -40, -50, -50, -40, -40, -30],
+    [-20, -30, -30, -40, -40, -30, -30, -20],
+    [-10, -20, -20, -20, -20, -20, -20, -10],
+    [20, 20, 0, 0, 0, 0, 20, 20],
+    [20, 30, 10, 0, 0, 10, 30, 20]
+]
+
+def pst_for(t):
+    if t = chess_core.P:
+        return PST_P
+    if t = chess_core.N:
+        return PST_N
+    if t = chess_core.B:
+        return PST_B
+    if t = chess_core.R:
+        return PST_R
+    if t = chess_core.Q:
+        return PST_Q
+    return PST_K
+
+def pst_score(t, r, c, color):
+    table : pst_for(t)
+    rr : r
+    if color = -1:
+        rr : 7 + (0 - r)
+    return table[rr][c]
+
+def evaluate(st):
+    board : st["board"]
+    score : 0
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            p : board[r, c]
+            if p != 0:
+                t : chess_core.piece_type(p)
+                if t < 1 or t > 6:
+                    c : c + 1
+                    continue
+                col : chess_core.piece_color(p)
+                v : VAL[t] + pst_score(t, r, c, col)
+                score : score + col * v
+            c : c + 1
+        r : r + 1
+    # small side-to-move mobility bonus (pseudo-legal count)
+    mob : len(chess_core.gen_pseudo(board, st["turn"], st["castle"], st["ep_r"], st["ep_c"]))
+    score : score + st["turn"] * mob
+    return score
+
+def order_moves(moves):
+    # captures first
+    caps : []
+    quiet : []
+    i : 0
+    while i < len(moves):
+        mv : moves[i]
+        if mv["capture"] != 0 or mv["flag"] = chess_core.FLAG_PROMO:
+            caps.append(mv)
+        else:
+            quiet.append(mv)
+        i : i + 1
+    out : []
+    i : 0
+    while i < len(caps):
+        out.append(caps[i])
+        i : i + 1
+    i : 0
+    while i < len(quiet):
+        out.append(quiet[i])
+        i : i + 1
+    return out
+
+def negamax(st, depth, alpha, beta, color):
+    if depth = 0:
+        return color * evaluate(st)
+    moves : chess_core.legal_moves(st)
+    if len(moves) = 0:
+        if chess_core.in_check(st["board"], st["turn"]) = 1:
+            return -200000 + (3 + (0 - depth))
+        return 0
+    moves : order_moves(moves)
+    best : -999999
+    i : 0
+    while i < len(moves):
+        mv : moves[i]
+        undo : chess_core.make_move(st, mv)
+        val : 0 - negamax(st, depth + (-1), 0 - beta, 0 - alpha, 0 - color)
+        chess_core.unmake_move(st, undo)
+        if val > best:
+            best : val
+        if val > alpha:
+            alpha : val
+        if alpha >= beta:
+            break
+        i : i + 1
+    return best
+
+def default_depth():
+    v : getenv("CHESS_DEPTH")
+    if type(v) = "NoneType":
+        return 3
+    if type(v) = "str":
+        if len(v) = 0:
+            return 3
+        n : int(v)
+        if n < 1:
+            return 1
+        if n > 5:
+            return 5
+        return n
+    return 3
+
+def esc_pressed():
+    # Drain window events so Esc reaches the input hub during long searches.
+    if gfx.alive() = 1:
+        gfx.tick()
+        gfx.sync_keys()
+    for ev in input(0):
+        if ev["kind"] = "key":
+            if ev["code"] = KEY_ESC:
+                return 1
+    return 0
+
+def choose_move(st, depth:0):
+    if depth = 0:
+        depth : default_depth()
+    moves : chess_core.legal_moves(st)
+    if len(moves) = 0:
+        return 0
+    moves : order_moves(moves)
+    color : st["turn"]
+    best_val : -999999
+    best_mv : moves[0]
+    alpha : -999999
+    beta : 999999
+    i : 0
+    while i < len(moves):
+        if esc_pressed() = 1:
+            return "cancel"
+        mv : moves[i]
+        undo : chess_core.make_move(st, mv)
+        val : 0 - negamax(st, depth + (-1), 0 - beta, 0 - alpha, 0 - color)
+        chess_core.unmake_move(st, undo)
+        if val > best_val:
+            best_val : val
+            best_mv : mv
+        if val > alpha:
+            alpha : val
+        i : i + 1
+    return best_mv
+
+def play_ai_move(st, depth:0):
+    mv : choose_move(st, depth)
+    st["ai_pending"] : 0
+    if type(mv) = "str":
+        if mv = "cancel":
+            st["ai_cancel"] : 1
+            return
+    if type(mv) = "dict":
+        chess_core.apply_and_finish(st, mv)
+        st["ai_pending"] : 0

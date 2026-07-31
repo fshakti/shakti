@@ -58,6 +58,15 @@ static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) 
     gfx_core_mouse_design((int)p.x, (int)p.y, 0);
     gfx_core_mark_dirty();
 }
+- (void)mouseDragged:(NSEvent *)ev {
+    NSPoint p = [self convertPoint:ev.locationInWindow fromView:nil];
+    input_hub_inject_mouse((int)p.x, (int)p.y, 1);
+    gfx_core_mouse_move((int)p.x, (int)p.y, 1);
+}
+- (void)mouseMoved:(NSEvent *)ev {
+    NSPoint p = [self convertPoint:ev.locationInWindow fromView:nil];
+    gfx_core_mouse_move((int)p.x, (int)p.y, 0);
+}
 - (void)keyDown:(NSEvent *)ev {
     [[self window] makeFirstResponder:self];
     unsigned short code = [ev keyCode];
@@ -173,6 +182,7 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
     [g_win setTitle:t];
     g_delegate = [[GfxWindowDelegate alloc] init];
     [g_win setDelegate:g_delegate];
+    [g_win setAcceptsMouseMovedEvents:YES];
     [g_win makeKeyAndOrderFront:nil];
     [g_win makeFirstResponder:g_view];
     [NSApp activateIgnoringOtherApps:YES];

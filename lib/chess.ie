@@ -1,0 +1,109 @@
+# chess — title / play / game-over loop (press-drag-release pieces)
+# Requires Shakti built with SHAKTI_GFX=1.
+#
+#   import chess
+#   chess.run()
+
+import gfx
+import input
+import chess_core
+import chess_ai
+import chess_render
+
+SCR_TITLE : 0
+SCR_PLAY : 1
+
+KEY_ESC : 65307
+
+def poll_esc():
+    for ev in input(0):
+        if ev["kind"] = "key":
+            if ev["code"] = KEY_ESC:
+                return 1
+    return 0
+
+def run_play(mode):
+    st : chess_core.new_state(mode)
+    chess_core.update_status(st)
+    prev_down : gfx.mouse_down()
+    while gfx.alive() = 1:
+        gfx.tick()
+        gfx.sync_keys()
+        if poll_esc() = 1:
+            return
+        if st["ai_pending"] = 1:
+            chess_core.clear_selection(st)
+            chess_render.draw_play(gfx, st)
+            wait(16)
+            chess_ai.play_ai_move(st, 0)
+            if st["ai_cancel"] = 1:
+                return
+            while gfx.click_pending() = 1:
+                gfx.consume_click()
+            prev_down : gfx.mouse_down()
+            if gfx.alive() = 0:
+                return
+            chess_render.draw_play(gfx, st)
+            wait(16)
+            continue
+        down : gfx.mouse_down()
+        mx : gfx.mouse_x()
+        my : gfx.mouse_y()
+        if st["drag"] = 1:
+            chess_core.update_drag(st, mx, my)
+        # mouse press
+        if down = 1 and prev_down = 0:
+            gfx.consume_click()
+            if st["promo"] = 1:
+                pt : chess_render.hit_promo(mx, my)
+                if pt != 0:
+                    chess_core.choose_promo(st, pt)
+            elif st["status"] = chess_core.STATUS_MATE or st["status"] = chess_core.STATUS_STALE:
+                rr : chess_render.rematch_rect()
+                if chess_render.in_rect(mx, my, rr["x"], rr["y"], rr["w"], rr["h"]) = 1:
+                    st : chess_core.new_state(mode)
+                    chess_core.update_status(st)
+            else:
+                cell : chess_render.px_to_cell(mx, my)
+                if cell["r"] >= 0:
+                    # start drag on own piece, or click-to-move if already selected
+                    p : st["board"][cell["r"], cell["c"]]
+                    if chess_core.piece_color(p) = st["turn"]:
+                        chess_core.begin_drag(st, cell["r"], cell["c"], mx, my)
+                    elif st["selected_r"] >= 0:
+                        # second-click style move without drag
+                        chess_core.click_cell(st, cell["r"], cell["c"])
+        # mouse release — drop
+        if down = 0 and prev_down = 1:
+            if st["drag"] = 1:
+                cell : chess_render.px_to_cell(mx, my)
+                chess_core.end_drag(st, cell["r"], cell["c"])
+        prev_down : down
+        chess_render.draw_play(gfx, st)
+        wait(16)
+
+def run():
+    screen : SCR_TITLE
+    gfx.open("Shakti Chess")
+    while gfx.alive() = 1:
+        gfx.tick()
+        gfx.sync_keys()
+        if screen = SCR_TITLE:
+            if poll_esc() = 1:
+                break
+            if gfx.click_pending() = 1:
+                cx : gfx.click_x()
+                cy : gfx.click_y()
+                gfx.consume_click()
+                hit : chess_render.hit_title(cx, cy)
+                if hit = -1:
+                    break
+                if hit = chess_core.MODE_AI or hit = chess_core.MODE_HUMAN:
+                    run_play(hit)
+                    if gfx.alive() = 0:
+                        break
+            chess_render.draw_title(gfx)
+            wait(16)
+        else:
+            wait(16)
+    gfx.close()

@@ -66,7 +66,7 @@ int gfx_platform_init(const char *title, char *err, size_t cap) {
     g.gc = XCreateGC(g.dpy, g.win, 0, NULL);
     if (title) XStoreName(g.dpy, g.win, title);
     swa.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask |
-                     ButtonReleaseMask | StructureNotifyMask;
+                     ButtonReleaseMask | PointerMotionMask | StructureNotifyMask;
     XSelectInput(g.dpy, g.win, swa.event_mask);
     if (gfx_core_fb_resize(1920, 1080) != 0) {
         if (err && cap) snprintf(err, cap, "gfx_open: framebuffer init failed");
@@ -142,15 +142,23 @@ int gfx_platform_poll(void) {
             gfx_core_mark_dirty();
             break;
         case ButtonPress:
+            if (ev.xbutton.button != Button1) break;
             input_hub_inject_mouse(ev.xbutton.x, ev.xbutton.y, 1);
             gfx_core_mouse_design(ev.xbutton.x, ev.xbutton.y, 1);
             gfx_core_mark_dirty();
             break;
         case ButtonRelease:
+            if (ev.xbutton.button != Button1) break;
             input_hub_inject_mouse(ev.xbutton.x, ev.xbutton.y, 0);
             gfx_core_mouse_design(ev.xbutton.x, ev.xbutton.y, 0);
             gfx_core_mark_dirty();
             break;
+        case MotionNotify: {
+            int b1 = (ev.xmotion.state & Button1Mask) ? 1 : 0;
+            input_hub_inject_mouse(ev.xmotion.x, ev.xmotion.y, b1);
+            gfx_core_mouse_move(ev.xmotion.x, ev.xmotion.y, b1);
+            break;
+        }
         case KeyPress:
         case KeyRelease: {
             KeySym ks = NoSymbol;

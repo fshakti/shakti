@@ -1,0 +1,299 @@
+# chess_recipes — high-detail Staunton pieces in 64x64 design space
+# Drawn via gfx.fill_rect / fill_circle.
+
+import chess_core
+
+UNIT : 64
+
+def rect(x, y, w, h, color):
+    return dict(x: x, y: y, w: w, h: h, color: color)
+
+def circ(cx, cy, r, color):
+    return dict(cx: cx, cy: cy, r: r, color: color)
+
+def append_rect(rects, x, y, w, h, color):
+    rects.append(rect(x, y, w, h, color))
+
+def append_circ(circles, cx, cy, r, color):
+    circles.append(circ(cx, cy, r, color))
+
+def shade(color, delta):
+    r : (color / 65536) % 256
+    g : (color / 256) % 256
+    b : color % 256
+    r : int(r) + delta
+    g : int(g) + delta
+    b : int(b) + delta
+    if r < 0:
+        r : 0
+    if g < 0:
+        g : 0
+    if b < 0:
+        b : 0
+    if r > 255:
+        r : 255
+    if g > 255:
+        g : 255
+    if b > 255:
+        b : 255
+    return r * 65536 + g * 256 + b
+
+def palette(is_white):
+    if is_white = 1:
+        body : 0xf0f0f0
+        return dict(
+            body: body,
+            hi: 0xffffff,
+            lo: shade(body, -40),
+            edge: shade(body, -90),
+            rim: shade(body, -55),
+            accent: 0xd0d0d0
+        )
+    body : 0x2c2c2c
+    return dict(
+        body: body,
+        hi: shade(body, 55),
+        lo: shade(body, -25),
+        edge: 0x000000,
+        rim: shade(body, 90),
+        accent: shade(body, 35)
+    )
+
+def append_base(rects, circles, pal):
+    # Staunton pedestal + plinth
+    append_rect(rects, 12, 54, 40, 6, pal["edge"])
+    append_rect(rects, 13, 54, 38, 2, pal["hi"])
+    append_rect(rects, 14, 56, 36, 3, pal["body"])
+    append_rect(rects, 16, 59, 32, 3, pal["lo"])
+    append_rect(rects, 18, 50, 28, 4, pal["rim"])
+    append_rect(rects, 19, 50, 26, 1, pal["hi"])
+    append_rect(rects, 20, 47, 24, 3, pal["body"])
+    append_rect(rects, 22, 47, 20, 1, pal["hi"])
+
+def append_stem(rects, pal, top_y, bot_y, w):
+    x : 32 + (0 - w / 2)
+    x : int(x)
+    h : bot_y + (0 - top_y)
+    append_rect(rects, x + (-1), top_y, w + 2, h, pal["edge"])
+    append_rect(rects, x, top_y, w, h, pal["body"])
+    append_rect(rects, x + 1, top_y, 2, h, pal["hi"])
+    append_rect(rects, x + w + (-2), top_y + 1, 1, h + (-2), pal["lo"])
+
+def make_pawn(pal):
+    rects : []
+    circles : []
+    append_base(rects, circles, pal)
+    append_stem(rects, pal, 30, 47, 10)
+    # collar
+    append_rect(rects, 22, 28, 20, 3, pal["rim"])
+    append_rect(rects, 23, 28, 18, 1, pal["hi"])
+    # head ball
+    append_circ(circles, 32, 20, 9, pal["edge"])
+    append_circ(circles, 32, 20, 8, pal["body"])
+    append_circ(circles, 29, 17, 3, pal["hi"])
+    return dict(rects: rects, circles: circles, body: pal["body"])
+
+def make_rook(pal):
+    rects : []
+    circles : []
+    append_base(rects, circles, pal)
+    append_stem(rects, pal, 28, 47, 14)
+    # tower body
+    append_rect(rects, 20, 16, 24, 14, pal["edge"])
+    append_rect(rects, 21, 16, 22, 13, pal["body"])
+    append_rect(rects, 22, 17, 4, 11, pal["hi"])
+    append_rect(rects, 40, 18, 2, 10, pal["lo"])
+    # battlements
+    append_rect(rects, 18, 10, 8, 7, pal["edge"])
+    append_rect(rects, 19, 10, 6, 6, pal["body"])
+    append_rect(rects, 20, 11, 2, 3, pal["hi"])
+    append_rect(rects, 28, 10, 8, 7, pal["edge"])
+    append_rect(rects, 29, 10, 6, 6, pal["body"])
+    append_rect(rects, 30, 11, 2, 3, pal["hi"])
+    append_rect(rects, 38, 10, 8, 7, pal["edge"])
+    append_rect(rects, 39, 10, 6, 6, pal["body"])
+    append_rect(rects, 40, 11, 2, 3, pal["hi"])
+    # rim under battlements
+    append_rect(rects, 18, 16, 28, 2, pal["rim"])
+    return dict(rects: rects, circles: circles, body: pal["body"])
+
+def make_knight(pal, is_white):
+    rects : []
+    circles : []
+    append_base(rects, circles, pal)
+    # haunch / body
+    append_rect(rects, 22, 34, 18, 14, pal["edge"])
+    append_rect(rects, 23, 34, 16, 13, pal["body"])
+    append_rect(rects, 24, 35, 4, 10, pal["hi"])
+    append_rect(rects, 34, 38, 3, 8, pal["lo"])
+    # neck
+    append_rect(rects, 26, 24, 12, 12, pal["edge"])
+    append_rect(rects, 27, 24, 10, 11, pal["body"])
+    append_rect(rects, 28, 25, 3, 8, pal["hi"])
+    # head facing left
+    append_rect(rects, 14, 12, 22, 14, pal["edge"])
+    append_rect(rects, 15, 12, 20, 13, pal["body"])
+    append_rect(rects, 16, 13, 5, 8, pal["hi"])
+    # snout
+    append_rect(rects, 8, 18, 10, 7, pal["edge"])
+    append_rect(rects, 9, 18, 8, 6, pal["body"])
+    append_rect(rects, 9, 19, 3, 3, pal["hi"])
+    # ear
+    append_rect(rects, 30, 6, 7, 10, pal["edge"])
+    append_rect(rects, 31, 7, 5, 8, pal["body"])
+    append_rect(rects, 32, 8, 2, 4, pal["hi"])
+    # eye
+    append_circ(circles, 20, 16, 2, pal["edge"])
+    if is_white = 1:
+        append_circ(circles, 20, 16, 1, 0x222222)
+    else:
+        append_circ(circles, 20, 16, 1, 0xffffff)
+    # mane notch
+    append_rect(rects, 34, 14, 4, 8, pal["lo"])
+    return dict(rects: rects, circles: circles, body: pal["body"])
+
+def make_bishop(pal):
+    rects : []
+    circles : []
+    append_base(rects, circles, pal)
+    append_stem(rects, pal, 32, 47, 10)
+    # collar ball
+    append_circ(circles, 32, 30, 5, pal["edge"])
+    append_circ(circles, 32, 30, 4, pal["body"])
+    append_circ(circles, 30, 28, 2, pal["hi"])
+    # mitre body
+    append_rect(rects, 24, 14, 16, 14, pal["edge"])
+    append_rect(rects, 25, 14, 14, 13, pal["body"])
+    append_rect(rects, 26, 15, 3, 10, pal["hi"])
+    append_rect(rects, 36, 16, 2, 9, pal["lo"])
+    # mitre tip
+    append_rect(rects, 28, 8, 8, 7, pal["edge"])
+    append_rect(rects, 29, 8, 6, 6, pal["body"])
+    append_rect(rects, 30, 6, 4, 4, pal["edge"])
+    append_rect(rects, 31, 6, 2, 3, pal["hi"])
+    # slit
+    append_rect(rects, 31, 12, 2, 10, pal["edge"])
+    append_rect(rects, 31, 14, 2, 6, pal["lo"])
+    return dict(rects: rects, circles: circles, body: pal["body"])
+
+def make_queen(pal):
+    rects : []
+    circles : []
+    append_base(rects, circles, pal)
+    append_stem(rects, pal, 30, 47, 12)
+    # collar
+    append_rect(rects, 20, 28, 24, 3, pal["rim"])
+    append_rect(rects, 21, 28, 22, 1, pal["hi"])
+    # coronet band
+    append_rect(rects, 18, 18, 28, 10, pal["edge"])
+    append_rect(rects, 19, 18, 26, 9, pal["body"])
+    append_rect(rects, 20, 19, 5, 6, pal["hi"])
+    append_rect(rects, 40, 20, 3, 6, pal["lo"])
+    # points + pearls
+    xs : [20, 26, 32, 38, 44]
+    i : 0
+    while i < 5:
+        px : xs[i]
+        append_rect(rects, px + (-2), 12, 4, 7, pal["edge"])
+        append_rect(rects, px + (-1), 12, 2, 6, pal["body"])
+        append_circ(circles, px, 10, 3, pal["edge"])
+        append_circ(circles, px, 10, 2, pal["hi"])
+        i : i + 1
+    # center pearl highlight
+    append_circ(circles, 32, 8, 2, pal["hi"])
+    return dict(rects: rects, circles: circles, body: pal["body"])
+
+def make_king(pal):
+    rects : []
+    circles : []
+    append_base(rects, circles, pal)
+    append_stem(rects, pal, 30, 47, 12)
+    # collar
+    append_rect(rects, 20, 28, 24, 3, pal["rim"])
+    append_rect(rects, 21, 28, 22, 1, pal["hi"])
+    # crown band
+    append_rect(rects, 18, 16, 28, 12, pal["edge"])
+    append_rect(rects, 19, 16, 26, 11, pal["body"])
+    append_rect(rects, 20, 17, 5, 8, pal["hi"])
+    append_rect(rects, 40, 18, 3, 8, pal["lo"])
+    # cross
+    append_rect(rects, 29, 4, 6, 14, pal["edge"])
+    append_rect(rects, 30, 4, 4, 13, pal["body"])
+    append_rect(rects, 31, 5, 2, 4, pal["hi"])
+    append_rect(rects, 24, 8, 16, 5, pal["edge"])
+    append_rect(rects, 25, 8, 14, 4, pal["body"])
+    append_rect(rects, 26, 9, 4, 2, pal["hi"])
+    return dict(rects: rects, circles: circles, body: pal["body"])
+
+def build_recipe(ptype, is_white):
+    pal : palette(is_white)
+    if ptype = chess_core.P:
+        return make_pawn(pal)
+    if ptype = chess_core.N:
+        return make_knight(pal, is_white)
+    if ptype = chess_core.B:
+        return make_bishop(pal)
+    if ptype = chess_core.R:
+        return make_rook(pal)
+    if ptype = chess_core.Q:
+        return make_queen(pal)
+    if ptype = chess_core.K:
+        return make_king(pal)
+    return dict(rects: [], circles: [], body: 0)
+
+def recipe_prim_count(rec):
+    return len(rec["rects"]) + len(rec["circles"])
+
+# lazy string-key cache (append-once box)
+_CACHE_BOX : []
+
+def _ensure_cache():
+    if len(_CACHE_BOX) > 0:
+        return
+    c : dict(
+        wp: build_recipe(chess_core.P, 1),
+        wn: build_recipe(chess_core.N, 1),
+        wb: build_recipe(chess_core.B, 1),
+        wr: build_recipe(chess_core.R, 1),
+        wq: build_recipe(chess_core.Q, 1),
+        wk: build_recipe(chess_core.K, 1),
+        bp: build_recipe(chess_core.P, 0),
+        bn: build_recipe(chess_core.N, 0),
+        bb: build_recipe(chess_core.B, 0),
+        br: build_recipe(chess_core.R, 0),
+        bq: build_recipe(chess_core.Q, 0),
+        bk: build_recipe(chess_core.K, 0)
+    )
+    _CACHE_BOX.append(c)
+
+def _cache_key(p):
+    t : chess_core.piece_type(p)
+    if p > 0:
+        if t = chess_core.P:
+            return "wp"
+        if t = chess_core.N:
+            return "wn"
+        if t = chess_core.B:
+            return "wb"
+        if t = chess_core.R:
+            return "wr"
+        if t = chess_core.Q:
+            return "wq"
+        return "wk"
+    if t = chess_core.P:
+        return "bp"
+    if t = chess_core.N:
+        return "bn"
+    if t = chess_core.B:
+        return "bb"
+    if t = chess_core.R:
+        return "br"
+    if t = chess_core.Q:
+        return "bq"
+    return "bk"
+
+def recipe_for(p):
+    if p = 0:
+        return dict(rects: [], circles: [], body: 0)
+    _ensure_cache()
+    return _CACHE_BOX[0][_cache_key(p)]

@@ -108,11 +108,12 @@ For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where 
 | `iefs` | Durable `.iefs` | [doc](doc.md#iefs-module) |
 | `input` / `ipc` / `rest` / `talk` | IO / network / STT | see [doc.md](doc.md) |
 
-Demo game: [`import pong`](lib/pong.ie) then `pong.run()` (gfx; needs `SHAKTI_GFX=1`). Terminal: `pong.run_terminal()`. Launcher: [`examples/pong_demo.ie`](examples/pong_demo.ie).
+Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie).
 
 ```bash
 make test-pong    # examples/pong_test.ie + examples/pong_spell_test.ie
 make bench-pong   # examples/pong_bench.ie (physics / frame / proj / AI)
+make test-chess   # examples/chess_test.ie (rules + AI smoke)
 ```
 
 Local demos (when `examples/_local/` is present): `examples/_local/gfx_demo.ie`, `examples/_local/pyplot_demo.ie`, `examples/_local/jupyter_demo.ie`, `examples/_local/pdf_smoke.ie`, `examples/_local/midi_demo.ie`, `examples/_local/sonicpi_demo.ie`.  

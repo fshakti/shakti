@@ -26,8 +26,12 @@ int gfx_click_pending(void);
 int gfx_click_x(void);
 int gfx_click_y(void);
 void gfx_consume_click(void);
+int gfx_mouse_x(void);
+int gfx_mouse_y(void);
+int gfx_mouse_down(void);
 
 void gfx_core_mouse_design(int wx, int wy, int down);
+void gfx_core_mouse_move(int wx, int wy, int down);
 uint32_t *gfx_core_present_pixels(void);
 int gfx_core_present_width(void);
 int gfx_core_present_height(void);

@@ -1,0 +1,211 @@
+# chess_test — headless rules + AI smoke tests
+
+import chess_core
+import chess_ai
+
+res : dict(passed: 0, failed: 0)
+
+def check(res, name, cond):
+    if cond:
+        res["passed"] : res["passed"] + 1
+        print("  PASS  " + name)
+    else:
+        res["failed"] : res["failed"] + 1
+        print("  FAIL  " + name)
+
+def empty_board():
+    return [
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0]
+    ]
+
+print("== starting position ==")
+st : chess_core.new_state(1)
+ms : chess_core.legal_moves(st)
+check(res, "white has 20 opening moves", len(ms) = 20)
+check(res, "status playing", st["status"] = chess_core.STATUS_PLAY)
+
+print("== make / unmake ==")
+mv : 0
+i : 0
+while i < len(ms):
+    m : ms[i]
+    if m["fr"] = 6 and m["fc"] = 4 and m["tr"] = 4 and m["tc"] = 4:
+        mv : m
+    i : i + 1
+undo : chess_core.make_move(st, mv)
+check(res, "e2e4 sets ep", st["ep_r"] = 5 and st["ep_c"] = 4)
+check(res, "turn black after e4", st["turn"] = -1)
+chess_core.unmake_move(st, undo)
+check(res, "unmake restores turn", st["turn"] = 1)
+check(res, "unmake clears ep", st["ep_r"] = -1)
+check(res, "pawn back on e2", st["board"][6, 4] = chess_core.P)
+check(res, "e4 empty again", st["board"][4, 4] = 0)
+
+print("== castling ==")
+stc : chess_core.new_state(0)
+b : stc["board"]
+b[7, 5] : 0
+b[7, 6] : 0
+ms : chess_core.legal_moves(stc)
+found_k : 0
+i : 0
+while i < len(ms):
+    if ms[i]["flag"] = chess_core.FLAG_CASTLE_K:
+        found_k : 1
+    i : i + 1
+check(res, "white kingside castle legal", found_k = 1)
+
+# path attacked: black rook on h3 attacks f1/g1 path via... put rook on a5? 
+# Put black queen on h4? Simpler: black rook on f8 attacks f-file — f1 attacked blocks castle
+stb : chess_core.new_state(0)
+bb : stb["board"]
+bb[7, 5] : 0
+bb[7, 6] : 0
+bb[0, 5] : 0
+bb[1, 5] : 0
+bb[0, 5] : 0 - chess_core.R
+# clear intervening so rook attacks down? rook on f8, need empty f7..f2
+r : 1
+while r < 7:
+    bb[r, 5] : 0
+    r : r + 1
+ms : chess_core.legal_moves(stb)
+found_k : 0
+i : 0
+while i < len(ms):
+    if ms[i]["flag"] = chess_core.FLAG_CASTLE_K:
+        found_k : 1
+    i : i + 1
+check(res, "castle blocked when f1 attacked", found_k = 0)
+
+print("== en passant ==")
+ste : chess_core.new_state(0)
+be : empty_board()
+be[3, 4] : chess_core.P
+be[1, 3] : 0 - chess_core.P
+be[7, 4] : chess_core.K
+be[0, 4] : 0 - chess_core.K
+chess_core.set_board(ste, be, -1, dict(wk: 0, wq: 0, bk: 0, bq: 0), -1, -1)
+# black double push d7d5
+mv : dict(fr: 1, fc: 3, tr: 3, tc: 3, promo: 0, flag: chess_core.FLAG_NONE, capture: 0)
+chess_core.make_move(ste, mv)
+check(res, "ep square after d7d5", ste["ep_r"] = 2 and ste["ep_c"] = 3)
+ms : chess_core.legal_moves(ste)
+ep_found : 0
+i : 0
+while i < len(ms):
+    m : ms[i]
+    if m["flag"] = chess_core.FLAG_EP and m["fr"] = 3 and m["fc"] = 4:
+        ep_found : 1
+        undo : chess_core.make_move(ste, m)
+        check(res, "ep removes black pawn", ste["board"][3, 3] = 0)
+        check(res, "ep white pawn on d6", ste["board"][2, 3] = chess_core.P)
+        chess_core.unmake_move(ste, undo)
+    i : i + 1
+check(res, "en passant move generated", ep_found = 1)
+
+print("== checkmate (back rank) ==")
+stm : chess_core.new_state(0)
+bm : empty_board()
+bm[0, 4] : 0 - chess_core.K
+bm[1, 3] : 0 - chess_core.P
+bm[1, 4] : 0 - chess_core.P
+bm[1, 5] : 0 - chess_core.P
+bm[0, 0] : chess_core.R
+bm[7, 4] : chess_core.K
+chess_core.set_board(stm, bm, -1, dict(wk: 0, wq: 0, bk: 0, bq: 0), -1, -1)
+check(res, "black in check", chess_core.in_check(stm["board"], -1) = 1)
+ms : chess_core.legal_moves(stm)
+check(res, "checkmate no legal moves", len(ms) = 0)
+check(res, "status mate", stm["status"] = chess_core.STATUS_MATE)
+
+print("== stalemate ==")
+sts : chess_core.new_state(0)
+bs : empty_board()
+bs[0, 0] : 0 - chess_core.K
+bs[2, 1] : chess_core.K
+bs[1, 2] : chess_core.Q
+chess_core.set_board(sts, bs, -1, dict(wk: 0, wq: 0, bk: 0, bq: 0), -1, -1)
+check(res, "stalemate not in check", chess_core.in_check(sts["board"], -1) = 0)
+ms : chess_core.legal_moves(sts)
+check(res, "stalemate no moves", len(ms) = 0)
+check(res, "status stalemate", sts["status"] = chess_core.STATUS_STALE)
+
+print("== promotion ==")
+stp : chess_core.new_state(0)
+bp : empty_board()
+bp[1, 0] : chess_core.P
+bp[7, 4] : chess_core.K
+bp[0, 4] : 0 - chess_core.K
+chess_core.set_board(stp, bp, 1, dict(wk: 0, wq: 0, bk: 0, bq: 0), -1, -1)
+ms : chess_core.legal_moves(stp)
+promo_n : 0
+i : 0
+while i < len(ms):
+    if ms[i]["flag"] = chess_core.FLAG_PROMO:
+        promo_n : promo_n + 1
+    i : i + 1
+check(res, "four promotion choices", promo_n = 4)
+# apply queen promo
+i : 0
+pm : 0
+while i < len(ms):
+    if ms[i]["flag"] = chess_core.FLAG_PROMO and ms[i]["promo"] = chess_core.Q:
+        pm : ms[i]
+    i : i + 1
+chess_core.make_move(stp, pm)
+check(res, "promoted to queen", stp["board"][0, 0] = chess_core.Q)
+
+print("== AI smoke ==")
+sta : chess_core.new_state(1)
+t0 : clock()
+am : chess_ai.choose_move(sta, 2)
+check(res, "AI returns a move dict", type(am) = "dict")
+ok : 0
+ms : chess_core.legal_moves(sta)
+i : 0
+while i < len(ms):
+    m : ms[i]
+    if m["fr"] = am["fr"] and m["fc"] = am["fc"] and m["tr"] = am["tr"] and m["tc"] = am["tc"] and m["promo"] = am["promo"] and m["flag"] = am["flag"]:
+        ok : 1
+    i : i + 1
+check(res, "AI move is legal", ok = 1)
+print("  AI depth-2 time " + str(clock() - t0))
+
+print("== piece recipes ==")
+import chess_recipes
+types : [chess_core.P, chess_core.N, chess_core.B, chess_core.R, chess_core.Q, chess_core.K]
+names : ["P", "N", "B", "R", "Q", "K"]
+i : 0
+while i < 6:
+    t : types[i]
+    rw : chess_recipes.recipe_for(t)
+    rb : chess_recipes.recipe_for(0 - t)
+    check(res, names[i] + " white has prims", chess_recipes.recipe_prim_count(rw) > 0)
+    check(res, names[i] + " black has prims", chess_recipes.recipe_prim_count(rb) > 0)
+    check(res, names[i] + " white/black body differ", rw["body"] != rb["body"])
+    i : i + 1
+check(res, "empty piece recipe", chess_recipes.recipe_prim_count(chess_recipes.recipe_for(0)) = 0)
+
+print("== drag ==")
+std : chess_core.new_state(1)
+chess_core.begin_drag(std, 6, 4, 100, 100)
+check(res, "begin drag selects", std["drag"] = 1 and std["selected_r"] = 6)
+chess_core.end_drag(std, 6, 4)
+check(res, "same-sq keeps selection", std["drag"] = 0 and std["selected_r"] = 6 and len(std["legal"]) > 0)
+chess_core.click_cell(std, 4, 4)
+check(res, "click-click e2e4 after tap", std["board"][4, 4] = chess_core.P and std["board"][6, 4] = 0)
+std2 : chess_core.new_state(1)
+chess_core.begin_drag(std2, 6, 4, 10, 10)
+chess_core.end_drag(std2, -1, -1)
+check(res, "offboard drag cancels", std2["drag"] = 0 and std2["selected_r"] < 0 and std2["board"][6, 4] = chess_core.P)
+
+print("")
+print(str(res["passed"]) + " passed, " + str(res["failed"]) + " failed")
