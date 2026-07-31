@@ -341,6 +341,10 @@ test-pong: shakti
 	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_spell_test.ie
 	@echo "PONG TESTS PASSED"
 
+test-chess: shakti
+	@echo "Running examples/chess_test.ie..."
+	@out=`SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/chess_test.ie 2>/dev/null`; echo "$$out"; echo "$$out" | grep -q "0 failed" && echo "CHESS TESTS PASSED" || (echo "CHESS TESTS FAILED"; exit 1)
+
 bench-pong: shakti
 	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_bench.ie
 
@@ -441,7 +445,7 @@ else
 	@echo "check-deps: no-op on $(UNAME_S)"
 endif
 
-.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse test-pong bench-pong
+.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse test-pong test-chess bench-pong
 
 # Optional JNI bridge for embedding Shakti in a JVM host
 # (Java_com_shakti_shakti_ShaktiNative_runFile). Not linked into the CLI

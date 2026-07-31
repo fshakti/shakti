@@ -51,3 +51,12 @@ def click_y():
 
 def consume_click():
     gfx_consume_click()
+
+def mouse_x():
+    return gfx_mouse_x()
+
+def mouse_y():
+    return gfx_mouse_y()
+
+def mouse_down():
+    return gfx_mouse_down()

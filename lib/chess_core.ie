@@ -1,0 +1,643 @@
+# chess_core — board, legal moves, make/unmake, check/mate/stalemate
+
+EMPTY : 0
+P : 1
+N : 2
+B : 3
+R : 4
+Q : 5
+K : 6
+
+STATUS_PLAY : 0
+STATUS_CHECK : 1
+STATUS_MATE : 2
+STATUS_STALE : 3
+
+MODE_HUMAN : 0
+MODE_AI : 1
+
+FLAG_NONE : 0
+FLAG_EP : 1
+FLAG_CASTLE_K : 2
+FLAG_CASTLE_Q : 3
+FLAG_PROMO : 4
+
+N_DR : [-2, -2, -1, -1, 1, 1, 2, 2]
+N_DC : [-1, 1, -2, 2, -2, 2, -1, 1]
+K_DR : [-1, -1, -1, 0, 0, 1, 1, 1]
+K_DC : [-1, 0, 1, -1, 1, -1, 0, 1]
+
+def piece_type(p):
+    if p < 0:
+        return 0 - p
+    return p
+
+def piece_color(p):
+    if p > 0:
+        return 1
+    if p < 0:
+        return -1
+    return 0
+
+def on_board(r, c):
+    if r < 0:
+        return 0
+    if r > 7:
+        return 0
+    if c < 0:
+        return 0
+    if c > 7:
+        return 0
+    return 1
+
+def copy_board(b):
+    out : []
+    r : 0
+    while r < 8:
+        row : []
+        c : 0
+        while c < 8:
+            row.append(b[r, c])
+            c : c + 1
+        out.append(row)
+        r : r + 1
+    return out
+
+def copy_castle(c):
+    return dict(wk: c["wk"], wq: c["wq"], bk: c["bk"], bq: c["bq"])
+
+def starting_board():
+    return [
+        [-R, -N, -B, -Q, -K, -B, -N, -R],
+        [-P, -P, -P, -P, -P, -P, -P, -P],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [P, P, P, P, P, P, P, P],
+        [R, N, B, Q, K, B, N, R]
+    ]
+
+def new_state(mode:1):
+    return dict(
+        board: starting_board(),
+        turn: 1,
+        castle: dict(wk: 1, wq: 1, bk: 1, bq: 1),
+        ep_r: -1,
+        ep_c: -1,
+        selected_r: -1,
+        selected_c: -1,
+        legal: [],
+        promo: 0,
+        promo_fr: -1,
+        promo_fc: -1,
+        promo_tr: -1,
+        promo_tc: -1,
+        status: STATUS_PLAY,
+        mode: mode,
+        ai_pending: 0,
+        ai_cancel: 0,
+        drag: 0,
+        drag_piece: 0,
+        drag_x: 0,
+        drag_y: 0
+    )
+
+def find_king(board, color):
+    target : K * color
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            if board[r, c] = target:
+                return dict(r: r, c: c)
+            c : c + 1
+        r : r + 1
+    return dict(r: -1, c: -1)
+
+def square_attacked(board, r, c, by_color):
+    # pawns
+    pr : r + by_color
+    if on_board(pr, c + (-1)) = 1:
+        if board[pr, c + (-1)] = P * by_color:
+            return 1
+    if on_board(pr, c + 1) = 1:
+        if board[pr, c + 1] = P * by_color:
+            return 1
+    # knights
+    i : 0
+    while i < 8:
+        nr : r + N_DR[i]
+        nc : c + N_DC[i]
+        if on_board(nr, nc) = 1:
+            if board[nr, nc] = N * by_color:
+                return 1
+        i : i + 1
+    # king
+    i : 0
+    while i < 8:
+        nr : r + K_DR[i]
+        nc : c + K_DC[i]
+        if on_board(nr, nc) = 1:
+            if board[nr, nc] = K * by_color:
+                return 1
+        i : i + 1
+    # bishop / queen diagonals
+    dirs_r : [-1, -1, 1, 1]
+    dirs_c : [-1, 1, -1, 1]
+    i : 0
+    while i < 4:
+        nr : r + dirs_r[i]
+        nc : c + dirs_c[i]
+        while on_board(nr, nc) = 1:
+            p : board[nr, nc]
+            if p = 0:
+                nr : nr + dirs_r[i]
+                nc : nc + dirs_c[i]
+                continue
+            if piece_color(p) = by_color:
+                t : piece_type(p)
+                if t = B or t = Q:
+                    return 1
+            break
+        i : i + 1
+    # rook / queen orthogonals
+    dirs_r : [-1, 1, 0, 0]
+    dirs_c : [0, 0, -1, 1]
+    i : 0
+    while i < 4:
+        nr : r + dirs_r[i]
+        nc : c + dirs_c[i]
+        while on_board(nr, nc) = 1:
+            p : board[nr, nc]
+            if p = 0:
+                nr : nr + dirs_r[i]
+                nc : nc + dirs_c[i]
+                continue
+            if piece_color(p) = by_color:
+                t : piece_type(p)
+                if t = R or t = Q:
+                    return 1
+            break
+        i : i + 1
+    return 0
+
+def in_check(board, color):
+    k : find_king(board, color)
+    if k["r"] < 0:
+        return 1
+    return square_attacked(board, k["r"], k["c"], 0 - color)
+
+def add_move(moves, fr, fc, tr, tc, promo, flag, capture):
+    moves.append(dict(fr: fr, fc: fc, tr: tr, tc: tc, promo: promo, flag: flag, capture: capture))
+
+def gen_slider(board, moves, fr, fc, color, dirs_r, dirs_c, n_dirs):
+    i : 0
+    while i < n_dirs:
+        nr : fr + dirs_r[i]
+        nc : fc + dirs_c[i]
+        while on_board(nr, nc) = 1:
+            p : board[nr, nc]
+            if p = 0:
+                add_move(moves, fr, fc, nr, nc, 0, FLAG_NONE, 0)
+            else:
+                if piece_color(p) != color:
+                    add_move(moves, fr, fc, nr, nc, 0, FLAG_NONE, p)
+                break
+            nr : nr + dirs_r[i]
+            nc : nc + dirs_c[i]
+        i : i + 1
+
+def gen_pawn(board, moves, fr, fc, color, ep_r, ep_c):
+    dir : 0 - color
+    start_r : 6
+    if color = -1:
+        start_r : 1
+    promo_r : 0
+    if color = -1:
+        promo_r : 7
+    nr : fr + dir
+    if on_board(nr, fc) = 1:
+        if board[nr, fc] = 0:
+            if nr = promo_r:
+                add_move(moves, fr, fc, nr, fc, Q, FLAG_PROMO, 0)
+                add_move(moves, fr, fc, nr, fc, R, FLAG_PROMO, 0)
+                add_move(moves, fr, fc, nr, fc, B, FLAG_PROMO, 0)
+                add_move(moves, fr, fc, nr, fc, N, FLAG_PROMO, 0)
+            else:
+                add_move(moves, fr, fc, nr, fc, 0, FLAG_NONE, 0)
+                if fr = start_r:
+                    nr2 : fr + dir + dir
+                    if board[nr2, fc] = 0:
+                        add_move(moves, fr, fc, nr2, fc, 0, FLAG_NONE, 0)
+    dc : -1
+    while dc <= 1:
+        if dc = 0:
+            dc : dc + 1
+            continue
+        nc : fc + dc
+        if on_board(nr, nc) = 1:
+            p : board[nr, nc]
+            if p != 0 and piece_color(p) != color:
+                if nr = promo_r:
+                    add_move(moves, fr, fc, nr, nc, Q, FLAG_PROMO, p)
+                    add_move(moves, fr, fc, nr, nc, R, FLAG_PROMO, p)
+                    add_move(moves, fr, fc, nr, nc, B, FLAG_PROMO, p)
+                    add_move(moves, fr, fc, nr, nc, N, FLAG_PROMO, p)
+                else:
+                    add_move(moves, fr, fc, nr, nc, 0, FLAG_NONE, p)
+            if ep_r = nr and ep_c = nc:
+                cap : board[fr, nc]
+                add_move(moves, fr, fc, nr, nc, 0, FLAG_EP, cap)
+        dc : dc + 1
+
+def gen_castle(board, moves, color, castle):
+    r : 7
+    if color = -1:
+        r : 0
+    enemy : 0 - color
+    if in_check(board, color) = 1:
+        return
+    if color = 1:
+        if castle["wk"] = 1:
+            if board[r, 5] = 0 and board[r, 6] = 0:
+                if square_attacked(board, r, 5, enemy) = 0 and square_attacked(board, r, 6, enemy) = 0:
+                    if board[r, 4] = K and board[r, 7] = R:
+                        add_move(moves, r, 4, r, 6, 0, FLAG_CASTLE_K, 0)
+        if castle["wq"] = 1:
+            if board[r, 1] = 0 and board[r, 2] = 0 and board[r, 3] = 0:
+                if square_attacked(board, r, 3, enemy) = 0 and square_attacked(board, r, 2, enemy) = 0:
+                    if board[r, 4] = K and board[r, 0] = R:
+                        add_move(moves, r, 4, r, 2, 0, FLAG_CASTLE_Q, 0)
+    else:
+        if castle["bk"] = 1:
+            if board[r, 5] = 0 and board[r, 6] = 0:
+                if square_attacked(board, r, 5, enemy) = 0 and square_attacked(board, r, 6, enemy) = 0:
+                    if board[r, 4] = 0 - K and board[r, 7] = 0 - R:
+                        add_move(moves, r, 4, r, 6, 0, FLAG_CASTLE_K, 0)
+        if castle["bq"] = 1:
+            if board[r, 1] = 0 and board[r, 2] = 0 and board[r, 3] = 0:
+                if square_attacked(board, r, 3, enemy) = 0 and square_attacked(board, r, 2, enemy) = 0:
+                    if board[r, 4] = 0 - K and board[r, 0] = 0 - R:
+                        add_move(moves, r, 4, r, 2, 0, FLAG_CASTLE_Q, 0)
+
+def gen_pseudo(board, color, castle, ep_r, ep_c):
+    moves : []
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            p : board[r, c]
+            if piece_color(p) = color:
+                t : piece_type(p)
+                if t = P:
+                    gen_pawn(board, moves, r, c, color, ep_r, ep_c)
+                elif t = N:
+                    i : 0
+                    while i < 8:
+                        nr : r + N_DR[i]
+                        nc : c + N_DC[i]
+                        if on_board(nr, nc) = 1:
+                            q : board[nr, nc]
+                            if q = 0 or piece_color(q) != color:
+                                add_move(moves, r, c, nr, nc, 0, FLAG_NONE, q)
+                        i : i + 1
+                elif t = B:
+                    gen_slider(board, moves, r, c, color, [-1, -1, 1, 1], [-1, 1, -1, 1], 4)
+                elif t = R:
+                    gen_slider(board, moves, r, c, color, [-1, 1, 0, 0], [0, 0, -1, 1], 4)
+                elif t = Q:
+                    gen_slider(board, moves, r, c, color, [-1, -1, -1, 0, 0, 1, 1, 1], [-1, 0, 1, -1, 1, -1, 0, 1], 8)
+                elif t = K:
+                    i : 0
+                    while i < 8:
+                        nr : r + K_DR[i]
+                        nc : c + K_DC[i]
+                        if on_board(nr, nc) = 1:
+                            q : board[nr, nc]
+                            if q = 0 or piece_color(q) != color:
+                                add_move(moves, r, c, nr, nc, 0, FLAG_NONE, q)
+                        i : i + 1
+            c : c + 1
+        r : r + 1
+    gen_castle(board, moves, color, castle)
+    return moves
+
+def make_move(st, mv):
+    board : st["board"]
+    color : st["turn"]
+    fr : mv["fr"]
+    fc : mv["fc"]
+    tr : mv["tr"]
+    tc : mv["tc"]
+    piece : board[fr, fc]
+    cap : board[tr, tc]
+    if mv["flag"] = FLAG_EP:
+        cap : board[fr, tc]
+    undo : dict(
+        fr: fr,
+        fc: fc,
+        tr: tr,
+        tc: tc,
+        promo: mv["promo"],
+        flag: mv["flag"],
+        capture: cap,
+        piece: piece,
+        ep_r: st["ep_r"],
+        ep_c: st["ep_c"],
+        castle: copy_castle(st["castle"]),
+        rook_from_c: -1,
+        rook_to_c: -1,
+        ep_cap_r: -1,
+        ep_cap_c: -1
+    )
+    board[fr, fc] : 0
+    if mv["flag"] = FLAG_EP:
+        undo["ep_cap_r"] : fr
+        undo["ep_cap_c"] : tc
+        board[fr, tc] : 0
+        board[tr, tc] : piece
+    elif mv["flag"] = FLAG_CASTLE_K:
+        board[tr, tc] : piece
+        board[tr, 7] : 0
+        board[tr, 5] : R * color
+        undo["rook_from_c"] : 7
+        undo["rook_to_c"] : 5
+    elif mv["flag"] = FLAG_CASTLE_Q:
+        board[tr, tc] : piece
+        board[tr, 0] : 0
+        board[tr, 3] : R * color
+        undo["rook_from_c"] : 0
+        undo["rook_to_c"] : 3
+    elif mv["flag"] = FLAG_PROMO:
+        board[tr, tc] : mv["promo"] * color
+    else:
+        board[tr, tc] : piece
+    # update ep
+    st["ep_r"] : -1
+    st["ep_c"] : -1
+    if piece_type(piece) = P:
+        if tr - fr = 2 or fr - tr = 2:
+            st["ep_r"] : (fr + tr) / 2
+            st["ep_c"] : fc
+            st["ep_r"] : int(st["ep_r"])
+    # update castle rights
+    cas : st["castle"]
+    if piece = K:
+        cas["wk"] : 0
+        cas["wq"] : 0
+    if piece = 0 - K:
+        cas["bk"] : 0
+        cas["bq"] : 0
+    if piece = R and fr = 7 and fc = 0:
+        cas["wq"] : 0
+    if piece = R and fr = 7 and fc = 7:
+        cas["wk"] : 0
+    if piece = 0 - R and fr = 0 and fc = 0:
+        cas["bq"] : 0
+    if piece = 0 - R and fr = 0 and fc = 7:
+        cas["bk"] : 0
+    if cap = R and tr = 7 and tc = 0:
+        cas["wq"] : 0
+    if cap = R and tr = 7 and tc = 7:
+        cas["wk"] : 0
+    if cap = 0 - R and tr = 0 and tc = 0:
+        cas["bq"] : 0
+    if cap = 0 - R and tr = 0 and tc = 7:
+        cas["bk"] : 0
+    st["turn"] : 0 - color
+    return undo
+
+def unmake_move(st, undo):
+    board : st["board"]
+    fr : undo["fr"]
+    fc : undo["fc"]
+    tr : undo["tr"]
+    tc : undo["tc"]
+    color : piece_color(undo["piece"])
+    st["turn"] : color
+    st["ep_r"] : undo["ep_r"]
+    st["ep_c"] : undo["ep_c"]
+    st["castle"] : undo["castle"]
+    if undo["flag"] = FLAG_CASTLE_K or undo["flag"] = FLAG_CASTLE_Q:
+        board[tr, tc] : 0
+        board[fr, fc] : undo["piece"]
+        board[tr, undo["rook_to_c"]] : 0
+        board[tr, undo["rook_from_c"]] : R * color
+        return
+    if undo["flag"] = FLAG_EP:
+        board[tr, tc] : 0
+        board[fr, fc] : undo["piece"]
+        board[undo["ep_cap_r"], undo["ep_cap_c"]] : undo["capture"]
+        return
+    board[tr, tc] : undo["capture"]
+    board[fr, fc] : undo["piece"]
+
+def is_legal_move(st, mv):
+    undo : make_move(st, mv)
+    bad : in_check(st["board"], 0 - st["turn"])
+    unmake_move(st, undo)
+    if bad = 1:
+        return 0
+    return 1
+
+def legal_moves(st):
+    raw : gen_pseudo(st["board"], st["turn"], st["castle"], st["ep_r"], st["ep_c"])
+    out : []
+    i : 0
+    while i < len(raw):
+        mv : raw[i]
+        if is_legal_move(st, mv) = 1:
+            out.append(mv)
+        i : i + 1
+    return out
+
+def legal_moves_from(st, r, c):
+    allm : legal_moves(st)
+    out : []
+    i : 0
+    while i < len(allm):
+        mv : allm[i]
+        if mv["fr"] = r and mv["fc"] = c:
+            out.append(mv)
+        i : i + 1
+    return out
+
+def update_status(st):
+    moves : legal_moves(st)
+    chk : in_check(st["board"], st["turn"])
+    if len(moves) = 0:
+        if chk = 1:
+            st["status"] : STATUS_MATE
+        else:
+            st["status"] : STATUS_STALE
+    elif chk = 1:
+        st["status"] : STATUS_CHECK
+    else:
+        st["status"] : STATUS_PLAY
+    return moves
+
+def clear_selection(st):
+    st["selected_r"] : -1
+    st["selected_c"] : -1
+    st["legal"] : []
+    st["drag"] : 0
+    st["drag_piece"] : 0
+
+def begin_drag(st, r, c, mx, my):
+    board : st["board"]
+    p : board[r, c]
+    if piece_color(p) != st["turn"]:
+        return 0
+    if st["status"] = STATUS_MATE or st["status"] = STATUS_STALE:
+        return 0
+    if st["promo"] = 1:
+        return 0
+    if st["mode"] = MODE_AI and st["turn"] = -1:
+        return 0
+    st["selected_r"] : r
+    st["selected_c"] : c
+    st["legal"] : legal_moves_from(st, r, c)
+    st["drag"] : 1
+    st["drag_piece"] : p
+    st["drag_x"] : mx
+    st["drag_y"] : my
+    return 1
+
+def update_drag(st, mx, my):
+    if st["drag"] = 0:
+        return
+    st["drag_x"] : mx
+    st["drag_y"] : my
+
+def end_drag(st, r, c):
+    if st["drag"] = 0:
+        return
+    st["drag"] : 0
+    st["drag_piece"] : 0
+    if on_board(r, c) = 0:
+        clear_selection(st)
+        return
+    # same square: end drag but keep selection for click-to-move
+    if r = st["selected_r"] and c = st["selected_c"]:
+        return
+    promos : find_promo_moves(st["legal"], r, c)
+    if len(promos) > 0:
+        st["promo"] : 1
+        st["promo_fr"] : st["selected_r"]
+        st["promo_fc"] : st["selected_c"]
+        st["promo_tr"] : r
+        st["promo_tc"] : c
+        st["selected_r"] : -1
+        st["selected_c"] : -1
+        st["legal"] : []
+        return
+    mv : find_move(st["legal"], r, c)
+    if type(mv) = "dict":
+        apply_and_finish(st, mv)
+        return
+    clear_selection(st)
+
+def find_move(legals, tr, tc):
+    i : 0
+    while i < len(legals):
+        mv : legals[i]
+        if mv["tr"] = tr and mv["tc"] = tc:
+            return mv
+        i : i + 1
+    return 0
+
+def find_promo_moves(legals, tr, tc):
+    out : []
+    i : 0
+    while i < len(legals):
+        mv : legals[i]
+        if mv["tr"] = tr and mv["tc"] = tc and mv["flag"] = FLAG_PROMO:
+            out.append(mv)
+        i : i + 1
+    return out
+
+def apply_and_finish(st, mv):
+    make_move(st, mv)
+    clear_selection(st)
+    st["promo"] : 0
+    update_status(st)
+    if st["mode"] = MODE_AI and st["turn"] = -1 and st["status"] != STATUS_MATE and st["status"] != STATUS_STALE:
+        st["ai_pending"] : 1
+
+def click_cell(st, r, c):
+    if st["status"] = STATUS_MATE or st["status"] = STATUS_STALE:
+        return
+    if st["promo"] = 1:
+        return
+    if st["mode"] = MODE_AI and st["turn"] = -1:
+        return
+    if on_board(r, c) = 0:
+        return
+    board : st["board"]
+    # if selected, try move
+    if st["selected_r"] >= 0:
+        promos : find_promo_moves(st["legal"], r, c)
+        if len(promos) > 0:
+            st["promo"] : 1
+            st["promo_fr"] : st["selected_r"]
+            st["promo_fc"] : st["selected_c"]
+            st["promo_tr"] : r
+            st["promo_tc"] : c
+            st["selected_r"] : -1
+            st["selected_c"] : -1
+            st["legal"] : []
+            return
+        mv : find_move(st["legal"], r, c)
+        if type(mv) = "dict":
+            apply_and_finish(st, mv)
+            return
+        # re-select own piece
+        p : board[r, c]
+        if piece_color(p) = st["turn"]:
+            st["selected_r"] : r
+            st["selected_c"] : c
+            st["legal"] : legal_moves_from(st, r, c)
+            return
+        clear_selection(st)
+        return
+    p : board[r, c]
+    if piece_color(p) = st["turn"]:
+        st["selected_r"] : r
+        st["selected_c"] : c
+        st["legal"] : legal_moves_from(st, r, c)
+
+def choose_promo(st, ptype):
+    if st["promo"] = 0:
+        return
+    mv : dict(
+        fr: st["promo_fr"],
+        fc: st["promo_fc"],
+        tr: st["promo_tr"],
+        tc: st["promo_tc"],
+        promo: ptype,
+        flag: FLAG_PROMO,
+        capture: st["board"][st["promo_tr"], st["promo_tc"]]
+    )
+    apply_and_finish(st, mv)
+
+def set_board(st, board, turn, castle, ep_r, ep_c):
+    st["board"] : board
+    st["turn"] : turn
+    st["castle"] : castle
+    st["ep_r"] : ep_r
+    st["ep_c"] : ep_c
+    clear_selection(st)
+    st["promo"] : 0
+    update_status(st)
+
+def load_fen_simple(st, rows, turn, wk, wq, bk, bq, ep_r, ep_c):
+    # rows: 8 strings of piece letters / digits for empties — caller builds board
+    st["board"] : rows
+    st["turn"] : turn
+    st["castle"] : dict(wk: wk, wq: wq, bk: bk, bq: bq)
+    st["ep_r"] : ep_r
+    st["ep_c"] : ep_c
+    clear_selection(st)
+    st["promo"] : 0
+    update_status(st)

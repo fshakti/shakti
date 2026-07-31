@@ -1058,8 +1058,13 @@ Module `lib/gfx.ie`.
 | `gfx.click_x()` | Last click X in design coordinates |
 | `gfx.click_y()` | Last click Y in design coordinates |
 | `gfx.consume_click()` | Clear the pending click |
+| `gfx.mouse_x()` | Current mouse X in design coordinates |
+| `gfx.mouse_y()` | Current mouse Y in design coordinates |
+| `gfx.mouse_down()` | `1` while the primary mouse button is held |
 
-Colors are packed as `0xRRGGBB`. Clicks are reported in design-buffer coordinates (not raw window pixels). `gfx.text` covers digits, A–Z, a–z (distinct lowercase), and common punctuation; unknown glyphs draw as a hollow box.
+Colors are packed as `0xRRGGBB`. Clicks and mouse positions are reported in design-buffer coordinates (not raw window pixels). `gfx.text` covers digits, A–Z, a–z (distinct lowercase), and common punctuation; unknown glyphs draw as a hollow box.
+
+Demo games: [`import pong`](lib/pong.ie) / `pong.run()`, [`import chess`](lib/chess.ie) / `chess.run()` (needs `SHAKTI_GFX=1`).
 
 ---
 

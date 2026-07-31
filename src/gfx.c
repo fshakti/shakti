@@ -34,6 +34,8 @@ typedef struct GfxState {
     int click_x;
     int click_y;
     int mouse_down;
+    int mouse_x;
+    int mouse_y;
 } GfxState;
 
 static GfxState g;
@@ -102,12 +104,25 @@ int gfx_core_fb_resize(int w, int h) {
 void gfx_core_mouse_design(int wx, int wy, int down) {
     int dx = (int)((wx - g.off_x) / g.ui_scale);
     int dy = (int)((wy - g.off_y) / g.ui_scale);
+    g.mouse_x = dx;
+    g.mouse_y = dy;
     if (down && !g.mouse_down) {
         g.click_pending = 1;
         g.click_x = dx;
         g.click_y = dy;
     }
     g.mouse_down = down ? 1 : 0;
+}
+
+void gfx_core_mouse_move(int wx, int wy, int down) {
+    int dx = (int)((wx - g.off_x) / g.ui_scale);
+    int dy = (int)((wy - g.off_y) / g.ui_scale);
+    g.mouse_x = dx;
+    g.mouse_y = dy;
+    /* Motion may clear a held button (release outside the window) but must
+     * not invent a press — only ButtonPress / mouse_design may set down. */
+    if (!down)
+        g.mouse_down = 0;
 }
 
 int gfx_available(void) { return 1; }
@@ -223,6 +238,9 @@ int gfx_click_pending(void) { return g.click_pending; }
 int gfx_click_x(void) { return g.click_x; }
 int gfx_click_y(void) { return g.click_y; }
 void gfx_consume_click(void) { g.click_pending = 0; }
+int gfx_mouse_x(void) { return g.mouse_x; }
+int gfx_mouse_y(void) { return g.mouse_y; }
+int gfx_mouse_down(void) { return g.mouse_down; }
 
 /* 5x7 monospace font: digits, A-Z, a-z, common punctuation. */
 static int gfx_glyph_idx(char ch) {
@@ -470,6 +488,9 @@ int gfx_click_pending(void) { return 0; }
 int gfx_click_x(void) { return 0; }
 int gfx_click_y(void) { return 0; }
 void gfx_consume_click(void) {}
+int gfx_mouse_x(void) { return 0; }
+int gfx_mouse_y(void) { return 0; }
+int gfx_mouse_down(void) { return 0; }
 uint32_t *gfx_core_present_pixels(void) { return NULL; }
 int gfx_core_present_width(void) { return 0; }
 int gfx_core_present_height(void) { return 0; }
@@ -478,6 +499,7 @@ int gfx_core_is_alive(void) { return 0; }
 void gfx_core_mark_dirty(void) {}
 int gfx_core_fb_resize(int w, int h) { (void)w;(void)h; return -1; }
 void gfx_core_mouse_design(int wx, int wy, int down) { (void)wx;(void)wy;(void)down; }
+void gfx_core_mouse_move(int wx, int wy, int down) { (void)wx;(void)wy;(void)down; }
 
 #endif
 
@@ -539,6 +561,9 @@ V *bi_gfx_click_pending(V **a, int n) { (void)a;(void)n; return v_int(gfx_click_
 V *bi_gfx_click_x(V **a, int n) { (void)a;(void)n; return v_int(gfx_click_x()); }
 V *bi_gfx_click_y(V **a, int n) { (void)a;(void)n; return v_int(gfx_click_y()); }
 V *bi_gfx_consume_click(V **a, int n) { (void)a;(void)n; gfx_consume_click(); return v_nil(); }
+V *bi_gfx_mouse_x(V **a, int n) { (void)a;(void)n; return v_int(gfx_mouse_x()); }
+V *bi_gfx_mouse_y(V **a, int n) { (void)a;(void)n; return v_int(gfx_mouse_y()); }
+V *bi_gfx_mouse_down(V **a, int n) { (void)a;(void)n; return v_int(gfx_mouse_down()); }
 V *bi_gfx_text(V **a, int n) {
     const char *s;
     int scale;
