@@ -3,6 +3,7 @@
  */
 #include "iefs_format.h"
 #include "iefs_io.h"
+#include "iefs_map.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -333,6 +334,7 @@ typedef struct {
     size_t n;
     size_t off;
     char err[256];
+    IefsMapRegion *map_reg; /* non-NULL → alias contiguous payloads */
 } IefsR;
 
 static int need(IefsR *r, size_t nbytes) {
@@ -344,6 +346,40 @@ static int need(IefsR *r, size_t nbytes) {
 }
 
 static V *decode_value(IefsR *r);
+
+/* which: 0=J, 1=F, 2=B; cols < 0 means vector. */
+static V *alias_payload(IefsR *r, int t, int64_t n, int64_t cols, size_t nbytes, int which) {
+    if (need(r, nbytes) != 0)
+        return v_err(r->err);
+    V *v;
+    if (t == T_IVEC)
+        v = v_ivec(n);
+    else if (t == T_FVEC)
+        v = v_fvec(n);
+    else if (t == T_BVEC)
+        v = v_bvec(n);
+    else if (t == T_IMAT)
+        v = v_imat(n, cols);
+    else if (t == T_FMAT)
+        v = v_fmat(n, cols);
+    else if (t == T_BMAT)
+        v = v_bmat(n, cols);
+    else
+        return v_err("iefs: alias type");
+    /* Drop malloc'd payload; point into map. */
+    free(v->J); v->J = NULL;
+    free(v->F); v->F = NULL;
+    free(v->B); v->B = NULL;
+    if (which == 0)
+        v->J = (int64_t *)(r->p + r->off);
+    else if (which == 1)
+        v->F = (double *)(r->p + r->off);
+    else
+        v->B = (unsigned char *)(r->p + r->off);
+    iefs_v_set_map_alias(v, r->map_reg);
+    r->off += nbytes;
+    return v;
+}
 
 static V *decode_value(IefsR *r) {
     if (need(r, 1) != 0)
@@ -419,7 +455,10 @@ static V *decode_value(IefsR *r) {
         r->off += 8;
         if (n > IEFS_MAX_ELEMS)
             return v_err("iefs: ivec too large");
-        if (need(r, (size_t)n * 8) != 0)
+        size_t nbytes = (size_t)n * 8;
+        if (r->map_reg)
+            return alias_payload(r, T_IVEC, (int64_t)n, -1, nbytes, 0);
+        if (need(r, nbytes) != 0)
             return v_err(r->err);
         V *v = v_ivec((int64_t)n);
         for (uint64_t i = 0; i < n; i++) {
@@ -435,7 +474,10 @@ static V *decode_value(IefsR *r) {
         r->off += 8;
         if (n > IEFS_MAX_ELEMS)
             return v_err("iefs: fvec too large");
-        if (need(r, (size_t)n * 8) != 0)
+        size_t nbytes = (size_t)n * 8;
+        if (r->map_reg)
+            return alias_payload(r, T_FVEC, (int64_t)n, -1, nbytes, 1);
+        if (need(r, nbytes) != 0)
             return v_err(r->err);
         V *v = v_fvec((int64_t)n);
         for (uint64_t i = 0; i < n; i++) {
@@ -451,12 +493,15 @@ static V *decode_value(IefsR *r) {
         r->off += 8;
         if (n > IEFS_MAX_ELEMS)
             return v_err("iefs: bvec too large");
-        if (need(r, (size_t)n) != 0)
+        size_t nbytes = (size_t)n;
+        if (r->map_reg)
+            return alias_payload(r, T_BVEC, (int64_t)n, -1, nbytes, 2);
+        if (need(r, nbytes) != 0)
             return v_err(r->err);
         V *v = v_bvec((int64_t)n);
         if (n)
-            memcpy(v->B, r->p + r->off, (size_t)n);
-        r->off += (size_t)n;
+            memcpy(v->B, r->p + r->off, nbytes);
+        r->off += nbytes;
         return v;
     }
     case T_IMAT:
@@ -471,7 +516,12 @@ static V *decode_value(IefsR *r) {
         if (rows > IEFS_MAX_ELEMS || cols > IEFS_MAX_ELEMS || cells > IEFS_MAX_ELEMS)
             return v_err("iefs: matrix too large");
         size_t esz = (t == T_BMAT) ? 1 : 8;
-        if (need(r, (size_t)cells * esz) != 0)
+        size_t nbytes = (size_t)cells * esz;
+        if (r->map_reg) {
+            int which = (t == T_IMAT) ? 0 : (t == T_FMAT) ? 1 : 2;
+            return alias_payload(r, (int)t, (int64_t)rows, (int64_t)cols, nbytes, which);
+        }
+        if (need(r, nbytes) != 0)
             return v_err(r->err);
         V *v;
         if (t == T_IMAT) {
@@ -551,7 +601,7 @@ V *iefs_decode(const unsigned char *buf, size_t len) {
     uint32_t got_crc = crc32_buf(payload, (size_t)payload_len);
     if (got_crc != expect_crc)
         return v_err("iefs: checksum mismatch");
-    IefsR r = {.p = payload, .n = (size_t)payload_len, .off = 0, .err = {0}};
+    IefsR r = {.p = payload, .n = (size_t)payload_len, .off = 0, .err = {0}, .map_reg = NULL};
     V *v = decode_value(&r);
     if (v->t == T_ERR)
         return v;
@@ -561,6 +611,32 @@ V *iefs_decode(const unsigned char *buf, size_t len) {
     }
     /* Tolerate trailing padding (O_DIRECT padded files truncated by ftruncate,
      * but readers may still see exact payload_len via header). */
+    return v;
+}
+
+V *iefs_decode_mapped(const unsigned char *buf, size_t len, IefsMapRegion *reg) {
+    if (!buf || len < IEFS_HEADER_SIZE)
+        return v_err("iefs: truncated header");
+    if (memcmp(buf, IEFS_MAGIC, 4) != 0)
+        return v_err("iefs: bad magic");
+    uint16_t ver = get_u16(buf + 4);
+    if (ver != IEFS_VERSION)
+        return v_errf("iefs: unsupported version %u (iefs.map requires v1)", (unsigned)ver);
+    uint64_t payload_len = get_u64(buf + 8);
+    if (payload_len > IEFS_MAX_PAYLOAD)
+        return v_err("iefs: payload too large");
+    if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
+        return v_err("iefs: truncated file");
+    const unsigned char *payload = buf + IEFS_HEADER_SIZE;
+    /* Skip CRC on map path (lazy open). */
+    IefsR r = {.p = payload, .n = (size_t)payload_len, .off = 0, .err = {0}, .map_reg = reg};
+    V *v = decode_value(&r);
+    if (v->t == T_ERR)
+        return v;
+    if (r.off != r.n) {
+        v_free(v);
+        return v_err("iefs: trailing payload bytes");
+    }
     return v;
 }
 
@@ -658,6 +734,23 @@ V *bi_iefs_load(V **a, int n) {
     if (n < 1 || !a[0] || a[0]->t != T_STR)
         return v_err("iefs_load(path)");
     return iefs_store_read(a[0]->s);
+}
+
+V *bi_iefs_map(V **a, int n) {
+    if (n < 1 || !a[0] || a[0]->t != T_STR)
+        return v_err("iefs_map(path[, pages])");
+    int pages = IEFS_MAP_PAGES_THP;
+    if (n > 1 && a[1] && a[1]->t == T_STR) {
+        if (!strcmp(a[1]->s, "1g") || !strcmp(a[1]->s, "1G"))
+            pages = IEFS_MAP_PAGES_1G;
+        else if (!strcmp(a[1]->s, "2m") || !strcmp(a[1]->s, "2M"))
+            pages = IEFS_MAP_PAGES_2M;
+        else if (!strcmp(a[1]->s, "thp") || !a[1]->s[0])
+            pages = IEFS_MAP_PAGES_THP;
+        else
+            return v_err("iefs_map: pages must be \"thp\", \"2m\", or \"1g\"");
+    }
+    return iefs_store_map(a[0]->s, pages);
 }
 
 V *bi_iefs_direct_available(V **a, int n) {
