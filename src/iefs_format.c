@@ -512,8 +512,9 @@ static V *decode_value(IefsR *r) {
         uint64_t rows = get_u64(r->p + r->off);
         uint64_t cols = get_u64(r->p + r->off + 8);
         r->off += 16;
-        uint64_t cells = rows * cols;
-        if (rows > IEFS_MAX_ELEMS || cols > IEFS_MAX_ELEMS || cells > IEFS_MAX_ELEMS)
+        uint64_t cells = 0;
+        if (__builtin_mul_overflow(rows, cols, &cells) ||
+            rows > IEFS_MAX_ELEMS || cols > IEFS_MAX_ELEMS || cells > IEFS_MAX_ELEMS)
             return v_err("iefs: matrix too large");
         size_t esz = (t == T_BMAT) ? 1 : 8;
         size_t nbytes = (size_t)cells * esz;

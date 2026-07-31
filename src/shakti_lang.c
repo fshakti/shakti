@@ -3243,7 +3243,11 @@ static V *vec_binop(V *a, V *b, int op) {
     }
     if(a->t==T_STR && b->t==T_STR && op==OP_ADD) {
         size_t la=strlen(a->s), lb=strlen(b->s);
-        char *r = malloc(la+lb+1);
+        size_t need = 0;
+        if (__builtin_add_overflow(la, lb, &need) || __builtin_add_overflow(need, (size_t)1, &need))
+            return v_err("string concat too large");
+        char *r = malloc(need);
+        if (!r) return v_err("out of memory");
         memcpy(r, a->s, la); memcpy(r+la, b->s, lb); r[la+lb]=0;
         V *v = v_str(r); free(r); return v;
     }
@@ -3339,7 +3343,10 @@ static V *vec_binop(V *a, V *b, int op) {
             case OP_POW:r->F[i]=pow(x,y);break;default:break;}} return r;
     }
     if(a->t==T_LIST && b->t==T_LIST && op==OP_ADD) {
-        V *r = v_list(a->n + b->n);
+        int64_t sum = 0;
+        if (__builtin_add_overflow(a->n, b->n, &sum) || sum < 0)
+            return v_err("list concat too large");
+        V *r = v_list(sum);
         for(int64_t i=0;i<a->n;i++) r->L[i] = v_ref(a->L[i]);
         for(int64_t i=0;i<b->n;i++) r->L[a->n+i] = v_ref(b->L[i]);
         return r;
@@ -5292,9 +5299,19 @@ V *eval(Node *n, Env *e) {
                     if(!strcmp(obj->keys->L[i]->s, target->sval)) { found=i; break; }
                 }
                 if(found >= 0) {
+                    if ((val->t==T_IVEC||val->t==T_FVEC||val->t==T_BVEC||val->t==T_LIST) &&
+                        obj->n > 0 && val->n != obj->n) {
+                        v_free(obj); v_free(val);
+                        return v_err("table column length mismatch");
+                    }
                     v_free(obj->vals->L[found]);
                     obj->vals->L[found] = v_ref(val);
                 } else {
+                    if ((val->t==T_IVEC||val->t==T_FVEC||val->t==T_BVEC||val->t==T_LIST) &&
+                        obj->n > 0 && val->n != obj->n) {
+                        v_free(obj); v_free(val);
+                        return v_err("table column length mismatch");
+                    }
                     V *k = v_str(target->sval);
                     v_list_append(obj->keys, k);
                     v_list_append(obj->vals, val);

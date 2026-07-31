@@ -17,6 +17,9 @@
 #define PDF_MAX 64
 #define PDF_LETTER_W 612.0
 #define PDF_LETTER_H 792.0
+#define PDF_MAX_PARSE_DEPTH 64
+#define PDF_MAX_PAGE_DEPTH 256
+#define PDF_MAX_FILE_BYTES (256u * 1024u * 1024u)
 
 typedef struct {
     char *data;
@@ -187,6 +190,7 @@ typedef struct {
     const unsigned char *data;
     size_t len;
     size_t pos;
+    int depth;
     char err[128];
 } PdfParse;
 
@@ -416,42 +420,47 @@ static PdfObj *pp_parse_number_or_ref(PdfParse *p) {
 }
 
 static PdfObj *pp_parse_array(PdfParse *p) {
+    if (p->depth >= PDF_MAX_PARSE_DEPTH) return NULL;
     if (!pp_consume(p, "[")) return NULL;
     PdfObj *o = po_new(PO_ARRAY);
     if (!o) return NULL;
+    p->depth++;
     for (;;) {
         pp_skip_ws(p);
         if (p->pos < p->len && p->data[p->pos] == ']') { p->pos++; break; }
         PdfObj *item = pp_parse_obj(p);
-        if (!item) { po_free(o); return NULL; }
+        if (!item) { po_free(o); p->depth--; return NULL; }
         PdfObj **ni = realloc(o->items, (size_t)(o->nitems + 1) * sizeof(PdfObj *));
-        if (!ni) { po_free(item); po_free(o); return NULL; }
+        if (!ni) { po_free(item); po_free(o); p->depth--; return NULL; }
         o->items = ni;
         o->items[o->nitems++] = item;
     }
+    p->depth--;
     return o;
 }
 
 static PdfObj *pp_parse_dict(PdfParse *p) {
+    if (p->depth >= PDF_MAX_PARSE_DEPTH) return NULL;
     if (!pp_consume(p, "<<")) return NULL;
     PdfObj *o = po_new(PO_DICT);
     if (!o) return NULL;
+    p->depth++;
     for (;;) {
         pp_skip_ws(p);
         if (pp_startswith(p, ">>")) { p->pos += 2; break; }
         PdfObj *key = pp_parse_name(p);
-        if (!key) { po_free(o); return NULL; }
+        if (!key) { po_free(o); p->depth--; return NULL; }
         PdfObj *val = pp_parse_obj(p);
-        if (!val) { po_free(key); po_free(o); return NULL; }
+        if (!val) { po_free(key); po_free(o); p->depth--; return NULL; }
         char **nk = realloc(o->keys, (size_t)(o->nkeys + 1) * sizeof(char *));
         if (!nk) {
-            po_free(key); po_free(val); po_free(o);
+            po_free(key); po_free(val); po_free(o); p->depth--;
             return NULL;
         }
         o->keys = nk;
         PdfObj **nv = realloc(o->vals, (size_t)(o->nkeys + 1) * sizeof(PdfObj *));
         if (!nv) {
-            po_free(key); po_free(val); po_free(o);
+            po_free(key); po_free(val); po_free(o); p->depth--;
             return NULL;
         }
         o->vals = nv;
@@ -461,6 +470,7 @@ static PdfObj *pp_parse_dict(PdfParse *p) {
         o->vals[o->nkeys] = val;
         o->nkeys++;
     }
+    p->depth--;
     return o;
 }
 
@@ -573,6 +583,11 @@ static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap) 
         if (slen < 0) {
             po_free(body);
             snprintf(err, errcap, "pdf: stream Length missing (obj %d)", objn);
+            return NULL;
+        }
+        if ((uint64_t)slen > (uint64_t)(d->file_len - p.pos)) {
+            po_free(body);
+            snprintf(err, errcap, "pdf: stream Length past EOF (obj %d)", objn);
             return NULL;
         }
         PdfObj *stream_obj = po_new(PO_STREAM);
@@ -725,8 +740,35 @@ static int pdf_parse_xref(PdfDoc *d, char *err, size_t errcap) {
 }
 
 /* Collect page object numbers from Kids refs */
+static int pdf_collect_page_nums_depth(PdfDoc *d, int objn, int **out, int *nout, int *cap,
+                                       char *err, size_t errcap, int depth, unsigned char *seen);
+
 static int pdf_collect_page_nums(PdfDoc *d, int objn, int **out, int *nout, int *cap,
                                  char *err, size_t errcap) {
+    int n = d->xref_n > 0 ? d->xref_n : 1;
+    unsigned char *seen = calloc((size_t)n, 1);
+    if (!seen) {
+        snprintf(err, errcap, "pdf: out of memory");
+        return -1;
+    }
+    int rc = pdf_collect_page_nums_depth(d, objn, out, nout, cap, err, errcap, 0, seen);
+    free(seen);
+    return rc;
+}
+
+static int pdf_collect_page_nums_depth(PdfDoc *d, int objn, int **out, int *nout, int *cap,
+                                       char *err, size_t errcap, int depth, unsigned char *seen) {
+    if (depth >= PDF_MAX_PAGE_DEPTH) {
+        snprintf(err, errcap, "pdf: page tree too deep");
+        return -1;
+    }
+    if (objn > 0 && objn < d->xref_n) {
+        if (seen[objn]) {
+            snprintf(err, errcap, "pdf: page tree cycle");
+            return -1;
+        }
+        seen[objn] = 1;
+    }
     PdfObj *node = pdf_load_indirect(d, objn, err, errcap);
     if (!node) return -1;
     if (node->t == PO_STREAM) {
@@ -756,7 +798,7 @@ static int pdf_collect_page_nums(PdfDoc *d, int objn, int **out, int *nout, int 
                 snprintf(err, errcap, "pdf: Kids entry not a ref");
                 return -1;
             }
-            if (pdf_collect_page_nums(d, kid->ref_n, out, nout, cap, err, errcap) < 0) {
+            if (pdf_collect_page_nums_depth(d, kid->ref_n, out, nout, cap, err, errcap, depth + 1, seen) < 0) {
                 po_free(node);
                 return -1;
             }
@@ -825,7 +867,8 @@ static int pdf_append_content_bytes(PdfDoc *d, PdfObj *contents, PdfBuf *out,
         snprintf(err, errcap, "pdf: Contents not a stream");
         return -1;
     }
-    if (contents->stream_off + contents->stream_len > d->file_len) {
+    if (contents->stream_len > d->file_len ||
+        contents->stream_off > d->file_len - contents->stream_len) {
         po_free(contents);
         snprintf(err, errcap, "pdf: stream past EOF");
         return -1;
@@ -1101,6 +1144,10 @@ V *bi_pdf_open(V **a, int n) {
     if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return v_err("pdf_open: seek failed"); }
     long sz = ftell(fp);
     if (sz < 0) { fclose(fp); return v_err("pdf_open: tell failed"); }
+    if ((unsigned long)sz > PDF_MAX_FILE_BYTES) {
+        fclose(fp);
+        return v_err("pdf_open: file too large");
+    }
     if (fseek(fp, 0, SEEK_SET) != 0) { fclose(fp); return v_err("pdf_open: seek failed"); }
     PdfDoc *d = calloc(1, sizeof(PdfDoc));
     if (!d) { fclose(fp); return v_err("pdf_open: out of memory"); }
