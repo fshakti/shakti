@@ -1607,6 +1607,10 @@ static V *append_cell(V *col, V *cell) {
     if (col->t == T_IVEC) {
         int64_t val = cell->t == T_INT ? cell->j : (int64_t)cell_float(cell, 0);
         if (col->rc == 1) {
+            if (col->owner_kind == V_OWNER_MAP_ALIAS) {
+                if (v_ensure_writable(col) != 0)
+                    return v_err("insert: out of memory");
+            }
             int cap = (int)col->_ht_cap >= (int)col->n ? (int)col->_ht_cap : (int)col->n;
             if (col->n >= cap) {
                 cap = cap ? cap * 2 : 8;

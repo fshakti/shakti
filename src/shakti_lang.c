@@ -1,6 +1,11 @@
 #include "shakti.h"
 #include "input.h"
 #include "mat_simd.h"
+#ifdef SHAKTI_HAVE_IEFS
+#include "iefs_format.h"
+#include "iefs_io.h"
+#include "iefs_map.h"
+#endif
 #if defined __has_include
 #if __has_include("shakti_version.h")
 #include "shakti_version.h"
@@ -535,14 +540,15 @@ void v_free(V *v) {
         v->rc = 1;
         return;
     }
+    int mapped = (v->owner_kind == V_OWNER_MAP_ALIAS);
     switch(v->t) {
     case T_STR: case T_ERR: free(v->s); break;
-    case T_IVEC: free(v->J); break;
-    case T_FVEC: free(v->F); break;
-    case T_BVEC: free(v->B); break;
-    case T_IMAT: free(v->J); break;
-    case T_FMAT: free(v->F); break;
-    case T_BMAT: free(v->B); break;
+    case T_IVEC: if (!mapped) free(v->J); break;
+    case T_FVEC: if (!mapped) free(v->F); break;
+    case T_BVEC: if (!mapped) free(v->B); break;
+    case T_IMAT: if (!mapped) free(v->J); break;
+    case T_FMAT: if (!mapped) free(v->F); break;
+    case T_BMAT: if (!mapped) free(v->B); break;
     case T_LIST:
         for(int64_t i=0;i<v->n;i++) v_free(v->L[i]);
         free(v->L); break;
@@ -559,7 +565,37 @@ void v_free(V *v) {
         break;
     default: break;
     }
+#ifdef SHAKTI_HAVE_IEFS
+    if (mapped && v->map_reg)
+        iefs_map_region_release((IefsMapRegion *)v->map_reg);
+#endif
     free(v);
+}
+
+int v_ensure_writable(V *v) {
+    if (!v)
+        return 0;
+    if (v->owner_kind != V_OWNER_MAP_ALIAS)
+        return 0;
+#ifdef SHAKTI_HAVE_IEFS
+    if (iefs_v_materialize(v) != 0)
+        return -1;
+    return (v->owner_kind == V_OWNER_MALLOC) ? 0 : -1;
+#else
+    return -1;
+#endif
+}
+
+/* Raise g_error and free assign temps when materializing a mapped column fails. */
+static V *assign_map_oom(V *a, V *b, V *c, V *d) {
+    g_error = 1;
+    if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+    g_error_val = v_err("iefs: out of memory materializing mapped column");
+    if (a) v_free(a);
+    if (b) v_free(b);
+    if (c) v_free(c);
+    if (d) v_free(d);
+    return v_nil();
 }
 int fn_ast_store(Node *n) {
     if(fn_ast_n >= MAX_FN) { fprintf(stderr,"too many functions\n"); exit(1); }
@@ -4642,7 +4678,16 @@ V *eval(Node *n, Env *e) {
         V *from;
         if (from0->t == T_STR) {
             V *proj = select_load_projection(n);
-            from = table_load(from0->s, proj);
+            size_t plen = strlen(from0->s);
+#ifdef SHAKTI_HAVE_IEFS
+            if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
+                (void)proj;
+                from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+            } else
+#endif
+            {
+                from = table_load(from0->s, proj);
+            }
             if (proj) {
                 v_free(proj);
             }
@@ -4664,27 +4709,87 @@ V *eval(Node *n, Env *e) {
     case N_UPDATE: {
         V *sql_err = require_sql(e);
         P(sql_err,sql_err)
-        V *from = eval(n->ch[0], e);
-        P(from->t == T_ERR,from)
+        V *from0 = eval(n->ch[0], e);
+        P(from0->t == T_ERR,from0)
+        char *iefs_path = NULL;
+        V *from = from0;
+#ifdef SHAKTI_HAVE_IEFS
+        if (from0->t == T_STR) {
+            size_t plen = strlen(from0->s);
+            if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
+                iefs_path = strdup(from0->s);
+                from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                v_free(from0);
+                if (from->t == T_ERR) {
+                    free(iefs_path);
+                    return from;
+                }
+            }
+        }
+#endif
         V *assignments = eval_update_cols(n->ch[1], from, e);
-        P(assignments->t == T_ERR,(v_free(from),assignments))
+        if (assignments->t == T_ERR) {
+            free(iefs_path);
+            v_free(from);
+            return assignments;
+        }
         V *where = eval_with_table_columns(from, n->ch[3], e);
         V *r = table_sql_update(from, assignments, where);
+#ifdef SHAKTI_HAVE_IEFS
+        if (r && r->t != T_ERR && iefs_path) {
+            char err[256];
+            err[0] = 0;
+            if (iefs_store_write(r, iefs_path, IEFS_IO_AUTO, err, sizeof err) != 0) {
+                const char *e_msg = iefs_last_error();
+                v_free(r);
+                r = v_err(e_msg && e_msg[0] ? e_msg : (err[0] ? err : "iefs save failed"));
+            }
+        }
+#endif
         if(r && r->t != T_ERR && n->ch[0] && n->ch[0]->type == N_NAME)
             env_update(e, n->ch[0]->sval, r);
+        free(iefs_path);
         v_free(from); v_free(assignments); v_free(where);
         return r;
     }
     case N_DELETE: {
         V *sql_err = require_sql(e);
         P(sql_err,sql_err)
-        V *from = eval(n->ch[0], e);
-        P(from->t == T_ERR,from)
+        V *from0 = eval(n->ch[0], e);
+        P(from0->t == T_ERR,from0)
+        char *iefs_path = NULL;
+        V *from = from0;
+#ifdef SHAKTI_HAVE_IEFS
+        if (from0->t == T_STR) {
+            size_t plen = strlen(from0->s);
+            if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
+                iefs_path = strdup(from0->s);
+                from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                v_free(from0);
+                if (from->t == T_ERR) {
+                    free(iefs_path);
+                    return from;
+                }
+            }
+        }
+#endif
         V *cols = eval_select_cols(n->ch[1], e);
         V *where = eval_with_table_columns(from, n->ch[3], e);
         V *r = table_sql_delete(from, cols, where);
+#ifdef SHAKTI_HAVE_IEFS
+        if (r && r->t != T_ERR && iefs_path) {
+            char err[256];
+            err[0] = 0;
+            if (iefs_store_write(r, iefs_path, IEFS_IO_AUTO, err, sizeof err) != 0) {
+                const char *e_msg = iefs_last_error();
+                v_free(r);
+                r = v_err(e_msg && e_msg[0] ? e_msg : (err[0] ? err : "iefs save failed"));
+            }
+        }
+#endif
         if(r && r->t != T_ERR && n->ch[0] && n->ch[0]->type == N_NAME)
             env_update(e, n->ch[0]->sval, r);
+        free(iefs_path);
         v_free(from); v_free(cols); v_free(where);
         return r;
     }
@@ -5116,6 +5221,8 @@ V *eval(Node *n, Env *e) {
                     if (r < 0) r += obj->n;
                     if (c < 0) c += mat_cols(obj);
                     if (r >= 0 && r < obj->n && c >= 0 && c < mat_cols(obj)) {
+                        if (v_ensure_writable(obj) != 0)
+                            return assign_map_oom(obj, idx0, idx1, val);
                         if (obj->t == T_IMAT && val->t == T_INT)
                             obj->J[mat_idx(obj, r, c)] = val->j;
                         else if (obj->t == T_FMAT && (val->t == T_FLOAT || val->t == T_INT))
@@ -5147,10 +5254,21 @@ V *eval(Node *n, Env *e) {
                 if(i < 0) i += obj->n;
                 if(i >= 0 && i < obj->n) {
                     if(obj->t==T_LIST) { v_free(obj->L[i]); obj->L[i] = v_ref(val); }
-                    else if(obj->t==T_IVEC && val->t==T_INT) obj->J[i] = val->j;
-                    else if(obj->t==T_FVEC && (val->t==T_FLOAT||val->t==T_INT))
+                    else if(obj->t==T_IVEC && val->t==T_INT) {
+                        if (v_ensure_writable(obj) != 0)
+                            return assign_map_oom(obj, idx, val, NULL);
+                        obj->J[i] = val->j;
+                    } else if(obj->t==T_FVEC && (val->t==T_FLOAT||val->t==T_INT)) {
+                        if (v_ensure_writable(obj) != 0)
+                            return assign_map_oom(obj, idx, val, NULL);
                         obj->F[i] = val->t==T_FLOAT ? val->f : (double)val->j;
-                    else if(is_mat_t(obj->t) && target->nch == 2) {
+                    } else if(obj->t==T_BVEC && val->t==T_BOOL) {
+                        if (v_ensure_writable(obj) != 0)
+                            return assign_map_oom(obj, idx, val, NULL);
+                        obj->B[i] = val->b ? 1 : 0;
+                    } else if(is_mat_t(obj->t) && target->nch == 2) {
+                        if (v_ensure_writable(obj) != 0)
+                            return assign_map_oom(obj, idx, val, NULL);
                         int64_t cols = mat_cols(obj);
                         if(obj->t==T_IMAT && val->t==T_IVEC && val->n==cols)
                             memcpy(obj->J + mat_idx(obj, i, 0), val->J, (size_t)cols * 8);

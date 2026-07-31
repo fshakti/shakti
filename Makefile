@@ -275,8 +275,11 @@ ifeq ($(SHAKTI_IEFS),1)
 iefs_io.o: src/iefs_io.c src/iefs_io.h
 	$(CC) $(CFLAGS) -c -o $@ src/iefs_io.c
 
-iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/iefs_map.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_format.c
+
+iefs_map.o: src/iefs_map.c src/iefs_map.h src/iefs_format.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_map.c
 endif
 
 ifeq ($(UNAME_S),Darwin)
@@ -305,7 +308,7 @@ DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),dsp.o)
 STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),stem.o)
 PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),pdf.o)
 MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),midi.o)
-IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o)
+IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o iefs_map.o)
 
 shakti: $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
@@ -342,7 +345,7 @@ bench-pong: shakti
 	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_bench.ie
 
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o stem.o pdf.o midi.o iefs_io.o iefs_format.o shakti_jni.o *.tmp *.plist
+	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o stem.o pdf.o midi.o iefs_io.o iefs_format.o iefs_map.o shakti_jni.o *.tmp *.plist
 	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
 	rm -rf build/ shakti/ *.dSYM shakti.zip $(BUILD)/analyze
 

@@ -3,12 +3,15 @@
 #
 #   import iefs
 #   iefs.save(x, "data.iefs")
-#   y : iefs.load("data.iefs")
-#   iefs.save(x, "big.iefs", 1)    # force O_DIRECT on Linux when available
-#   iefs.save(x, "small.iefs", 0)  # force buffered
+#   y : iefs.load("data.iefs")          # full read + CRC + owned copy
+#   z : iefs.map("data.iefs")           # mmap, skip CRC, alias buffers
+#   z : iefs.map("data.iefs", pages:"thp")
+#   iefs.save(x, "big.iefs", 1)         # force O_DIRECT on Linux when available
+#   iefs.save(x, "small.iefs", 0)       # force buffered
 #   print(iefs.direct_available())
 #
 # Also reachable via global save/load when the path ends in .iefs.
+# SQL `select … from "….iefs"` opens via map (not CRC load).
 # Env: SHAKTI_IEFS_DIRECT=0|1, SHAKTI_IEFS_DIRECT_MIN=<bytes>
 # (ISOLDE_IEFS_* still accepted as aliases.)
 
@@ -19,6 +22,9 @@ def save(x, path, direct:-1):
 
 def load(path):
     return iefs_load(path)
+
+def map(path, pages:"thp"):
+    return iefs_map(path, pages)
 
 def direct_available():
     return iefs_direct_available()
