@@ -36,7 +36,7 @@ export SHAKTI_LIB=$PWD/lib
 ```
 
 `make prod-speed` enables `-O3` plus host CPU tuning (`-mcpu=native` on
-arm64 / Apple Silicon, including M5; `-march=x86-64-v3` / AVX2 on x86-64).
+arm64 / Apple Silicon, including M5; `-march=x86-64-v2` on x86-64).
 For a redistributable arm64 binary, use `SHAKTI_PORTABLE_CPU=1` (`-mcpu=apple-m4`;
 current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make prod-size` optimizes for size.

@@ -15,12 +15,6 @@
 #ifndef SHAKTI_BIN_OMP_MAX_THREADS
 #define SHAKTI_BIN_OMP_MAX_THREADS 16
 #endif
-#if defined(__x86_64__) && defined(__AVX2__)
-#include <immintrin.h>
-#define SHAKTI_USE_AVX2 1
-#else
-#define SHAKTI_USE_AVX2 0
-#endif
 #if defined(__aarch64__)
 #include <arm_neon.h>
 #endif
@@ -39,75 +33,6 @@ static inline int isl_vec_omp_threads(int64_t ne) {
 #else
 static inline int isl_vec_omp_threads(int64_t ne) { (void)ne; return 1; }
 #endif
-
-#if SHAKTI_USE_AVX2
-static inline double hsum256(__m256d v) {
-    __m128d lo = _mm256_castpd256_pd128(v);
-    __m128d hi = _mm256_extractf128_pd(v, 1);
-    __m128d s = _mm_add_pd(lo, hi);
-    s = _mm_add_pd(s, _mm_unpackhi_pd(s, s));
-    return _mm_cvtsd_f64(s);
-}
-
-static double sum_f64_avx2(const double *d, int64_t n) {
-    double r = 0;
-#ifdef _OPENMP
-    #pragma omp parallel reduction(+:r)
-#endif
-    {
-#ifdef _OPENMP
-        int tid = omp_get_thread_num(), nt = omp_get_num_threads();
-        int64_t chunk = (n + nt - 1) / nt;
-        int64_t start = (int64_t)tid * chunk;
-        int64_t len = (start + chunk > n) ? (n - start) : chunk;
-        const double *ptr = d + start;
-#else
-        int64_t len = n;
-        const double *ptr = d;
-#endif
-        if (len > 0) {
-            __m256d sum = _mm256_setzero_pd();
-            int64_t i = 0;
-            for (; i + 4 <= len; i += 4)
-                sum = _mm256_add_pd(sum, _mm256_loadu_pd(ptr + i));
-            double tsum = hsum256(sum);
-            for (; i < len; i++) tsum += ptr[i];
-            r += tsum;
-        }
-    }
-    return r;
-}
-
-static double dot_f64_avx2(const double *a, const double *b, int64_t n) {
-    double r = 0;
-#ifdef _OPENMP
-    #pragma omp parallel reduction(+:r)
-#endif
-    {
-#ifdef _OPENMP
-        int tid = omp_get_thread_num(), nt = omp_get_num_threads();
-        int64_t chunk = (n + nt - 1) / nt;
-        int64_t start = (int64_t)tid * chunk;
-        int64_t len = (start + chunk > n) ? (n - start) : chunk;
-        const double *pa = a + start, *pb = b + start;
-#else
-        int64_t len = n;
-        const double *pa = a, *pb = b;
-#endif
-        if (len > 0) {
-            __m256d sum = _mm256_setzero_pd();
-            int64_t i = 0;
-            for (; i + 4 <= len; i += 4)
-                sum = _mm256_fmadd_pd(_mm256_loadu_pd(pa + i),
-                                      _mm256_loadu_pd(pb + i), sum);
-            double tsum = hsum256(sum);
-            for (; i < len; i++) tsum += pa[i] * pb[i];
-            r += tsum;
-        }
-    }
-    return r;
-}
-#endif /* SHAKTI_USE_AVX2 */
 
 #if defined(__aarch64__)
 static double sum_f64_neon(const double *d, int64_t n) {
@@ -133,9 +58,7 @@ static double dot_f64_neon(const double *a, const double *b, int64_t n) {
 
 double shakti_sum_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
-#if SHAKTI_USE_AVX2
-    return sum_f64_avx2(d, n);
-#elif defined(__aarch64__)
+#if defined(__aarch64__)
     if (n >= ISL_OMP_VEC_MIN) {
         double r = 0;
 #ifdef _OPENMP
@@ -164,85 +87,9 @@ double shakti_sum_f64(const double *d, int64_t n) {
 #endif
 }
 
-#if SHAKTI_USE_AVX2
-static inline double hmin256(__m256d v) {
-    __m128d lo = _mm256_castpd256_pd128(v);
-    __m128d hi = _mm256_extractf128_pd(v, 1);
-    __m128d m = _mm_min_pd(lo, hi);
-    m = _mm_min_pd(m, _mm_unpackhi_pd(m, m));
-    return _mm_cvtsd_f64(m);
-}
-static inline double hmax256(__m256d v) {
-    __m128d lo = _mm256_castpd256_pd128(v);
-    __m128d hi = _mm256_extractf128_pd(v, 1);
-    __m128d m = _mm_max_pd(lo, hi);
-    m = _mm_max_pd(m, _mm_unpackhi_pd(m, m));
-    return _mm_cvtsd_f64(m);
-}
-static double min_f64_avx2(const double *d, int64_t n) {
-    double r = d[0];
-#ifdef _OPENMP
-    #pragma omp parallel reduction(min:r)
-#endif
-    {
-#ifdef _OPENMP
-        int tid = omp_get_thread_num(), nt = omp_get_num_threads();
-        int64_t chunk = (n + nt - 1) / nt;
-        int64_t start = (int64_t)tid * chunk;
-        int64_t len = (start + chunk > n) ? (n - start) : chunk;
-        const double *ptr = d + start;
-#else
-        int64_t len = n;
-        const double *ptr = d;
-#endif
-        if (len > 0) {
-            __m256d vmin = _mm256_set1_pd(ptr[0]);
-            int64_t i = 0;
-            for (; i + 4 <= len; i += 4)
-                vmin = _mm256_min_pd(vmin, _mm256_loadu_pd(ptr + i));
-            double t = hmin256(vmin);
-            for (; i < len; i++) if (ptr[i] < t) t = ptr[i];
-            if (t < r) r = t;
-        }
-    }
-    return r;
-}
-static double max_f64_avx2(const double *d, int64_t n) {
-    double r = d[0];
-#ifdef _OPENMP
-    #pragma omp parallel reduction(max:r)
-#endif
-    {
-#ifdef _OPENMP
-        int tid = omp_get_thread_num(), nt = omp_get_num_threads();
-        int64_t chunk = (n + nt - 1) / nt;
-        int64_t start = (int64_t)tid * chunk;
-        int64_t len = (start + chunk > n) ? (n - start) : chunk;
-        const double *ptr = d + start;
-#else
-        int64_t len = n;
-        const double *ptr = d;
-#endif
-        if (len > 0) {
-            __m256d vmax = _mm256_set1_pd(ptr[0]);
-            int64_t i = 0;
-            for (; i + 4 <= len; i += 4)
-                vmax = _mm256_max_pd(vmax, _mm256_loadu_pd(ptr + i));
-            double t = hmax256(vmax);
-            for (; i < len; i++) if (ptr[i] > t) t = ptr[i];
-            if (t > r) r = t;
-        }
-    }
-    return r;
-}
-#endif /* SHAKTI_USE_AVX2 */
-
 double shakti_min_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
     if (n == 1) return d[0];
-#if SHAKTI_USE_AVX2
-    return min_f64_avx2(d, n);
-#else
     double r = d[0];
 #ifdef _OPENMP
     int nt = isl_vec_omp_threads(n);
@@ -250,15 +97,11 @@ double shakti_min_f64(const double *d, int64_t n) {
 #endif
     for (int64_t i = 1; i < n; i++) if (d[i] < r) r = d[i];
     return r;
-#endif
 }
 
 double shakti_max_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
     if (n == 1) return d[0];
-#if SHAKTI_USE_AVX2
-    return max_f64_avx2(d, n);
-#else
     double r = d[0];
 #ifdef _OPENMP
     int nt = isl_vec_omp_threads(n);
@@ -266,7 +109,6 @@ double shakti_max_f64(const double *d, int64_t n) {
 #endif
     for (int64_t i = 1; i < n; i++) if (d[i] > r) r = d[i];
     return r;
-#endif
 }
 
 int64_t shakti_min_i64(const int64_t *d, int64_t n) {
@@ -293,9 +135,7 @@ int64_t shakti_max_i64(const int64_t *d, int64_t n) {
 
 double shakti_dot_f64(const double *a, const double *b, int64_t n) {
     if (n <= 0) return 0.0;
-#if SHAKTI_USE_AVX2
-    return dot_f64_avx2(a, b, n);
-#elif defined(__aarch64__)
+#if defined(__aarch64__)
     if (n >= ISL_OMP_VEC_MIN) {
         double r = 0;
 #ifdef _OPENMP
