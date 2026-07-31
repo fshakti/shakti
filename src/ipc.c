@@ -809,7 +809,7 @@ V *bi_ipc_shm_open(V **a, int n) {
     int nn = snprintf(name, sizeof name, "/shakti_%s", a[0]->s);
     P(nn < 0 || (size_t)nn >= sizeof name, v_err("ipc_shm_open: name too long"))
     shm_unlink(name);
-    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0666);
+    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0) return v_err("ipc_shm_open: shm_open failed");
     if (ftruncate(fd, (off_t)size) != 0) {
         close(fd);

@@ -221,7 +221,7 @@ int iefs_io_write_atomic(const char *path, const unsigned char *buf, size_t len,
     int fd = -1;
 #if defined(__linux__) && defined(O_DIRECT)
     if (use_direct) {
-        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, 0666);
+        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, 0600);
         if (fd < 0) {
             /* Fall back to buffered if filesystem rejects O_DIRECT. */
             use_direct = 0;
@@ -229,7 +229,7 @@ int iefs_io_write_atomic(const char *path, const unsigned char *buf, size_t len,
     }
 #endif
     if (fd < 0) {
-        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC, 0666);
+        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC, 0600);
         if (fd < 0) {
             set_errf(err, err_cap, "iefs open temp", errno);
             return -1;

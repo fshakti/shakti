@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -108,8 +109,94 @@ static int rest_has_ctl(const char *s) {
 
 /* Only allow real HTTP(S) URLs. This also prevents a leading '-' from being
  * interpreted by curl as an option, and blocks file://, etc. */
+static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
+    if (!sa) return 1;
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *sin4 = (const struct sockaddr_in *)sa;
+        uint32_t a = ntohl(sin4->sin_addr.s_addr);
+        if ((a & 0xff000000u) == 0x7f000000u) return 1; /* 127/8 */
+        if ((a & 0xff000000u) == 0x0a000000u) return 1; /* 10/8 */
+        if ((a & 0xfff00000u) == 0xac100000u) return 1; /* 172.16/12 */
+        if ((a & 0xffff0000u) == 0xc0a80000u) return 1; /* 192.168/16 */
+        if ((a & 0xffff0000u) == 0xa9fe0000u) return 1; /* 169.254/16 */
+        if ((a & 0xff000000u) == 0x00000000u) return 1; /* 0/8 */
+        return 0;
+    }
+#if defined(AF_INET6)
+    if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)sa;
+        const unsigned char *b = in6->sin6_addr.s6_addr;
+        int zero = 1;
+        for (int i = 0; i < 15; i++) if (b[i]) { zero = 0; break; }
+        if (zero && (b[15] == 0 || b[15] == 1)) return 1; /* :: / ::1 */
+        if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return 1; /* fe80::/10 */
+        if ((b[0] & 0xfe) == 0xfc) return 1; /* fc00::/7 */
+        /* IPv4-mapped */
+        int mapped = 1;
+        for (int i = 0; i < 10; i++) if (b[i]) { mapped = 0; break; }
+        if (mapped && b[10] == 0xff && b[11] == 0xff) {
+            struct sockaddr_in v4;
+            memset(&v4, 0, sizeof v4);
+            v4.sin_family = AF_INET;
+            memcpy(&v4.sin_addr, b + 12, 4);
+            return rest_host_is_blocked_ip((struct sockaddr *)&v4);
+        }
+    }
+#endif
+    return 0;
+}
+
+static int rest_extract_host(const char *url, char *host, size_t host_cap) {
+    if (!url || !host || host_cap < 2) return 0;
+    const char *p = url;
+    if (!strncmp(p, "http://", 7)) p += 7;
+    else if (!strncmp(p, "https://", 8)) p += 8;
+    else return 0;
+    size_t i = 0;
+    while (p[i] && p[i] != '/' && p[i] != ':' && p[i] != '?' && p[i] != '#' && i + 1 < host_cap) {
+        host[i] = p[i];
+        i++;
+    }
+    host[i] = 0;
+    return i > 0;
+}
+
+static int rest_url_host_allowed(const char *url) {
+    char host[256];
+    if (!rest_extract_host(url, host, sizeof host)) return 0;
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res) return 0;
+    int blocked = 0;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        if (rest_host_is_blocked_ip(ai->ai_addr)) { blocked = 1; break; }
+    }
+    freeaddrinfo(res);
+    return !blocked;
+}
+
+static int rest_token_host_ok(const char *url) {
+    const char *hosts = getenv("SHAKTI_REST_TOKEN_HOSTS");
+    if (!hosts || !hosts[0]) return 0; /* no allowlist → never auto-attach */
+    char host[256];
+    if (!rest_extract_host(url, host, sizeof host)) return 0;
+    char buf[1024];
+    snprintf(buf, sizeof buf, "%s", hosts);
+    for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        char *end = tok + strlen(tok);
+        while (end > tok && (end[-1] == ' ' || end[-1] == '\t')) *--end = 0;
+        if (!strcmp(tok, host)) return 1;
+    }
+    return 0;
+}
+
 static int rest_valid_url(const char *u) {
-    return u && (!strncmp(u, "http://", 7) || !strncmp(u, "https://", 8));
+    int ok = u && (!strncmp(u, "http://", 7) || !strncmp(u, "https://", 8));
+    if (ok && !rest_url_host_allowed(u)) ok = 0;
+    return ok;
 }
 
 /* Read a file fully, but never more than max_len bytes (0 = unlimited). Returns
@@ -281,6 +368,8 @@ static ssize_t rest_read_line(int fd, char *buf, size_t cap) {
         if (c == '\n') break;
     }
     buf[i] = 0;
+    if (i + 1 >= cap && (i == 0 || buf[i - 1] != '\n'))
+        return -1;
     return (ssize_t)i;
 }
 
@@ -328,7 +417,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     if (content_type && rest_has_ctl(content_type))
         return v_err("rest: invalid control character in content_type");
     if (!rest_valid_url(url))
-        return v_err("rest: url must start with http:// or https://");
+        return v_err("rest: url must be http(s) to a non-private host");
     if (!g_rest_temps_ok)
         return v_err("rest: temp file failed");
 
@@ -355,7 +444,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
 
     char auth_hdr[4200];
     auth_hdr[0] = 0;
-    if (g_rest_token[0])
+    if (g_rest_token[0] && rest_token_host_ok(url))
         snprintf(auth_hdr, sizeof auth_hdr, "Authorization: Bearer %s", g_rest_token);
 
     /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
@@ -444,6 +533,12 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
 static V *rest_do_listen(int port, const char *host) {
     if (port < 1 || port > 65535) return v_err("rest_listen: invalid port");
     if (!host || !host[0]) host = "127.0.0.1";
+    {
+        int loopback = !strcmp(host, "127.0.0.1") || !strcmp(host, "::1") || !strcmp(host, "localhost");
+        const char *allow = getenv("SHAKTI_REST_ALLOW_PUBLIC");
+        if (!loopback && !(allow && allow[0] == '1' && allow[1] == '\0'))
+            return v_err("rest_listen: non-loopback bind requires SHAKTI_REST_ALLOW_PUBLIC=1");
+    }
 
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return v_err("rest_listen: socket failed");
@@ -580,6 +675,8 @@ static V *rest_do_write(int conn_h, int status, const char *body, const char *co
     if (!conn || conn->kind != REST_KIND_CONN) return v_err("rest_write: invalid connection handle");
     if (!body) body = "";
     if (!content_type || !content_type[0]) content_type = "text/plain";
+    if (rest_has_ctl(content_type))
+        return v_err("rest_write: content_type has control characters");
 
     const char *reason = "OK";
     if (status == 201) reason = "Created";
