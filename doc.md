@@ -227,7 +227,7 @@ compares **already-built** `cc -O2` binaries (compile untimed) to Shakti.
 
 Fair peer for “language VM” cost is **CPython** (~parity on the same harness).
 Expect **gcc -O2** to win scalar micros by a wide margin: Shakti is an AST
-interpreter with bulk SIMD/OpenMP only on large vectors (`make prod-speed`).
+interpreter with bulk NEON/OpenMP only on large vectors (`make prod-speed`).
 Tips: emit `.ie` once for hot runs; repeated `./shakti file.c` uses a disk
 transpile cache under `~/.cache/shakti/transpile/` (disable with
 `SHAKTI_NO_TRANSPILE_CACHE=1`). Counting `while (i < N): …; i += 1` loops
@@ -581,7 +581,7 @@ print(sum(a * b))      # same math; allocates a * b first
 
 Large vector operations use OpenMP. `make prod-speed` enables `-O3` and
 native CPU tuning (`-mcpu=native` on arm64, including Apple Silicon M5;
-`-march=x86-64-v3` / AVX2 on x86-64). `SHAKTI_PORTABLE_CPU=1` uses `-mcpu=apple-m4` on
+`-march=x86-64-v2` on x86-64). `SHAKTI_PORTABLE_CPU=1` uses `-mcpu=apple-m4` on
 arm64 (clang does not yet expose `-mcpu=apple-m5` on current Xcode).
 With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
 For windowed VWAP / averages over many symbols, see [time-series indexes](#time-series-indexes).
@@ -631,9 +631,9 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 
 ### Performance
 
-On x86-64, `make prod-speed` enables AVX2 paths (`-march=x86-64-v3`) for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters. On arm64 (Apple Silicon), the same matrix operations use NEON; `prod-speed` passes `-mcpu=native` (M5 and other hosts) or `-mcpu=apple-m4` with `SHAKTI_PORTABLE_CPU=1` (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
+On x86-64, `make prod-speed` uses `-march=x86-64-v2` with scalar C (+ OpenMP) for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters. On arm64 (Apple Silicon), the same matrix operations use NEON; `prod-speed` passes `-mcpu=native` (M5 and other hosts) or `-mcpu=apple-m4` with `SHAKTI_PORTABLE_CPU=1` (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
-The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (AVX2/NEON when `prod-speed` enables those ISAs; `prod-speed` also retunes C and ObjC units with `-O3` and the arch flags above). There is no GPU backend in the standalone binary.
+The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (NEON on arm64; scalar+OpenMP on x86; `prod-speed` also retunes C and ObjC units with `-O3` and the arch flags above). There is no GPU backend in the standalone binary.
 
 OpenMP thread count affects short vector timings. Keep `OMP_NUM_THREADS`
 fixed when comparing local runs.

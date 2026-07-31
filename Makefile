@@ -388,7 +388,7 @@ else
     # exposes -mcpu=apple-m5.
     PROD_SPEED_ARCH := -mcpu=native
   else
-    PROD_SPEED_ARCH := -march=x86-64-v3
+    PROD_SPEED_ARCH := -march=x86-64-v2 -mtune=native
   endif
 endif
 PROD_SPEED_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -O3 -DNDEBUG $(PROD_RELEASE_CFLAGS) $(PROD_SPEED_ARCH)
