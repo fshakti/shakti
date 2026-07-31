@@ -775,6 +775,7 @@ static int asof_ascending_i64(V *v){
 }
 static V *asof_cell(V *col,int64_t row){
     if(row<0)return v_nil();
+    if(!col || row >= col->n) return v_nil();
     if(col->t==T_IVEC)return v_int(col->J[row]);
     if(col->t==T_FVEC)return v_float(col->F[row]);
     if(col->t==T_BVEC)return v_bool(col->B[row]);
@@ -786,13 +787,26 @@ static V *asof_gather_col(V *col,const int64_t *idx,int64_t n){
     int miss=0;
     for(int64_t i=0;i<n;i++)if(idx[i]<0){miss=1;break;}
     if(!miss&&col->t==T_IVEC){
-        V *r=v_ivec(n);for(int64_t i=0;i<n;i++)r->J[i]=col->J[idx[i]];return r;
+        V *r=v_ivec(n);for(int64_t i=0;i<n;i++){
+            if(idx[i]<0||idx[i]>=col->n){v_free(r);miss=1;break;}
+            r->J[i]=col->J[idx[i]];
+        }
+        if(!miss)return r;
+        /* fall through to list path */
     }
     if(!miss&&col->t==T_FVEC){
-        V *r=v_fvec(n);for(int64_t i=0;i<n;i++)r->F[i]=col->F[idx[i]];return r;
+        V *r=v_fvec(n);for(int64_t i=0;i<n;i++){
+            if(idx[i]<0||idx[i]>=col->n){v_free(r);miss=1;break;}
+            r->F[i]=col->F[idx[i]];
+        }
+        if(!miss)return r;
     }
     if(!miss&&col->t==T_BVEC){
-        V *r=v_bvec(n);for(int64_t i=0;i<n;i++)r->B[i]=col->B[idx[i]];return r;
+        V *r=v_bvec(n);for(int64_t i=0;i<n;i++){
+            if(idx[i]<0||idx[i]>=col->n){v_free(r);miss=1;break;}
+            r->B[i]=col->B[idx[i]];
+        }
+        if(!miss)return r;
     }
     V *r=v_list(n);
     for(int64_t i=0;i<n;i++)r->L[i]=asof_cell(col,idx[i]);
@@ -880,13 +894,12 @@ static int join_grow_idx(int64_t **lidx, int64_t **ridx, int64_t *cap, int64_t n
     size_t bytes = 0;
     if (__builtin_mul_overflow((size_t)ncap, sizeof(int64_t), &bytes)) return 0;
     int64_t *nl = realloc(*lidx, bytes);
-    int64_t *nr = realloc(*ridx, bytes);
-    if (!nl || !nr) {
-        if (nl && nl != *lidx) free(nl);
-        if (nr && nr != *ridx) free(nr);
-        return 0;
-    }
+    if (!nl) return 0;
+    /* Commit first buffer before attempting the second so a later failure
+     * never leaves *lidx dangling at a block already freed by realloc. */
     *lidx = nl;
+    int64_t *nr = realloc(*ridx, bytes);
+    if (!nr) return 0;
     *ridx = nr;
     *cap = ncap;
     return 1;

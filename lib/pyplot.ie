@@ -303,6 +303,8 @@ def _draw_series(lim):
         col : s["color"]
         if s["kind"] = "plot":
             n : len(s["x"])
+            if len(s["y"]) < n:
+                n : len(s["y"])
             if n > 1:
                 i : 0
                 while i < n - 1:
@@ -310,6 +312,8 @@ def _draw_series(lim):
                     i : i + 1
         if s["kind"] = "scatter":
             n : len(s["x"])
+            if len(s["y"]) < n:
+                n : len(s["y"])
             i : 0
             while i < n:
                 gfx.fill_circle(_sx(s["x"][i], lim), _sy(s["y"][i], lim), 3, col)
@@ -317,6 +321,8 @@ def _draw_series(lim):
         if s["kind"] = "bar":
             bw : _bar_width(s, lim)
             n : len(s["x"])
+            if len(s["y"]) < n:
+                n : len(s["y"])
             i : 0
             while i < n:
                 x0 : s["x"][i] - bw * 0.5

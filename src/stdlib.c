@@ -185,8 +185,20 @@ static void walk_paths_add(WalkPaths *wp, char *path) {
     }
     wp->paths[wp->n++] = path;
 }
+#if defined(SHAKTI_HAVE_DIRENT)
+static void walk_inner_paths_d(const char *base, WalkPaths *wp, int depth);
+#endif
 static void walk_inner_paths(const char *base, WalkPaths *wp) {
 #if defined(SHAKTI_HAVE_DIRENT)
+    walk_inner_paths_d(base, wp, 0);
+#else
+    (void)base;
+    (void)wp;
+#endif
+}
+#if defined(SHAKTI_HAVE_DIRENT)
+static void walk_inner_paths_d(const char *base, WalkPaths *wp, int depth) {
+    if (depth >= 64) return;
     DIR *d = opendir(base);
     Pv(!d)
     size_t bl = strlen(base);
@@ -202,23 +214,20 @@ static void walk_inner_paths(const char *base, WalkPaths *wp) {
         memcpy(path + bl + 1, e->d_name, nl + 1);
 #if defined(_DIRENT_HAVE_D_TYPE) || defined(DT_UNKNOWN)
         if (e->d_type == DT_DIR) {
-            walk_inner_paths(path, wp);
+            walk_inner_paths_d(path, wp, depth + 1);
         } else if (e->d_type == DT_UNKNOWN) {
             struct stat sb;
-            if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) walk_inner_paths(path, wp);
+            if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) walk_inner_paths_d(path, wp, depth + 1);
         }
 #else
         struct stat sb;
-        if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) walk_inner_paths(path, wp);
+        if (stat(path, &sb) == 0 && S_ISDIR(sb.st_mode)) walk_inner_paths_d(path, wp, depth + 1);
 #endif
         walk_paths_add(wp, path);
     }
     closedir(d);
-#else
-    (void)base;
-    (void)wp;
-#endif
 }
+#endif
 static void walk_inner(const char *base, V *out) {
 #if defined(SHAKTI_HAVE_DIRENT)
     WalkPaths wp = {0};

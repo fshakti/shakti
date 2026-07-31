@@ -75,8 +75,37 @@ def roles(guild_id):
 def members(guild_id, limit:100):
     return get("/guilds/" + str(guild_id) + "/members?limit=" + str(limit))
 
+def _urlencode(s):
+    # Minimal RFC3986 unreserved pass-through; everything else → %XX.
+    out : ""
+    i : 0
+    ss : str(s)
+    while i < len(ss):
+        c : ss[i]
+        o : ord(c)
+        ok : 0
+        if o >= 48:
+            if o <= 57:
+                ok : 1
+        if o >= 65:
+            if o <= 90:
+                ok : 1
+        if o >= 97:
+            if o <= 122:
+                ok : 1
+        if c = "-" or c = "_" or c = "." or c = "~":
+            ok : 1
+        if ok:
+            out : out + c
+        else:
+            # hex encode one byte
+            hexd : "0123456789ABCDEF"
+            out : out + "%" + hexd[o // 16] + hexd[o % 16]
+        i : i + 1
+    return out
+
 def search_members(guild_id, query, limit:10):
-    return get("/guilds/" + str(guild_id) + "/members/search?query=" + str(query) + "&limit=" + str(limit))
+    return get("/guilds/" + str(guild_id) + "/members/search?query=" + _urlencode(query) + "&limit=" + str(limit))
 
 def member(guild_id, user_id):
     return get("/guilds/" + str(guild_id) + "/members/" + str(user_id))
