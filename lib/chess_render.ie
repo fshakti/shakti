@@ -1,0 +1,271 @@
+# chess_render — board draw + click hit-tests
+# Layout fits Shakti default gfx framebuffer 960x540.
+# Pieces: Staunton recipes via gfx.fill_rect / fill_circle.
+
+import chess_core
+import chess_recipes
+
+CELL : 50
+ORIGIN_X : 20
+ORIGIN_Y : 12
+VIEW_W : 960
+VIEW_H : 540
+PIECE_SCALE : 0.78
+
+LIGHT : 0xeeeed2
+DARK : 0x769656
+SEL : 0xf6f669
+LEGAL : 0x2ecc71
+LAST : 0xcdd26a
+BG : 0x1a1a1a
+HUD : 0xf0e6d8
+ACCENT : 0xe8c547
+BTN : 0x2a2a3a
+BTN_HI : 0x3d5a80
+DIM : 0x8888aa
+SHADOW : 0x1a1a1a
+
+def in_rect(x, y, rx, ry, rw, rh):
+    if x < rx:
+        return 0
+    if y < ry:
+        return 0
+    if x >= rx + rw:
+        return 0
+    if y >= ry + rh:
+        return 0
+    return 1
+
+def cell_px(c):
+    return ORIGIN_X + c * CELL
+
+def cell_py(r):
+    return ORIGIN_Y + r * CELL
+
+def px_to_cell(x, y):
+    if x < ORIGIN_X or y < ORIGIN_Y:
+        return dict(r: -1, c: -1)
+    if x >= ORIGIN_X + 8 * CELL or y >= ORIGIN_Y + 8 * CELL:
+        return dict(r: -1, c: -1)
+    c : int((x - ORIGIN_X) / CELL)
+    r : int((y - ORIGIN_Y) / CELL)
+    return dict(r: r, c: c)
+
+def is_legal_sq(legals, r, c):
+    i : 0
+    while i < len(legals):
+        mv : legals[i]
+        if mv["tr"] = r and mv["tc"] = c:
+            return 1
+        i : i + 1
+    return 0
+
+def draw_rects(gfx, rects, ox, oy, scale, color_override):
+    i : 0
+    while i < len(rects):
+        r : rects[i]
+        rw : int(r["w"] * scale)
+        rh : int(r["h"] * scale)
+        rx : int(r["x"] * scale)
+        ry : int(r["y"] * scale)
+        if rw < 1:
+            rw : 1
+        if rh < 1:
+            rh : 1
+        col : r["color"]
+        if color_override != 0:
+            col : color_override
+        gfx.fill_rect(ox + rx, oy + ry, rw, rh, col)
+        i : i + 1
+
+def draw_circles(gfx, circles, ox, oy, scale, color_override):
+    i : 0
+    while i < len(circles):
+        c : circles[i]
+        cx : int(c["cx"] * scale)
+        cy : int(c["cy"] * scale)
+        rad : int(c["r"] * scale)
+        if rad < 1:
+            rad : 1
+        col : c["color"]
+        if color_override != 0:
+            col : color_override
+        gfx.fill_circle(ox + cx, oy + cy, rad, col)
+        i : i + 1
+
+def draw_piece(gfx, px, py, piece, scale):
+    rec : chess_recipes.recipe_for(piece)
+    # center 64-unit recipe in cell
+    ox : px + int((CELL + (0 - chess_recipes.UNIT * scale)) / 2)
+    oy : py + int((CELL + (0 - chess_recipes.UNIT * scale)) / 2)
+    # drop shadow
+    draw_rects(gfx, rec["rects"], ox + 2, oy + 3, scale, SHADOW)
+    draw_circles(gfx, rec["circles"], ox + 2, oy + 3, scale, SHADOW)
+    draw_rects(gfx, rec["rects"], ox, oy, scale, 0)
+    draw_circles(gfx, rec["circles"], ox, oy, scale, 0)
+
+def draw_piece_centered(gfx, cx, cy, piece, scale):
+    # draw with recipe center at (cx, cy)
+    half : int(chess_recipes.UNIT * scale / 2)
+    ox : cx + (0 - half)
+    oy : cy + (0 - half)
+    rec : chess_recipes.recipe_for(piece)
+    draw_rects(gfx, rec["rects"], ox + 2, oy + 3, scale, SHADOW)
+    draw_circles(gfx, rec["circles"], ox + 2, oy + 3, scale, SHADOW)
+    draw_rects(gfx, rec["rects"], ox, oy, scale, 0)
+    draw_circles(gfx, rec["circles"], ox, oy, scale, 0)
+
+def draw_board(gfx, st):
+    board : st["board"]
+    scale : CELL * PIECE_SCALE / chess_recipes.UNIT
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            col : LIGHT
+            if (r + c) % 2 = 1:
+                col : DARK
+            x : cell_px(c)
+            y : cell_py(r)
+            gfx.fill_rect(x, y, CELL, CELL, col)
+            if st["selected_r"] = r and st["selected_c"] = c:
+                gfx.fill_rect(x, y, CELL, 4, SEL)
+                gfx.fill_rect(x, y + CELL + (-4), CELL, 4, SEL)
+                gfx.fill_rect(x, y, 4, CELL, SEL)
+                gfx.fill_rect(x + CELL + (-4), y, 4, CELL, SEL)
+            if is_legal_sq(st["legal"], r, c) = 1:
+                gfx.fill_circle(x + CELL / 2, y + CELL / 2, 8, LEGAL)
+            p : board[r, c]
+            # hide origin square piece while dragging
+            if st["drag"] = 1 and st["selected_r"] = r and st["selected_c"] = c:
+                p : 0
+            if p != 0:
+                draw_piece(gfx, x, y, p, scale)
+            c : c + 1
+        r : r + 1
+    # floating dragged piece under cursor
+    if st["drag"] = 1 and st["drag_piece"] != 0:
+        draw_piece_centered(gfx, st["drag_x"], st["drag_y"], st["drag_piece"], scale * 1.05)
+    # file / rank labels
+    files : "abcdefgh"
+    i : 0
+    while i < 8:
+        gfx.text(cell_px(i) + 18, ORIGIN_Y + 8 * CELL + 4, files[i], DIM, 1)
+        gfx.text(ORIGIN_X + (-14), cell_py(i) + 16, str(8 + (0 - i)), DIM, 1)
+        i : i + 1
+
+def status_text(st):
+    if st["status"] = chess_core.STATUS_MATE:
+        if st["turn"] = 1:
+            return "CHECKMATE — Black wins"
+        return "CHECKMATE — White wins"
+    if st["status"] = chess_core.STATUS_STALE:
+        return "STALEMATE"
+    side : "White"
+    if st["turn"] = -1:
+        side : "Black"
+    if st["status"] = chess_core.STATUS_CHECK:
+        return side + " to move — CHECK"
+    if st["ai_pending"] = 1:
+        return "Black thinking..."
+    return side + " to move"
+
+def draw_hud(gfx, st):
+    hx : ORIGIN_X + 8 * CELL + 20
+    gfx.text(hx, 40, "ISOLDE CHESS", ACCENT, 2)
+    gfx.text(hx, 80, status_text(st), HUD, 2)
+    mode : "Human vs AI"
+    if st["mode"] = chess_core.MODE_HUMAN:
+        mode : "Two Player"
+    gfx.text(hx, 120, mode, DIM, 2)
+    gfx.text(hx, 160, "Esc = menu", DIM, 1)
+    if st["status"] = chess_core.STATUS_MATE or st["status"] = chess_core.STATUS_STALE:
+        gfx.fill_rect(hx, 200, 200, 44, BTN_HI)
+        gfx.text(hx + 24, 212, "REMATCH", HUD, 2)
+
+def rematch_rect():
+    return dict(x: ORIGIN_X + 8 * CELL + 20, y: 200, w: 200, h: 44)
+
+def promo_buttons():
+    base_x : ORIGIN_X
+    base_y : ORIGIN_Y + 8 * CELL + 22
+    types : [chess_core.Q, chess_core.R, chess_core.B, chess_core.N]
+    out : []
+    i : 0
+    while i < 4:
+        out.append(dict(
+            x: base_x + i * 70,
+            y: base_y,
+            w: 64,
+            h: 36,
+            ptype: types[i]
+        ))
+        i : i + 1
+    return out
+
+def draw_promo(gfx, st):
+    if st["promo"] = 0:
+        return
+    gfx.text(ORIGIN_X, ORIGIN_Y + 8 * CELL + 6, "Promote:", ACCENT, 2)
+    btns : promo_buttons()
+    scale : 36 * 0.9 / chess_recipes.UNIT
+    i : 0
+    while i < len(btns):
+        b : btns[i]
+        gfx.fill_rect(b["x"], b["y"], b["w"], b["h"], BTN_HI)
+        # show piece icon in the promoting side's colors
+        draw_piece(gfx, b["x"] + 7, b["y"] + (-6), b["ptype"] * st["turn"], scale)
+        i : i + 1
+
+def draw_play(gfx, st):
+    gfx.clear(BG)
+    draw_board(gfx, st)
+    draw_hud(gfx, st)
+    draw_promo(gfx, st)
+
+def title_buttons():
+    return [
+        dict(x: 280, y: 200, w: 400, h: 56, label: "Human vs AI", mode: chess_core.MODE_AI),
+        dict(x: 280, y: 280, w: 400, h: 56, label: "Two Player", mode: chess_core.MODE_HUMAN),
+        dict(x: 280, y: 360, w: 400, h: 56, label: "Quit", mode: -1)
+    ]
+
+def draw_title(gfx):
+    gfx.clear(BG)
+    gfx.text(300, 80, "SHAKTI CHESS", ACCENT, 4)
+    gfx.text(280, 140, "Staunton pieces  ·  minimax AI", DIM, 2)
+    # preview row of white pieces (fits under Quit within 540p)
+    types : [chess_core.K, chess_core.Q, chess_core.R, chess_core.B, chess_core.N, chess_core.P]
+    scale : 40 * 0.85 / chess_recipes.UNIT
+    i : 0
+    while i < 6:
+        draw_piece(gfx, 280 + i * 56, 430, types[i], scale)
+        i : i + 1
+    btns : title_buttons()
+    i : 0
+    while i < len(btns):
+        b : btns[i]
+        gfx.fill_rect(b["x"], b["y"], b["w"], b["h"], BTN)
+        gfx.fill_rect(b["x"], b["y"], b["w"], 4, ACCENT)
+        gfx.text(b["x"] + 100, b["y"] + 14, b["label"], HUD, 3)
+        i : i + 1
+
+def hit_title(x, y):
+    btns : title_buttons()
+    i : 0
+    while i < len(btns):
+        b : btns[i]
+        if in_rect(x, y, b["x"], b["y"], b["w"], b["h"]) = 1:
+            return b["mode"]
+        i : i + 1
+    return -2
+
+def hit_promo(x, y):
+    btns : promo_buttons()
+    i : 0
+    while i < len(btns):
+        b : btns[i]
+        if in_rect(x, y, b["x"], b["y"], b["w"], b["h"]) = 1:
+            return b["ptype"]
+        i : i + 1
+    return 0
