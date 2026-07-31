@@ -184,6 +184,7 @@ extern V *bi_midi_poll(V**,in);
 #ifdef SHAKTI_HAVE_IEFS
 #include "iefs_format.h"
 #include "iefs_io.h"
+#include "iefs_map.h"
 #endif
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
@@ -285,7 +286,7 @@ static const char *BUILTINS[] = {
     "pdf_create","pdf_add_page","pdf_text_at","pdf_save","pdf_open","pdf_page_count","pdf_info","pdf_text","pdf_close",
     "midi_open","midi_close","midi_alive","midi_backend","midi_list","midi_connect","midi_disconnect",
     "midi_note_on","midi_note_off","midi_cc","midi_program","midi_raw","midi_poll",
-    "iefs_save","iefs_load","iefs_direct_available",
+    "iefs_save","iefs_load","iefs_map","iefs_direct_available",
     "eval",
     NULL
 };
@@ -2291,7 +2292,7 @@ BI0(midi_connect) BI0(midi_disconnect) BI0(midi_note_on) BI0(midi_note_off)
 BI0(midi_cc) BI0(midi_program) BI0(midi_raw) BI0(midi_poll)
 #endif
 #ifdef SHAKTI_HAVE_IEFS
-BI0(iefs_save) BI0(iefs_load) BI0(iefs_direct_available)
+BI0(iefs_save) BI0(iefs_load) BI0(iefs_map) BI0(iefs_direct_available)
 #endif
 BIE(eval)
 #ifdef SHAKTI_HAVE_IPC
@@ -2392,6 +2393,7 @@ static const BiEntry bi_tab[] = {
 #ifdef SHAKTI_HAVE_IEFS
     {"iefs_direct_available", bi_w_iefs_direct_available},
     {"iefs_load", bi_w_iefs_load},
+    {"iefs_map", bi_w_iefs_map},
     {"iefs_save", bi_w_iefs_save},
 #endif
     {"input", bi_w_input},

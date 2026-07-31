@@ -1826,10 +1826,17 @@ export SHAKTI_LIB=$PWD/lib
 ```ie
 import iefs
 iefs.save(x, "data.iefs")
-x2 : iefs.load("data.iefs")
-iefs.save(x, "big.iefs", 1)   # force O_DIRECT when available
+x2 : iefs.load("data.iefs")          # CRC-checked owned copy
+x3 : iefs.map("data.iefs")           # mmap; skip CRC; alias payloads
+x3 : iefs.map("data.iefs", pages:"thp")  # or "2m" / "1g" (HugePages must be reserved)
+iefs.save(x, "big.iefs", 1)          # force O_DIRECT when available
 print(iefs.direct_available())
 ```
+
+- `iefs.load` / global `load("….iefs")` — full read + CRC + malloc copy (unchanged).
+- `iefs.map` — `mmap` the file, skip CRC, alias contiguous vector/matrix payloads. Mutating an aliased value materializes a private copy first.
+- SQL `select … from "….iefs"` opens via **map**. `update` / `delete` from a `.iefs` path string open via map and write the result back with `iefs.save` semantics.
+- CSV / XML / TSV `load` paths are unchanged.
 
 Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, vectors, matrices, lists, dicts, tables. Functions, errors, and input streams are rejected.
 

@@ -76,6 +76,12 @@ struct Env {
     Env *parent;
 };
 
+/* Buffer ownership for vector/matrix payloads (J/F/B). */
+enum {
+    V_OWNER_MALLOC = 0,   /* free() buffers in v_free (default) */
+    V_OWNER_MAP_ALIAS     /* buffers alias an IefsMapRegion; munmap via map_reg */
+};
+
 struct V {
     int t;
     int rc;
@@ -93,6 +99,8 @@ struct V {
     uint32_t _ht_cap;
     V *params, *defaults;
     Env *closure;
+    int owner_kind;   /* V_OWNER_* */
+    void *map_reg;    /* IefsMapRegion* when V_OWNER_MAP_ALIAS */
 };
 
 enum {
@@ -350,6 +358,8 @@ V *eval_fn(Node *body, Env *e);
 int shakti_lang_main(int argc, char **argv);
 V *table_load(const char *path, V *columns_opt);
 int table_save(V *table, const char *path);
+/* Materialize MAP_ALIAS payloads before in-place mutation. 0 ok, -1 OOM. */
+int v_ensure_writable(V *v);
 V *method_call(V *obj, const char *method, V **args, int nargs, Env *e);
 V *builtin_call(const char *name, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e);
 V *table_sql_select(V *from, V *cols, V *by, V *where);
