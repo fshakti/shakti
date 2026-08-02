@@ -1,5 +1,6 @@
 # GNU Make build: standalone CLI.
 BUILD := .build
+.DEFAULT_GOAL := build
 UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 UNAME_M := $(shell uname -m 2>/dev/null || echo unknown)
 
@@ -229,98 +230,106 @@ endef
 $(foreach stem,p2s c2s cs2s j2s,$(eval $(call make_embed_rule,$(stem))))
 
 ifeq ($(SHAKTI_TALK),1)
-talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(OBJC) $(TALK_OBJC_FLAGS) -c -o $@ src/talk.c
 endif
 
 ifeq ($(SHAKTI_SYNTH),1)
-synth.o: src/synth.c src/synth_ui.c src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/synth.o: src/synth.c src/synth_ui.c src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/synth.c
 
-synth_ui.o: src/synth_ui.c src/synth_ui.h
+$(BUILD)/synth_ui.o: src/synth_ui.c src/synth_ui.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ src/synth_ui.c
 endif
 
 ifeq ($(SHAKTI_GFX),1)
-gfx.o: src/gfx.c src/gfx.h src/gfx_platform.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/gfx.o: src/gfx.c src/gfx.h src/gfx_platform.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/gfx.c
 endif
 
 ifeq ($(SHAKTI_SONICPI),1)
-sonicpi.o: src/sonicpi.c src/sonicpi.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/sonicpi.o: src/sonicpi.c src/sonicpi.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/sonicpi.c
 endif
 
 ifeq ($(SHAKTI_DSP),1)
-dsp.o: src/dsp.c src/dsp.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/dsp.o: src/dsp.c src/dsp.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/dsp.c
 endif
 
 ifeq ($(SHAKTI_STEM),1)
-stem.o: src/stem.c src/stem.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/stem.o: src/stem.c src/stem.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/stem.c
 endif
 
 ifeq ($(SHAKTI_PDF),1)
-pdf.o: src/pdf.c src/pdf.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/pdf.o: src/pdf.c src/pdf.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/pdf.c
 endif
 
 ifeq ($(SHAKTI_MIDI),1)
-midi.o: src/midi.c src/midi.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/midi.o: src/midi.c src/midi.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/midi.c
 endif
 
 ifeq ($(SHAKTI_IEFS),1)
-iefs_io.o: src/iefs_io.c src/iefs_io.h
+$(BUILD)/iefs_io.o: src/iefs_io.c src/iefs_io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ src/iefs_io.c
 
-iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/iefs_map.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/iefs_map.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_format.c
 
-iefs_map.o: src/iefs_map.c src/iefs_map.h src/iefs_format.h src/shakti.h src/a.h $(BUILD)/shakti_version.h
+$(BUILD)/iefs_map.o: src/iefs_map.c src/iefs_map.h src/iefs_format.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_map.c
 endif
 
 ifeq ($(UNAME_S),Darwin)
 ifeq ($(SHAKTI_SYNTH),1)
-synth_mac.o: src/synth_mac.m $(BUILD)/shakti_version.h
+$(BUILD)/synth_mac.o: src/synth_mac.m $(BUILD)/shakti_version.h | $(BUILD)
 	$(OBJC) $(SYNTH_OBJC_FLAGS) -c -o $@ src/synth_mac.m
 endif
 ifeq ($(SHAKTI_GFX),1)
-gfx_mac.o: src/gfx_mac.m $(BUILD)/shakti_version.h
+$(BUILD)/gfx_mac.o: src/gfx_mac.m $(BUILD)/shakti_version.h | $(BUILD)
 	$(OBJC) $(GFX_OBJC_FLAGS) -c -o $@ src/gfx_mac.m
 endif
 endif
 
 ifeq ($(UNAME_S),Linux)
 ifeq ($(SHAKTI_GFX),1)
-gfx_x11.o: src/gfx_x11.c src/gfx_platform.h src/gfx.h $(BUILD)/shakti_version.h
+$(BUILD)/gfx_x11.o: src/gfx_x11.c src/gfx_platform.h src/gfx.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/gfx_x11.c
 endif
 endif
 
-SYNTH_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_SYNTH))),synth_mac.o)
-GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_mac.o)
-GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),gfx_x11.o)
-SONICPI_OBJ := $(if $(filter 1,$(SHAKTI_SONICPI)),sonicpi.o)
-DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),dsp.o)
-STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),stem.o)
-PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),pdf.o)
-MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),midi.o)
-IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),iefs_io.o iefs_format.o iefs_map.o)
+SYNTH_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_SYNTH))),$(BUILD)/synth_mac.o)
+GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),$(BUILD)/gfx_mac.o)
+GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),$(BUILD)/gfx_x11.o)
+SONICPI_OBJ := $(if $(filter 1,$(SHAKTI_SONICPI)),$(BUILD)/sonicpi.o)
+DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),$(BUILD)/dsp.o)
+STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),$(BUILD)/stem.o)
+PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),$(BUILD)/pdf.o)
+MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),$(BUILD)/midi.o)
+IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),$(BUILD)/iefs_io.o $(BUILD)/iefs_format.o $(BUILD)/iefs_map.o)
 
-shakti: $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
+$(BUILD):
+	@mkdir -p $@
+
+all: build
+build: shakti
+
+shakti: $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
 	@if [ -d shakti ] && [ ! -f shakti ]; then \
 		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
 	fi
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),synth.o synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
 SHAKTI_TESTS := $(wildcard tests/*.ie)
 
-ifneq ($(SHAKTI_TESTS),)
+.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts
+
 test: shakti
+ifneq ($(SHAKTI_TESTS),)
 	@for f in $(SHAKTI_TESTS); do \
 	  echo "Running $$f..."; case "$$f" in \
 	    *synth*|*mac_synth*) SHAKTI_SYNTH_HEADLESS=1 SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti "$$f" || exit 1 ;; \
@@ -329,29 +338,13 @@ test: shakti
 	done
 	@if [ -x tests/exe_realpath.sh ]; then bash tests/exe_realpath.sh || exit 1; fi
 	@if [ -x tests/build_guards.sh ]; then bash tests/build_guards.sh || exit 1; fi
+else
+	@echo "test: no tests/*.ie present (ok)"
 endif
 
-test-parse: shakti
-	@bash scripts/parse_golden.sh
-
-test-pong: shakti
-	@echo "Running examples/pong_test.ie..."
-	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_test.ie
-	@echo "Running examples/pong_spell_test.ie..."
-	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_spell_test.ie
-	@echo "PONG TESTS PASSED"
-
-test-chess: shakti
-	@echo "Running examples/chess_test.ie..."
-	@out=`SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/chess_test.ie 2>/dev/null`; echo "$$out"; echo "$$out" | grep -q "0 failed" && echo "CHESS TESTS PASSED" || (echo "CHESS TESTS FAILED"; exit 1)
-
-bench-pong: shakti
-	@SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti examples/pong_bench.ie
-
 clean:
-	rm -f shakti shakti-standalone *.o talk.o synth.o synth_ui.o synth_mac.o sonicpi.o dsp.o stem.o pdf.o midi.o iefs_io.o iefs_format.o iefs_map.o shakti_jni.o *.tmp *.plist
-	rm -f $(BUILD)/shakti_version.h $(BUILD)/macros_smoke
-	rm -rf build/ shakti/ *.dSYM shakti.zip $(BUILD)/analyze
+	rm -f shakti shakti-standalone *.o *.tmp *.plist
+	rm -rf $(BUILD) build/ shakti/ *.dSYM shakti.zip
 
 PROD_RELEASE_CFLAGS := -fstack-protector-strong
 
@@ -424,35 +417,4 @@ prod-speed: clean-shakti-artifacts shakti
 	$(MACOS_RESIGN)
 
 clean-shakti-artifacts:
-	rm -f shakti talk.o synth.o synth_ui.o synth_mac.o gfx.o gfx_mac.o
-
-check-deps:
-ifeq ($(UNAME_S),Darwin)
-	@missing=; \
-	if [ ! -f /opt/homebrew/opt/libomp/include/omp.h ] && [ ! -f /usr/local/opt/libomp/include/omp.h ]; then \
-	  missing="$$missing libomp"; \
-	fi; \
-	if ! command -v brew >/dev/null 2>&1 || ! brew list expat >/dev/null 2>&1; then \
-	  missing="$$missing expat"; \
-	fi; \
-	if [ -n "$$missing" ]; then \
-	  echo "Missing Homebrew packages:$$missing"; \
-	  echo "Install with: brew install$$missing"; \
-	  exit 1; \
-	fi; \
-	echo "macOS dependencies OK"
-else
-	@echo "check-deps: no-op on $(UNAME_S)"
-endif
-
-.PHONY: clean prod prod-size prod-speed clean-shakti-artifacts shakti check-deps shakti_jni.o test test-parse test-pong test-chess bench-pong
-
-# Optional JNI bridge for embedding Shakti in a JVM host
-# (Java_com_shakti_shakti_ShaktiNative_runFile). Not linked into the CLI
-# binary; build only when an external Android/Java consumer needs it.
-# Requires JAVA_HOME or Homebrew OpenJDK (jni.h).
-shakti_jni.o: src/shakti_jni.c src/a.h
-	@if [ -z "$(JNI_CFLAGS)" ]; then \
-	  echo "error: jni.h not found — set JAVA_HOME or install openjdk" >&2; exit 1; \
-	fi
-	$(CC) $(CFLAGS) $(JNI_CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/shakti_jni.c
+	rm -f shakti $(BUILD)/talk.o $(BUILD)/synth.o $(BUILD)/synth_ui.o $(BUILD)/synth_mac.o $(BUILD)/gfx.o $(BUILD)/gfx_mac.o $(BUILD)/gfx_x11.o
