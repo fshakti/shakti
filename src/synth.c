@@ -561,10 +561,6 @@ void synth_core_handle_key(int key, int down) {
         synth_core_audio_unlock();
         return;
     }
-    if (!down) {
-        synth_core_audio_unlock();
-        return;
-    }
     if(key == 0xa3) key = '#'; // £ -> # for uk layout
     static const char *shift_knob = "!@#$%^&*";
     static const char *shift_idx  = "QWERTYUI";
@@ -572,8 +568,10 @@ void synth_core_handle_key(int key, int down) {
     const char *q;
     if((q=strchr(keyjam,key))) {
         int note = 64 + (q - keyjam);
-        unsigned char midi[] = { 0x90 + down, note, 64 };
+        unsigned char midi[] = { 0x90, note, down * 64 };
         midi_decode_bytes(midi, 3);
+
+    } else if (!down) {
 
     } else if((q=strchr(shift_knob,key))) {
         int i = q - shift_knob;
