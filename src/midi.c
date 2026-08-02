@@ -141,10 +141,7 @@ static V *midi_ev_dict(const MidiEv *ev) {
     return d;
 }
 
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((unused))
-#endif
-static void midi_decode_bytes(const unsigned char *data, int len) {
+void midi_decode_bytes(const unsigned char *data, int len) {
     if (len < 1) return;
     MidiEv ev;
     memset(&ev, 0, sizeof ev);
