@@ -21,6 +21,8 @@ V *bi_midi_program(V **a, int n);
 V *bi_midi_raw(V **a, int n);
 V *bi_midi_poll(V **a, int n);
 
+void midi_decode_bytes(const unsigned char *data, int len);
+
 #ifdef __cplusplus
 }
 #endif
