@@ -54,11 +54,15 @@ static int shakti_wants_banner(int argc, char **argv) {
     int quiet = 0, force = 0, has_c = 0, interactive = 0, has_script = 0;
     int r = 1;
     W(r<argc&&argv[r][0]=='-',{
+        if(!strcmp(argv[r],"--"))break;
+        if(shakti_flag_is(argv[r],"--help","-h")||shakti_flag_is(argv[r],"--version","-V"))return 0;
         if(shakti_flag_is(argv[r],"--quiet","-q"))quiet=1;
-        else if(!strcmp(argv[r],"--banner"))force=1;
-        else if(!strcmp(argv[r],"-c")&&r+1<argc){has_c=1;r+=2;continue;}
-        else if(!strcmp(argv[r],"-i")){interactive=1;r++;continue;}
+        else if(shakti_flag_is(argv[r],"--banner","-b"))force=1;
+        else if((shakti_flag_is(argv[r],"--command","-c"))&&r+1<argc){has_c=1;r+=2;continue;}
+        else if(shakti_flag_is(argv[r],"--interactive","-i")){interactive=1;r++;continue;}
+        else if(!strcmp(argv[r],"--parse-profile-iters")&&r+1<argc){r+=2;continue;}
         r++;})
+    if(r<argc&&!strcmp(argv[r],"--"))r++;
     if(r<argc)has_script=1;
     P(quiet,0)
     P(force,1)
@@ -71,7 +75,7 @@ static int shakti_wants_banner(int argc, char **argv) {
 static void shakti_strip_banner_flags(int *argc, char **argv) {
     int w=1,r;
     for(r=1;r<*argc;r++){
-        if(shakti_flag_is(argv[r],"--quiet","-q")||!strcmp(argv[r],"--banner"))continue;
+        if(shakti_flag_is(argv[r],"--quiet","-q")||shakti_flag_is(argv[r],"--banner","-b"))continue;
         argv[w++]=argv[r];}
     *argc=w;}
 int main(int argc, char **argv) {

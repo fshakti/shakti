@@ -6552,6 +6552,25 @@ static char *shakti_transpile_java(const char *java_src, const char *filename, E
                                      "__shakti_j2s__", "j2s");
 }
 #ifndef SHAKTI_NO_MAIN
+static void shakti_print_usage(FILE *out) {
+    fprintf(out,
+        "Usage:\n"
+        "  shakti [options] [script [args...]]\n"
+        "  shakti [options] -c|--command <code> [-i|--interactive]\n"
+        "  shakti\n"
+        "\n"
+        "Options:\n"
+        "  -h, --help                     Show this help and exit\n"
+        "  -V, --version                  Show version and exit\n"
+        "  -q, --quiet                    Suppress startup banner\n"
+        "  -b, --banner                   Force startup banner\n"
+        "  -c, --command <code>           Evaluate a code string\n"
+        "  -i, --interactive              Enter REPL after --command\n"
+        "      --parse-dump               Dump parse AST and exit\n"
+        "      --parse-profile            Microbench the parser and exit\n"
+        "      --parse-profile-iters <n>  Iterations for --parse-profile\n"
+        "      --                         End of options\n");
+}
 int shakti_lang_main(int argc, char **argv) {
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     {
@@ -6576,17 +6595,48 @@ int shakti_lang_main(int argc, char **argv) {
     int parse_profile = 0;
     int parse_profile_iters = 100000;
     while(i < argc && argv[i][0] == '-') {
-        if(!strcmp(argv[i], "-c") && i+1 < argc) {
+        if(!strcmp(argv[i], "--")) {
+            i++;
+            break;
+        } else if(!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            shakti_print_usage(stdout);
+            env_free(global);
+            return 0;
+        } else if(!strcmp(argv[i], "-V") || !strcmp(argv[i], "--version")) {
+            printf("shakti %s\n", SHAKTI_PKG_VERSION);
+            env_free(global);
+            return 0;
+        } else if(!strcmp(argv[i], "-c") || !strcmp(argv[i], "--command")) {
+            if(i+1 >= argc) {
+                fprintf(stderr, "shakti: option '%s' requires an argument\n", argv[i]);
+                shakti_print_usage(stderr);
+                env_free(global);
+                return 2;
+            }
             cmd = argv[++i];
-        } else if(!strcmp(argv[i], "-i")) {
+        } else if(!strcmp(argv[i], "-i") || !strcmp(argv[i], "--interactive")) {
             interactive = 1;
         } else if(!strcmp(argv[i], "--parse-dump")) {
             parse_dump = 1;
         } else if(!strcmp(argv[i], "--parse-profile")) {
             parse_profile = 1;
-        } else if(!strcmp(argv[i], "--parse-profile-iters") && i+1 < argc) {
+        } else if(!strcmp(argv[i], "--parse-profile-iters")) {
+            if(i+1 >= argc) {
+                fprintf(stderr, "shakti: option '%s' requires an argument\n", argv[i]);
+                shakti_print_usage(stderr);
+                env_free(global);
+                return 2;
+            }
             parse_profile_iters = atoi(argv[++i]);
             if (parse_profile_iters < 1) parse_profile_iters = 1;
+        } else if(!strcmp(argv[i], "-q") || !strcmp(argv[i], "--quiet") ||
+                  !strcmp(argv[i], "-b") || !strcmp(argv[i], "--banner")) {
+            /* Banner flags are handled in cli_main; ignore if still present. */
+        } else {
+            fprintf(stderr, "shakti: unknown option '%s'\n", argv[i]);
+            shakti_print_usage(stderr);
+            env_free(global);
+            return 2;
         }
         i++;
     }
