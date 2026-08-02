@@ -287,7 +287,7 @@ static void raw_after_first(void) {
 #endif
 
 static double now_ms(void) {
-    return (double)clock() / (double)(CLOCKS_PER_SEC / 1000);
+    return (double)clock() / ((double)CLOCKS_PER_SEC / 1000.0);
 }
 
 static void pump_synth(void) {
@@ -339,39 +339,21 @@ static int read_byte_timed(int timeout_ms, unsigned char *out) {
         Sleep(1);
     }
 #else
-    if (!is_tty()) {
-        fd_set fds;
-        struct timeval tv = {0, 0};
-        FD_ZERO(&fds);
-        FD_SET(STDIN_FILENO, &fds);
-        if (timeout_ms > 0) {
-            tv.tv_sec = timeout_ms / 1000;
-            tv.tv_usec = (timeout_ms % 1000) * 1000;
-        }
-        pump_synth();
-        if (select(STDIN_FILENO + 1, &fds, NULL, NULL, timeout_ms < 0 ? NULL : &tv) > 0 &&
-            FD_ISSET(STDIN_FILENO, &fds)) {
-            ssize_t n = read(STDIN_FILENO, out, 1);
-            return n > 0;
-        }
-        return 0;
+    fd_set fds;
+    struct timeval tv = {0, 0};
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    if (timeout_ms > 0) {
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
     }
-    double deadline = timeout_ms < 0 ? -1.0 : now_ms() + (double)timeout_ms;
-    for (;;) {
-        pump_synth();
-        fd_set fds;
-        struct timeval tv = {0, 16000};
-        FD_ZERO(&fds);
-        FD_SET(STDIN_FILENO, &fds);
-        int rc = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
-        if (rc > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
-            ssize_t n = read(STDIN_FILENO, out, 1);
-            if (n > 0) return 1;
-        }
-        if (rc < 0) return 0;
-        if (timeout_ms == 0) return 0;
-        if (deadline >= 0 && now_ms() >= deadline) return 0;
+    pump_synth();
+    if (select(STDIN_FILENO + 1, &fds, NULL, NULL, timeout_ms < 0 ? NULL : &tv) > 0 &&
+        FD_ISSET(STDIN_FILENO, &fds)) {
+        ssize_t n = read(STDIN_FILENO, out, 1);
+        return n > 0;
     }
+    return 0;
 #endif
 }
 
@@ -492,7 +474,6 @@ static void tty_drain(int timeout_ms) {
         raw_after_first();
 #endif
         if (!decode_vt_byte(c, pending, &pn)) {
-#ifdef _WIN32
             if (c == '\r' || c == '\n') {
                 char u[2] = {(char)c, 0};
                 input_note_stop_key(c == '\r' ? 0xff0d : c, 1, u);
@@ -507,7 +488,6 @@ static void tty_drain(int timeout_ms) {
                 emit_key((int)c, u, 1);
                 emit_key((int)c, u, 0);
             }
-#endif
         }
         if (timeout_ms == 0) continue;
     }
@@ -537,8 +517,7 @@ V *input_poll_ms(int ms) {
             pump_synth();
         }
     } else {
-        if (!g_in.own_gui)
-            tty_drain(0);
+        tty_drain(ms);
     }
     V *out = v_list(0);
     InputEvent ev;
@@ -632,23 +611,12 @@ V *input_stream_next(V *stream) {
 
 int input_hub_read_char(char *out) {
     input_hub_init();
-    if (g_in.active_streams == 0) {
-        InputEvent ev;
-        while (q_pop(&ev)) {
-            if (ev.kind == EV_CHAR && ev.utf8[0]) {
-                *out = ev.utf8[0];
-                return 1;
-            }
-        }
-        unsigned char c;
-        if (!read_byte_timed(-1, &c)) return 0;
-        *out = (char)c;
-        return 1;
-    }
     InputEvent ev;
-    if (q_pop(&ev)) {
-        *out = ev.utf8[0] ? ev.utf8[0] : (char)(ev.code & 0xff);
-        return 1;
+    while (q_pop(&ev)) {
+        if (ev.utf8[0]) {
+            *out = ev.utf8[0];
+            return 1;
+        }
     }
     unsigned char c;
     if (!read_byte_timed(-1, &c)) return 0;
