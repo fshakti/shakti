@@ -6247,7 +6247,11 @@ static void repl_print_runtime_doc(void) {
             continue;
         }
         if (in_code) {
+#if SHAKTI_HL
+            hl_render(line,n);putchar('\n');
+#else
             puts(line);
+#endif
             prev_blank = (n == 0);
             continue;
         }
@@ -6258,7 +6262,6 @@ static void repl_print_runtime_doc(void) {
             prev_blank = 1;
             continue;
         }
-        if (!prev_blank) putchar('\n');
         puts(line);
         prev_blank = 0;
     }
