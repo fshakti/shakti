@@ -6041,15 +6041,9 @@ static void hl_redraw(const char *prompt, const char *buf, int len, int pos) {
     else printf("\r");
     fflush(stdout);
 }
-#if defined(SHAKTI_HAVE_SYNTH)
 static int hl_read_char(char *c) {
     return input_hub_read_char(c);
 }
-#else
-static int hl_read_char(char *c) {
-    return input_hub_read_char(c);
-}
-#endif
 static char *hl_readline(const char *prompt) {
     static char buf[65536];
     int len=0, pos=0, hidx=hl_hlen;
@@ -6275,6 +6269,7 @@ static void run_repl(Env *e) {
 #endif
     enum { REPL_INPUT_CAP = 262144 };
     char input[REPL_INPUT_CAP];
+    atexit(input_hub_shutdown);
     for (;;) {
 #if SHAKTI_HL
         char *line = hl_readline("> ");
