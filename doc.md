@@ -5,6 +5,7 @@ Version **0.12.0**.
 ## Contents
 
 - [Examples index](#examples-index)
+- [Command-line interface](#command-line-interface)
 - [Syntax and builtins](#syntax-and-builtins)
 - [Time-series indexes](#time-series-indexes)
 - [Decorators](#decorators)
@@ -113,7 +114,31 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `ipc` | [IPC module](#ipc-module) |
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
+| CLI | [command-line interface](#command-line-interface) |
 | Time-series indexes | [time-series indexes](#time-series-indexes) |
+
+## Command-line interface
+
+```
+shakti [options] [script [args...]]
+shakti [options] -c|--command <code> [-i|--interactive]
+shakti
+```
+
+| Short | Long | Action |
+|-------|------|--------|
+| `-h` | `--help` | Usage; exit 0 |
+| `-V` | `--version` | Version; exit 0 |
+| `-q` | `--quiet` | No banner |
+| `-b` | `--banner` | Force banner |
+| `-c <code>` | `--command <code>` | Eval string |
+| `-i` | `--interactive` | REPL after command |
+| | `--parse-dump` | AST dump |
+| | `--parse-profile` | Parse microbench |
+| | `--parse-profile-iters <n>` | Iterations |
+| | `--` | End options |
+
+Unknown flags exit with status 2. A silent leading `run` argument is accepted for Android launchers only.
 
 ## Tests and benchmarks (local tree)
 
@@ -584,7 +609,7 @@ native CPU tuning (`-mcpu=native` on arm64, including Apple Silicon M5;
 `-march=x86-64-v2` on x86-64). `SHAKTI_PORTABLE_CPU=1` uses `-mcpu=apple-m4` on
 arm64 (clang does not yet expose `-mcpu=apple-m5` on current Xcode).
 With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
-For windowed VWAP / averages over many symbols, see [time-series indexes](#time-series-indexes).
+For windowed weighted averages over many keys, see [time-series indexes](#time-series-indexes).
 
 ## Matrices
 
@@ -743,7 +768,7 @@ delete from u where id = 2
 
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Prefer core `,` / `union` / `outer` table joins (see [Table joins](#table-joins----union--outer)); SQL `t1 join t2 on col` is not yet implemented.
 
-For high-throughput windowed VWAP / averages / exchange stats over dense symbol ids, prefer the [time-series indexes](#time-series-indexes) instead of a full SQL scan.
+For high-throughput windowed averages / range aggregates over dense keys, prefer the [time-series indexes](#time-series-indexes) instead of a full SQL scan.
 
 ## Modules
 
@@ -766,72 +791,76 @@ Index: [examples index](#examples-index).
 
 # Time-series indexes
 
-Core builtins (no `import`) for load-time prefix / sorted indexes over columnar `ivec` / `fvec` quote and trade data. Build the index **once** outside the timed query path; query with binary search over half-open `[t0, t1)` windows.
+Core builtins (no `import`) for load-time prefix / sorted indexes over columnar `ivec` / `fvec` data. Build the index **once** outside the timed query path; query with binary search over half-open `[t0, t1)` windows.
 
-Symbol / exchange ids must be dense nonnegative integers (`max_id ≤ row count`). Windows are half-open: include `t0`, exclude `t1`.
+Keys and group ids must be dense nonnegative integers (`max_id ≤ row count`). Windows are half-open: include `t0`, exclude `t1`.
 
-## Volume-weighted bid (`shakti_vwbid*`)
+## Weighted average (`wavg*`)
 
-Basket VWAP of bid × size over a time window:
+Σ(value·weight) / Σ(weight) for a key set over a time window:
 
 ```ie
-idx : shakti_vwbid_index(quote.sym_id, quote.time_ns, quote.bid, quote.bsize)
-vwap : shakti_vwbid(idx, basket, t0, t1)   # Σ(bid·bsize) / Σ(bsize); 0 if den=0
+idx : wavg_index(rows.key, rows.time, rows.value, rows.weight)
+avg : wavg(idx, keys, t0, t1)   # 0 if weight sum is 0
 ```
 
 | Builtin | Role |
 |---------|------|
-| `shakti_vwbid_index(sym_id, time_ns, bid, bsize)` | Sort by `(sym, time)`; return `[time, notional_prefix, bsize_prefix, bounds]` |
-| `shakti_vwbid(index, basket, t0, t1)` | Scalar VWAP for symbols in `basket` over `[t0, t1)` |
+| `wavg_index(key, time, value, weight)` | Sort by `(key, time)`; return `[time, product_prefix, weight_prefix, bounds]` |
+| `wavg(index, keys, t0, t1)` | Scalar weighted average for keys in `keys` over `[t0, t1)` |
 
-`bid` / `bsize` may be `fvec` or other numeric columns. The query does not reorder the caller’s basket. Prefer a pre-sorted basket to skip an internal sort.
+`value` / `weight` may be `fvec` or other numeric columns. The query does not reorder the caller’s key list. Prefer a pre-sorted key list to skip an internal sort.
 
-## Windowed average (`shakti_winavg*`)
+## Windowed average (`winavg*`)
 
-Per-symbol average of a numeric column over one or more windows (returns the **last** window’s grouped table):
-
-| Builtin | Role |
-|---------|------|
-| `shakti_winavg_index(sym_id, time_ns, size)` | Dense symbol starts + prefix sums/counts |
-| `shakti_winavg_query(index, basket, starts, window_ns)` | For each start in `starts`, average over `[start, start+window_ns)` |
-
-Result columns: `sym_id`, `avg_size`.
-
-## High bid (`shakti_hibid*`)
-
-Grouped symbol/time range-max bid over a basket:
+Per-key mean of a numeric column over one or more windows (returns the **last** window’s grouped table):
 
 | Builtin | Role |
 |---------|------|
-| `shakti_hibid_index(sym_id, time_ns, bid)` | Sort by `(sym, time)`; return `[time, bid, bounds]` |
-| `shakti_hibid(index, basket, t0, t1)` | `max(bid)` by `sym_id` for symbols in `basket` over `[t0, t1)` |
+| `winavg_index(key, time, value)` | Dense key starts + prefix sums/counts |
+| `winavg(index, keys, starts, window)` | For each start in `starts`, mean over `[start, start+window)` |
 
-## NBBO (`shakti_nbbo*`)
+Result columns: `key`, `avg`.
 
-Per-symbol max bid / min ask (equivalent to two-stage SQL `by sym_id, exchange` then `by sym_id`):
+## Range maximum (`range_max*`)
 
-| Builtin | Role |
-|---------|------|
-| `shakti_nbbo_index(sym_id, bid, ask)` | Build the grouped NBBO table once at load |
-| `shakti_nbbo(index)` | Return the precomputed table (or pass raw columns for a one-shot scan) |
-
-## Exchange stats (`shakti_stats*`)
-
-Trade aggregates by symbol for one exchange id:
+Per-key `max(value)` over a key set and time window:
 
 | Builtin | Role |
 |---------|------|
-| `shakti_stats_index(exchange, time_ns, sym_id, price)` | Sort by `(exchange, time)` |
-| `shakti_stats_agg(index, exchange_id, t0, t1)` | `count` / `sum` / `min` / `max` / `avg` by `sym_id` |
-| `shakti_stats_ui(index, exchange_id, t0, t1, minute_ns)` | Minute-bucket pass; returns the last minute’s table (no sum column) |
+| `range_max_index(key, time, value)` | Sort by `(key, time)`; return `[time, value, bounds]` |
+| `range_max(index, keys, t0, t1)` | `max(value)` by `key` for keys in `keys` over `[t0, t1)` |
 
-## Theoretical P&L (`shakti_theopl`)
+Result columns: `key`, `value`.
 
-For the first `n_trades` rows with positive `size`, scan forward within `horizon_ns` on the same symbol and count hits when cumulative size reaches 2×, 4×, and 20× the initial size.
+## Key max/min (`key_maxmin*`)
+
+Per-key `max(col_hi)` and `min(col_lo)`:
 
 | Builtin | Role |
 |---------|------|
-| `shakti_theopl(sym_id, time_ns, size, n_trades, horizon_ns)` | Return hit count (int) |
+| `key_maxmin_index(key, col_hi, col_lo)` | Build the grouped table once at load |
+| `key_maxmin(index)` | Return the precomputed table (or pass raw columns for a one-shot scan) |
+
+Result columns: `key`, `col_hi`, `col_lo`.
+
+## Time-series stats (`ts_stats*`)
+
+Aggregates by key for one group id over a time window:
+
+| Builtin | Role |
+|---------|------|
+| `ts_stats_index(group, time, key, value)` | Sort by `(group, time)` |
+| `ts_stats_agg(index, group_id, t0, t1)` | `count` / `sum` / `min` / `max` / `avg` by `key` |
+| `ts_stats_bucket(index, group_id, t0, t1, bucket)` | Fixed-width time buckets; returns the last bucket’s table (no sum column) |
+
+## Cumulative multiplier hits (`cum_mult_hits`)
+
+For the first `n_rows` rows with positive `value`, scan forward within `horizon` on the same key and count hits when the cumulative same-key sum reaches 2×, 4×, and 20× the initial value.
+
+| Builtin | Role |
+|---------|------|
+| `cum_mult_hits(key, time, value, n_rows, horizon)` | Return hit count (int) |
 
 ## Table joins (`,` / `union` / `outer`)
 
@@ -861,7 +890,7 @@ SQL `t1 join t2 on col` remains unimplemented.
 
 ## See also
 
-- [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where` (slower for full-table VWAP scans)
+- [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where` (slower for full-table weighted-average scans)
 
 ---
 

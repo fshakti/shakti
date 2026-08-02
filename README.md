@@ -4,8 +4,9 @@
 
 Small interpreted language (0.12.0) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), load-time time-series indexes
-(VWAB / windowed avg / stats / asof), and optional SQL, graph, IPC, REST, gfx,
-pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi, and IEFS modules.
+(weighted avg / range max / windowed avg / keyed stats / asof), and optional SQL,
+graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
+and IEFS modules.
 
 ## grammar
 
@@ -13,7 +14,9 @@ pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi, and IEFS modules.
 - **Compare** with `=` — `if x = 1:`
 - `==` is not supported
 - Leading `@` decorates; expression `@` is each; matrix multiply is `mmul(a, b)`
-- Prefix indexes: `shakti_vwbid_index` / `shakti_vwbid`, `shakti_hibid_*`, `shakti_nbbo_*`, `shakti_winavg_*`, `shakti_stats_*`, `shakti_theopl`, `asof_sort` / `asof_bin` — see [doc.md](doc.md#time-series-indexes)
+- Time-series indexes: `wavg_index` / `wavg`, `range_max_*`, `key_maxmin_*`,
+  `winavg_*`, `ts_stats_*`, `cum_mult_hits`, `asof_sort` / `asof_bin` — see
+  [doc.md](doc.md#time-series-indexes)
 
 ```ie
 values : [1, -2, 3]
@@ -31,7 +34,8 @@ for value in abs@ values:
 ```bash
 # Linux: sudo apt-get install -y libx11-dev libasound2-dev libexpat1-dev
 # macOS: brew install libomp expat
-make prod
+make build          # default: same as `make` / `make all`
+make prod           # strip release binary
 export SHAKTI_LIB=$PWD/lib
 ```
 
@@ -40,7 +44,7 @@ arm64 / Apple Silicon, including M5; `-march=x86-64-v2` on x86-64).
 For a redistributable arm64 binary, use `SHAKTI_PORTABLE_CPU=1` (`-mcpu=apple-m4`;
 current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make prod-size` optimizes for size.
-`make check-deps` verifies Homebrew packages on macOS.
+`make clean` removes the binary and objects under `.build/`.
 Embedded converter headers are generated under `gen/` from `converters/p2s.ie`,
 `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
 
@@ -48,9 +52,31 @@ Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `S
 
 ## run
 
+```
+shakti [options] [script [args...]]
+shakti [options] -c|--command <code> [-i|--interactive]
+shakti
+```
+
+| Short | Long | Action |
+|-------|------|--------|
+| `-h` | `--help` | Usage; exit 0 |
+| `-V` | `--version` | Version; exit 0 |
+| `-q` | `--quiet` | No banner |
+| `-b` | `--banner` | Force banner |
+| `-c <code>` | `--command <code>` | Eval string |
+| `-i` | `--interactive` | REPL after command |
+| | `--parse-dump` | AST dump |
+| | `--parse-profile` | Parse microbench |
+| | `--parse-profile-iters <n>` | Iterations |
+| | `--` | End options |
+
+Unknown flags exit with status 2.
+
 ```bash
 ./shakti file.ie
 ./shakti          # REPL
+./shakti --command '1+1'
 ./shakti file.py    # supported Python subset → Shakti, then run
 ./shakti file.c     # supported C subset → Shakti, then run
 ./shakti file.cs    # supported C# subset → Shakti, then run
@@ -111,9 +137,9 @@ For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where 
 Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie).
 
 ```bash
-make test-pong    # examples/pong_test.ie + examples/pong_spell_test.ie
-make bench-pong   # examples/pong_bench.ie (physics / frame / proj / AI)
-make test-chess   # examples/chess_test.ie (rules + AI smoke)
+make -f Makefile.local test-pong    # examples/pong_test.ie + examples/pong_spell_test.ie
+make -f Makefile.local bench-pong   # examples/pong_bench.ie (physics / frame / proj / AI)
+make -f Makefile.local test-chess   # examples/chess_test.ie (rules + AI smoke)
 ```
 
 Local demos (when `examples/_local/` is present): `examples/_local/gfx_demo.ie`, `examples/_local/pyplot_demo.ie`, `examples/_local/jupyter_demo.ie`, `examples/_local/pdf_smoke.ie`, `examples/_local/midi_demo.ie`, `examples/_local/sonicpi_demo.ie`.  
