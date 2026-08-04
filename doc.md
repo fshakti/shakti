@@ -1678,7 +1678,7 @@ export SHAKTI_LIB=$PWD/lib
 | `stem.load_ml(path)` / `stem.unload_ml()` | Load/unload MLP weights |
 | `stem.ml_info()` | Checkpoint dims / flags (CPU-only) |
 | `stem.ml_spike(batch, iters)` | Time one MVM layer |
-| `stem.separate_file_ml(path, outdir)` | Offline file split via MLP masks |
+| `stem.separate_file_ml(path, outdir)` | Offline file split via MLP masks (**44100 Hz** WAV required) |
 | `stem.close()` / `stem.alive()` | Lifecycle |
 
 ## Example
