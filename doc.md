@@ -1652,7 +1652,9 @@ Disable at build: `SHAKTI_DSP=0 make prod`.
 
 Streaming 4-stem separator (drums / bass / vocals / other) via STFT + HPSS + band soft-masks. Built by default (`SHAKTI_STEM=1`). Algorithmic look-ahead is about **64–100 ms** (e.g. ~63.9 ms at 44.1 kHz with `n_fft=1024`, `hop=256`, HPSS window 17).
 
-Cross-engine benches (Demucs OSS, optional LALAL.AI proprietary API) live in the sibling [`../stem`](../stem) workspace.
+Also includes an **offline CPU spectrogram MLP** path (`SHAKST01` checkpoint format): magnitude frames → two ReLU layers → sigmoid stem masks → ISTFT. Generate a synthetic checkpoint with `stem.write_ml_synth` for tests; no GPU backend.
+
+Cross-engine benches (Demucs OSS, optional LALAL.AI proprietary API) live in the sibling [`../stem`](../stem) workspace when present.
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -1670,7 +1672,12 @@ export SHAKTI_LIB=$PWD/lib
 | `stem.mix(stems)` | Sum stem dict → fvec |
 | `stem.latency_ms()` | Algorithmic latency |
 | `stem.info()` | `n_fft` / `hop` / `hpss_len` / latency |
-| `stem.separate_file(path, outdir)` | Offline file split (same engine) |
+| `stem.separate_file(path, outdir)` | Offline file split (classical engine) |
+| `stem.write_ml_synth(path, nhidden)` | Write synthetic `SHAKST01` checkpoint |
+| `stem.load_ml(path)` / `stem.unload_ml()` | Load/unload MLP weights |
+| `stem.ml_info()` | Checkpoint dims / flags (CPU-only) |
+| `stem.ml_spike(batch, iters)` | Time one MVM layer |
+| `stem.separate_file_ml(path, outdir)` | Offline file split via MLP masks |
 | `stem.close()` / `stem.alive()` | Lifecycle |
 
 ## Example
@@ -1684,6 +1691,11 @@ out : stem.process(block)
 stem.set_gains(1, 1, 0, 1)   # mute vocals
 mix : stem.mix(out)
 stem.close()
+
+stem.write_ml_synth("/tmp/demo.stemw", 32)
+stem.load_ml("/tmp/demo.stemw")
+ml : stem.separate_file_ml("benchmarks/fixtures/stem_tone.wav")
+stem.unload_ml()
 ```
 
 ## Tests and benchmarks
