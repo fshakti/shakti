@@ -1,15 +1,28 @@
 /*
  * stem.c — streaming 4-stem separator for Shakti (drums / bass / vocals / other).
  *
- * Pipeline: ring-fed STFT → median HPSS → band soft-masks → ISTFT overlap-add.
+ * Classical: ring-fed STFT → median HPSS → band soft-masks → ISTFT overlap-add.
  * Algorithmic look-ahead is STEM_HPSS_HALF hops (~64–100 ms at typical rates).
+ *
+ * Offline ML: Shakti spectrogram MLP (SHAKST01) — mag frames → soft masks → ISTFT.
+ * Matmuls are CPU-only (optional OpenMP). No GPU path.
  */
 #include "stem.h"
 
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 
 /* a.h short macros collide with common DSP names (im, st, i0, ...). */
 #undef ia
@@ -41,6 +54,14 @@
 #define STEM_RING_CAP (1 << 16)
 /* Hann² constant-overlap-add gain for hop = n_fft/4 */
 #define STEM_COLA 1.5f
+
+/* Shakti-owned offline MLP checkpoint (not Isolde STEMML01). */
+#define STEM_ML_MAGIC "SHAKST01"
+#define STEM_ML_HIDDEN_DEFAULT 64
+#define STEM_ML_BATCH_MAX 256
+#define STEM_ML_FLAG_LOG1P 1
+#define STEM_ML_MAX_SAMP (8 * 1024 * 1024)
+#define STEM_ML_SPIKE_ITERS_MAX 10000
 
 enum { STEM_DRUMS = 0, STEM_BASS = 1, STEM_VOCALS = 2, STEM_OTHER = 3, STEM_N = 4 };
 
@@ -75,10 +96,34 @@ typedef struct {
     float out[STEM_N][STEM_RING_CAP];
     int out_r[STEM_N], out_w[STEM_N], out_n[STEM_N];
 
-    /* last process latency sample (wall not available here; algorithmic only) */
+    /* reusable process() scratch (avoids malloc per call) */
+    float *proc_scratch;
+    int64_t proc_scratch_cap;
 } StemState;
 
+/* Precomputed 1024-pt FFT: bit-reversal + packed stage twiddles. */
+static int g_fft_br[STEM_NFFT];
+static float g_fft_wr[STEM_NFFT];
+static float g_fft_wi[STEM_NFFT];
+static int g_fft_ready;
+
+typedef struct {
+    int loaded;
+    int nbins;
+    int nhidden;
+    int nstems;
+    int flags;
+    double *W1, *b1, *W2, *b2, *W3, *b3;
+    double *x_batch;
+    double *h1_batch;
+    double *h2_batch;
+    double *y_batch;
+    int batch_cap;
+    char path[512];
+} StemMl;
+
 static StemState g_stem;
+static StemMl g_ml;
 
 static float stem_hz_to_bin(float hz, int sr) {
     float b = hz * (float)STEM_NFFT / (float)sr;
@@ -87,44 +132,66 @@ static float stem_hz_to_bin(float hz, int sr) {
     return b;
 }
 
+static void stem_fft_init(void) {
+    int i, j, m, k, off;
+    if (g_fft_ready) return;
+    for (i = 0; i < STEM_NFFT; i++) {
+        int x = i, y = 0;
+        for (j = 0; j < 10; j++) { /* log2(1024) = 10 */
+            y = (y << 1) | (x & 1);
+            x >>= 1;
+        }
+        g_fft_br[i] = y;
+    }
+    off = 0;
+    for (m = 2; m <= STEM_NFFT; m <<= 1) {
+        float theta = -2.0f * (float)M_PI / (float)m;
+        for (k = 0; k < m / 2; k++) {
+            float a = theta * (float)k;
+            g_fft_wr[off + k] = cosf(a);
+            g_fft_wi[off + k] = sinf(a);
+        }
+        off += m / 2;
+    }
+    g_fft_ready = 1;
+}
+
+/* Fixed-size 1024-pt in-place radix-2 using precomputed tables. */
 static void stem_fft(float *re, float *im, int n, int inverse) {
-    /* in-place radix-2 Cooley–Tukey */
-    int i, j, k, m;
-    float tr, ti, ur, ui, wr, wi, theta, tmp;
-    j = 0;
-    for (i = 1; i < n; i++) {
-        int bit = n >> 1;
-        for (; j & bit; bit >>= 1) j ^= bit;
-        j ^= bit;
+    int i, k, m, off;
+    float tmp, s;
+    (void)n;
+    stem_fft_init();
+    for (i = 0; i < STEM_NFFT; i++) {
+        int j = g_fft_br[i];
         if (i < j) {
             tmp = re[i]; re[i] = re[j]; re[j] = tmp;
             tmp = im[i]; im[i] = im[j]; im[j] = tmp;
         }
     }
-    for (m = 2; m <= n; m <<= 1) {
-        theta = (inverse ? 2.0f : -2.0f) * (float)M_PI / (float)m;
-        wr = cosf(theta);
-        wi = sinf(theta);
-        for (i = 0; i < n; i += m) {
-            ur = 1.f;
-            ui = 0.f;
-            for (k = 0; k < m / 2; k++) {
-                int ia0 = i + k, ia1 = i + k + m / 2;
-                tr = ur * re[ia1] - ui * im[ia1];
-                ti = ur * im[ia1] + ui * re[ia1];
+    off = 0;
+    for (m = 2; m <= STEM_NFFT; m <<= 1) {
+        int half = m / 2;
+        for (i = 0; i < STEM_NFFT; i += m) {
+            for (k = 0; k < half; k++) {
+                float wr = g_fft_wr[off + k];
+                float wi = g_fft_wi[off + k];
+                int ia0 = i + k, ia1 = i + k + half;
+                float tr, ti;
+                if (inverse) wi = -wi;
+                tr = wr * re[ia1] - wi * im[ia1];
+                ti = wr * im[ia1] + wi * re[ia1];
                 re[ia1] = re[ia0] - tr;
                 im[ia1] = im[ia0] - ti;
                 re[ia0] += tr;
                 im[ia0] += ti;
-                tmp = ur * wr - ui * wi;
-                ui = ur * wi + ui * wr;
-                ur = tmp;
             }
         }
+        off += half;
     }
     if (inverse) {
-        float s = 1.f / (float)n;
-        for (i = 0; i < n; i++) {
+        s = 1.f / (float)STEM_NFFT;
+        for (i = 0; i < STEM_NFFT; i++) {
             re[i] *= s;
             im[i] *= s;
         }
@@ -132,7 +199,7 @@ static void stem_fft(float *re, float *im, int n, int inverse) {
 }
 
 static float stem_median_copy(float *tmp, int n) {
-    /* insertion sort small n */
+    /* insertion sort; n <= STEM_HPSS_LEN */
     int i, j;
     for (i = 1; i < n; i++) {
         float v = tmp[i];
@@ -140,6 +207,27 @@ static float stem_median_copy(float *tmp, int n) {
         tmp[j] = v;
     }
     return tmp[n / 2];
+}
+
+static void stem_mag_from_cplx(const float *re, const float *im, float *mag, int n) {
+    int b = 0;
+#if defined(__AVX2__)
+    for (; b + 8 <= n; b += 8) {
+        __m256 r = _mm256_loadu_ps(re + b);
+        __m256 imv = _mm256_loadu_ps(im + b);
+        __m256 m = _mm256_sqrt_ps(_mm256_fmadd_ps(r, r, _mm256_mul_ps(imv, imv)));
+        _mm256_storeu_ps(mag + b, m);
+    }
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    for (; b + 4 <= n; b += 4) {
+        float32x4_t r = vld1q_f32(re + b);
+        float32x4_t imv = vld1q_f32(im + b);
+        float32x4_t m = vsqrtq_f32(vmlaq_f32(vmulq_f32(r, r), imv, imv));
+        vst1q_f32(mag + b, m);
+    }
+#endif
+    for (; b < n; b++)
+        mag[b] = sqrtf(re[b] * re[b] + im[b] * im[b]);
 }
 
 static void stem_ring_push(float *buf, int *r, int *w, int *n, float x) {
@@ -163,10 +251,22 @@ static int stem_ring_pop(float *buf, int *r, int *w, int *n, float *out) {
 }
 
 static void stem_ola_add(StemState *st, int stem, const float *frame) {
-    int i;
-    /* STEM_NFFT (1024) is always <= STEM_OLA_CAP (8192); loop bound is the real guard. */
-    for (i = 0; i < STEM_NFFT; i++)
-        st->ola[stem][i] += frame[i];
+    int i = 0;
+    float *dst = st->ola[stem];
+#if defined(__AVX2__)
+    for (; i + 8 <= STEM_NFFT; i += 8) {
+        __m256 a = _mm256_loadu_ps(dst + i);
+        __m256 b = _mm256_loadu_ps(frame + i);
+        _mm256_storeu_ps(dst + i, _mm256_add_ps(a, b));
+    }
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    for (; i + 4 <= STEM_NFFT; i += 4) {
+        float32x4_t a = vld1q_f32(dst + i);
+        float32x4_t b = vld1q_f32(frame + i);
+        vst1q_f32(dst + i, vaddq_f32(a, b));
+    }
+#endif
+    for (; i < STEM_NFFT; i++) dst[i] += frame[i];
     if (st->ola_len < STEM_NFFT) st->ola_len = STEM_NFFT;
 }
 
@@ -201,11 +301,9 @@ static void stem_process_frame(StemState *st) {
     }
     stem_fft(st->re, st->im, STEM_NFFT, 0);
 
-    for (b = 0; b < STEM_BINS; b++) {
-        mag[b] = sqrtf(st->re[b] * st->re[b] + st->im[b] * st->im[b]);
-        phase_re[b] = st->re[b];
-        phase_im[b] = st->im[b];
-    }
+    stem_mag_from_cplx(st->re, st->im, mag, STEM_BINS);
+    memcpy(phase_re, st->re, sizeof phase_re);
+    memcpy(phase_im, st->im, sizeof phase_im);
 
     /* push into magnitude + complex history (phase must match HPSS center frame) */
     memcpy(st->mag_hist[st->mag_w], mag, sizeof mag);
@@ -349,6 +447,7 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
     if (fmt != 1 || (bps != 16 && bps != 32) || ch < 1 || ch > 2) { fclose(fp); return -1; }
     if (bps == 16) {
         nframes = (int)(data_bytes / (2 * ch));
+        if (nframes < 1) { fclose(fp); return -1; }
         pcm = (int16_t *)malloc((size_t)nframes * ch * sizeof(int16_t));
         if (!pcm) { fclose(fp); return -1; }
         if ((int)fread(pcm, 2 * ch, (size_t)nframes, fp) != nframes) {
@@ -366,6 +465,7 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
         /* float32 */
         float *fpcm;
         nframes = (int)(data_bytes / (4 * ch));
+        if (nframes < 1) { fclose(fp); return -1; }
         fpcm = (float *)malloc((size_t)nframes * ch * sizeof(float));
         if (!fpcm) { fclose(fp); return -1; }
         if ((int)fread(fpcm, 4 * ch, (size_t)nframes, fp) != nframes) {
@@ -434,6 +534,8 @@ static int stem_write_wav(const char *path, const float *x, int n, int sr) {
 V *bi_stem_open(V **a, int n) {
     int sr = 44100, block = STEM_HOP;
     int i;
+    float *keep_scratch;
+    int64_t keep_cap;
     if (g_stem.open) return v_err("stem_open: already open");
     if (n >= 1) {
         if (a[0]->t == T_INT) sr = (int)a[0]->j;
@@ -448,20 +550,31 @@ V *bi_stem_open(V **a, int n) {
     if (sr < 8000) sr = 8000;
     if (sr > 192000) sr = 192000;
     if (block < 32) block = 32;
+    keep_scratch = g_stem.proc_scratch;
+    keep_cap = g_stem.proc_scratch_cap;
     memset(&g_stem, 0, sizeof g_stem);
+    g_stem.proc_scratch = keep_scratch;
+    g_stem.proc_scratch_cap = keep_cap;
     g_stem.sr = sr;
     g_stem.block = block;
     for (i = 0; i < STEM_N; i++) g_stem.gains[i] = 1.f;
     for (i = 0; i < STEM_NFFT; i++)
         g_stem.win[i] = 0.5f - 0.5f * cosf(2.f * (float)M_PI * (float)i / (float)STEM_NFFT);
+    stem_fft_init();
     g_stem.open = 1;
     return v_nil();
 }
 
 V *bi_stem_close(V **a, int n) {
+    float *keep_scratch;
+    int64_t keep_cap;
     (void)a;
     (void)n;
+    keep_scratch = g_stem.proc_scratch;
+    keep_cap = g_stem.proc_scratch_cap;
     memset(&g_stem, 0, sizeof g_stem);
+    g_stem.proc_scratch = keep_scratch;
+    g_stem.proc_scratch_cap = keep_cap;
     return v_nil();
 }
 
@@ -539,8 +652,13 @@ V *bi_stem_process(V **a, int n) {
     if (count < 0) return v_err("stem_process: bad length");
     if (count == 0) return stem_dict_from_outs(st, 0);
     if (count > 8 * 1024 * 1024) return v_err("stem_process: block too large");
-    tmp = (float *)malloc((size_t)count * sizeof(float));
-    if (!tmp) return v_err("stem_process: oom");
+    if (count > st->proc_scratch_cap) {
+        float *nbuf = (float *)realloc(st->proc_scratch, (size_t)count * sizeof(float));
+        if (!nbuf) return v_err("stem_process: oom");
+        st->proc_scratch = nbuf;
+        st->proc_scratch_cap = count;
+    }
+    tmp = st->proc_scratch;
     if (samples->t == T_FVEC) {
         for (i = 0; i < count; i++) tmp[i] = (float)samples->F[i];
     } else {
@@ -550,7 +668,6 @@ V *bi_stem_process(V **a, int n) {
         }
     }
     stem_feed(st, tmp, (int)count);
-    free(tmp);
     n_out = (int)count;
     return stem_dict_from_outs(st, n_out);
 }
@@ -769,5 +886,546 @@ V *bi_stem_separate_file(V **a, int n) {
     v_dict_put(result, "latency_samples", v_int(delay));
     free(mono);
     bi_stem_close(NULL, 0);
+    return result;
+}
+
+/* ---- SHAKST01 offline spectrogram MLP (CPU) ---- */
+
+static int stem_mul_size(size_t a, size_t b, size_t *out) {
+    if (__builtin_mul_overflow(a, b, out)) return -1;
+    return 0;
+}
+
+static void *stem_malloc_nm(size_t n, size_t elem) {
+    size_t bytes;
+    if (n == 0) return malloc(1);
+    if (stem_mul_size(n, elem, &bytes) != 0) return NULL;
+    return malloc(bytes);
+}
+
+static void *stem_calloc_nm(size_t n, size_t elem) {
+    size_t bytes;
+    void *p;
+    if (n == 0) return calloc(1, 1);
+    if (stem_mul_size(n, elem, &bytes) != 0) return NULL;
+    p = malloc(bytes);
+    if (p) memset(p, 0, bytes);
+    return p;
+}
+
+static void stem_ml_free(void) {
+    free(g_ml.W1); free(g_ml.b1);
+    free(g_ml.W2); free(g_ml.b2);
+    free(g_ml.W3); free(g_ml.b3);
+    free(g_ml.x_batch); free(g_ml.h1_batch);
+    free(g_ml.h2_batch); free(g_ml.y_batch);
+    memset(&g_ml, 0, sizeof g_ml);
+}
+
+/* y[r] = W[r,c] @ x[c]  (row-major W) */
+static void stem_mvm(double *y, const double *W, const double *x, int r, int c) {
+    int i, j;
+#ifdef _OPENMP
+#pragma omp parallel for private(j)
+#endif
+    for (i = 0; i < r; i++) {
+        const double *row = W + (size_t)i * (size_t)c;
+        double s = 0.0;
+        for (j = 0; j < c; j++) s += row[j] * x[j];
+        y[i] = s;
+    }
+}
+
+/* For each batch k: y[k*r..] = W @ x[k*c..] */
+static void stem_mvm_batched(double *y, const double *W, const double *x,
+                             int r, int c, int batch) {
+    int k;
+    if (batch == 1) {
+        stem_mvm(y, W, x, r, c);
+        return;
+    }
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+    for (k = 0; k < batch; k++)
+        stem_mvm(y + (size_t)k * (size_t)r, W, x + (size_t)k * (size_t)c, r, c);
+}
+
+static void stem_ml_relu(double *x, int n) {
+    int i;
+    for (i = 0; i < n; i++) if (x[i] < 0.0) x[i] = 0.0;
+}
+
+static void stem_ml_sigmoid(double *x, int n) {
+    int i;
+    for (i = 0; i < n; i++) x[i] = 1.0 / (1.0 + exp(-x[i]));
+}
+
+static void stem_ml_add_bias_rows(double *y, const double *b, int rows, int batch) {
+    int i, k;
+    for (k = 0; k < batch; k++)
+        for (i = 0; i < rows; i++)
+            y[(size_t)k * (size_t)rows + i] += b[i];
+}
+
+static int stem_ml_ensure_batch(int batch) {
+    int H, B, Y;
+    double *xb, *h1, *h2, *yb;
+    if (!g_ml.loaded) return -1;
+    if (batch < 1) batch = 1;
+    if (batch > STEM_ML_BATCH_MAX) batch = STEM_ML_BATCH_MAX;
+    if (batch <= g_ml.batch_cap) return batch;
+    H = g_ml.nhidden;
+    B = g_ml.nbins;
+    Y = g_ml.nstems * B;
+    xb = (double *)malloc((size_t)batch * (size_t)B * sizeof(double));
+    h1 = (double *)malloc((size_t)batch * (size_t)H * sizeof(double));
+    h2 = (double *)malloc((size_t)batch * (size_t)H * sizeof(double));
+    yb = (double *)malloc((size_t)batch * (size_t)Y * sizeof(double));
+    if (!xb || !h1 || !h2 || !yb) {
+        free(xb); free(h1); free(h2); free(yb);
+        return -1;
+    }
+    free(g_ml.x_batch); free(g_ml.h1_batch);
+    free(g_ml.h2_batch); free(g_ml.y_batch);
+    g_ml.x_batch = xb;
+    g_ml.h1_batch = h1;
+    g_ml.h2_batch = h2;
+    g_ml.y_batch = yb;
+    g_ml.batch_cap = batch;
+    return batch;
+}
+
+static void stem_ml_pack_input(int row, const float *mag) {
+    int b, B = g_ml.nbins;
+    double *dst = g_ml.x_batch + (size_t)row * (size_t)B;
+    double peak = 1e-8;
+    if (g_ml.flags & STEM_ML_FLAG_LOG1P) {
+        for (b = 0; b < B; b++) {
+            double v = log1p((double)mag[b]);
+            dst[b] = v;
+            if (v > peak) peak = v;
+        }
+    } else {
+        for (b = 0; b < B; b++) {
+            double v = (double)mag[b];
+            dst[b] = v;
+            if (v > peak) peak = v;
+        }
+    }
+    for (b = 0; b < B; b++) dst[b] /= peak;
+}
+
+static int stem_ml_forward_batch(int batch) {
+    int H = g_ml.nhidden, B = g_ml.nbins, Y = g_ml.nstems * g_ml.nbins;
+    int k, i;
+    if (stem_ml_ensure_batch(batch) < 0) return -1;
+
+    stem_mvm_batched(g_ml.h1_batch, g_ml.W1, g_ml.x_batch, H, B, batch);
+    stem_ml_add_bias_rows(g_ml.h1_batch, g_ml.b1, H, batch);
+    stem_ml_relu(g_ml.h1_batch, H * batch);
+
+    stem_mvm_batched(g_ml.h2_batch, g_ml.W2, g_ml.h1_batch, H, H, batch);
+    stem_ml_add_bias_rows(g_ml.h2_batch, g_ml.b2, H, batch);
+    stem_ml_relu(g_ml.h2_batch, H * batch);
+
+    stem_mvm_batched(g_ml.y_batch, g_ml.W3, g_ml.h2_batch, Y, H, batch);
+    stem_ml_add_bias_rows(g_ml.y_batch, g_ml.b3, Y, batch);
+    stem_ml_sigmoid(g_ml.y_batch, Y * batch);
+
+    for (k = 0; k < batch; k++) {
+        double *yk = g_ml.y_batch + (size_t)k * (size_t)Y;
+        for (i = 0; i < B; i++) {
+            double ssum = 1e-8;
+            int s;
+            for (s = 0; s < g_ml.nstems; s++) ssum += yk[s * B + i];
+            for (s = 0; s < g_ml.nstems; s++) yk[s * B + i] /= ssum;
+        }
+    }
+    return 0;
+}
+
+static int stem_ml_read_f32_as_f64(FILE *fp, double *dst, size_t n) {
+    size_t i;
+    float *tmp = (float *)malloc(n * sizeof(float));
+    if (!tmp) return -1;
+    if (fread(tmp, sizeof(float), n, fp) != n) {
+        free(tmp);
+        return -1;
+    }
+    for (i = 0; i < n; i++) dst[i] = (double)tmp[i];
+    free(tmp);
+    return 0;
+}
+
+static V *stem_ml_load_path(const char *path) {
+    FILE *fp;
+    char magic[8];
+    int32_t hdr[4];
+    int nbins, nhidden, nstems, flags;
+    size_t nW1, nW2, nW3;
+
+    fp = fopen(path, "rb");
+    if (!fp) return v_err("stem_load_ml: cannot open file");
+    if (fread(magic, 1, 8, fp) != 8 || memcmp(magic, STEM_ML_MAGIC, 8) != 0) {
+        fclose(fp);
+        return v_err("stem_load_ml: bad magic (want SHAKST01)");
+    }
+    if (fread(hdr, sizeof(int32_t), 4, fp) != 4) {
+        fclose(fp);
+        return v_err("stem_load_ml: bad header");
+    }
+    nbins = (int)hdr[0];
+    nhidden = (int)hdr[1];
+    nstems = (int)hdr[2];
+    flags = (int)hdr[3];
+    if (nbins != STEM_BINS || nstems != STEM_N || nhidden < 8 || nhidden > 2048) {
+        fclose(fp);
+        return v_err("stem_load_ml: unsupported dims");
+    }
+
+    stem_ml_free();
+    g_ml.nbins = nbins;
+    g_ml.nhidden = nhidden;
+    g_ml.nstems = nstems;
+    g_ml.flags = flags;
+    nW1 = (size_t)nhidden * (size_t)nbins;
+    nW2 = (size_t)nhidden * (size_t)nhidden;
+    nW3 = (size_t)(nstems * nbins) * (size_t)nhidden;
+    g_ml.W1 = (double *)malloc(nW1 * sizeof(double));
+    g_ml.b1 = (double *)malloc((size_t)nhidden * sizeof(double));
+    g_ml.W2 = (double *)malloc(nW2 * sizeof(double));
+    g_ml.b2 = (double *)malloc((size_t)nhidden * sizeof(double));
+    g_ml.W3 = (double *)malloc(nW3 * sizeof(double));
+    g_ml.b3 = (double *)malloc((size_t)(nstems * nbins) * sizeof(double));
+    if (!g_ml.W1 || !g_ml.b1 || !g_ml.W2 || !g_ml.b2 || !g_ml.W3 || !g_ml.b3) {
+        fclose(fp);
+        stem_ml_free();
+        return v_err("stem_load_ml: oom");
+    }
+    if (stem_ml_read_f32_as_f64(fp, g_ml.W1, nW1) ||
+        stem_ml_read_f32_as_f64(fp, g_ml.b1, (size_t)nhidden) ||
+        stem_ml_read_f32_as_f64(fp, g_ml.W2, nW2) ||
+        stem_ml_read_f32_as_f64(fp, g_ml.b2, (size_t)nhidden) ||
+        stem_ml_read_f32_as_f64(fp, g_ml.W3, nW3) ||
+        stem_ml_read_f32_as_f64(fp, g_ml.b3, (size_t)(nstems * nbins))) {
+        fclose(fp);
+        stem_ml_free();
+        return v_err("stem_load_ml: truncated weights");
+    }
+    fclose(fp);
+    strncpy(g_ml.path, path, sizeof g_ml.path - 1);
+    g_ml.path[sizeof g_ml.path - 1] = 0;
+    g_ml.loaded = 1;
+    if (stem_ml_ensure_batch(32) < 0) {
+        stem_ml_free();
+        return v_err("stem_load_ml: scratch oom");
+    }
+    return v_nil();
+}
+
+V *bi_stem_unload_ml(V **a, int n) {
+    (void)a;
+    (void)n;
+    stem_ml_free();
+    return v_nil();
+}
+
+V *bi_stem_load_ml(V **a, int n) {
+    const char *path;
+    if (n < 1 || a[0]->t != T_STR || !a[0]->s || !a[0]->s[0])
+        return v_err("stem_load_ml(path) — pass a SHAKST01 checkpoint");
+    path = a[0]->s;
+    return stem_ml_load_path(path);
+}
+
+V *bi_stem_ml_info(V **a, int n) {
+    V *d;
+    (void)a;
+    (void)n;
+    d = v_dict_empty();
+    v_dict_put(d, "loaded", v_bool(g_ml.loaded));
+    v_dict_put(d, "device_gpu", v_bool(0));
+    v_dict_put(d, "magic", v_str(STEM_ML_MAGIC));
+    v_dict_put(d, "nbins", v_int(g_ml.loaded ? g_ml.nbins : STEM_BINS));
+    v_dict_put(d, "nhidden", v_int(g_ml.loaded ? g_ml.nhidden : 0));
+    v_dict_put(d, "nstems", v_int(g_ml.loaded ? g_ml.nstems : STEM_N));
+    v_dict_put(d, "flags", v_int(g_ml.loaded ? g_ml.flags : 0));
+    v_dict_put(d, "log1p", v_bool(g_ml.loaded && (g_ml.flags & STEM_ML_FLAG_LOG1P)));
+    v_dict_put(d, "n_fft", v_int(STEM_NFFT));
+    v_dict_put(d, "hop", v_int(STEM_HOP));
+    if (g_ml.loaded && g_ml.path[0])
+        v_dict_put(d, "path", v_str(g_ml.path));
+    return d;
+}
+
+V *bi_stem_write_ml_synth(V **a, int n) {
+    const char *path;
+    FILE *fp;
+    int32_t hdr[4];
+    int H = STEM_ML_HIDDEN_DEFAULT, B = STEM_BINS, S = STEM_N;
+    size_t i, nW1, nW2, nW3;
+    float *buf;
+    unsigned seed = 0xA11CEu;
+
+    if (n < 1 || a[0]->t != T_STR) return v_err("stem_write_ml_synth(path, [nhidden])");
+    path = a[0]->s;
+    if (n >= 2) {
+        if (a[1]->t == T_INT) H = (int)a[1]->j;
+        else if (a[1]->t == T_FLOAT) H = (int)a[1]->f;
+    }
+    if (H < 8) H = 8;
+    if (H > 512) H = 512;
+
+    nW1 = (size_t)H * (size_t)B;
+    nW2 = (size_t)H * (size_t)H;
+    nW3 = (size_t)(S * B) * (size_t)H;
+    buf = (float *)malloc((nW1 > nW3 ? nW1 : nW3) * sizeof(float));
+    if (!buf) return v_err("stem_write_ml_synth: oom");
+
+    fp = fopen(path, "wb");
+    if (!fp) {
+        free(buf);
+        return v_err("stem_write_ml_synth: cannot write");
+    }
+    fwrite(STEM_ML_MAGIC, 1, 8, fp);
+    hdr[0] = B; hdr[1] = H; hdr[2] = S; hdr[3] = STEM_ML_FLAG_LOG1P;
+    fwrite(hdr, sizeof(int32_t), 4, fp);
+
+#define STEM_RANDF() ((float)((seed = seed * 1664525u + 1013904223u) & 0xffff) / 65535.f * 0.02f - 0.01f)
+    for (i = 0; i < nW1; i++) buf[i] = STEM_RANDF();
+    fwrite(buf, sizeof(float), nW1, fp);
+    for (i = 0; i < (size_t)H; i++) buf[i] = 0.f;
+    fwrite(buf, sizeof(float), (size_t)H, fp);
+    for (i = 0; i < nW2; i++) buf[i] = STEM_RANDF();
+    fwrite(buf, sizeof(float), nW2, fp);
+    for (i = 0; i < (size_t)H; i++) buf[i] = 0.f;
+    fwrite(buf, sizeof(float), (size_t)H, fp);
+    for (i = 0; i < nW3; i++) buf[i] = STEM_RANDF();
+    fwrite(buf, sizeof(float), nW3, fp);
+    for (i = 0; i < (size_t)(S * B); i++) buf[i] = 0.f;
+    fwrite(buf, sizeof(float), (size_t)(S * B), fp);
+#undef STEM_RANDF
+    fclose(fp);
+    free(buf);
+    return v_nil();
+}
+
+V *bi_stem_ml_spike(V **a, int n) {
+    int batch = 64, iters = 20, i, k;
+    int H, B;
+    double ms;
+    V *d;
+    if (!g_ml.loaded) return v_err("stem_ml_spike: load weights first");
+    if (n >= 1) {
+        if (a[0]->t == T_INT) batch = (int)a[0]->j;
+        else if (a[0]->t == T_FLOAT) batch = (int)a[0]->f;
+    }
+    if (n >= 2) {
+        if (a[1]->t == T_INT) iters = (int)a[1]->j;
+        else if (a[1]->t == T_FLOAT) iters = (int)a[1]->f;
+    }
+    if (batch < 1) batch = 1;
+    if (batch > STEM_ML_BATCH_MAX) batch = STEM_ML_BATCH_MAX;
+    if (iters < 1) iters = 1;
+    if (iters > STEM_ML_SPIKE_ITERS_MAX) iters = STEM_ML_SPIKE_ITERS_MAX;
+    if (stem_ml_ensure_batch(batch) < 0) return v_err("stem_ml_spike: oom");
+    H = g_ml.nhidden;
+    B = g_ml.nbins;
+    for (k = 0; k < batch; k++)
+        for (i = 0; i < B; i++)
+            g_ml.x_batch[k * B + i] = 0.1 + 0.001 * (double)((k + i) % 97);
+
+    stem_mvm_batched(g_ml.h1_batch, g_ml.W1, g_ml.x_batch, H, B, batch);
+
+#if defined(CLOCK_MONOTONIC)
+    {
+        struct timespec ts0, ts1;
+        clock_gettime(CLOCK_MONOTONIC, &ts0);
+        for (i = 0; i < iters; i++)
+            stem_mvm_batched(g_ml.h1_batch, g_ml.W1, g_ml.x_batch, H, B, batch);
+        clock_gettime(CLOCK_MONOTONIC, &ts1);
+        ms = (ts1.tv_sec - ts0.tv_sec) * 1000.0 +
+             (ts1.tv_nsec - ts0.tv_nsec) / 1e6;
+    }
+#else
+    {
+        clock_t c0 = clock();
+        for (i = 0; i < iters; i++)
+            stem_mvm_batched(g_ml.h1_batch, g_ml.W1, g_ml.x_batch, H, B, batch);
+        ms = 1000.0 * ((double)(clock() - c0)) / (double)CLOCKS_PER_SEC;
+    }
+#endif
+    d = v_dict_empty();
+    v_dict_put(d, "batch", v_int(batch));
+    v_dict_put(d, "iters", v_int(iters));
+    v_dict_put(d, "rows", v_int(H));
+    v_dict_put(d, "cols", v_int(B));
+    v_dict_put(d, "flops_per_iter", v_float((double)H * (double)B * (double)batch));
+    v_dict_put(d, "total_ms", v_float(ms));
+    v_dict_put(d, "ms_per_iter", v_float(ms / (double)iters));
+    v_dict_put(d, "device_gpu", v_bool(0));
+    return d;
+}
+
+V *bi_stem_separate_file_ml(V **a, int n) {
+    const char *path;
+    const char *outdir = NULL;
+    float *mono = NULL;
+    int n_samp = 0, sr = 44100;
+    int n_frames, f, b, s, i, pos;
+    float *re_s = NULL, *im_s = NULL, *mag_s = NULL;
+    float *acc[STEM_N];
+    float win[STEM_NFFT];
+    float frame_re[STEM_NFFT], frame_im[STEM_NFFT];
+    float synth[STEM_NFFT];
+    int out_len, acc_cap, batch, base, n_out;
+    size_t spec_n;
+    char outpath[1024];
+    static const char *names[STEM_N] = {"drums", "bass", "vocals", "other"};
+    V *result;
+
+    for (s = 0; s < STEM_N; s++) acc[s] = NULL;
+
+    if (!g_ml.loaded)
+        return v_err("stem_separate_file_ml: call stem_load_ml(path) first");
+    if (n < 1 || a[0]->t != T_STR) return v_err("stem_separate_file_ml(path, [outdir])");
+    path = a[0]->s;
+    if (n >= 2) {
+        if (a[1]->t != T_STR) return v_err("stem_separate_file_ml: outdir must be string");
+        outdir = a[1]->s;
+        if (outdir && !outdir[0]) outdir = NULL;
+    }
+    if (stem_read_wav(path, &mono, &n_samp, &sr) != 0)
+        return v_err("stem_separate_file_ml: failed to read wav");
+    if (n_samp < STEM_NFFT) {
+        free(mono);
+        return v_err("stem_separate_file_ml: audio too short");
+    }
+    if (n_samp > STEM_ML_MAX_SAMP) {
+        free(mono);
+        return v_err("stem_separate_file_ml: audio too long");
+    }
+
+    n_frames = 1 + (n_samp - STEM_NFFT) / STEM_HOP;
+    if (n_frames < 1) {
+        free(mono);
+        return v_err("stem_separate_file_ml: no frames");
+    }
+    if (stem_mul_size((size_t)n_frames, (size_t)STEM_BINS, &spec_n) != 0) {
+        free(mono);
+        return v_err("stem_separate_file_ml: size overflow");
+    }
+
+    re_s = (float *)stem_malloc_nm(spec_n, sizeof(float));
+    im_s = (float *)stem_malloc_nm(spec_n, sizeof(float));
+    mag_s = (float *)stem_malloc_nm(spec_n, sizeof(float));
+    if (!re_s || !im_s || !mag_s) {
+        free(re_s); free(im_s); free(mag_s); free(mono);
+        return v_err("stem_separate_file_ml: oom");
+    }
+
+    out_len = (n_frames - 1) * STEM_HOP + STEM_NFFT;
+    /* Match classical separate_file: return n_samp samples (zero-pad short STFT tail). */
+    n_out = n_samp;
+    acc_cap = out_len > n_out ? out_len : n_out;
+    if (acc_cap > INT_MAX - STEM_NFFT) {
+        free(re_s); free(im_s); free(mag_s); free(mono);
+        return v_err("stem_separate_file_ml: size overflow");
+    }
+    acc_cap += STEM_NFFT;
+    for (s = 0; s < STEM_N; s++) {
+        acc[s] = (float *)stem_calloc_nm((size_t)acc_cap, sizeof(float));
+        if (!acc[s]) {
+            for (i = 0; i < s; i++) free(acc[i]);
+            free(re_s); free(im_s); free(mag_s); free(mono);
+            return v_err("stem_separate_file_ml: oom");
+        }
+    }
+
+    for (i = 0; i < STEM_NFFT; i++)
+        win[i] = 0.5f - 0.5f * cosf(2.f * (float)M_PI * (float)i / (float)STEM_NFFT);
+    stem_fft_init();
+
+    for (f = 0; f < n_frames; f++) {
+        pos = f * STEM_HOP;
+        for (i = 0; i < STEM_NFFT; i++) {
+            float x = (pos + i < n_samp) ? mono[pos + i] : 0.f;
+            frame_re[i] = x * win[i];
+            frame_im[i] = 0.f;
+        }
+        stem_fft(frame_re, frame_im, STEM_NFFT, 0);
+        for (b = 0; b < STEM_BINS; b++) {
+            re_s[f * STEM_BINS + b] = frame_re[b];
+            im_s[f * STEM_BINS + b] = frame_im[b];
+            mag_s[f * STEM_BINS + b] =
+                sqrtf(frame_re[b] * frame_re[b] + frame_im[b] * frame_im[b]);
+        }
+    }
+
+    for (base = 0; base < n_frames; base += STEM_ML_BATCH_MAX) {
+        batch = n_frames - base;
+        if (batch > STEM_ML_BATCH_MAX) batch = STEM_ML_BATCH_MAX;
+        if (stem_ml_ensure_batch(batch) < 0) {
+            for (s = 0; s < STEM_N; s++) free(acc[s]);
+            free(re_s); free(im_s); free(mag_s); free(mono);
+            return v_err("stem_separate_file_ml: batch oom");
+        }
+        for (f = 0; f < batch; f++)
+            stem_ml_pack_input(f, mag_s + (base + f) * STEM_BINS);
+        if (stem_ml_forward_batch(batch) != 0) {
+            for (s = 0; s < STEM_N; s++) free(acc[s]);
+            free(re_s); free(im_s); free(mag_s); free(mono);
+            return v_err("stem_separate_file_ml: forward failed");
+        }
+        for (f = 0; f < batch; f++) {
+            int fi = base + f;
+            double *yk = g_ml.y_batch + (size_t)f * (size_t)(STEM_N * STEM_BINS);
+            for (s = 0; s < STEM_N; s++) {
+                memset(frame_re, 0, sizeof frame_re);
+                memset(frame_im, 0, sizeof frame_im);
+                for (b = 0; b < STEM_BINS; b++) {
+                    float m = (float)yk[s * STEM_BINS + b];
+                    frame_re[b] = re_s[fi * STEM_BINS + b] * m;
+                    frame_im[b] = im_s[fi * STEM_BINS + b] * m;
+                    if (b > 0 && b < STEM_BINS - 1) {
+                        frame_re[STEM_NFFT - b] = frame_re[b];
+                        frame_im[STEM_NFFT - b] = -frame_im[b];
+                    }
+                }
+                stem_fft(frame_re, frame_im, STEM_NFFT, 1);
+                for (i = 0; i < STEM_NFFT; i++)
+                    synth[i] = (frame_re[i] * win[i]) / STEM_COLA;
+                pos = fi * STEM_HOP;
+                for (i = 0; i < STEM_NFFT; i++) {
+                    if (pos + i < acc_cap)
+                        acc[s][pos + i] += synth[i];
+                }
+            }
+        }
+    }
+
+    if (outdir) {
+        for (s = 0; s < STEM_N; s++) {
+            snprintf(outpath, sizeof outpath, "%s/%s_ml.wav", outdir, names[s]);
+            stem_write_wav(outpath, acc[s], n_out, sr);
+        }
+    }
+
+    result = v_dict_empty();
+    for (s = 0; s < STEM_N; s++) {
+        V *fv = v_fvec(n_out);
+        for (i = 0; i < n_out; i++) fv->F[i] = acc[s][i];
+        v_dict_set(result, names[s], fv);
+        v_free(fv);
+        free(acc[s]);
+    }
+    v_dict_put(result, "sr", v_int(sr));
+    v_dict_put(result, "n", v_int(n_out));
+    v_dict_put(result, "n_frames", v_int(n_frames));
+    v_dict_put(result, "backend", v_str("ml"));
+    v_dict_put(result, "device_gpu", v_bool(0));
+    v_dict_put(result, "nhidden", v_int(g_ml.nhidden));
+    free(re_s); free(im_s); free(mag_s); free(mono);
     return result;
 }
