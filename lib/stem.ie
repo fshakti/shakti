@@ -1,11 +1,17 @@
 # stem — streaming 4-stem separator (drums / bass / vocals / other)
 # Requires shakti built with SHAKTI_STEM=1 (default).
 #
+# Classical (streaming):
 #   import stem
 #   stem.open(44100, 256)
 #   out : stem.process(block)   # dict of fvecs
 #   stem.set_gains(1, 1, 0, 1)  # mute vocals
 #   mix : stem.mix(out)
+#
+# Offline ML (SHAKST01 spectrogram MLP, CPU-only):
+#   stem.write_ml_synth("ckpt.stemw", 32)
+#   stem.load_ml("ckpt.stemw")
+#   out : stem.separate_file_ml("mix.wav")
 
 def open(sr:44100, block:256):
     return stem_open(sr, block)
@@ -38,3 +44,23 @@ def separate_file(path, outdir:""):
 
 def info():
     return stem_info()
+
+def load_ml(path):
+    return stem_load_ml(path)
+
+def unload_ml():
+    return stem_unload_ml()
+
+def ml_info():
+    return stem_ml_info()
+
+def write_ml_synth(path, nhidden:64):
+    return stem_write_ml_synth(path, nhidden)
+
+def ml_spike(batch:64, iters:20):
+    return stem_ml_spike(batch, iters)
+
+def separate_file_ml(path, outdir:""):
+    if outdir:
+        return stem_separate_file_ml(path, outdir)
+    return stem_separate_file_ml(path)
