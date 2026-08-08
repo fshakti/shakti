@@ -450,10 +450,11 @@ void v_dict_put(V *d, const char *key, V *val) {
     v_free(val);
 }
 V *v_fn(V *params, V *defaults, Node *body_ast, Env *closure) {
+    int idx = fn_ast_store(body_ast);
+    if(idx < 0) return v_err("too many functions");
     V *v=v_alloc(T_FN);
     v->params = v_ref(params);
     v->defaults = defaults ? v_ref(defaults) : NULL;
-    int idx = fn_ast_store(body_ast);
     v->j = idx;
     v->closure = closure;
     if(closure) env_ref(closure);
@@ -598,8 +599,10 @@ static V *assign_map_oom(V *a, V *b, V *c, V *d) {
     return v_nil();
 }
 int fn_ast_store(Node *n) {
-    if(fn_ast_n >= MAX_FN) { fprintf(stderr,"too many functions\n"); exit(1); }
+    if(n->fn_ast_i>-1)return n->fn_ast_i;
+    if(fn_ast_n >= MAX_FN) return -1;
     fn_ast[fn_ast_n] = n;
+    n->fn_ast_i = fn_ast_n;
     return fn_ast_n++;
 }
 const char *type_name(int t) {
@@ -1816,6 +1819,7 @@ Token lex_peek(Lexer *l) {
 Node *node_new(int type) {
     Node *n = x_calloc(1, sizeof(Node), "node_new");
     n->type = type;
+    n->fn_ast_i=-1;
     return n;
 }
 void node_add(Node *n, Node *child) {
@@ -1823,7 +1827,7 @@ void node_add(Node *n, Node *child) {
     n->ch[n->nch++] = child;
 }
 void node_free(Node *n) {
-    Pv(!n)
+    Pv(!n||n->fn_ast_i>-1)
     free(n->sval);
     i(n->nch,node_free(n->ch[i]))
     free(n->ch);
@@ -5716,10 +5720,15 @@ V *eval(Node *n, Env *e) {
                 defaults->L[i] = v_nil();
             }
         }
-        /* Steal body so node_free(prog) won't free the fn_ast entry. */
         Node *body = n->ch[1];
-        n->ch[1] = NULL;
         V *fn = v_fn(params, defaults, body, e);
+        if(fn->t == T_ERR) {
+            g_error = 1;
+            if(g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+            g_error_val = v_ref(fn);
+            v_free(params); v_free(defaults); v_free(fn);
+            return v_nil();
+        }
         env_set(e, n->sval, fn);
         v_free(params); v_free(defaults); v_free(fn);
         return v_nil();
@@ -5736,9 +5745,15 @@ V *eval(Node *n, Env *e) {
             }
         }
         Node *body = n->ch[1];
-        n->ch[1] = NULL;
         V *fn = v_fn(params, defaults, body, e);
         v_free(params); v_free(defaults);
+        if(fn->t == T_ERR) {
+            g_error = 1;
+            if(g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+            g_error_val = v_ref(fn);
+            v_free(fn);
+            return v_nil();
+        }
         return fn;
     }
     case N_RETURN: {
