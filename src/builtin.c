@@ -236,6 +236,11 @@ static const char *BUILTINS[] = {
     "bin","asof_sort","asof_bin","asof_index","asof_index_count","winavg_index","winavg",
     "ts_stats_index","ts_stats_agg","ts_stats_bucket",
     "wavg","wavg_index","range_max","range_max_index","key_maxmin","key_maxmin_index","cum_mult_hits",
+    /* STAC-M3 compatibility aliases (see bi_shakti_* wrappers). */
+    "shakti_winavg_index","shakti_winavg_query",
+    "shakti_stats_index","shakti_stats_agg","shakti_stats_ui",
+    "shakti_vwbid","shakti_vwbid_index","shakti_hibid","shakti_hibid_index",
+    "shakti_nbbo","shakti_nbbo_index","shakti_theopl",
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
@@ -1910,6 +1915,63 @@ static V *bi_ts_stats_bucket(V**a,in){
     }
     return last?last:stats_empty_agg(0);
 }
+/* STAC-M3 name compatibility: renamed generics keep STAC column names via thin wrappers. */
+static V *table_rename_keys(V *t,const char *const *names,int nnames){
+    if(!t||t->t!=T_TABLE)return t;
+    int64_t nk=t->keys->n;
+    if(nnames>nk)nnames=(int)nk;
+    V *keys=v_list(nk),*data=v_list(nk);
+    for(int64_t i=0;i<nk;i++){
+        keys->L[i]=(i<nnames)?v_str(names[i]):v_copy(t->keys->L[i]);
+        data->L[i]=v_ref(t->vals->L[i]);
+    }
+    V *r=v_table(keys,data);v_free(keys);v_free(data);v_free(t);return r;
+}
+static V *bi_shakti_hibid_index(V**a,in){return bi_range_max_index(a,n);}
+static V *bi_shakti_hibid(V**a,in){
+    V *r=bi_range_max(a,n);
+    if(!r||r->t==T_ERR)return r;
+    static const char *names[]={"sym_id","bid"};
+    return table_rename_keys(r,names,2);
+}
+static V *bi_shakti_vwbid_index(V**a,in){return bi_wavg_index(a,n);}
+static V *bi_shakti_vwbid(V**a,in){return bi_wavg(a,n);}
+static V *bi_shakti_nbbo_index(V**a,in){
+    V *r=bi_key_maxmin_index(a,n);
+    if(!r||r->t==T_ERR)return r;
+    static const char *names[]={"sym_id","bid","ask"};
+    return table_rename_keys(r,names,3);
+}
+static V *bi_shakti_nbbo(V**a,in){
+    V *r=bi_key_maxmin(a,n);
+    if(!r||r->t!=T_TABLE)return r;
+    /* Fresh builds use key/col_hi/col_lo; pre-renamed index tables already have STAC names. */
+    if(r->keys->n>=1&&r->keys->L[0]->t==T_STR&&strcmp(r->keys->L[0]->s,"sym_id")==0)
+        return r;
+    static const char *names[]={"sym_id","bid","ask"};
+    return table_rename_keys(r,names,3);
+}
+static V *bi_shakti_theopl(V**a,in){return bi_cum_mult_hits(a,n);}
+static V *bi_shakti_winavg_index(V**a,in){return bi_winavg_index(a,n);}
+static V *bi_shakti_winavg_query(V**a,in){
+    V *r=bi_winavg(a,n);
+    if(!r||r->t!=T_TABLE)return r;
+    static const char *names[]={"sym_id","avg_size"};
+    return table_rename_keys(r,names,2);
+}
+static V *bi_shakti_stats_index(V**a,in){return bi_ts_stats_index(a,n);}
+static V *bi_shakti_stats_agg(V**a,in){
+    V *r=bi_ts_stats_agg(a,n);
+    if(!r||r->t!=T_TABLE)return r;
+    static const char *names[]={"sym_id"};
+    return table_rename_keys(r,names,1);
+}
+static V *bi_shakti_stats_ui(V**a,in){
+    V *r=bi_ts_stats_bucket(a,n);
+    if(!r||r->t!=T_TABLE)return r;
+    static const char *names[]={"sym_id"};
+    return table_rename_keys(r,names,1);
+}
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
@@ -2210,6 +2272,9 @@ BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(asof_index) BI0(asof_index_count) BI0(
 BI0(ts_stats_index) BI0(ts_stats_agg) BI0(ts_stats_bucket)
 BI0(range_max) BI0(range_max_index) BI0(key_maxmin) BI0(key_maxmin_index) BI0(cum_mult_hits)
 BI0(wavg) BI0(wavg_index)
+BI0(shakti_hibid) BI0(shakti_hibid_index) BI0(shakti_nbbo) BI0(shakti_nbbo_index)
+BI0(shakti_stats_agg) BI0(shakti_stats_index) BI0(shakti_stats_ui) BI0(shakti_theopl)
+BI0(shakti_vwbid) BI0(shakti_vwbid_index) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -2534,6 +2599,18 @@ static const BiEntry bi_tab[] = {
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
     {"sh", bi_w_sh},
+    {"shakti_hibid", bi_w_shakti_hibid},
+    {"shakti_hibid_index", bi_w_shakti_hibid_index},
+    {"shakti_nbbo", bi_w_shakti_nbbo},
+    {"shakti_nbbo_index", bi_w_shakti_nbbo_index},
+    {"shakti_stats_agg", bi_w_shakti_stats_agg},
+    {"shakti_stats_index", bi_w_shakti_stats_index},
+    {"shakti_stats_ui", bi_w_shakti_stats_ui},
+    {"shakti_theopl", bi_w_shakti_theopl},
+    {"shakti_vwbid", bi_w_shakti_vwbid},
+    {"shakti_vwbid_index", bi_w_shakti_vwbid_index},
+    {"shakti_winavg_index", bi_w_shakti_winavg_index},
+    {"shakti_winavg_query", bi_w_shakti_winavg_query},
     {"shape", bi_w_shape},
     {"shl", bi_w_shl},
     {"shr", bi_w_shr},

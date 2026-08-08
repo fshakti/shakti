@@ -65,6 +65,7 @@ struct Node {
     int op;
     Node **ch;
     int nch;
+    int fn_ast_i;
 };
 
 struct Env {
