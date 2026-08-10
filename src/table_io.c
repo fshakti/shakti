@@ -210,7 +210,7 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         if ((unsigned char)buf[0] == 0xef && (unsigned char)buf[1] == 0xbb &&
             (unsigned char)buf[2] == 0xbf)
             buf += 3;
-        int cap = 256, nl = 0;
+        int64_t cap = 256, nl = 0;
         char **lines = malloc((size_t)cap * sizeof(char *));
         if (!lines) {
             free(raw);
@@ -219,7 +219,7 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         char *at = buf;
         while (*at) {
             if (nl >= cap) {
-                if (cap > (1 << 30)) {
+                if (cap > (INT64_C(1) << 30)) {
                     free(lines);
                     free(raw);
                     return v_errf("%s: too many lines", fmt);
@@ -415,6 +415,8 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         strip_pad(line, c);
         if (!line[0])
             continue;
+        if (row >= data_rows)
+            break;
         for (int cj = 0; cj < nh; cj++)
             cells[cj] = NULL;
         split_delim_line(line, cells, 64, c);

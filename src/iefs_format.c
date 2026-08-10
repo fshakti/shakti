@@ -329,10 +329,13 @@ int iefs_encode(V *v, unsigned char **out, size_t *out_len, char *err, size_t er
 }
 
 /* ---- decode ---- */
+#define IEFS_MAX_DEPTH 64
+
 typedef struct {
     const unsigned char *p;
     size_t n;
     size_t off;
+    int depth;
     char err[256];
     IefsMapRegion *map_reg; /* non-NULL → alias contiguous payloads */
 } IefsR;
@@ -366,22 +369,47 @@ static V *alias_payload(IefsR *r, int t, int64_t n, int64_t cols, size_t nbytes,
         v = v_bmat(n, cols);
     else
         return v_err("iefs: alias type");
-    /* Drop malloc'd payload; point into map. */
+    /* Drop malloc'd payload; point into map when naturally aligned. */
     free(v->J); v->J = NULL;
     free(v->F); v->F = NULL;
     free(v->B); v->B = NULL;
-    if (which == 0)
-        v->J = (int64_t *)(r->p + r->off);
-    else if (which == 1)
-        v->F = (double *)(r->p + r->off);
-    else
-        v->B = (unsigned char *)(r->p + r->off);
-    iefs_v_set_map_alias(v, r->map_reg);
+    {
+        const unsigned char *src = r->p + r->off;
+        uintptr_t align = (which == 0) ? sizeof(int64_t)
+                         : (which == 1) ? sizeof(double)
+                         : 1;
+        if (align > 1 && ((uintptr_t)src % align) != 0) {
+            /* Misaligned mmap alias is UB on strict targets — copy instead. */
+            if (which == 0) {
+                v->J = (int64_t *)malloc(nbytes);
+                if (!v->J) { v_free(v); return v_err("iefs: out of memory"); }
+                memcpy(v->J, src, nbytes);
+            } else if (which == 1) {
+                v->F = (double *)malloc(nbytes);
+                if (!v->F) { v_free(v); return v_err("iefs: out of memory"); }
+                memcpy(v->F, src, nbytes);
+            } else {
+                v->B = (unsigned char *)malloc(nbytes);
+                if (!v->B) { v_free(v); return v_err("iefs: out of memory"); }
+                memcpy(v->B, src, nbytes);
+            }
+        } else {
+            if (which == 0)
+                v->J = (int64_t *)src;
+            else if (which == 1)
+                v->F = (double *)src;
+            else
+                v->B = (unsigned char *)src;
+            iefs_v_set_map_alias(v, r->map_reg);
+        }
+    }
     r->off += nbytes;
     return v;
 }
 
 static V *decode_value(IefsR *r) {
+    if (r->depth >= IEFS_MAX_DEPTH)
+        return v_err("iefs: nesting too deep");
     if (need(r, 1) != 0)
         return v_err(r->err);
     unsigned char t = r->p[r->off++];
@@ -552,30 +580,38 @@ static V *decode_value(IefsR *r) {
         r->off += 8;
         if (n > IEFS_MAX_ELEMS)
             return v_err("iefs: list too large");
+        r->depth++;
         V *v = v_list((int64_t)n);
         for (uint64_t i = 0; i < n; i++) {
             V *item = decode_value(r);
             if (item->t == T_ERR) {
                 v_free(v);
+                r->depth--;
                 return item;
             }
             v->L[i] = item; /* transfer ownership */
         }
+        r->depth--;
         return v;
     }
     case T_DICT:
     case T_TABLE: {
+        r->depth++;
         V *keys = decode_value(r);
-        if (keys->t == T_ERR)
+        if (keys->t == T_ERR) {
+            r->depth--;
             return keys;
+        }
         V *vals = decode_value(r);
         if (vals->t == T_ERR) {
             v_free(keys);
+            r->depth--;
             return vals;
         }
         V *out = (t == T_DICT) ? v_dict(keys, vals) : v_table(keys, vals);
         v_free(keys);
         v_free(vals);
+        r->depth--;
         return out;
     }
     default:

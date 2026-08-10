@@ -2126,6 +2126,7 @@ static V *bi_group_sum(V**a,in){
         snprintf(buf, sizeof(buf), "group_sum(table,group_col,sum_col) - got nargs=%d, type0=%s", n, n>0?type_name(a[0]->t):"none");
         return v_err(buf);
     }
+    P(a[1]->t!=T_STR||a[2]->t!=T_STR,v_err("group_sum: column names must be strings"))
     V*tbl=a[0],*gc=v_nil(),*sc=v_nil();
     for(int i=0;i<tbl->keys->n;i++){
         if(!strcmp(tbl->keys->L[i]->s,a[1]->s))gc=tbl->vals->L[i];
@@ -2133,11 +2134,23 @@ static V *bi_group_sum(V**a,in){
     P(gc->t==T_NIL||sc->t==T_NIL,v_err("column not found"))
     V*k=v_list(0),*v=v_list(0);V*res=v_dict(k,v);v_free(k);v_free(v);
     for(int64_t i=0;i<tbl->n;i++){
-        const char*gs=(gc->t==T_STR)?gc->s:(gc->t==T_LIST?gc->L[i]->s:"?");
+        char *gs_owned=NULL;
+        const char*gs;
+        if(gc->t==T_STR)gs=gc->s;
+        else if(gc->t==T_IVEC||gc->t==T_FVEC){
+            V*cell=gc->t==T_IVEC?v_int(gc->J[i]):v_float(gc->F[i]);
+            gs_owned=v_to_str(cell);v_free(cell);
+            gs=gs_owned?gs_owned:"?";
+        }else if(gc->t==T_LIST&&i<gc->n&&gc->L[i]){
+            if(gc->L[i]->t==T_STR)gs=gc->L[i]->s;
+            else{gs_owned=v_to_str(gc->L[i]);gs=gs_owned?gs_owned:"?";}
+        }else gs="?";
+        if(!gs)gs="?";
         double gv=(sc->t==T_FVEC)?sc->F[i]:(sc->t==T_IVEC?(double)sc->J[i]:0);
         V*cur=v_dict_get(res,gs);
         if(!cur){V*cv=v_float(gv);v_dict_set(res,gs,cv);v_free(cv);}
-        else{cur->f+=gv;}}
+        else{cur->f+=gv;}
+        free(gs_owned);}
     return res;}
 static V *bi_input(V **a, in) {
     input_hub_init();
