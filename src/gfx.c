@@ -1,5 +1,6 @@
 #include "gfx.h"
 #include "gfx_platform.h"
+#include "fb_present.h"
 #include "input.h"
 #include "shakti.h"
 #include <math.h>
@@ -7,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #if defined(SHAKTI_HAVE_GFX) && ( \
     (defined(__linux__) && __has_include(<X11/Xlib.h>)) || \
@@ -50,33 +52,12 @@ static void gfx_letterbox(void) {
     int wh = g.win_h > 0 ? g.win_h : GFX_DESIGN_H;
     float sx = (float)ww / (float)GFX_DESIGN_W;
     float sy = (float)wh / (float)GFX_DESIGN_H;
-    int x, y, dx, dy;
     g.ui_scale = sx < sy ? sx : sy;
     g.off_x = (ww - (int)(GFX_DESIGN_W * g.ui_scale)) / 2;
     g.off_y = (wh - (int)(GFX_DESIGN_H * g.ui_scale)) / 2;
-    if (!g.present || g.win_w <= 0 || g.win_h <= 0) return;
-    /* Fast path: 1:1 copy when window matches design buffer. */
-    if (g.ui_scale == 1.0f && g.off_x == 0 && g.off_y == 0 &&
-        ww == GFX_DESIGN_W && wh == GFX_DESIGN_H) {
-        memcpy(g.present, g.fb, (size_t)GFX_DESIGN_W * (size_t)GFX_DESIGN_H * sizeof(uint32_t));
-        return;
-    }
-    for (y = 0; y < g.win_h; y++) {
-        uint32_t *dst = g.present + (size_t)y * (size_t)g.win_w;
-        dy = (int)((y - g.off_y) / g.ui_scale);
-        if (dy < 0 || dy >= GFX_DESIGN_H) {
-            for (x = 0; x < g.win_w; x++) dst[x] = GFX_LETTERBOX;
-            continue;
-        }
-        {
-            const uint32_t *src = g.fb + (size_t)dy * (size_t)GFX_DESIGN_W;
-            for (x = 0; x < g.win_w; x++) {
-                dx = (int)((x - g.off_x) / g.ui_scale);
-                if (dx < 0 || dx >= GFX_DESIGN_W) dst[x] = GFX_LETTERBOX;
-                else dst[x] = src[dx];
-            }
-        }
-    }
+    if (!g.present || g.win_w <= 0 || g.win_h <= 0 || !g.fb) return;
+    fb_letterbox_nn(g.present, g.win_w, g.win_h, g.fb, GFX_DESIGN_W, GFX_DESIGN_H,
+                    g.ui_scale, g.off_x, g.off_y, GFX_LETTERBOX);
 }
 
 void gfx_core_mark_dirty(void) { g.dirty = 1; }
@@ -160,6 +141,7 @@ void gfx_close(void) {
 int gfx_alive(void) { return g.alive && g.fb != NULL; }
 
 int gfx_tick(char *err, size_t err_cap) {
+    const char *nosleep;
     (void)err;
     (void)err_cap;
     if (!gfx_alive()) return 0;
@@ -170,6 +152,10 @@ int gfx_tick(char *err, size_t err_cap) {
         gfx_platform_present();
         g.dirty = 0;
     }
+    /* Pace like synth (~60 Hz). SHAKTI_GFX_NO_SLEEP=1 restores busy-wait. */
+    nosleep = getenv("SHAKTI_GFX_NO_SLEEP");
+    if (!nosleep || !(*nosleep == '1' || *nosleep == 'y' || *nosleep == 'Y'))
+        usleep(16000);
     return 0;
 }
 

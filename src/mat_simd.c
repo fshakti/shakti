@@ -1,5 +1,6 @@
 #include "mat_simd.h"
 #include "a.h"
+#include <limits.h>
 #include <math.h>
 #include <string.h>
 #ifdef _OPENMP
@@ -7,6 +8,13 @@
 #endif
 #if defined(__aarch64__)
 #include <arm_neon.h>
+#endif
+
+#ifndef SHAKTI_USE_ACCELERATE
+#define SHAKTI_USE_ACCELERATE 0
+#endif
+#if SHAKTI_USE_ACCELERATE
+#include "shakti_accelerate.h"
 #endif
 
 #ifdef _OPENMP
@@ -24,14 +32,21 @@ static inline int isl_vec_omp_threads(int64_t ne) {
 static inline int isl_vec_omp_threads(int64_t ne) { (void)ne; return 1; }
 #endif
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || SHAKTI_USE_ACCELERATE
 static inline int use_simd_elems(int64_t ne) { return ne >= ISL_MAT_SIMD_MIN_ELEMS; }
 static inline int use_simd_mul(int64_t m, int64_t k, int64_t n) {
     return m * n >= ISL_MAT_SIMD_MIN_ELEMS && k >= ISL_MAT_SIMD_K_MIN;
 }
+static inline int use_accel_mul(int64_t m, int64_t k, int64_t n) {
+    return m * n >= SHAKTI_ACCEL_GEMM_MIN_ELEMS && k >= SHAKTI_ACCEL_GEMM_K_MIN
+        && m <= INT_MAX && k <= INT_MAX && n <= INT_MAX;
+}
 #else
 static inline int use_simd_elems(int64_t ne) { (void)ne; return 0; }
 static inline int use_simd_mul(int64_t m, int64_t k, int64_t n) {
+    (void)m; (void)k; (void)n; return 0;
+}
+static inline int use_accel_mul(int64_t m, int64_t k, int64_t n) {
     (void)m; (void)k; (void)n; return 0;
 }
 #endif
@@ -172,6 +187,17 @@ static void dot_row_col_fmat_scalar(double *cr, const double *ar, const double *
 }
 
 void mat_fmat_mul(double *C, const double *A, const double *B, int64_t m, int64_t k, int64_t n) {
+#if SHAKTI_USE_ACCELERATE
+    if (use_accel_mul(m, k, n)) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        /* Prefer classic cblas until ACCELERATE_NEW_LAPACK can coexist with a.h macros. */
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                    (int)m, (int)n, (int)k, 1.0, A, (int)k, B, (int)n, 0.0, C, (int)n);
+#pragma clang diagnostic pop
+        return;
+    }
+#endif
 #if defined(__aarch64__)
     if (use_simd_mul(m, k, n)) {
 #ifdef _OPENMP

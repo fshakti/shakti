@@ -111,8 +111,7 @@ untrusted shell script.
 
 **`examples/example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
 It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end
-hits an open-window busy loop (`while gfx.alive(): gfx.tick()` with no sleep) and will
-spin until the window is closed. Copy one section into its own `.ie`, or use
+opens windows and loops until they are closed (`gfx.tick` paces at ~60 Hz). Copy one section into its own `.ie`, or use
 `examples/_local/gfx_demo.ie` / other standalone demos under `examples/_local/` when present.
 For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where demos support it.
 

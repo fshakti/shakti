@@ -1,5 +1,7 @@
 /*
  * IE file store I/O: buffered + optional Linux O_DIRECT atomic writes.
+ * On Darwin, large AUTO reads/writes set F_NOCACHE to avoid thrashing
+ * the unified buffer cache on sequential APFS scans.
  *
  * io_uring is intentionally not required for v1 (liburing headers may be
  * absent). O_DIRECT with aligned buffers is the Linux NVMe fast path;
@@ -79,14 +81,31 @@ static int want_direct(size_t len, int mode) {
     return len >= iefs_io_direct_threshold();
 }
 
+/* Darwin: bypass page cache for large sequential I/O (no O_DIRECT). */
+static void iefs_maybe_nocache(int fd, size_t len, int mode) {
+#if defined(__APPLE__) && defined(F_NOCACHE)
+    if (fd < 0)
+        return;
+    if (mode == IEFS_IO_BUF)
+        return;
+    if (mode == IEFS_IO_DIRECT || len >= iefs_io_direct_threshold())
+        (void)fcntl(fd, F_NOCACHE, 1);
+#else
+    (void)fd;
+    (void)len;
+    (void)mode;
+#endif
+}
+
 static void *aligned_alloc_pages(size_t nbytes) {
+#if defined(__linux__) && defined(O_DIRECT)
     void *p = NULL;
-#if defined(_POSIX_C_SOURCE) || defined(__linux__) || defined(__APPLE__)
     if (posix_memalign(&p, IEFS_IO_ALIGN, nbytes) != 0)
         return NULL;
     return p;
 #else
-    return malloc(nbytes);
+    (void)nbytes;
+    return NULL;
 #endif
 }
 
@@ -119,6 +138,7 @@ int iefs_io_read_all(const char *path, unsigned char **out, size_t *out_len, cha
         return -1;
     }
     size_t n = (size_t)st.st_size;
+    iefs_maybe_nocache(fd, n, IEFS_IO_AUTO);
     unsigned char *buf = malloc(n ? n : 1);
     if (!buf) {
         set_err(err, err_cap, "iefs: out of memory");
@@ -236,6 +256,7 @@ int iefs_io_write_atomic(const char *path, const unsigned char *buf, size_t len,
         }
         use_direct = 0;
     }
+    iefs_maybe_nocache(fd, len, mode);
 
     int rc = 0;
     if (use_direct)

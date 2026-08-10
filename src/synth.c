@@ -2,6 +2,7 @@
 #include "synth.h"
 #include "synth_ui.h"
 #include "synth_render.h"
+#include "fb_present.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -605,25 +606,9 @@ int synth_core_fb_design_init(void) {
 __attribute__((unused)) static void synth_request_maximize(void) { synth_platform_request_maximize(); }
 void synth_core_present_scale(void) {
     uint32_t bar = rgb(14, 15, 18);
-    int x, y, dx, dy, dw, dh;
     Pv(!g.present || !g.fb)
-    dw = (int)(DESIGN_W * g.ui_scale);
-    dh = (int)(DESIGN_H * g.ui_scale);
-    for (y = 0; y < g.win_h; y++) {
-        for (x = 0; x < g.win_w; x++) {
-            if (x < g.off_x || y < g.off_y || x >= g.off_x + dw || y >= g.off_y + dh) {
-                g.present[y * g.win_w + x] = bar;
-                continue;
-            }
-            dx = (int)((x - g.off_x) / g.ui_scale);
-            dy = (int)((y - g.off_y) / g.ui_scale);
-            if (dx < 0) dx = 0;
-            if (dy < 0) dy = 0;
-            if (dx >= DESIGN_W) dx = DESIGN_W - 1;
-            if (dy >= DESIGN_H) dy = DESIGN_H - 1;
-            g.present[y * g.win_w + x] = g.fb[dy * DESIGN_W + dx];
-        }
-    }
+    fb_letterbox_nn(g.present, g.win_w, g.win_h, g.fb, DESIGN_W, DESIGN_H,
+                    g.ui_scale, g.off_x, g.off_y, bar);
 }
 int synth_core_fb_resize(int w, int h) {
     if (w < SYNTH_MIN_W) w = SYNTH_MIN_W;

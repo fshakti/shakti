@@ -1,6 +1,7 @@
 /*
  * IE file store I/O backend.
  * Portable buffered POSIX path; optional Linux O_DIRECT for large payloads.
+ * On Darwin, large AUTO I/O uses F_NOCACHE (not O_DIRECT).
  */
 #ifndef SHAKTI_IEFS_IO_H
 #define SHAKTI_IEFS_IO_H
@@ -29,7 +30,8 @@ int iefs_io_read_all(const char *path, unsigned char **out, size_t *out_len, cha
 int iefs_io_write_atomic(const char *path, const unsigned char *buf, size_t len, int mode,
                         char *err, size_t err_cap);
 
-/* Probe: 1 if O_DIRECT path is available on this build/OS. */
+/* Probe: 1 if O_DIRECT path is available on this build/OS (Linux only).
+ * Darwin uses buffered I/O + F_NOCACHE for large AUTO transfers instead. */
 int iefs_io_direct_available(void);
 
 /* Default AUTO size threshold in bytes (1 MiB). Overridable via SHAKTI_IEFS_DIRECT_MIN. */
