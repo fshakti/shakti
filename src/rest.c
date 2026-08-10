@@ -12,6 +12,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
+#endif
+
 #if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -152,6 +156,15 @@ static int rest_extract_host(const char *url, char *host, size_t host_cap) {
     if (!strncmp(p, "http://", 7)) p += 7;
     else if (!strncmp(p, "https://", 8)) p += 8;
     else return 0;
+    /* Reject userinfo (user:pass@host) — curl connects to the post-@ host while
+     * naive extraction used to validate/pin the pre-@ token (SSRF bypass). */
+    {
+        const char *q = p;
+        while (*q && *q != '/' && *q != '?' && *q != '#') {
+            if (*q == '@') return 0;
+            q++;
+        }
+    }
     size_t i = 0;
     while (p[i] && p[i] != '/' && p[i] != ':' && p[i] != '?' && p[i] != '#' && i + 1 < host_cap) {
         host[i] = p[i];
@@ -161,20 +174,81 @@ static int rest_extract_host(const char *url, char *host, size_t host_cap) {
     return i > 0;
 }
 
-static int rest_url_host_allowed(const char *url) {
+/* Port from URL (explicit, or 443/80 by scheme). Returns 0 on failure. */
+static int rest_extract_port(const char *url) {
+    if (!url) return 0;
+    int https = 0;
+    const char *p = url;
+    if (!strncmp(p, "https://", 8)) { p += 8; https = 1; }
+    else if (!strncmp(p, "http://", 7)) p += 7;
+    else return 0;
+    while (*p && *p != '/' && *p != ':' && *p != '?' && *p != '#') p++;
+    if (*p == ':') {
+        p++;
+        long port = 0;
+        if (*p < '0' || *p > '9') return 0;
+        while (*p >= '0' && *p <= '9') {
+            port = port * 10 + (*p - '0');
+            if (port > 65535) return 0;
+            p++;
+        }
+        return (int)port;
+    }
+    return https ? 443 : 80;
+}
+
+/* Resolve once, reject private/blocked addrs, and build curl --resolve pin
+ * "host:port:ip[,ip...]" so curl cannot rebind via a second DNS lookup. */
+static int rest_url_resolve_pin(const char *url, char *resolve_out, size_t resolve_cap) {
     char host[256];
     if (!rest_extract_host(url, host, sizeof host)) return 0;
+    int port = rest_extract_port(url);
+    if (port <= 0) return 0;
+
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res) return 0;
-    int blocked = 0;
+
+    char ips[8][INET6_ADDRSTRLEN];
+    int nip = 0;
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-        if (rest_host_is_blocked_ip(ai->ai_addr)) { blocked = 1; break; }
+        if (rest_host_is_blocked_ip(ai->ai_addr)) {
+            freeaddrinfo(res);
+            return 0;
+        }
+        if (nip >= 8) continue;
+        const void *addr = NULL;
+        if (ai->ai_family == AF_INET)
+            addr = &((struct sockaddr_in *)ai->ai_addr)->sin_addr;
+#if defined(AF_INET6)
+        else if (ai->ai_family == AF_INET6)
+            addr = &((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr;
+#endif
+        else continue;
+        if (!inet_ntop(ai->ai_family, addr, ips[nip], sizeof ips[nip])) continue;
+        /* de-dup */
+        int dup = 0;
+        for (int j = 0; j < nip; j++)
+            if (!strcmp(ips[j], ips[nip])) { dup = 1; break; }
+        if (!dup) nip++;
     }
     freeaddrinfo(res);
-    return !blocked;
+    if (nip == 0) return 0;
+
+    size_t used = 0;
+    int n = snprintf(resolve_out, resolve_cap, "%s:%d:", host, port);
+    if (n < 0 || (size_t)n >= resolve_cap) return 0;
+    used = (size_t)n;
+    for (int i = 0; i < nip; i++) {
+        int need_br = (strchr(ips[i], ':') != NULL);
+        n = snprintf(resolve_out + used, resolve_cap - used, "%s%s%s%s",
+                     i ? "," : "", need_br ? "[" : "", ips[i], need_br ? "]" : "");
+        if (n < 0 || (size_t)n >= resolve_cap - used) return 0;
+        used += (size_t)n;
+    }
+    return 1;
 }
 
 static int rest_token_host_ok(const char *url) {
@@ -191,12 +265,6 @@ static int rest_token_host_ok(const char *url) {
         if (!strcmp(tok, host)) return 1;
     }
     return 0;
-}
-
-static int rest_valid_url(const char *u) {
-    int ok = u && (!strncmp(u, "http://", 7) || !strncmp(u, "https://", 8));
-    if (ok && !rest_url_host_allowed(u)) ok = 0;
-    return ok;
 }
 
 /* Read a file fully, but never more than max_len bytes (0 = unlimited). Returns
@@ -377,7 +445,7 @@ static ssize_t rest_read_line(int fd, char *buf, size_t cap) {
  * -w http_code) into code_path. Returns curl's exit status, or -1 on error.
  * posix_spawn avoids a full address-space copy from fork(). */
 static int rest_run_curl(char *const argv[], const char *code_path) {
-    int ofd = open(code_path, O_WRONLY | O_TRUNC, 0600);
+    int ofd = open(code_path, O_WRONLY | O_TRUNC | O_NOFOLLOW, 0600);
     if (ofd < 0) return -1;
     int dn = open("/dev/null", O_WRONLY);
     posix_spawn_file_actions_t fa;
@@ -416,10 +484,14 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         return v_err("rest: invalid control character in method, url, or token");
     if (content_type && rest_has_ctl(content_type))
         return v_err("rest: invalid control character in content_type");
-    if (!rest_valid_url(url))
+    if (!url || (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0))
         return v_err("rest: url must be http(s) to a non-private host");
     if (!g_rest_temps_ok)
         return v_err("rest: temp file failed");
+
+    char resolve_pin[1024];
+    if (!rest_url_resolve_pin(url, resolve_pin, sizeof resolve_pin))
+        return v_err("rest: url must be http(s) to a non-private host");
 
     int have_data = 0;
     char ct_hdr[512];
@@ -427,7 +499,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     ct_hdr[0] = 0;
     data_at[0] = 0;
     if (body && body[0]) {
-        int data_fd = open(g_rest_data_path, O_WRONLY | O_TRUNC);
+        int data_fd = open(g_rest_data_path, O_WRONLY | O_TRUNC | O_NOFOLLOW);
         if (data_fd < 0)
             return v_err("rest: temp file failed");
         size_t blen = strlen(body);
@@ -450,7 +522,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
      * literal argument, so URL/header/token contents cannot inject a command. */
     int nextra = (extra_hdrs && extra_hdrs->t == T_DICT) ? (int)extra_hdrs->keys->n : 0;
-    int max_args = 24 + nextra * 2;
+    int max_args = 28 + nextra * 2;
     char **argv = calloc((size_t)max_args, sizeof(char *));
     char **hdr_lines = calloc((size_t)(nextra > 0 ? nextra : 1), sizeof(char *));
     if (!argv || !hdr_lines) {
@@ -464,6 +536,8 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     argv[ac++] = "-sS";
     argv[ac++] = "-m";
     argv[ac++] = "60";
+    argv[ac++] = "--resolve";
+    argv[ac++] = resolve_pin;
     argv[ac++] = "-X";
     argv[ac++] = (char *)method;
     if (auth_hdr[0]) {
@@ -685,21 +759,33 @@ static V *rest_do_write(int conn_h, int status, const char *body, const char *co
     else if (status == 404) reason = "Not Found";
     else if (status >= 500) reason = "Internal Server Error";
 
-    char resp[REST_MAX_BODY + 4096];
     size_t blen = strlen(body);
-    int n = snprintf(resp, sizeof resp,
-                     "HTTP/1.1 %d %s\r\n"
-                     "Content-Type: %s\r\n"
-                     "Content-Length: %zu\r\n"
-                     "Connection: close\r\n"
-                     "\r\n"
-                     "%s",
-                     status, reason, content_type, blen, body);
-    if (n < 0 || (size_t)n >= sizeof resp) return v_err("rest_write: response too large");
+    if (blen > REST_MAX_BODY)
+        return v_err("rest_write: response too large");
+
+    char hdr[512];
+    int hn = snprintf(hdr, sizeof hdr,
+                      "HTTP/1.1 %d %s\r\n"
+                      "Content-Type: %s\r\n"
+                      "Content-Length: %zu\r\n"
+                      "Connection: close\r\n"
+                      "\r\n",
+                      status, reason, content_type, blen);
+    if (hn < 0 || (size_t)hn >= sizeof hdr)
+        return v_err("rest_write: response too large");
 
     size_t sent = 0;
-    while (sent < (size_t)n) {
-        ssize_t w = write(conn->fd, resp + sent, (size_t)n - sent);
+    while (sent < (size_t)hn) {
+        ssize_t w = write(conn->fd, hdr + sent, (size_t)hn - sent);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            return v_err("rest_write: write failed");
+        }
+        sent += (size_t)w;
+    }
+    sent = 0;
+    while (sent < blen) {
+        ssize_t w = write(conn->fd, body + sent, blen - sent);
         if (w < 0) {
             if (errno == EINTR) continue;
             return v_err("rest_write: write failed");

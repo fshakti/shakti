@@ -529,6 +529,7 @@ void synth_ui_emit_num(int x, int y, int n, uint32_t c) {
     g_cmds[g_ncmds - 1].idx0 = n;
 }
 void synth_ui_emit_spectrum(UiRect r, const float *mags, int n) {
+    if (n <= 0 || !mags) return;
     int lim = n < SYNTH_UI_SPECTRUM_BINS ? n : SYNTH_UI_SPECTRUM_BINS;
     ui_emit(UI_SPECTRUM);
     g_cmds[g_ncmds - 1].r = r;
@@ -536,6 +537,7 @@ void synth_ui_emit_spectrum(UiRect r, const float *mags, int n) {
     memcpy(g_spectrum, mags, (size_t)lim * sizeof(float));
 }
 void synth_ui_emit_waveform(UiRect r, const float *samples, int n) {
+    if (n <= 0 || !samples) return;
     int lim = n < SYNTH_UI_WAVEFORM_LEN ? n : SYNTH_UI_WAVEFORM_LEN;
     ui_emit(UI_WAVEFORM);
     g_cmds[g_ncmds - 1].r = r;
