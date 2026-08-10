@@ -38,7 +38,7 @@ Version **0.12.0**.
 
 Most demo sections live in [`examples/example.ie`](examples/example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/_local/`](examples/_local/) when present locally (that tree is workspace-local / not published).
 
-**Do not run `examples/example.ie` as a single program.** It concatenates interactive demos. After the early non-GUI sections it reaches `gfx_demo` / `synth_*` / `input` event loops (`while gfx.alive(): gfx.tick()` and similar). `tick` does not sleep, so an unattended run busy-waits at ~100% CPU until the window is closed (or forever if no display interaction). Copy one section into its own file, or run a standalone under `examples/`.
+**Do not run `examples/example.ie` as a single program.** It concatenates interactive demos. After the early non-GUI sections it reaches `gfx_demo` / `synth_*` / `input` event loops (`while gfx.alive(): gfx.tick()` and similar). Interactive loops stay open until the window is closed. Copy one section into its own file, or run a standalone under `examples/`.
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
@@ -658,7 +658,7 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 
 On x86-64, `make prod-speed` uses `-march=x86-64-v2` with scalar C (+ OpenMP) for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters. On arm64 (Apple Silicon), the same matrix operations use NEON; `prod-speed` passes `-mcpu=native` (M5 and other hosts) or `-mcpu=apple-m4` with `SHAKTI_PORTABLE_CPU=1` (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
-The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (NEON on arm64; scalar+OpenMP on x86; `prod-speed` also retunes C and ObjC units with `-O3` and the arch flags above). There is no GPU backend in the standalone binary.
+The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (NEON on arm64; scalar+OpenMP on x86; on Darwin with Accelerate, large `sum`/`dot` use `vDSP` and large float `mmul` uses `cblas_dgemm`). `prod-speed` also retunes C and ObjC units with `-O3` and the arch flags above. There is no GPU backend in the standalone binary.
 
 OpenMP thread count affects short vector timings. Keep `OMP_NUM_THREADS`
 fixed when comparing local runs.
@@ -1029,9 +1029,8 @@ export SHAKTI_LIB=$PWD/lib
 
 Linux needs `libx11-dev`. Disable at build time with `SHAKTI_GFX=0 make prod`.
 
-`gfx.tick()` polls events and presents if dirty; it does **not** sleep. A
-`while gfx.alive(): gfx.tick()` loop is a busy-wait until the window is closed —
-fine for interactive demos, not for unattended scripts.
+`gfx.tick()` polls events and presents if dirty, then sleeps ~16 ms (~60 Hz),
+matching `synth.tick`. Set `SHAKTI_GFX_NO_SLEEP=1` to restore a busy-wait loop.
 ## Example
 
 `gfx_demo.ie`:
@@ -1074,7 +1073,7 @@ Module `lib/gfx.ie`.
 | `gfx.close()` | Close the window |
 | `gfx.alive()` | `1` while the window is open |
 | `gfx.available()` | `1` when built with a GUI backend |
-| `gfx.tick()` | Poll events and present if dirty (no sleep; event loops busy-wait) |
+| `gfx.tick()` | Poll events, present if dirty, sleep ~16 ms (`SHAKTI_GFX_NO_SLEEP=1` disables) |
 | `gfx.sync_keys()` | Refresh GUI-owned key state into the input hub |
 | `gfx.clear(color)` | Fill the full design buffer with `0xRRGGBB` |
 | `gfx.fill_rect(x, y, w, h, color)` | Filled rectangle |
@@ -1863,7 +1862,8 @@ iefs.save(x, "data.iefs")
 x2 : iefs.load("data.iefs")          # CRC-checked owned copy
 x3 : iefs.map("data.iefs")           # mmap; skip CRC; alias payloads
 x3 : iefs.map("data.iefs", pages:"thp")  # or "2m" / "1g" (HugePages must be reserved)
-iefs.save(x, "big.iefs", 1)          # force O_DIRECT when available
+iefs.save(x, "big.iefs", 1)          # force O_DIRECT when available (Linux);
+                                     # on Darwin large AUTO I/O uses F_NOCACHE
 print(iefs.direct_available())
 ```
 
@@ -1875,6 +1875,7 @@ print(iefs.direct_available())
 Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, vectors, matrices, lists, dicts, tables. Functions, errors, and input streams are rejected.
 
 Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>` (`ISOLDE_IEFS_*` aliases still accepted).
+On Darwin, `direct_available()` is 0; large AUTO reads/writes still set `F_NOCACHE` above the same size threshold.
 
 ## Tests and benchmarks
 

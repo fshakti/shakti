@@ -9,6 +9,7 @@
 #endif
 
 #include "synth_platform.h"
+#include "fb_present.h"
 #include "input.h"
 /* a.h short-name macros collide with Apple SDK / local identifiers (st, in, im, etc.) */
 #undef ia
@@ -63,22 +64,8 @@
     }
     if (!_rep) return;
 
-    /* Framebuffer row 0 = top (X11-style). NSBitmapImageRep row 0 maps to bottom
-     * when drawn in a flipped view — reverse rows so header appears at top. */
-    unsigned char *dst = [_rep bitmapData];
-    for (int y = 0; y < h; y++) {
-        int dy = (h - 1) - y;
-        const uint32_t *src_row = px + (size_t)y * (size_t)w;
-        unsigned char *dst_row = dst + (size_t)dy * (size_t)w * 4u;
-        for (int x = 0; x < w; x++) {
-            uint32_t c = src_row[x];
-            unsigned char *p = dst_row + (size_t)x * 4u;
-            p[0] = (unsigned char)((c >> 16) & 255u);
-            p[1] = (unsigned char)((c >> 8) & 255u);
-            p[2] = (unsigned char)(c & 255u);
-            p[3] = 255;
-        }
-    }
+    /* Framebuffer row 0 = top (X11-style). NSBitmapImageRep needs Y-flip. */
+    fb_pack_rgba8([_rep bitmapData], px, w, h, 1);
     [_rep drawInRect:self.bounds];
 }
 - (void)mouseDown:(NSEvent *)ev {
