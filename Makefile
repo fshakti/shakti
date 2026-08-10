@@ -338,6 +338,7 @@ ifneq ($(SHAKTI_TESTS),)
 	done
 	@if [ -x tests/exe_realpath.sh ]; then bash tests/exe_realpath.sh || exit 1; fi
 	@if [ -x tests/build_guards.sh ]; then bash tests/build_guards.sh || exit 1; fi
+	@if [ -x tests/repl_q.sh ]; then bash tests/repl_q.sh || exit 1; fi
 else
 	@echo "test: no tests/*.ie present (ok)"
 endif

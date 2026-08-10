@@ -12,7 +12,7 @@
 def open():
     r : synth_open()
     if type(r) != "error":
-        print("synth open — window active; close it or type quit to leave repl")
+        print("synth open — window active; close it or type \\q to leave repl")
     return r
 
 def close():

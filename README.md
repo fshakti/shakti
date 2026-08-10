@@ -73,9 +73,14 @@ shakti
 
 Unknown flags exit with status 2.
 
+Bare REPL meta-commands (banner also lists them): `\d` docs, `\v` vars, `\w` names,
+`\q` / `\q N` (process exit with optional status). Soft leave: `quit` or `exit`.
+
 ```bash
 ./shakti file.ie
 ./shakti          # REPL
+printf '\\q\n' | ./shakti -q          # quit with status 0
+printf '\\q 7\n' | ./shakti -q        # quit with status 7
 ./shakti --command '1+1'
 ./shakti file.py    # supported Python subset → Shakti, then run
 ./shakti file.c     # supported C subset → Shakti, then run
