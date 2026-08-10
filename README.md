@@ -35,7 +35,8 @@ for value in abs@ values:
 # Linux: sudo apt-get install -y libx11-dev libasound2-dev libexpat1-dev
 # macOS: brew install libomp expat
 make build          # default: same as `make` / `make all`
-make prod           # strip release binary
+make prod           # strip release binary under .build/; refresh ./shakti symlink
+make install        # optional: ~/.local/bin/shakti → this tree's .build/shakti
 export SHAKTI_LIB=$PWD/lib
 ```
 
@@ -44,7 +45,9 @@ arm64 / Apple Silicon, including M5; `-march=x86-64-v2` on x86-64).
 For a redistributable arm64 binary, use `SHAKTI_PORTABLE_CPU=1` (`-mcpu=apple-m4`;
 current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make prod-size` optimizes for size.
-`make clean` removes the binary and build objects.
+`make clean` removes `.build/` and the `./shakti` symlink.
+The linked binary lives at `.build/shakti`; `make build` also creates `./shakti` →
+`.build/shakti` so a workspace directory on `PATH` finds `shakti` (same idea as Isolde).
 Embedded converter headers are generated under `gen/` from `converters/p2s.ie`,
 `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
 
