@@ -21,7 +21,7 @@ extern "C" {
 #define IEFS_MAGIC "IEF1"
 #define IEFS_VERSION 1u
 #define IEFS_HEADER_SIZE 24u
-#define IEFS_MAX_PAYLOAD (16ull << 30) /* 16 GiB hard cap */
+#define IEFS_MAX_PAYLOAD (64ull << 30) /* 64 GiB hard cap (was 16; Basic one-day quotes ~25 GiB) */
 #define IEFS_MAX_ELEMS (1ull << 32)
 
 /* Encode value into a newly malloc'd buffer (*out_len includes header). 0 = ok. */
