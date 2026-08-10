@@ -154,7 +154,7 @@ print("sum(u * v):", sum(u * v))
 # CSV/TSV table save/load. String columns save as text; load is numeric-only.
 # Normal-sized files use a buffered read; oversized files stream when
 # SHAKTI_CSV_MAX_BYTES is exceeded (default 1 GiB).
-#   ./shakti example.ie   # or copy this section to its own file
+#   ./shakti examples/example.ie   # or copy this section to its own file
 
 people : table(id:[1, 2, 3], name:["ada", "bob", "cam"])
 r : save(people, "/tmp/shakti_people.csv")
@@ -195,7 +195,7 @@ print(tsv_short)
 # =============================================================================
 # In-memory table SQL — requires `import sql` before statement syntax.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: sql_demo.ie
+#   ./shakti examples/example.ie  # section: sql_demo.ie
 
 import sql
 
@@ -231,7 +231,7 @@ print(roster)
 # =============================================================================
 # Standalone pixel window (960x540 design, presented at 1920x1080). Close the window to exit.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: gfx_demo.ie
+#   ./shakti examples/example.ie  # section: gfx_demo.ie
 # Also: examples/gfx_demo.ie, examples/gfx_demo_timed.ie, examples/gfx_movie.ie
 
 import gfx
@@ -260,7 +260,7 @@ else:
 # =============================================================================
 # matplotlib.pyplot-shaped charts on gfx.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: pyplot_demo.ie
+#   ./shakti examples/example.ie  # section: pyplot_demo.ie
 # Also: examples/pyplot_demo.ie
 
 import pyplot
@@ -288,7 +288,7 @@ else:
 # =============================================================================
 # IPython / Notebook-shaped cells on eval + .ipynb R/W (optional gfx view).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: jupyter_demo.ie
+#   ./shakti examples/example.ie  # section: jupyter_demo.ie
 #   SHAKTI_GFX_SKIP=1 ./shakti examples/jupyter_demo.ie
 # Also: examples/jupyter_demo.ie
 
@@ -343,7 +343,7 @@ print("done")
 # =============================================================================
 # Knowledge graph demo — subject/predicate/object triples.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: graph_demo.ie
+#   ./shakti examples/example.ie  # section: graph_demo.ie
 
 import graph
 
@@ -380,8 +380,8 @@ print(graph.query("*", "knows", "Grace"))
 # =============================================================================
 # Terminal + event-hub input demo (no synth window).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: input_demo.ie
-#   echo hello | ./shakti example.ie   # readline path (same section)
+#   ./shakti examples/example.ie  # section: input_demo.ie
+#   echo hello | ./shakti examples/example.ie   # readline path (same section)
 
 import input
 
@@ -427,7 +427,7 @@ print("steps:", synth.steps())
 # Usage (from repo root, with X11 + ALSA):
 #   SHAKTI_SYNTH:1 make shakti
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: synth_song.ie
+#   ./shakti examples/example.ie  # section: synth_song.ie
 
 import synth
 
@@ -497,7 +497,7 @@ while synth.alive():
 # Synth + unified input jam demo (Linux/macOS with synth build).
 #
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: synth_input.ie
+#   ./shakti examples/example.ie  # section: synth_input.ie
 #
 # Maps QWERTY keys to synth notes via input(2) key up/down stream.
 # Close the synth window or press Ctrl+C to exit.
@@ -535,7 +535,7 @@ print("Done")
 # Compare with 12-TET by toggling tuning while holding notes.
 #
 #   export SHAKTI_LIB=$PWD/lib
-#   SHAKTI_SYNTH_HEADLESS=1 ./shakti example.ie  # section: synth_just_intonation.ie
+#   SHAKTI_SYNTH_HEADLESS=1 ./shakti examples/example.ie  # section: synth_just_intonation.ie
 
 import synth
 
@@ -567,7 +567,7 @@ print("done")
 # =============================================================================
 # Just-intonation ratio helpers (no audio device required).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: dsp_demo.ie
+#   ./shakti examples/example.ie  # section: dsp_demo.ie
 
 import dsp
 
@@ -582,7 +582,7 @@ for row in dsp.perfect7(root):
 # =============================================================================
 # Drive Sonic Pi via OSC (UDP). Start Sonic Pi + examples/sonicpi_bridge.rb first.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: sonicpi_demo.ie
+#   ./shakti examples/example.ie  # section: sonicpi_demo.ie
 
 import sonicpi
 
@@ -598,7 +598,7 @@ print("sonicpi demo sent — check Sonic Pi audio")
 # =============================================================================
 # PDF 1.4 write/read round-trip (no third-party PDF libs).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: pdf_demo.ie
+#   ./shakti examples/example.ie  # section: pdf_demo.ie
 
 import pdf
 
@@ -618,7 +618,7 @@ pdf.close(d)
 # =============================================================================
 # MIDI I/O (ALSA / CoreMIDI). Override port with MIDI_PORT env.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: midi_demo.ie
+#   ./shakti examples/example.ie  # section: midi_demo.ie
 
 import midi
 
@@ -634,7 +634,7 @@ if midi.backend() != "none":
 # =============================================================================
 # Durable .iefs save/load for any supported value.
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: iefs_demo.ie
+#   ./shakti examples/example.ie  # section: iefs_demo.ie
 
 import iefs
 
@@ -650,7 +650,7 @@ print("direct_available:", iefs.direct_available())
 # =============================================================================
 # Speech-to-text demo (macOS only; requires microphone + Speech Recognition permission).
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: talk_demo.ie
+#   ./shakti examples/example.ie  # section: talk_demo.ie
 
 import talk
 
@@ -741,7 +741,7 @@ else:
 # REST client + local server demo
 #
 #   export SHAKTI_LIB=$PWD/lib
-#   ./shakti example.ie  # section: rest_demo.ie
+#   ./shakti examples/example.ie  # section: rest_demo.ie
 #
 # Optional live API (needs network):
 #   resp : rest.get("https://httpbin.org/get")

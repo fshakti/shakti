@@ -1,0 +1,48 @@
+# stem demo — separate a short synthetic tone stream and print latency
+import stem
+
+print("stem info:", stem.info())
+stem.open(44100, 256)
+print("algorithmic latency_ms:", stem.latency_ms())
+
+sr : 44100.0
+secs : 0.5
+n : int(sr * secs)
+block_sz : 256
+pos : 0
+energy : {"drums": 0.0, "bass": 0.0, "vocals": 0.0, "other": 0.0}
+
+t0 : clock()
+while pos < n:
+    take : block_sz
+    if pos + take > n:
+        take : n - pos
+    blk : []
+    i : 0
+    while i < take:
+        t : (pos + i) / sr
+        x : 0.2 * sin(6.283185307179586 * 110.0 * t)
+        x : x + 0.15 * sin(6.283185307179586 * 440.0 * t)
+        append(blk, x)
+        i : i + 1
+    out : stem.process(blk)
+    for name in ["drums", "bass", "vocals", "other"]:
+        s : out[name]
+        e : 0.0
+        j : 0
+        while j < len(s):
+            v : s[j]
+            e : e + v * v
+            j : j + 1
+        energy[name] : energy[name] + e
+    pos : pos + take
+dt : clock() - t0
+
+print("process wall_s:", dt)
+print("audio_s:", secs)
+print("xrt:", dt / secs)
+print("stem energy:", energy)
+stem.set_gains(1, 1, 0, 1)
+print("gains (vocals muted):", stem.gains())
+stem.close()
+print("stem demo done")

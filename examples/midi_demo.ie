@@ -1,0 +1,40 @@
+# MIDI I/O demo — Linux ALSA or macOS CoreMIDI
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/midi_demo.ie
+#
+# Lists ports by default. To send a short test pattern, set MIDI_PORT to a
+# port id or name substring (e.g. MIDI_PORT="Midi Through" or "14:0").
+
+import midi
+
+print("backend:", midi.backend())
+if midi.backend() = "none":
+    print("midi not available")
+else:
+    midi.open()
+    print("ports:")
+    for p in midi.list():
+        print(" ", p)
+
+    target : getenv("MIDI_PORT")
+    if not target:
+        print("set MIDI_PORT to a port id/name substring to send a test pattern")
+        midi.close()
+    else:
+        print("connect:", target)
+        midi.connect(target)
+        midi.note_on(60, 100)
+        wait(0.4)
+        midi.note_off(60)
+        midi.note_on(64, 90)
+        wait(0.3)
+        midi.note_off(64)
+        midi.cc(1, 64)
+        # Drain any inbound events briefly
+        t0 : clock()
+        while clock() - t0 < 0.2:
+            ev : midi.poll()
+            if ev:
+                print("in:", ev)
+        midi.close()
+        print("done")

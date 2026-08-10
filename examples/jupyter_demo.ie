@@ -1,0 +1,68 @@
+# jupyter demo — notebook cells, eval history, .ipynb round-trip, optional gfx view
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/jupyter_demo.ie
+#   SHAKTI_GFX_SKIP=1 ./shakti examples/jupyter_demo.ie   # no window
+import jupyter
+import gfx
+
+def _escape_nl(s):
+    out : ""
+    for ch in str(s):
+        if ch = "\n":
+            out : out + "\\n"
+        else:
+            out : out + ch
+    return out
+
+def _fmt_in(xs):
+    parts : []
+    for s in xs:
+        parts.append(_escape_nl(s))
+    return parts
+
+jupyter.new()
+jupyter.markdown("# jupyter demo")
+jupyter.markdown("Shakti cells via `eval` — not a Python kernel.")
+jupyter.code("a : [1, 2, 3, 4]")
+jupyter.code("b : 0\nfor x in a:\n    b : b + x\nb")
+jupyter.code("a")
+
+vals : jupyter.run_all()
+print("run_all results:", vals)
+print("In:", _fmt_in(jupyter.get_in()))
+print("Out:", jupyter.get_out())
+print("execution_count:", jupyter.execution_count(), "cells:", jupyter.ncells())
+
+# Persist a clean notebook BEFORE error / one-shot demos (round-trip should stay green).
+path : "/tmp/shakti_jupyter_demo.ipynb"
+nbytes : jupyter.save(path)
+print("wrote", path, nbytes, "bytes")
+
+# error cell becomes an error output (run continues); not part of saved round-trip
+err : jupyter.run("1 / 0")
+print("error cell:", err, "type:", type(err))
+print("last outputs:", jupyter.cell(jupyter.ncells() - 1)["outputs"])
+
+# IPython-shaped one-shot append+exec
+r : jupyter.run("10 * 10")
+print("run =>", r, "Out[last]:", jupyter.get_out()[jupyter.execution_count()])
+
+# round-trip: clear, load clean notebook, inspect (does not re-exec)
+jupyter.clear()
+jupyter.load(path)
+print("reloaded cells:", jupyter.ncells())
+print("cell0:", jupyter.cell(0)["cell_type"], jupyter.cell(0)["source"])
+print("cell2 source:", jupyter.cell(2)["source"])
+print("dumps head:", jupyter.dumps()[0:80], "...")
+
+# re-run after load restores values in root eval env
+print("re-run_all:", jupyter.run_all())
+
+if getenv("SHAKTI_GFX_SKIP") = "1":
+    print("jupyter demo: show skipped (SHAKTI_GFX_SKIP=1)")
+else:
+    if gfx.available():
+        jupyter.show()
+    else:
+        print("jupyter demo: gfx not available (skip show)")
+print("done")
