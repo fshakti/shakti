@@ -1,7 +1,7 @@
 # Merged Shakti examples — copy/paste catalog. Do NOT run this file end-to-end:
 # later sections open gfx/synth/input loops (while …: tick() with no sleep) that
 # busy-wait at ~100% CPU until the window is closed.
-# Prefer: copy one section into its own .ie, or run examples/<name>.ie when present.
+# Prefer: copy one section into its own .ie.
 # Headless: SHAKTI_GFX_SKIP=1 for demos that honor it. See README.md / doc.md.
 
 # =============================================================================

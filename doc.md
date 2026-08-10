@@ -36,18 +36,17 @@ Version **0.12.0**.
 
 # Examples index
 
-Most demo sections live in [`examples/example.ie`](examples/example.ie) (labels like `sql_demo.ie` are section banners, not separate files). Extra gfx demos also live under [`examples/_local/`](examples/_local/) when present locally (that tree is workspace-local / not published).
+Most demo sections live in [`examples/example.ie`](examples/example.ie) (labels like `sql_demo.ie` are section banners, not separate files).
 
 **Do not run `examples/example.ie` as a single program.** It concatenates interactive demos. After the early non-GUI sections it reaches `gfx_demo` / `synth_*` / `input` event loops (`while gfx.alive(): gfx.tick()` and similar). Interactive loops stay open until the window is closed. Copy one section into its own file, or run a standalone under `examples/`.
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# Good: one demo
-./shakti examples/_local/gfx_demo.ie
-# Or paste a single section from examples/example.ie into /tmp/demo.ie and run that
+# Paste a single section from examples/example.ie into /tmp/demo.ie and run that
+./shakti /tmp/demo.ie
 ```
 
-Copy a section into its own file if you need to run it alone (for example IPC server + client). Timed/movie gfx demos: `examples/_local/gfx_demo_timed.ie`, `examples/_local/gfx_movie.ie`.
+Copy a section into its own file if you need to run it alone (for example IPC server + client).
 
 ## By module
 
@@ -59,21 +58,18 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` (numeric + string columns) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
-| `import gfx` | `gfx_demo.ie` | Pixel window + click drawing (also `examples/_local/gfx_demo.ie`) |
-| `import gfx` | `examples/_local/gfx_demo_timed.ie` | Timed open/draw/present (standalone) |
-| `import gfx` | `examples/_local/gfx_movie.ie` | Animated redraw demo (standalone) |
-| `import pyplot` | `pyplot_demo.ie` / `examples/_local/pyplot_demo.ie` | Line / scatter / bar charts on gfx |
-| `import jupyter` | `jupyter_demo.ie` / `examples/_local/jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
+| `import gfx` | `gfx_demo.ie` | Pixel window + click drawing |
+| `import pyplot` | `pyplot_demo.ie` | Line / scatter / bar charts on gfx |
+| `import jupyter` | `jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
 | `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers |
-| `import stem` | `examples/_local/stem_demo.ie` | Streaming 4-stem separator |
-| `import sonicpi` | `sonicpi_demo.ie` / `examples/_local/sonicpi_demo.ie` | Drive Sonic Pi over OSC |
-| `import pdf` | `pdf_demo.ie` / `examples/_local/pdf_smoke.ie` | PDF 1.4 write/read |
-| `import midi` | `midi_demo.ie` / `examples/_local/midi_demo.ie` | ALSA / CoreMIDI I/O |
+| `import sonicpi` | `sonicpi_demo.ie` | Drive Sonic Pi over OSC |
+| `import pdf` | `pdf_demo.ie` | PDF 1.4 write/read |
+| `import midi` | `midi_demo.ie` | ALSA / CoreMIDI I/O |
 | `import iefs` | `iefs_demo.ie` | Durable `.iefs` save/load |
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
@@ -158,35 +154,11 @@ Start with `./shakti` (or `-i` after `--command`). Banner line:
 
 Unknown `\` commands print an error and stay in the REPL.
 
-## Tests and benchmarks (local tree)
-
-When `tests/`, `benchmarks/`, and `Makefile.local` are present:
-
-```bash
-make prod && export SHAKTI_LIB=$PWD/lib
-make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter, module_defaults
-make -f Makefile.local bench-modules  # focused suites only
-make -f Makefile.local test-repl-q    # REPL \q / \q N quit (also via make test → tests/repl_q.sh)
-make -f Makefile.local bench-repl-q   # cold spawn + \q exit microbench
-make -f Makefile.local test-c         # C converter regression script
-make -f Makefile.local test-transpile-matrix
-make -f Makefile.local bench-transpile-all
-make -f Makefile.local compare-langs  # vs CPython / cc -O2 / .NET / JVM (decomposed C table)
-SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench-update
-SHAKTI_MIDI_SKIP_SEND=1 SHAKTI_SONICPI_SKIP_SEND=1 make -f Makefile.local bench
-```
-
-Per-module targets: `test-dsp`, `bench-dsp`, `test-pdf`, `bench-pdf`, `test-midi`, `bench-midi`, `test-iefs`, `bench-iefs`, `test-sonicpi`, `bench-sonicpi`, `test-pyplot`, `bench-pyplot`, `test-jupyter`, `bench-jupyter`. Headless benches skip UDP/MIDI send when `SHAKTI_MIDI_SKIP_SEND=1` / `SHAKTI_SONICPI_SKIP_SEND=1`. Display draw benches skip when `SHAKTI_GFX_SKIP=1`.
-
-Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).
-
 Build note: the direct-run converters (`./shakti file.py`, `./shakti file.c`,
 `./shakti file.cs`, `./shakti file.java`) use embedded copies generated into
-`gen/` from `converters/p2s.ie`, `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`. Shared converter
-feature matrix: `scripts/transpile_feature_matrix.py` (via
-`make -f Makefile.local test-transpile-matrix`). Repeated source runs write a
-transpile cache under `~/.cache/shakti/transpile/` (or `$XDG_CACHE_HOME/shakti/transpile/`);
-set `SHAKTI_NO_TRANSPILE_CACHE=1` to force a fresh convert each process.
+`gen/` from `converters/p2s.ie`, `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
+Repeated source runs use a disk transpile cache; set `SHAKTI_NO_TRANSPILE_CACHE=1`
+to force a fresh convert each process.
 
 ---
 
@@ -261,8 +233,7 @@ subset to Shakti and evaluates that. Unsupported syntax exits nonzero with
 
 ### Performance vs `cc -O2` (methodology)
 
-Local `make -f Makefile.local compare-langs` / `scripts/bench_c_vs_shakti.py`
-compares **already-built** `cc -O2` binaries (compile untimed) to Shakti.
+Compare **already-built** `cc -O2` binaries (compile untimed) to Shakti:
 
 | Path | What is timed | How to read it |
 |------|---------------|----------------|
@@ -274,12 +245,8 @@ Fair peer for “language VM” cost is **CPython** (~parity on the same harness
 Expect **gcc -O2** to win scalar micros by a wide margin: Shakti is an AST
 interpreter with bulk NEON/OpenMP only on large vectors (`make prod-speed`).
 Tips: emit `.ie` once for hot runs; repeated `./shakti file.c` uses a disk
-transpile cache under `~/.cache/shakti/transpile/` (disable with
-`SHAKTI_NO_TRANSPILE_CACHE=1`). Counting `while (i < N): …; i += 1` loops
-lowered from C are specialized in the evaluator.
-
-Latest local numbers: `benchmarks/local/langs.md`, profile notes in
-`benchmarks/local/c_gap_profile.md`.
+transpile cache (disable with `SHAKTI_NO_TRANSPILE_CACHE=1`). Counting
+`while (i < N): …; i += 1` loops lowered from C are specialized in the evaluator.
 
 ## Rewrites
 
@@ -802,9 +769,9 @@ For high-throughput windowed averages / range aggregates over dense keys, prefer
 |--------|-----|---------|
 | `sql` | [sql module](#sql-module) | `sql_demo.ie` |
 | `graph` | [graph module](#graph-module) | `graph_demo.ie` |
-| `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` / `examples/_local/gfx_demo.ie` |
-| `pyplot` | [pyplot module](#pyplot-module) | `pyplot_demo.ie` / `examples/_local/pyplot_demo.ie` |
-| `jupyter` | [jupyter module](#jupyter-module) | `jupyter_demo.ie` / `examples/_local/jupyter_demo.ie` |
+| `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` |
+| `pyplot` | [pyplot module](#pyplot-module) | `pyplot_demo.ie` |
+| `jupyter` | [jupyter module](#jupyter-module) | `jupyter_demo.ie` |
 | `input` | [input module](#input-module) | `input_demo.ie` |
 | `synth` | [synth module](#synth-module) | `synth_demo.ie` |
 | `talk` | [talk module](#talk-module-macos) | `talk_demo.ie` |
@@ -928,7 +895,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-# copy sql_demo.ie section from examples/example.ie, or: ./shakti examples/_local/sql_demo.ie  # if present
+# copy sql_demo.ie section from examples/example.ie into its own file, then run it
 ```
 
 ## Example
@@ -1049,8 +1016,8 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/gfx_demo.ie
-# or copy the gfx_demo.ie section from examples/example.ie into its own file
+# copy the gfx_demo.ie section from examples/example.ie into its own file, then:
+./shakti /tmp/gfx_demo.ie
 ```
 
 Linux needs `libx11-dev`. Disable at build time with `SHAKTI_GFX=0 make prod`.
@@ -1084,10 +1051,7 @@ else:
 
 | File | Description |
 |------|-------------|
-| `gfx_demo.ie` | Minimal open/draw/click loop ([`examples/example.ie`](examples/example.ie) section; also `examples/_local/gfx_demo.ie`) |
-| `examples/_local/gfx_demo_timed.ie` | Reports open/draw/tick timing |
-| `examples/_local/gfx_movie.ie` | Animated redraw stress demo |
-| `tests/gfx_api.ie` | Smoke test for API and reopen/close behavior |
+| `gfx_demo.ie` | Minimal open/draw/click loop ([`examples/example.ie`](examples/example.ie) section) |
 
 ## API
 
@@ -1130,8 +1094,8 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/pyplot_demo.ie
-SHAKTI_GFX_SKIP=1 ./shakti examples/_local/pyplot_demo.ie   # skip gfx window
+# copy the pyplot_demo.ie section from examples/example.ie into its own file
+SHAKTI_GFX_SKIP=1 ./shakti /tmp/pyplot_demo.ie   # skip gfx window
 ```
 
 Or copy the `pyplot_demo.ie` section from [`examples/example.ie`](examples/example.ie).
@@ -1156,10 +1120,7 @@ Call style is `pyplot.plot(...)` (no `import … as plt` alias).
 
 | File | Description |
 |------|-------------|
-| `examples/_local/pyplot_demo.ie` | Line + scatter + bar with legend/grid |
-| `examples/example.ie` (`pyplot_demo.ie` section) | Same charts in the merged examples file |
-| `tests/pyplot_api.ie` | API smoke tests; draws once when a display is available |
-| `benchmarks/suites/pyplot.ie` | CPU + optional draw microbenches (`make -f Makefile.local bench-pyplot`) |
+| `examples/example.ie` (`pyplot_demo.ie` section) | Line + scatter + bar with legend/grid |
 
 ## API
 
@@ -1181,7 +1142,7 @@ Module `lib/pyplot.ie` (imports `gfx`).
 | `pyplot.show()` | Open gfx, draw, block until the window closes |
 | `pyplot.close()` | Close the gfx window if open |
 
-Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` strings, or `0xRRGGBB` ints. Auto color cycles when `color` is omitted. Headless demos: set `SHAKTI_GFX_SKIP=1` to skip `show()` in `examples/_local/pyplot_demo.ie`.
+Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` strings, or `0xRRGGBB` ints. Auto color cycles when `color` is omitted. Headless demos: set `SHAKTI_GFX_SKIP=1` to skip `show()`.
 
 ---
 
@@ -1193,8 +1154,8 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/jupyter_demo.ie
-SHAKTI_GFX_SKIP=1 ./shakti examples/_local/jupyter_demo.ie   # skip gfx window
+# copy the jupyter_demo.ie section from examples/example.ie into its own file
+SHAKTI_GFX_SKIP=1 ./shakti /tmp/jupyter_demo.ie   # skip gfx window
 ```
 
 Or copy the `jupyter_demo.ie` section from [`examples/example.ie`](examples/example.ie).
@@ -1220,10 +1181,7 @@ IPython-shaped one-shot: `jupyter.run("3 * 4")` appends a code cell and executes
 
 | File | Description |
 |------|-------------|
-| `examples/_local/jupyter_demo.ie` | Cells, errors, run/run_all, save/load, optional gfx view |
-| `examples/example.ie` (`jupyter_demo.ie` section) | Same flow in the merged examples file |
-| `tests/jupyter_api.ie` | API smoke tests; draws once when a display is available |
-| `benchmarks/suites/jupyter.ie` | CPU + optional draw microbenches (`make -f Makefile.local bench-jupyter`) |
+| `examples/example.ie` (`jupyter_demo.ie` section) | Cells, errors, run/run_all, save/load, optional gfx view |
 
 ## API
 
@@ -1666,13 +1624,6 @@ Module `lib/dsp.ie`:
 | `dsp.et_cents(semitone)` | Equal-temperament cents for semitone count |
 | `dsp.et_delta(num, den)` | Cents deviation from nearest ET semitone |
 
-## Tests and benchmarks
-
-```bash
-make -f Makefile.local test-dsp
-make -f Makefile.local bench-dsp
-```
-
 Disable at build: `SHAKTI_DSP=0 make prod`.
 
 ---
@@ -1683,11 +1634,8 @@ Streaming 4-stem separator (drums / bass / vocals / other) via STFT + HPSS + ban
 
 Also includes an **offline CPU spectrogram MLP** path (`SHAKST01` checkpoint format): magnitude frames → two ReLU layers → sigmoid stem masks → ISTFT. Generate a synthetic checkpoint with `stem.write_ml_synth` for tests; no GPU backend.
 
-Cross-engine benches (Demucs OSS, optional LALAL.AI proprietary API) live in the sibling [`../stem`](../stem) workspace when present.
-
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/stem_demo.ie
 ```
 
 ## API
@@ -1723,15 +1671,8 @@ stem.close()
 
 stem.write_ml_synth("/tmp/demo.stemw", 32)
 stem.load_ml("/tmp/demo.stemw")
-ml : stem.separate_file_ml("benchmarks/fixtures/stem_tone.wav")
+ml : stem.separate_file_ml("/tmp/tone.wav")
 stem.unload_ml()
-```
-
-## Tests and benchmarks
-
-```bash
-make -f Makefile.local test-stem
-make -f Makefile.local bench-stem
 ```
 
 Disable at build: `SHAKTI_STEM=0 make prod`.
@@ -1744,14 +1685,13 @@ OSC bridge to [Sonic Pi](https://sonic-pi.net/) for live-coded music from Shakti
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/sonicpi_demo.ie  # or copy section from examples/example.ie
-# or: ./shakti examples/_local/sonicpi_demo.ie
+# copy sonicpi_demo.ie section from examples/example.ie into its own file, then run it
 ```
 
 ## Prerequisites
 
 1. Install **Sonic Pi** separately from [sonic-pi.net](https://sonic-pi.net/) (not bundled with Shakti).
-2. Start Sonic Pi and run the bridge in `examples/_local/sonicpi_bridge.rb` when that tree is present locally.
+2. Start Sonic Pi and enable its OSC listener.
 3. By default Sonic Pi listens for OSC on **`127.0.0.1:4560`**. For remote hosts, enable **Preferences → IO → Networked OSC → Allow OSC from other computers**.
 
 ## Example
@@ -1783,13 +1723,6 @@ For arbitrary OSC paths, call the builtin `sonicpi_send(path, args...)` directly
 
 Environment overrides: `SONICPI_HOST`, `SONICPI_PORT`.
 
-## Tests and benchmarks
-
-```bash
-make -f Makefile.local test-sonicpi   # UDP smoke (Sonic Pi optional)
-make -f Makefile.local bench-sonicpi  # configure/play/send; set SHAKTI_SONICPI_SKIP_SEND=1 for configure-only
-```
-
 Disable at build: `SHAKTI_SONICPI=0 make prod`.
 
 Shakti communicates with Sonic Pi over the public **OSC** protocol. Shakti does **not** ship Sonic Pi binaries, samples, or synthdefs. Sonic Pi is external software by Samuel Aaron and contributors.
@@ -1802,8 +1735,7 @@ From-scratch PDF 1.4 reader/writer (`src/pdf.c`) — no MuPDF/Poppler/PDFium. Bu
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/pdf_smoke.ie  # or copy pdf_demo.ie section from examples/example.ie
-# or: ./shakti examples/_local/pdf_smoke.ie
+# copy pdf_demo.ie section from examples/example.ie into its own file, then run it
 ```
 
 ## Example
@@ -1837,13 +1769,6 @@ pdf.close(d)
 | `pdf.text(h, page:0)` | Extract text; `page` 1-based, `0` = all |
 | `pdf.close(h)` | Release handle |
 
-## Tests and benchmarks
-
-```bash
-make -f Makefile.local test-pdf
-make -f Makefile.local bench-pdf
-```
-
 Disable at build: `SHAKTI_PDF=0 make prod`.
 
 ---
@@ -1854,8 +1779,8 @@ MIDI I/O via ALSA sequencer (Linux) or CoreMIDI (macOS). Built by default (`SHAK
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/_local/midi_demo.ie
-# optional: MIDI_PORT='Scarlett' ./shakti examples/_local/midi_demo.ie
+# copy midi_demo.ie section from examples/example.ie into its own file, then run it
+# optional: MIDI_PORT='Scarlett' ./shakti /tmp/midi_demo.ie
 ```
 
 ## vs `synth` / `sonicpi`
@@ -1876,13 +1801,6 @@ export SHAKTI_LIB=$PWD/lib
 | `connect(id_or_name)` / `disconnect()` | Subscribe output (and input when matched) |
 | `note_on` / `note_off` / `cc` / `program` / `raw` | Send |
 | `poll()` | Next inbound event or `nil` |
-
-## Tests and benchmarks
-
-```bash
-make -f Makefile.local test-midi
-make -f Makefile.local bench-midi   # set SHAKTI_MIDI_SKIP_SEND=1 to skip note I/O
-```
 
 Disable at build: `SHAKTI_MIDI=0 make prod`.
 
@@ -1917,13 +1835,6 @@ Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, v
 
 Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>` (`ISOLDE_IEFS_*` aliases still accepted).
 On Darwin, `direct_available()` is 0; large AUTO reads/writes still set `F_NOCACHE` above the same size threshold.
-
-## Tests and benchmarks
-
-```bash
-make -f Makefile.local test-iefs
-make -f Makefile.local bench-iefs
-```
 
 Disable at build: `SHAKTI_IEFS=0 make prod`.
 
