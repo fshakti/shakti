@@ -1,4 +1,5 @@
 #include "shakti.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,7 +9,7 @@
 #define XML_GE 1
 #endif
 #include <expat.h>
-struct xml_cb{V*tag;V*id;V*name;V*text;};
+struct xml_cb{V*tag;V*id;V*name;V*text;size_t cur_cap;};
 static void xml_start(void*ud,const char*name,const char**atts){
  struct xml_cb*c=(struct xml_cb*)ud;
  const char*idv="",*nm="";
@@ -18,20 +19,28 @@ static void xml_start(void*ud,const char*name,const char**atts){
  v_list_append_own(c->tag,v_str(name));
  v_list_append_own(c->id,v_str(idv));
  v_list_append_own(c->name,v_str(nm));
- v_list_append_own(c->text,v_str(""));}
+ v_list_append_own(c->text,v_str(""));
+ c->cur_cap=1;}
 static void xml_ch(void*ud,const XML_Char*s,int len){
  struct xml_cb*c=(struct xml_cb*)ud;
- if(c->text->n==0)return;
+ if(c->text->n==0||len<=0)return;
  if(c->text->L[c->text->n-1]->t!=T_STR)return;
  V*last=c->text->L[c->text->n-1];
  size_t o=strlen(last->s);
- char*n=malloc(o+(size_t)len+1);
- if(!n)return;
- memcpy(n,last->s,o);
- memcpy(n+o,s,(size_t)len);
- n[o+(size_t)len]=0;
- free(last->s);
- last->s=n;}
+ size_t need=o+(size_t)len+1;
+ if(need>c->cur_cap){
+  size_t ncap=c->cur_cap?c->cur_cap*2:16;
+  while(ncap<need){
+   if(ncap>(SIZE_MAX/2)){ncap=need;break;}
+   ncap*=2;
+  }
+  char*n=realloc(last->s,ncap);
+  if(!n)return;
+  last->s=n;
+  c->cur_cap=ncap;
+ }
+ memcpy(last->s+o,s,(size_t)len);
+ last->s[o+(size_t)len]=0;}
 #define SHAKTI_XML_MAX_FILE (256u * 1024u * 1024u)
 V*table_xml_load(const char*path,V*columns_opt){
  (void)columns_opt;

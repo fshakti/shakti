@@ -432,8 +432,20 @@ V *v_dict_own(V *keys, V *vals) {
     return d;
 }
 V *v_table(V *cols, V *data) {
-    V *v=v_alloc(T_TABLE); v->n = (data->n>0 && data->L && data->L[0]) ? data->L[0]->n : 0;
-    v->keys=v_ref(cols); v->vals=v_ref(data);
+    int64_t n = 0;
+    if (!data || data->t != T_LIST) return v_err("table: bad columns");
+    if (data->n > 0) {
+        if (!data->L || !data->L[0]) return v_err("table: ragged columns");
+        n = data->L[0]->n;
+        for (int64_t i = 1; i < data->n; i++) {
+            if (!data->L[i] || data->L[i]->n != n)
+                return v_err("table: ragged columns");
+        }
+    }
+    V *v = v_alloc(T_TABLE);
+    v->n = n;
+    v->keys = v_ref(cols);
+    v->vals = v_ref(data);
     return v;
 }
 /* Like v_table, but drops the caller's refs on cols/data (for fresh construction). */

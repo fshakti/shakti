@@ -255,6 +255,14 @@ static int sock_listen_tcp(const char *host, int port, char *err, size_t err_cap
         snprintf(err, err_cap, "ipc: bad host '%s'", host);
         close(s);
         return -1;
+    } else {
+        const char *allow = getenv("SHAKTI_IPC_ALLOW_PUBLIC");
+        if (!allow || strcmp(allow, "1") != 0) {
+            snprintf(err, err_cap,
+                     "ipc: non-loopback bind requires SHAKTI_IPC_ALLOW_PUBLIC=1");
+            close(s);
+            return -1;
+        }
     }
     if (bind(s, (struct sockaddr *)&addr, sizeof addr) < 0) {
         snprintf(err, err_cap, "ipc: bind: %s", strerror(errno));
