@@ -4,6 +4,7 @@ Thumbs.db
 .vscode/
 .idea/
 .cursor/
+.claude/
 
 # build outputs
 **/build/
@@ -16,6 +17,7 @@ Thumbs.db
 # logs / caches
 *.log
 **/__pycache__/
+**/.venv/
 
 # binaries / objects
 *.o
@@ -39,16 +41,16 @@ shakti-standalone
 .env
 .env.*
 
-# local scripts
-vuln_scan.sh
-record_gfx_tests.sh
-gfx_tests_terminal.mp4
+# local helper scripts / captures at repo root
+*_scan.sh
+record_*.sh
+/*.mp4
 
 # local workspace notes (never publish)
 CONTEXT.md
 /*audit*.md
 /*benchmark*.md
-/transpile_coverage*.md
+/*_coverage*.md
 
 # never recommit generated converter emit artifacts at repo root
 /c.ie
@@ -62,9 +64,9 @@ qa/
 tests
 tests/
 scripts/
+samples/
 benchmarks/
 internal-bench/
-samples/
 android/
 cmake/
 editors/
@@ -72,7 +74,5 @@ examples/_local/
 docs/
 Makefile.local
 
-# static analyzer / stray local artifacts
+# static analyzer artifacts
 /*.plist
-stluRITA
-

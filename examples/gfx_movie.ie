@@ -1,0 +1,53 @@
+# Animated GFX "movie" — clear + redraw moving objects each frame.
+# Close the window to stop.
+import gfx
+
+if not gfx.available():
+    print("gfx not available")
+else:
+    gfx.open("Shakti GFX movie")
+    t0 : clock()
+    frames : 0
+
+    while gfx.alive():
+        t : clock() - t0
+
+        # Orbiting green ball
+        cx : 480 + int(220.0 * cos(t * 1.3))
+        cy : 270 + int(140.0 * sin(t * 1.3))
+
+        # Bouncing orange square (triangle-wave bounce)
+        bx : 80 + int((t * 160.0) % 720.0)
+        bounce : abs(((t * 110.0) % 360.0) - 180.0)
+        by_pos : 80 + int(bounce)
+
+        # Sliding yellow cursor + white tether to the orbit
+        sx : 60 + int((t * 140.0) % 840.0)
+        sy : 460 - int(abs(((t * 80.0) % 200.0) - 100.0))
+
+        # Progress bar sweep
+        bar_x : 40 + int((t * 220.0) % 840.0)
+
+        gfx.clear(0x0a0a12)
+        gfx.fill_rect(40, 40, 880, 8, 0x1a1a2e)
+        gfx.fill_rect(bar_x, 36, 48, 16, 0x4488ff)
+
+        gfx.fill_rect(bx, by_pos, 56, 56, 0xff6644)
+        gfx.fill_circle(cx, cy, 44, 0x44dd88)
+        gfx.line(sx, sy, cx, cy, 0xffffff)
+        gfx.fill_circle(sx, sy, 14, 0xffcc00)
+
+        if gfx.click_pending():
+            # Click plants a brief flash disk at the pointer
+            gfx.fill_circle(gfx.click_x(), gfx.click_y(), 22, 0xffffff)
+            gfx.consume_click()
+
+        gfx.tick()
+        frames : frames + 1
+
+    elapsed : clock() - t0
+    gfx.close()
+    print("frames:", frames)
+    if elapsed > 0.0:
+        print("fps:", float(frames) / elapsed)
+    print("done")

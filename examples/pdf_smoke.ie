@@ -1,0 +1,19 @@
+# PDF round-trip smoke
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/pdf_smoke.ie
+
+import pdf
+
+path : "/tmp/shakti_pdf_smoke.pdf"
+
+w : pdf.create()
+pdf.add_page(w)
+pdf.text_at(w, 72, 720, "Hello Shakti", size:12)
+pdf.save(w, path)
+pdf.close(w)
+
+d : pdf.open(path)
+print("pages:", pdf.page_count(d))
+print("text:", pdf.text(d))
+pdf.close(d)
+print("pdf smoke ok")
