@@ -6632,7 +6632,20 @@ int shakti_lang_main(int argc, char **argv) {
             char *slash = strrchr(exe, '/');
             if (slash) {
                 *slash = 0;
-                snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib", exe);
+                /* Binaries under .build/ (or build/) load modules from the
+                 * sibling ../lib next to that build dir — same layout as when
+                 * the CLI lived at the repo root. */
+                {
+                    char *leaf_slash = strrchr(exe, '/');
+                    const char *leaf = leaf_slash ? leaf_slash + 1 : exe;
+                    int under_build = leaf_slash &&
+                        (!strcmp(leaf, ".build") || !strcmp(leaf, "build"));
+                    if (under_build)
+                        snprintf(g_lib_path, sizeof(g_lib_path), "%.*s/lib",
+                                 (int)(leaf_slash - exe), exe);
+                    else
+                        snprintf(g_lib_path, sizeof(g_lib_path), "%s/lib", exe);
+                }
             }
             free(exe);
         }
