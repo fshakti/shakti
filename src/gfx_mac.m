@@ -153,6 +153,7 @@ static void gfx_mac_ensure_app(void) {
     if (g_app_ready) return;
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     g_app_ready = 1;
 }
 
