@@ -1,5 +1,6 @@
 # GNU Make build: standalone CLI.
 BUILD := .build
+SHAKTI := $(BUILD)/shakti
 .DEFAULT_GOAL := build
 UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 UNAME_M := $(shell uname -m 2>/dev/null || echo unknown)
@@ -317,16 +318,26 @@ $(BUILD):
 all: build
 build: shakti
 
-shakti: $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ)
-	@if [ -d shakti ] && [ ! -f shakti ]; then \
-		echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
+# PATH-friendly name at repo root (Isolde-style: workspace dir on PATH finds ./shakti).
+# The real binary stays under $(BUILD)/; ./shakti is a relative symlink.
+shakti: $(SHAKTI)
+	@if [ -e shakti ] && [ ! -L shakti ]; then \
+	  if [ -d shakti ]; then \
+	    echo "error: ./shakti is a directory (stale build tree). Run: rm -rf shakti/" >&2; exit 1; \
+	  fi; \
+	  echo "error: ./shakti exists and is not a symlink to $(SHAKTI). Remove it first." >&2; exit 1; \
 	fi
+	ln -sfn $(SHAKTI) shakti
+
+$(SHAKTI): $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 SHAKTI_LIB_DIR := lib
 SHAKTI_TESTS := $(wildcard tests/*.ie)
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
 
-.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts
+.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall
 
 test: shakti
 ifneq ($(SHAKTI_TESTS),)
@@ -353,13 +364,13 @@ PROD_RELEASE_CFLAGS := -fstack-protector-strong
 # ad-hoc code signature, so the kernel SIGKILLs the binary at launch
 # ("Code Signature Invalid"). Re-sign ad-hoc after every strip. No-op elsewhere.
 ifeq ($(UNAME_S),Darwin)
-  MACOS_RESIGN := codesign --force --sign - shakti
+  MACOS_RESIGN := codesign --force --sign - $(SHAKTI)
 else
   MACOS_RESIGN := :
 endif
 
 prod: shakti
-	strip shakti
+	strip $(SHAKTI)
 	$(MACOS_RESIGN)
 
 PROD_SIZE_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -Os -DNDEBUG -DSHAKTI_MINSIZE=1 $(PROD_RELEASE_CFLAGS)
@@ -368,7 +379,7 @@ PROD_SIZE_LDFLAGS := $(LDFLAGS)
 prod-size: CFLAGS := $(PROD_SIZE_CFLAGS)
 prod-size: LDFLAGS := $(PROD_SIZE_LDFLAGS)
 prod-size: clean-shakti-artifacts shakti
-	strip shakti
+	strip $(SHAKTI)
 	$(MACOS_RESIGN)
 
 SHAKTI_PORTABLE_CPU ?= 0
@@ -414,8 +425,17 @@ ifneq ($(PROD_SPEED_GFX_OBJC_FLAGS),)
 prod-speed: GFX_OBJC_FLAGS := $(PROD_SPEED_GFX_OBJC_FLAGS)
 endif
 prod-speed: clean-shakti-artifacts shakti
-	strip shakti
+	strip $(SHAKTI)
 	$(MACOS_RESIGN)
 
 clean-shakti-artifacts:
-	rm -f shakti $(BUILD)/talk.o $(BUILD)/synth.o $(BUILD)/synth_ui.o $(BUILD)/synth_mac.o $(BUILD)/gfx.o $(BUILD)/gfx_mac.o $(BUILD)/gfx_x11.o
+	rm -f shakti $(SHAKTI) $(BUILD)/talk.o $(BUILD)/synth.o $(BUILD)/synth_ui.o $(BUILD)/synth_mac.o $(BUILD)/gfx.o $(BUILD)/gfx_mac.o $(BUILD)/gfx_x11.o
+
+# Install a stable PATH entry (symlink → this tree's .build/shakti).
+install: shakti
+	install -d "$(BINDIR)"
+	ln -sfn "$(CURDIR)/$(SHAKTI)" "$(BINDIR)/shakti"
+	@echo "installed $(BINDIR)/shakti -> $(CURDIR)/$(SHAKTI)"
+
+uninstall:
+	rm -f "$(BINDIR)/shakti"

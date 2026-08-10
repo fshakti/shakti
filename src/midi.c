@@ -213,19 +213,25 @@ static int midi_alsa_open(char *err, size_t err_cap) {
     return 0;
 }
 
+/* Soft-close: drop connections but keep the seq client + ports so a later
+ * midi.open() hits the g_seq fast path instead of recreating ALSA state.
+ * Drain the kernel input queue so reopen/poll cannot see pre-close events. */
+static void midi_alsa_drain_input(void) {
+    if (!g_seq) return;
+    snd_seq_event_t *ev;
+    while (snd_seq_event_input(g_seq, &ev) >= 0)
+        snd_seq_free_event(ev);
+}
+
 static void midi_alsa_close(void) {
     if (!g_seq) return;
     if (g_dst_client >= 0)
         snd_seq_disconnect_to(g_seq, g_out_port, g_dst_client, g_dst_port);
     if (g_src_client >= 0)
         snd_seq_disconnect_from(g_seq, g_in_port, g_src_client, g_src_port);
-    if (g_in_port >= 0) snd_seq_delete_simple_port(g_seq, g_in_port);
-    if (g_out_port >= 0) snd_seq_delete_simple_port(g_seq, g_out_port);
-    snd_seq_close(g_seq);
-    g_seq = NULL;
-    g_out_port = g_in_port = -1;
     g_dst_client = g_dst_port = -1;
     g_src_client = g_src_port = -1;
+    midi_alsa_drain_input();
 }
 
 static V *midi_alsa_list(void) {
@@ -482,13 +488,9 @@ static int midi_cm_open(char *err, size_t err_cap) {
     return 0;
 }
 
+/* Soft-close: disconnect endpoints but keep client + ports for fast reopen. */
 static void midi_cm_close(void) {
     if (g_source && g_in_port_ref) MIDIPortDisconnectSource(g_in_port_ref, g_source);
-    if (g_out_port_ref) MIDIPortDispose(g_out_port_ref);
-    if (g_in_port_ref) MIDIPortDispose(g_in_port_ref);
-    if (g_client) MIDIClientDispose(g_client);
-    g_out_port_ref = g_in_port_ref = 0;
-    g_client = 0;
     g_dest = g_source = 0;
 }
 

@@ -43,7 +43,7 @@ Most demo sections live in [`examples/example.ie`](examples/example.ie) (labels 
 ```bash
 export SHAKTI_LIB=$PWD/lib
 # Paste a single section from examples/example.ie into /tmp/demo.ie and run that
-./shakti /tmp/demo.ie
+./.build/shakti /tmp/demo.ie
 ```
 
 Copy a section into its own file if you need to run it alone (for example IPC server + client).
@@ -87,7 +87,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `converters/cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
 | `converters/j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
 | `examples/python.py` / `examples/c.c` / `examples/csharp.cs` / `examples/java.java` | Tiny demos for each converter |
-| `example.py` / `example.c` / `example.cs` / `example.java` | Broader subset demos (`./shakti examples/example.py` / `example.c` / `example.cs` / `example.java`) |
+| `example.py` / `example.c` / `example.cs` / `example.java` | Broader subset demos (`./.build/shakti examples/example.py` / `example.c` / `example.cs` / `example.java`) |
 
 ## Module docs
 
@@ -139,7 +139,7 @@ Unknown flags exit with status 2. A silent leading `run` argument is accepted fo
 
 ### REPL
 
-Start with `./shakti` (or `-i` after `--command`). Banner line:
+Start with `./.build/shakti` (or `-i` after `--command`). Banner line:
 
 `\d docs  \v vars  \w names  \q [N]  quit|exit`
 
@@ -154,8 +154,8 @@ Start with `./shakti` (or `-i` after `--command`). Banner line:
 
 Unknown `\` commands print an error and stay in the REPL.
 
-Build note: the direct-run converters (`./shakti file.py`, `./shakti file.c`,
-`./shakti file.cs`, `./shakti file.java`) use embedded copies generated into
+Build note: the direct-run converters (`./.build/shakti file.py`, `./.build/shakti file.c`,
+`./.build/shakti file.cs`, `./.build/shakti file.java`) use embedded copies generated into
 `gen/` from `converters/p2s.ie`, `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
 Repeated source runs use a disk transpile cache; set `SHAKTI_NO_TRANSPILE_CACHE=1`
 to force a fresh convert each process.
@@ -169,14 +169,14 @@ generated headers under `gen/` for direct runs, and still available as
 `converters/p2s.ie` for emit-only conversion.
 
 ```bash
-./shakti file.py                 # transpile + run (supported subset)
-./shakti examples/python.py
-./shakti converters/p2s.ie input.py -o out.ie
-./shakti converters/p2s.ie examples/python.py -o python.ie
-SHAKTI_LIB=$PWD/lib ./shakti out.ie
+./.build/shakti file.py                 # transpile + run (supported subset)
+./.build/shakti examples/python.py
+./.build/shakti converters/p2s.ie input.py -o out.ie
+./.build/shakti converters/p2s.ie examples/python.py -o python.ie
+SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
-`./shakti file.py` is not CPython: it lowers the supported subset to Shakti
+`./.build/shakti file.py` is not CPython: it lowers the supported subset to Shakti
 and evaluates that. Unsupported syntax exits nonzero with `file:line:col`
 diagnostics (original `.py` path preserved).
 
@@ -220,14 +220,14 @@ If `main` is present, the converter appends a call so the program runs.
 `main(len(argv[1:]), argv[1:])` (CLI args without the program name).
 
 ```bash
-./shakti file.c                  # transpile + run (supported subset)
-./shakti examples/example.c
-./shakti converters/c2s.ie input.c -o out.ie
-./shakti converters/c2s.ie examples/c.c -o c.ie
-SHAKTI_LIB=$PWD/lib ./shakti out.ie
+./.build/shakti file.c                  # transpile + run (supported subset)
+./.build/shakti examples/example.c
+./.build/shakti converters/c2s.ie input.c -o out.ie
+./.build/shakti converters/c2s.ie examples/c.c -o c.ie
+SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
-`./shakti file.c` is not a C compiler or libc runtime: it lowers the supported
+`./.build/shakti file.c` is not a C compiler or libc runtime: it lowers the supported
 subset to Shakti and evaluates that. Unsupported syntax exits nonzero with
 `file:line:col` diagnostics (original `.c` path preserved).
 
@@ -237,14 +237,14 @@ Compare **already-built** `cc -O2` binaries (compile untimed) to Shakti:
 
 | Path | What is timed | How to read it |
 |------|---------------|----------------|
-| `./shakti file.c` | process start + transpile + parse + eval | Historical headline; mixes converter cost |
-| `./shakti file.ie` | process start + parse + eval | Fairer interpreter-vs-binary gap |
+| `./.build/shakti file.c` | process start + transpile + parse + eval | Historical headline; mixes converter cost |
+| `./.build/shakti file.ie` | process start + parse + eval | Fairer interpreter-vs-binary gap |
 | `eval~` | batch `.ie` minus single `.ie`, per rep | Approximates loop body cost |
 
 Fair peer for “language VM” cost is **CPython** (~parity on the same harness).
 Expect **gcc -O2** to win scalar micros by a wide margin: Shakti is an AST
 interpreter with bulk NEON/OpenMP only on large vectors (`make prod-speed`).
-Tips: emit `.ie` once for hot runs; repeated `./shakti file.c` uses a disk
+Tips: emit `.ie` once for hot runs; repeated `./.build/shakti file.c` uses a disk
 transpile cache (disable with `SHAKTI_NO_TRANSPILE_CACHE=1`). Counting
 `while (i < N): …; i += 1` loops lowered from C are specialized in the evaluator.
 
@@ -303,14 +303,14 @@ generated headers under `gen/` for direct runs, and still available as
 `converters/cs2s.ie` for emit-only conversion.
 
 ```bash
-./shakti file.cs                 # transpile + run (supported subset)
-./shakti examples/csharp.cs
-./shakti converters/cs2s.ie input.cs -o out.ie
-./shakti converters/cs2s.ie examples/csharp.cs -o csharp.ie
-SHAKTI_LIB=$PWD/lib ./shakti out.ie
+./.build/shakti file.cs                 # transpile + run (supported subset)
+./.build/shakti examples/csharp.cs
+./.build/shakti converters/cs2s.ie input.cs -o out.ie
+./.build/shakti converters/cs2s.ie examples/csharp.cs -o csharp.ie
+SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
-`./shakti file.cs` is not the .NET runtime: it lowers the supported subset to
+`./.build/shakti file.cs` is not the .NET runtime: it lowers the supported subset to
 Shakti and evaluates that. Unsupported syntax exits nonzero with
 `file:line:col` diagnostics (original `.cs` path preserved).
 
@@ -376,15 +376,15 @@ methods. If `main` is present, the converter appends `main(argv[1:])` so CLI
 arguments match Java (no program name).
 
 ```bash
-./shakti file.java               # transpile + run (supported subset)
-./shakti examples/java.java
-./shakti examples/example.java
-./shakti converters/j2s.ie input.java -o out.ie
-./shakti converters/j2s.ie examples/java.java -o java.ie
-SHAKTI_LIB=$PWD/lib ./shakti out.ie
+./.build/shakti file.java               # transpile + run (supported subset)
+./.build/shakti examples/java.java
+./.build/shakti examples/example.java
+./.build/shakti converters/j2s.ie input.java -o out.ie
+./.build/shakti converters/j2s.ie examples/java.java -o java.ie
+SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
-`./shakti file.java` is not the JVM: it lowers the supported subset to Shakti
+`./.build/shakti file.java` is not the JVM: it lowers the supported subset to Shakti
 and evaluates that. Unsupported syntax exits nonzero with `file:line:col`
 diagnostics (original `.java` path preserved).
 
@@ -1017,7 +1017,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 ```bash
 export SHAKTI_LIB=$PWD/lib
 # copy the gfx_demo.ie section from examples/example.ie into its own file, then:
-./shakti /tmp/gfx_demo.ie
+./.build/shakti /tmp/gfx_demo.ie
 ```
 
 Linux needs `libx11-dev`. Disable at build time with `SHAKTI_GFX=0 make prod`.
@@ -1095,7 +1095,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 ```bash
 export SHAKTI_LIB=$PWD/lib
 # copy the pyplot_demo.ie section from examples/example.ie into its own file
-SHAKTI_GFX_SKIP=1 ./shakti /tmp/pyplot_demo.ie   # skip gfx window
+SHAKTI_GFX_SKIP=1 ./.build/shakti /tmp/pyplot_demo.ie   # skip gfx window
 ```
 
 Or copy the `pyplot_demo.ie` section from [`examples/example.ie`](examples/example.ie).
@@ -1155,7 +1155,7 @@ Build from the repo root (`make prod`; see [README](README.md)), then:
 ```bash
 export SHAKTI_LIB=$PWD/lib
 # copy the jupyter_demo.ie section from examples/example.ie into its own file
-SHAKTI_GFX_SKIP=1 ./shakti /tmp/jupyter_demo.ie   # skip gfx window
+SHAKTI_GFX_SKIP=1 ./.build/shakti /tmp/jupyter_demo.ie   # skip gfx window
 ```
 
 Or copy the `jupyter_demo.ie` section from [`examples/example.ie`](examples/example.ie).
@@ -1518,7 +1518,7 @@ USB MIDI controller (iRig Keys 2): `examples/synth_midi.ie`
 
 ```bash
 export SHAKTI_LIB=$PWD/lib
-./shakti examples/synth_midi.ie
+./.build/shakti examples/synth_midi.ie
 ```
 
 Maps notes, pitch bend, Mod (CC1 → vibrato), and knobs CC12–19 (level, reverb,
@@ -1781,7 +1781,7 @@ MIDI I/O via ALSA sequencer (Linux) or CoreMIDI (macOS). Built by default (`SHAK
 ```bash
 export SHAKTI_LIB=$PWD/lib
 # copy midi_demo.ie section from examples/example.ie into its own file, then run it
-# optional: MIDI_PORT='Scarlett' ./shakti /tmp/midi_demo.ie
+# optional: MIDI_PORT='Scarlett' ./.build/shakti /tmp/midi_demo.ie
 ```
 
 ## vs `synth` / `sonicpi`
