@@ -44,7 +44,7 @@ arm64 / Apple Silicon, including M5; `-march=x86-64-v2` on x86-64).
 For a redistributable arm64 binary, use `SHAKTI_PORTABLE_CPU=1` (`-mcpu=apple-m4`;
 current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make prod-size` optimizes for size.
-`make clean` removes the binary and objects under `.build/`.
+`make clean` removes the binary and build objects.
 Embedded converter headers are generated under `gen/` from `converters/p2s.ie`,
 `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
 
@@ -96,12 +96,11 @@ comments with source-line diagnostics instead of emitting partial programs.
 CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger inputs.
 
 `./shakti file.c` is **subset lowering + interpret**, not a C compiler. Repeated
-`.c` / `.py` / `.cs` / `.java` runs use a disk transpile cache under
-`~/.cache/shakti/transpile/` (keyed by source and converter; set
-`SHAKTI_NO_TRANSPILE_CACHE=1` to disable). Prefer emitting `.ie` once for hot loops. Fast numeric work belongs on large vectors /
+`.c` / `.py` / `.cs` / `.java` runs use a disk transpile cache (keyed by source
+and converter; set `SHAKTI_NO_TRANSPILE_CACHE=1` to disable). Prefer emitting
+`.ie` once for hot loops. Fast numeric work belongs on large vectors /
 `dot` / `mmul` / `make prod-speed` — scalar `for`/`while` micros stay in the AST
-interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performance-vs-cc--o2-methodology)
-and local `make -f Makefile.local compare-langs`.
+interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performance-vs-cc--o2-methodology).
 
 ## security
 
@@ -117,9 +116,8 @@ untrusted shell script.
 **`examples/example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
 It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end
 hits an open-window busy loop (`while gfx.alive(): gfx.tick()` with no sleep) and will
-spin until the window is closed. Copy one section into its own `.ie`, or use
-`examples/_local/gfx_demo.ie` / other standalone demos under `examples/_local/` when present.
-For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where demos support it.
+spin until the window is closed. Copy one section into its own `.ie`.
+For automation, set `SHAKTI_GFX_SKIP=1` where demos support it.
 
 ## modules
 
@@ -142,30 +140,13 @@ For automation, prefer those standalone files and set `SHAKTI_GFX_SKIP=1` where 
 Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie).
 
 ```bash
-make -f Makefile.local test-pong    # examples/pong_test.ie + examples/pong_spell_test.ie
-make -f Makefile.local bench-pong   # examples/pong_bench.ie (physics / frame / proj / AI)
-make -f Makefile.local test-chess   # examples/chess_test.ie (rules + AI smoke)
+./shakti examples/pong_test.ie
+./shakti examples/pong_spell_test.ie
+./shakti examples/pong_bench.ie
+./shakti examples/chess_test.ie
 ```
 
-Local demos (when `examples/_local/` is present): `examples/_local/gfx_demo.ie`, `examples/_local/pyplot_demo.ie`, `examples/_local/jupyter_demo.ie`, `examples/_local/pdf_smoke.ie`, `examples/_local/midi_demo.ie`, `examples/_local/sonicpi_demo.ie`.  
 Merged copy-paste sections also live in [`examples/example.ie`](examples/example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
-
-## test & bench (local tree)
-
-When `tests/`, `benchmarks/`, and `Makefile.local` are present:
-
-```bash
-make -f Makefile.local test
-make -f Makefile.local test-modules   # dsp, stem, pdf, midi, iefs, sonicpi, pyplot, jupyter
-make -f Makefile.local bench-modules  # focused module benches
-make -f Makefile.local bench          # full suite vs baselines
-make -f Makefile.local test-c         # C converter regression script
-make -f Makefile.local test-transpile-matrix  # shared converter feature matrix
-make -f Makefile.local bench-transpile-all
-make -f Makefile.local compare-langs  # vs host runtimes; C .c/.ie/eval~ split
-```
-
-Time-series index correctness tests live under local `tests/` when that tree is present (gitignored).
 
 ## license
 
