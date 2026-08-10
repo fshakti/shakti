@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <errno.h>
+#include <limits.h>
 
 /* fopen() may succeed on directories (Linux); reject non-regular files. */
 static FILE *fopen_regular(const char *path, char *err, size_t err_cap) {
@@ -6320,6 +6321,30 @@ static void run_repl(Env *e) {
             repl_print_runtime_doc();
             continue;
         }
+        /* \q / \q N — process exit (optional status), same as Isolde */
+        if (strncmp(line, "\\q", 2) == 0 &&
+            (line[2] == 0 || line[2] == ' ' || line[2] == '\t')) {
+            const char *p = line + 2;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (*p == 0) {
+                exit(0);
+            }
+            char *end = NULL;
+            errno = 0;
+            long code = strtol(p, &end, 10);
+            if (end == p || errno == ERANGE || code < INT_MIN || code > INT_MAX) {
+                fprintf(stderr, "usage: \\q [N]\n");
+                continue;
+            }
+            while (*end == ' ' || *end == '\t')
+                end++;
+            if (*end != 0) {
+                fprintf(stderr, "usage: \\q [N]\n");
+                continue;
+            }
+            exit((int)code);
+        }
         if (line[0] == '\\') {
             fprintf(stderr, "Unknown REPL command: %s (try \\d for help)\n", line);
             continue;
@@ -6582,7 +6607,9 @@ static void shakti_print_usage(FILE *out) {
         "      --parse-dump               Dump parse AST and exit\n"
         "      --parse-profile            Microbench the parser and exit\n"
         "      --parse-profile-iters <n>  Iterations for --parse-profile\n"
-        "      --                         End of options\n");
+        "      --                         End of options\n"
+        "\n"
+        "REPL (bare shakti / -i): \\d docs  \\v vars  \\w names  \\q [N]  quit|exit\n");
 }
 int shakti_lang_main(int argc, char **argv) {
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
