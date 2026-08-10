@@ -214,9 +214,9 @@ $(BUILD)/shakti_version.h: src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
-# Regenerated from converters/ when a local embed helper exists (scripts/ is
-# gitignored). src/shakti_lang.c includes these files via ../gen/... explicitly
-# so stale src/shakti_*_embed.h copies cannot shadow them.
+# Regenerated from converters/ when scripts/embed_text.py is available.
+# src/shakti_lang.c includes these files via ../gen/... explicitly so stale
+# src/shakti_*_embed.h copies cannot shadow them.
 define make_embed_rule
 gen/shakti_$(1)_embed.h: converters/$(1).ie
 	@mkdir -p gen
