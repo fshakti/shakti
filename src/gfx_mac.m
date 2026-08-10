@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "gfx_platform.h"
 #include "gfx.h"
+#include "fb_present.h"
 #include "input.h"
 #undef in
 #undef st
@@ -20,22 +21,10 @@
 
 static void gfx_mac_blit_rep(NSBitmapImageRep *rep, uint32_t *px, int w, int h) {
     unsigned char *dst;
-    int x, y;
     if (!rep || !px || w <= 0 || h <= 0) return;
     dst = [rep bitmapData];
-    for (y = 0; y < h; y++) {
-        int dy = (h - 1) - y;
-        const uint32_t *src = px + (size_t)y * (size_t)w;
-        unsigned char *row = dst + (size_t)dy * (size_t)w * 4u;
-        for (x = 0; x < w; x++) {
-            uint32_t c = src[x];
-            unsigned char *p = row + (size_t)x * 4u;
-            p[0] = (unsigned char)((c >> 16) & 255u);
-            p[1] = (unsigned char)((c >> 8) & 255u);
-            p[2] = (unsigned char)(c & 255u);
-            p[3] = 255;
-        }
-    }
+    /* Framebuffer row 0 = top; NSBitmapImageRep needs Y-flip in a flipped view. */
+    fb_pack_rgba8(dst, px, w, h, 1);
 }
 
 @implementation GfxView

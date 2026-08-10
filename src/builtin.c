@@ -374,23 +374,16 @@ static V *vec_reduce_sum(V *v) {
         return v_int(s);
     }
     if (v->t == T_FMAT) {
-        double s = 0;
         int64_t ne = mat_nelem(v);
-        for (int64_t i = 0; i < ne; i++) s += v->F[i];
-        return v_float(s);
+        return v_float(shakti_sum_f64(v->F, ne));
     }
     if (v->t == T_IVEC) {
         int64_t s = 0;
         for (int64_t i = 0; i < v->n; i++) s += v->J[i];
         return v_int(s);
     }
-    if (v->t == T_FVEC) {
-        if (v->n >= ISL_OMP_VEC_MIN)
-            return v_float(shakti_sum_f64(v->F, v->n));
-        double s = 0;
-        for (int64_t i = 0; i < v->n; i++) s += v->F[i];
-        return v_float(s);
-    }
+    if (v->t == T_FVEC)
+        return v_float(shakti_sum_f64(v->F, v->n));
     if (v->t == T_LIST) {
         double s = 0;
         int all_int = 1;

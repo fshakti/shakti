@@ -90,7 +90,7 @@ else
   LDFLAGS += -lexpat
 endif
 
-LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c
+LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c src/fb_present.c
 LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/isolde_bridge.c src/rest.c src/graph.c src/machine.c src/pcm.c
 
 SHAKTI_IPC ?= 1
@@ -235,7 +235,7 @@ $(BUILD)/talk.o: src/talk.c src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(B
 endif
 
 ifeq ($(SHAKTI_SYNTH),1)
-$(BUILD)/synth.o: src/synth.c src/synth_ui.c src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+$(BUILD)/synth.o: src/synth.c src/synth_ui.c src/fb_present.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/synth.c
 
 $(BUILD)/synth_ui.o: src/synth_ui.c src/synth_ui.h | $(BUILD)
@@ -243,7 +243,7 @@ $(BUILD)/synth_ui.o: src/synth_ui.c src/synth_ui.h | $(BUILD)
 endif
 
 ifeq ($(SHAKTI_GFX),1)
-$(BUILD)/gfx.o: src/gfx.c src/gfx.h src/gfx_platform.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+$(BUILD)/gfx.o: src/gfx.c src/gfx.h src/gfx_platform.h src/fb_present.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/gfx.c
 endif
 
@@ -285,11 +285,11 @@ endif
 
 ifeq ($(UNAME_S),Darwin)
 ifeq ($(SHAKTI_SYNTH),1)
-$(BUILD)/synth_mac.o: src/synth_mac.m $(BUILD)/shakti_version.h | $(BUILD)
+$(BUILD)/synth_mac.o: src/synth_mac.m src/fb_present.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(OBJC) $(SYNTH_OBJC_FLAGS) -c -o $@ src/synth_mac.m
 endif
 ifeq ($(SHAKTI_GFX),1)
-$(BUILD)/gfx_mac.o: src/gfx_mac.m $(BUILD)/shakti_version.h | $(BUILD)
+$(BUILD)/gfx_mac.o: src/gfx_mac.m src/fb_present.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(OBJC) $(GFX_OBJC_FLAGS) -c -o $@ src/gfx_mac.m
 endif
 endif

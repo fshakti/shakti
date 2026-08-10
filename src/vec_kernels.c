@@ -8,6 +8,13 @@
 #include <omp.h>
 #endif
 
+#ifndef SHAKTI_USE_ACCELERATE
+#define SHAKTI_USE_ACCELERATE 0
+#endif
+#if SHAKTI_USE_ACCELERATE
+#include "shakti_accelerate.h"
+#endif
+
 /* OpenMP over query needles — far cheaper than binary search itself below this. */
 #ifndef SHAKTI_BIN_OMP_MIN
 #define SHAKTI_BIN_OMP_MIN 4096
@@ -58,6 +65,13 @@ static double dot_f64_neon(const double *a, const double *b, int64_t n) {
 
 double shakti_sum_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
+#if SHAKTI_USE_ACCELERATE
+    if (n >= SHAKTI_ACCEL_VEC_MIN) {
+        double r = 0.0;
+        vDSP_sveD(d, 1, &r, (vDSP_Length)n);
+        return r;
+    }
+#endif
 #if defined(__aarch64__)
     if (n >= ISL_OMP_VEC_MIN) {
         double r = 0;
@@ -135,6 +149,13 @@ int64_t shakti_max_i64(const int64_t *d, int64_t n) {
 
 double shakti_dot_f64(const double *a, const double *b, int64_t n) {
     if (n <= 0) return 0.0;
+#if SHAKTI_USE_ACCELERATE
+    if (n >= SHAKTI_ACCEL_VEC_MIN) {
+        double r = 0.0;
+        vDSP_dotprD(a, 1, b, 1, &r, (vDSP_Length)n);
+        return r;
+    }
+#endif
 #if defined(__aarch64__)
     if (n >= ISL_OMP_VEC_MIN) {
         double r = 0;

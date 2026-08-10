@@ -51,6 +51,16 @@
 #define ISL_MAT_SIMD_MIN_ELEMS 64
 #define ISL_MAT_SIMD_K_MIN 8
 #define ISL_MAT_OMP_ROWS_MIN 32
+/* Apple Accelerate: prefer vDSP/cblas above these sizes (NEON below). */
+#ifndef SHAKTI_ACCEL_VEC_MIN
+#define SHAKTI_ACCEL_VEC_MIN 4096
+#endif
+#ifndef SHAKTI_ACCEL_GEMM_MIN_ELEMS
+#define SHAKTI_ACCEL_GEMM_MIN_ELEMS 64
+#endif
+#ifndef SHAKTI_ACCEL_GEMM_K_MIN
+#define SHAKTI_ACCEL_GEMM_K_MIN 8
+#endif
 #define i(n,x)for(it=n,i=0;i<t;++i){x;}
 #define j(n,x)for(it=n,j=0;j<t;++j){x;}
 #endif
