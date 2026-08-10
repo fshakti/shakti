@@ -1282,6 +1282,7 @@ Environment:
 
 - `SHAKTI_IPC_DIR` — UDS socket directory (default `/tmp`)
 - `SHAKTI_IPC_TRANSPORT` — default transport: `auto`, `tcp`, `uds`, `rdma`
+- `SHAKTI_IPC_ALLOW_PUBLIC=1` — allow `ipc.listen` on a non-loopback address (default: loopback/UDS only)
 
 Build:
 
@@ -1442,7 +1443,7 @@ rest.close(srv)
 
 | Function | Description |
 |----------|-------------|
-| `rest.listen(port[, host])` | Listen on TCP (default host `127.0.0.1`) |
+| `rest.listen(port[, host])` | Listen on TCP (default host `127.0.0.1`; non-loopback needs `SHAKTI_REST_ALLOW_PUBLIC=1`) |
 | `rest.accept(listen_h)` | Accept connection handle |
 | `rest.read(conn)` | Read request → `{method, path, body, headers}` |
 | `rest.write(conn, status[, body, content_type])` | Send HTTP/1.1 response |
