@@ -1133,7 +1133,9 @@ static int join_is_asof_shape(V *left,V *right){
     V *lk=left->keys->L[0],*rk=right->keys->L[0];
     if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))return 0;
     V *lt=left->vals->L[0],*rt=right->vals->L[0];
-    return lt->t==T_IVEC&&rt->t==T_IVEC;
+    /* Docs: asof only for matching *sorted* time/time_ns; otherwise equi. */
+    return lt->t==T_IVEC&&rt->t==T_IVEC
+        &&asof_ascending_i64(lt)&&asof_ascending_i64(rt);
 }
 V *table_asof_comma_join(V *left,V *right){
     if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
