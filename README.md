@@ -112,6 +112,8 @@ untrusted shell script.
 - Parser nesting and interpreter recursion are capped (defaults 40 / 3000;
   override call depth with `SHAKTI_CALL_MAX_DEPTH`).
 - REST temps use `$XDG_RUNTIME_DIR` / `$TMPDIR` when set, mode `0600`.
+- Non-loopback `rest.listen` / `ipc.listen` require `SHAKTI_REST_ALLOW_PUBLIC=1` /
+  `SHAKTI_IPC_ALLOW_PUBLIC=1`.
 
 **`examples/example.ie` is a merged copy-paste catalog** — do **not** run the whole file as one program.
 It concatenates interactive demos (`gfx`, `synth`, `input`, …). Running it end-to-end

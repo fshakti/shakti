@@ -199,7 +199,7 @@ void gfx_fill_rect(int x, int y, int w, int h, uint32_t color) {
     if (x1 > g.design_w) x1 = g.design_w;
     w = x1 - x0;
     if (w <= 0 || y >= g.design_h) return;
-    if (y + h > g.design_h) h = g.design_h - y;
+    if (h > g.design_h - y) h = g.design_h - y;
     for (j = 0; j < h; j++) {
         uint32_t *row = g.fb + (size_t)(y + j) * (size_t)g.design_w + (size_t)x0;
         int i;
@@ -227,7 +227,7 @@ void gfx_fill_circle(int cx, int cy, int r, uint32_t color) {
     int y;
     if (!g.fb || r <= 0) return;
     for (y = -r; y <= r; y++) {
-        int dy2 = r * r - y * y;
+        int64_t dy2 = (int64_t)r * (int64_t)r - (int64_t)y * (int64_t)y;
         int dx = dy2 > 0 ? (int)sqrt((double)dy2) : 0;
         gfx_fill_rect(cx - dx, cy + y, dx * 2 + 1, 1, color);
     }
@@ -432,11 +432,12 @@ void gfx_copy_rect(int sx, int sy, int w, int h, int dx, int dy) {
     size_t n;
     if (!g.fb || w <= 0 || h <= 0) return;
     if (sx == dx && sy == dy) return;
-    /* Clip source to design buffer */
+    /* Clip source to design buffer (overflow-safe) */
     if (sx < 0) { w += sx; dx -= sx; sx = 0; }
     if (sy < 0) { h += sy; dy -= sy; sy = 0; }
-    if (sx + w > g.design_w) w = g.design_w - sx;
-    if (sy + h > g.design_h) h = g.design_h - sy;
+    if (sx >= g.design_w || sy >= g.design_h) return;
+    if (w > g.design_w - sx) w = g.design_w - sx;
+    if (h > g.design_h - sy) h = g.design_h - sy;
     if (w <= 0 || h <= 0) return;
     /* Clip dest */
     x0 = dx < 0 ? 0 : dx;
