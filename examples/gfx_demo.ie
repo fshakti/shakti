@@ -1,0 +1,21 @@
+# Minimal Shakti GFX demo — clear, draw, tick until window closes.
+import gfx
+
+if not gfx.available():
+    print("gfx not available")
+else:
+    gfx.open("Shakti GFX")
+    gfx.clear(0x0a0a12)
+    gfx.fill_rect(80, 60, 800, 40, 0x2244aa)
+    gfx.fill_rect(120, 160, 200, 200, 0xff6644)
+    gfx.fill_circle(640, 300, 90, 0x44dd88)
+    gfx.line(40, 500, 920, 40, 0xffffff)
+    while gfx.alive():
+        if gfx.click_pending():
+            x : gfx.click_x()
+            y : gfx.click_y()
+            gfx.fill_circle(x, y, 12, 0xffcc00)
+            gfx.consume_click()
+        gfx.tick()
+    gfx.close()
+    print("done")

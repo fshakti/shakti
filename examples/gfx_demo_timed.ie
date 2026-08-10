@@ -1,0 +1,47 @@
+# Timed copy of gfx_demo — reports open / draw / present timings.
+import gfx
+
+if not gfx.available():
+    print("gfx not available")
+else:
+    t_all : clock()
+
+    t0 : clock()
+    gfx.open("Shakti GFX (timed)")
+    t_open : clock() - t0
+    print("open_ms:", t_open * 1000.0)
+
+    t0 : clock()
+    gfx.clear(0x0a0a12)
+    gfx.fill_rect(80, 60, 800, 40, 0x2244aa)
+    gfx.fill_rect(120, 160, 200, 200, 0xff6644)
+    gfx.fill_circle(640, 300, 90, 0x44dd88)
+    gfx.line(40, 500, 920, 40, 0xffffff)
+    t_draw : clock() - t0
+    print("draw_ms:", t_draw * 1000.0)
+
+    frames : 0
+    t_tick : 0.0
+    t_loop : clock()
+    while gfx.alive():
+        if gfx.click_pending():
+            x : gfx.click_x()
+            y : gfx.click_y()
+            gfx.fill_circle(x, y, 12, 0xffcc00)
+            gfx.consume_click()
+        t1 : clock()
+        gfx.tick()
+        t_tick : t_tick + (clock() - t1)
+        frames : frames + 1
+    t_loop : clock() - t_loop
+
+    gfx.close()
+    t_all : clock() - t_all
+
+    print("frames:", frames)
+    print("loop_ms:", t_loop * 1000.0)
+    if frames > 0:
+        print("tick_avg_ms:", (t_tick / float(frames)) * 1000.0)
+        print("fps:", float(frames) / t_loop)
+    print("total_ms:", t_all * 1000.0)
+    print("done")

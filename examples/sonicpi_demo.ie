@@ -1,0 +1,20 @@
+# Drive Sonic Pi from Shakti via OSC.
+# 1. Start Sonic Pi and run examples/sonicpi_bridge.rb
+# 2. export SHAKTI_LIB=$PWD/lib
+# 3. ./shakti examples/sonicpi_demo.ie
+
+import sonicpi
+
+sonicpi.configure("127.0.0.1", 4560)
+sonicpi.bpm(120)
+
+notes : 60 64 67 72
+for n in notes:
+    sonicpi.play(n, 0.85, 0.3)
+    wait(0.35)
+
+sonicpi.synth("prophet", 70, 0.9, 1.2)
+wait(0.5)
+sonicpi.synth("dsaw", 65, 0.75, 0.8)
+
+print("sonicpi demo sent — check Sonic Pi audio")
