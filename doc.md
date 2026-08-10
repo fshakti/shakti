@@ -115,6 +115,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
 | CLI | [command-line interface](#command-line-interface) |
+| REPL | [REPL](#repl) |
 | Time-series indexes | [time-series indexes](#time-series-indexes) |
 
 ## Command-line interface
@@ -140,6 +141,23 @@ shakti
 
 Unknown flags exit with status 2. A silent leading `run` argument is accepted for Android launchers only.
 
+### REPL
+
+Start with `./shakti` (or `-i` after `--command`). Banner line:
+
+`\d docs  \v vars  \w names  \q [N]  quit|exit`
+
+| Input | Effect |
+|-------|--------|
+| `\d` / `\help` / `help` | Print [Syntax and builtins](#syntax-and-builtins) from this doc |
+| `\v` | Bound names and values |
+| `\w` | Bound names only |
+| `\q` | Process exit status `0` |
+| `\q N` | Process exit status `N` (integer; invalid args print `usage: \q [N]` and stay in the REPL) |
+| `quit` / `exit` | Soft leave the REPL loop (process status `0`) |
+
+Unknown `\` commands print an error and stay in the REPL.
+
 ## Tests and benchmarks (local tree)
 
 When `tests/`, `benchmarks/`, and `Makefile.local` are present:
@@ -148,6 +166,8 @@ When `tests/`, `benchmarks/`, and `Makefile.local` are present:
 make prod && export SHAKTI_LIB=$PWD/lib
 make -f Makefile.local test-modules    # dsp, pdf, midi, iefs, sonicpi, pyplot, jupyter, module_defaults
 make -f Makefile.local bench-modules  # focused suites only
+make -f Makefile.local test-repl-q    # REPL \q / \q N quit (also via make test → tests/repl_q.sh)
+make -f Makefile.local bench-repl-q   # cold spawn + \q exit microbench
 make -f Makefile.local test-c         # C converter regression script
 make -f Makefile.local test-transpile-matrix
 make -f Makefile.local bench-transpile-all
@@ -694,6 +714,12 @@ k : ktable(a:1, b:2)
 - `eval(src)` — parse and evaluate a Shakti source string in the **root** environment (returns the value, or an error value). Bindings persist across calls, including when `eval` is invoked from nested functions.
 - `sh(cmd)` — runs `cmd` via the host shell (`system`). Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`. Untrusted `.ie` input is otherwise equivalent to an untrusted shell script; see README security notes.
 - Parser nesting is capped at 40; interpreter call depth defaults to 3000 (`SHAKTI_CALL_MAX_DEPTH`).
+
+## Process / REPL
+
+- REPL: `\q` or `\q N` — terminate the process with integer status (default `0`), q-style (Isolde parity). Invalid `\q` args print `usage: \q [N]` and stay in the REPL.
+- Soft leave: type `quit` or `exit` to leave the REPL loop without forcing a non-zero status.
+- Other meta-commands: `\d` / `\help` / `help` (this section), `\v` (vars), `\w` (names). See [REPL](#repl) under the CLI section.
 
 ## Tables from files
 
@@ -1507,6 +1533,9 @@ synth.set_metro_sound(0)   # 0 = click, 1 = drum
 while synth.alive():
     synth.tick()
 ```
+
+Leave an interactive synth session with the window close button, or from a bare REPL with `\q` (see [Process / REPL](#process--repl)).
+
 
 Jam with keyboard events: `synth_input.ie`:
 
