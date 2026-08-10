@@ -839,6 +839,10 @@ V *bi_stem_separate_file(V **a, int n) {
         free(mono);
         return v_err("stem_separate_file: empty wav");
     }
+    if (n_samp > STEM_ML_MAX_SAMP) {
+        free(mono);
+        return v_err("stem_separate_file: wav too long");
+    }
 
     if (was_open) bi_stem_close(NULL, 0);
     argv[0] = v_int(sr);
@@ -853,7 +857,18 @@ V *bi_stem_separate_file(V **a, int n) {
     v_free(open_rc);
 
     delay = (int)stem_latency_samples(sr);
-    acc_cap = n_samp + delay + STEM_HPSS_LEN * STEM_HOP + STEM_NFFT + STEM_HOP;
+    {
+        int64_t acc_cap64 = (int64_t)n_samp + (int64_t)delay +
+                            (int64_t)STEM_HPSS_LEN * STEM_HOP + STEM_NFFT + STEM_HOP;
+        /* Cap like ML path; also reject values that cannot fit a float buffer. */
+        if (acc_cap64 <= 0 || acc_cap64 > (int64_t)STEM_ML_MAX_SAMP * 2 ||
+            (uint64_t)acc_cap64 > (uint64_t)SIZE_MAX / sizeof(float)) {
+            free(mono);
+            bi_stem_close(NULL, 0);
+            return v_err("stem_separate_file: buffer too large");
+        }
+        acc_cap = (int)acc_cap64;
+    }
     for (s = 0; s < STEM_N; s++) {
         acc[s] = (float *)calloc((size_t)acc_cap, sizeof(float));
         if (!acc[s]) {

@@ -509,19 +509,25 @@ static PdfObj *dict_get(PdfObj *d, const char *key) {
     return NULL;
 }
 
-static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap);
+#define PDF_MAX_INDIRECT_DEPTH 32
+
+static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap, int depth);
 
 static PdfObj *pdf_resolve(PdfDoc *d, PdfObj *o, char *err, size_t errcap) {
     int guard = 0;
-    while (o && o->t == PO_REF && guard++ < 32) {
-        PdfObj *n = pdf_load_indirect(d, o->ref_n, err, errcap);
+    while (o && o->t == PO_REF && guard++ < PDF_MAX_INDIRECT_DEPTH) {
+        PdfObj *n = pdf_load_indirect(d, o->ref_n, err, errcap, 0);
         po_free(o);
         o = n;
     }
     return o;
 }
 
-static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap) {
+static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap, int depth) {
+    if (depth >= PDF_MAX_INDIRECT_DEPTH) {
+        snprintf(err, errcap, "pdf: indirect load nesting too deep");
+        return NULL;
+    }
     if (objn <= 0 || objn >= d->xref_n || d->xref[objn] <= 0) {
         snprintf(err, errcap, "pdf: missing object %d", objn);
         return NULL;
@@ -576,7 +582,7 @@ static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap) 
         int64_t slen = -1;
         if (len_o && len_o->t == PO_INT) slen = len_o->i;
         else if (len_o && len_o->t == PO_REF) {
-            PdfObj *lr = pdf_load_indirect(d, len_o->ref_n, err, errcap);
+            PdfObj *lr = pdf_load_indirect(d, len_o->ref_n, err, errcap, depth + 1);
             if (lr && lr->t == PO_INT) slen = lr->i;
             po_free(lr);
         }
@@ -662,19 +668,20 @@ static int pdf_parse_xref(PdfDoc *d, char *err, size_t errcap) {
         }
         int count = (int)count_o->i;
         po_free(count_o);
-        if (start < 0 || count < 0 || start + count > 1000000) {
+        int64_t end = (int64_t)start + (int64_t)count;
+        if (start < 0 || count < 0 || end > 1000000) {
             snprintf(err, errcap, "pdf: xref subsection out of range");
             free(tmp_xref);
             return -1;
         }
-        if (start + count > tmp_n) {
-            long *nx = realloc(tmp_xref, (size_t)(start + count) * sizeof(long));
+        if (end > tmp_n) {
+            long *nx = realloc(tmp_xref, (size_t)end * sizeof(long));
             if (!nx) { free(tmp_xref); return -1; }
-            for (int i = tmp_n; i < start + count; i++) nx[i] = 0;
+            for (int64_t i = tmp_n; i < end; i++) nx[i] = 0;
             tmp_xref = nx;
-            tmp_n = start + count;
+            tmp_n = (int)end;
         }
-        if (start + count > max_obj) max_obj = start + count;
+        if (end > max_obj) max_obj = (int)end;
 
         for (int i = 0; i < count; i++) {
             pp_skip_ws(&xp);
@@ -699,8 +706,8 @@ static int pdf_parse_xref(PdfDoc *d, char *err, size_t errcap) {
                 if (xp.data[xp.pos] == '\r') xp.pos++;
                 if (xp.pos < xp.len && xp.data[xp.pos] == '\n') xp.pos++;
             }
-            if (use == 'n') tmp_xref[start + i] = off;
-            else tmp_xref[start + i] = 0;
+            if (use == 'n') tmp_xref[(int64_t)start + i] = off;
+            else tmp_xref[(int64_t)start + i] = 0;
             (void)gen;
         }
     }
@@ -769,7 +776,7 @@ static int pdf_collect_page_nums_depth(PdfDoc *d, int objn, int **out, int *nout
         }
         seen[objn] = 1;
     }
-    PdfObj *node = pdf_load_indirect(d, objn, err, errcap);
+    PdfObj *node = pdf_load_indirect(d, objn, err, errcap, 0);
     if (!node) return -1;
     if (node->t == PO_STREAM) {
         /* unwrap unlikely */
@@ -820,7 +827,7 @@ static int pdf_collect_page_nums_depth(PdfDoc *d, int objn, int **out, int *nout
 }
 
 static int pdf_get_page_nums(PdfDoc *d, int **out, int *nout, char *err, size_t errcap) {
-    PdfObj *catalog = pdf_load_indirect(d, d->root_obj, err, errcap);
+    PdfObj *catalog = pdf_load_indirect(d, d->root_obj, err, errcap, 0);
     if (!catalog) return -1;
     PdfObj *pages = dict_get(catalog, "Pages");
     if (!pages || pages->t != PO_REF) {
@@ -837,7 +844,12 @@ static int pdf_get_page_nums(PdfDoc *d, int **out, int *nout, char *err, size_t 
 }
 
 static int pdf_append_content_bytes(PdfDoc *d, PdfObj *contents, PdfBuf *out,
-                                    char *err, size_t errcap) {
+                                    char *err, size_t errcap, int depth) {
+    if (depth >= PDF_MAX_PARSE_DEPTH) {
+        po_free(contents);
+        snprintf(err, errcap, "pdf: Contents nesting too deep");
+        return -1;
+    }
     contents = pdf_resolve(d, contents, err, errcap);
     if (!contents) return -1;
     if (contents->t == PO_ARRAY) {
@@ -854,7 +866,7 @@ static int pdf_append_content_bytes(PdfDoc *d, PdfObj *contents, PdfBuf *out,
                 snprintf(err, errcap, "pdf: Contents array entry not a ref");
                 return -1;
             }
-            if (pdf_append_content_bytes(d, copy, out, err, errcap) < 0) {
+            if (pdf_append_content_bytes(d, copy, out, err, errcap, depth + 1) < 0) {
                 po_free(contents);
                 return -1;
             }
@@ -886,7 +898,7 @@ static int pdf_append_content_bytes(PdfDoc *d, PdfObj *contents, PdfBuf *out,
 }
 
 static int pdf_page_content(PdfDoc *d, int page_obj, PdfBuf *out, char *err, size_t errcap) {
-    PdfObj *page = pdf_load_indirect(d, page_obj, err, errcap);
+    PdfObj *page = pdf_load_indirect(d, page_obj, err, errcap, 0);
     if (!page) return -1;
     PdfObj *contents = dict_get(page, "Contents");
     if (!contents) {
@@ -919,7 +931,7 @@ static int pdf_page_content(PdfDoc *d, int page_obj, PdfBuf *out, char *err, siz
         return -1;
     }
     po_free(page);
-    return pdf_append_content_bytes(d, copy, out, err, errcap);
+    return pdf_append_content_bytes(d, copy, out, err, errcap, 0);
 }
 
 static int extract_append_str(PdfBuf *out, const char *s, size_t n) {
@@ -1208,7 +1220,7 @@ V *bi_pdf_info(V **a, int n) {
     if (!d->info_obj) return res;
     char err[160];
     err[0] = 0;
-    PdfObj *info = pdf_load_indirect(d, d->info_obj, err, sizeof err);
+    PdfObj *info = pdf_load_indirect(d, d->info_obj, err, sizeof err, 0);
     if (!info || info->t != PO_DICT) {
         po_free(info);
         return res;
