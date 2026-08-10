@@ -24,6 +24,7 @@
 #include <alsa/asoundlib.h>
 #include "input.h"
 #endif
+#include "midi.h"
 #define DESIGN_W 960
 #define DESIGN_H 660
 #define SYNTH_MIN_W 640
@@ -560,30 +561,28 @@ void synth_core_handle_key(int key, int down) {
         synth_core_audio_unlock();
         return;
     }
-    if (!down) {
-        synth_core_audio_unlock();
-        return;
-    }
-    if (key >= '1' && key <= '8') {
-        int i = key - '1';
+    if(key == 0xa3) key = '#'; // £ -> # for uk layout
+    static const char *shift_knob = "!@#$%^&*";
+    static const char *shift_idx  = "QWERTYUI";
+    static const char *keyjam = "zsxdcvgbhnjmq2w3er5t6y7ui9o0p";
+    const char *q;
+    if((q=strchr(keyjam,key))) {
+        int note = 64 + (q - keyjam);
+        unsigned char midi[] = { 0x90, note, down * 64 };
+        midi_decode_bytes(midi, 3);
+
+    } else if (!down) {
+
+    } else if((q=strchr(shift_knob,key))) {
+        int i = q - shift_knob;
         g.knobs[i] += 0.05f;
         if (g.knobs[i] > 1.f) g.knobs[i] = 1.f;
         synth_recalc_timing();
-    } else {
-        int idx = -1;
-        if (key == 'q' || key == 'Q') idx = 0;
-        else if (key == 'w' || key == 'W') idx = 1;
-        else if (key == 'e' || key == 'E') idx = 2;
-        else if (key == 'r' || key == 'R') idx = 3;
-        else if (key == 't' || key == 'T') idx = 4;
-        else if (key == 'y' || key == 'Y') idx = 5;
-        else if (key == 'u' || key == 'U') idx = 6;
-        else if (key == 'i' || key == 'I') idx = 7;
-        if (idx >= 0) {
-            g.knobs[idx] -= 0.05f;
-            if (g.knobs[idx] < 0.f) g.knobs[idx] = 0.f;
-            synth_recalc_timing();
-        }
+    } else if ((q=strchr(shift_idx,key))) {
+        int idx = q - shift_idx;
+        g.knobs[idx] -= 0.05f;
+        if (g.knobs[idx] < 0.f) g.knobs[idx] = 0.f;
+        synth_recalc_timing();
     }
     synth_core_audio_unlock();
 }

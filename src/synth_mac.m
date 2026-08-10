@@ -45,6 +45,7 @@
 
 @implementation SynthView
 - (BOOL)isFlipped { return YES; }
+- (BOOL)acceptsFirstResponder { return YES; }
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
     uint32_t *px = synth_core_present_pixels();
@@ -159,6 +160,7 @@ static void synth_mac_ensure_app(void) {
     if (g_app_ready) return;
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     g_app_ready = 1;
 }
 
