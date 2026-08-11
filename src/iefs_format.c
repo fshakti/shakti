@@ -12,6 +12,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(SHAKTI_HAVE_ZSTD)
+#include <zstd.h>
+#endif
+
 static char g_iefs_err[512];
 
 void iefs_set_last_error(const char *msg) {
@@ -620,12 +624,235 @@ static V *decode_value(IefsR *r) {
     }
 }
 
+/* ---- IEFS v3 (TOC + 2MiB extents; Isolde Basic / STAC day shards) ---- */
+
+static int iefs_zstd_decompress(const unsigned char *src, size_t src_len,
+                                unsigned char **out, size_t *out_len, char *err, size_t err_cap) {
+    *out = NULL;
+    *out_len = 0;
+#if !defined(SHAKTI_HAVE_ZSTD)
+    (void)src;
+    (void)src_len;
+    snprintf(err, err_cap, "iefs: zstd not built (rebuild with libzstd)");
+    return -1;
+#else
+    unsigned long long need = ZSTD_getFrameContentSize(src, src_len);
+    if (need == ZSTD_CONTENTSIZE_ERROR) {
+        snprintf(err, err_cap, "iefs: zstd invalid frame");
+        return -1;
+    }
+    size_t cap;
+    if (need == ZSTD_CONTENTSIZE_UNKNOWN) {
+        cap = src_len ? src_len * 4 : 64;
+        if (cap > (size_t)IEFS_MAX_PAYLOAD)
+            cap = (size_t)IEFS_MAX_PAYLOAD;
+    } else {
+        if (need > IEFS_MAX_PAYLOAD) {
+            snprintf(err, err_cap, "iefs: zstd payload too large");
+            return -1;
+        }
+        cap = (size_t)need;
+    }
+    unsigned char *buf = (unsigned char *)malloc(cap ? cap : 1);
+    if (!buf) {
+        snprintf(err, err_cap, "iefs: out of memory");
+        return -1;
+    }
+    size_t nn = ZSTD_decompress(buf, cap, src, src_len);
+    if (ZSTD_isError(nn)) {
+        free(buf);
+        snprintf(err, err_cap, "iefs: zstd decompress: %s", ZSTD_getErrorName(nn));
+        return -1;
+    }
+    *out = buf;
+    *out_len = nn;
+    return 0;
+#endif
+}
+
+/* Basic STAC columns are T_IVEC / T_FVEC with bits=64. */
+static V *iefs_v3_import_vec(int type, int bits, uint64_t nelem, const unsigned char *p, size_t nbytes,
+                             IefsMapRegion *reg, int alias_ok) {
+    if (nelem > IEFS_MAX_ELEMS)
+        return v_err("iefs: extent too large");
+    if (bits != 0 && bits != 64)
+        return v_errf("iefs: unsupported extent bits %d (need 64)", bits);
+    size_t needb = (size_t)nelem * 8u;
+    if (needb != nbytes)
+        return v_err("iefs: extent length mismatch");
+    if (type != T_IVEC && type != T_FVEC)
+        return v_errf("iefs: unsupported extent type %d (need ivec/fvec)", type);
+    if (alias_ok && reg) {
+        V *v = (type == T_FVEC) ? v_fvec((int64_t)nelem) : v_ivec((int64_t)nelem);
+        free(v->J);
+        v->J = NULL;
+        free(v->F);
+        v->F = NULL;
+        if (type == T_FVEC)
+            v->F = (double *)(uintptr_t)p;
+        else
+            v->J = (int64_t *)(uintptr_t)p;
+        iefs_v_set_map_alias(v, reg);
+        return v;
+    }
+    V *v = (type == T_FVEC) ? v_fvec((int64_t)nelem) : v_ivec((int64_t)nelem);
+    if (nelem && nbytes) {
+        if (type == T_FVEC)
+            memcpy(v->F, p, nbytes);
+        else
+            memcpy(v->J, p, nbytes);
+    }
+    return v;
+}
+
+static void iefs_v3_cleanup(V **cols, V **keys, uint32_t n) {
+    for (uint32_t j = 0; j < n; j++) {
+        if (cols && cols[j])
+            v_free(cols[j]);
+        if (keys && keys[j])
+            v_free(keys[j]);
+    }
+    free(cols);
+    free(keys);
+}
+
+static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *reg, int verify_crc) {
+    uint64_t payload_len = get_u64(buf + 8);
+    uint32_t expect_crc = get_u32(buf + 16);
+    if (payload_len > IEFS_MAX_PAYLOAD)
+        return v_err("iefs: payload too large");
+    if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
+        return v_err("iefs: truncated file");
+    const unsigned char *body = buf + IEFS_HEADER_SIZE;
+    if (verify_crc) {
+        uint32_t got = crc32_buf(body, (size_t)payload_len);
+        if (got != expect_crc)
+            return v_err("iefs: checksum mismatch");
+    }
+    if (payload_len < 8)
+        return v_err("iefs: truncated v3 TOC");
+    uint32_t n_ext = get_u32(body + 0);
+    uint32_t names_len = get_u32(body + 4);
+    if (n_ext > 1000000u)
+        return v_err("iefs: too many extents");
+    size_t toc_need = 8u + (size_t)n_ext * IEFS_V3_EXTENT_SIZE + (size_t)names_len;
+    if (payload_len < toc_need)
+        return v_err("iefs: truncated v3 TOC");
+    const unsigned char *names = body + 8 + (size_t)n_ext * IEFS_V3_EXTENT_SIZE;
+    V **cols = (V **)calloc(n_ext ? n_ext : 1, sizeof(V *));
+    V **keys = (V **)calloc(n_ext ? n_ext : 1, sizeof(V *));
+    if (!cols || !keys) {
+        free(cols);
+        free(keys);
+        return v_err("iefs: out of memory");
+    }
+    int named = 0;
+    for (uint32_t i = 0; i < n_ext; i++) {
+        const unsigned char *er = body + 8 + (size_t)i * IEFS_V3_EXTENT_SIZE;
+        int type = er[0];
+        int bits = er[1];
+        int codec = er[2];
+        int outer = er[3];
+        uint64_t nelem = get_u64(er + 4);
+        uint64_t file_off = get_u64(er + 20);
+        uint64_t elen = get_u64(er + 28);
+        uint32_t ecrc = get_u32(er + 36);
+        uint32_t name_off = get_u32(er + 40);
+        if (file_off < IEFS_HEADER_SIZE || elen > len || file_off > len - elen) {
+            iefs_v3_cleanup(cols, keys, i);
+            return v_err("iefs: bad extent offset");
+        }
+        const unsigned char *ep = buf + file_off;
+        if (verify_crc && crc32_buf(ep, (size_t)elen) != ecrc) {
+            iefs_v3_cleanup(cols, keys, i);
+            return v_err("iefs: extent checksum mismatch");
+        }
+        unsigned char *plain = NULL;
+        size_t plain_len = 0;
+        const unsigned char *pay = ep;
+        size_t pay_len = (size_t)elen;
+        int alias_ok = (reg != NULL) && (codec == IEFS_CODEC_NONE) && (outer == IEFS_CODEC_NONE) &&
+                       (type != (int)IEFS_EXT_TLV);
+        if (outer != IEFS_CODEC_NONE) {
+            iefs_v3_cleanup(cols, keys, i);
+            return v_err("iefs: outer residual codecs not supported in Shakti v3 reader");
+        }
+        if (codec != IEFS_CODEC_NONE) {
+            char err[256];
+            if (codec != IEFS_CODEC_ZSTD) {
+                iefs_v3_cleanup(cols, keys, i);
+                return v_errf("iefs: unsupported extent codec %d (need none/zstd)", codec);
+            }
+            if (iefs_zstd_decompress(ep, (size_t)elen, &plain, &plain_len, err, sizeof err) != 0) {
+                iefs_v3_cleanup(cols, keys, i);
+                return v_err(err[0] ? err : "iefs: extent decompress failed");
+            }
+            pay = plain;
+            pay_len = plain_len;
+            alias_ok = 0;
+        }
+        V *col;
+        if (type == (int)IEFS_EXT_TLV) {
+            IefsR r = {.p = pay, .n = pay_len, .off = 0, .err = {0}, .map_reg = NULL};
+            col = decode_value(&r);
+            free(plain);
+            if (!col || col->t == T_ERR) {
+                iefs_v3_cleanup(cols, keys, i);
+                return col ? col : v_err("iefs: TLV extent decode failed");
+            }
+        } else {
+            col = iefs_v3_import_vec(type, bits ? bits : 64, nelem, pay, pay_len, reg, alias_ok);
+            free(plain);
+            if (!col || col->t == T_ERR) {
+                iefs_v3_cleanup(cols, keys, i);
+                return col ? col : v_err("iefs: extent import failed");
+            }
+        }
+        cols[i] = col;
+        if (name_off != 0xffffffffu && name_off < names_len) {
+            size_t rem = (size_t)names_len - (size_t)name_off;
+            int has_nul = 0;
+            for (size_t k = 0; k < rem; k++) {
+                if (names[name_off + k] == 0) {
+                    has_nul = 1;
+                    break;
+                }
+            }
+            if (!has_nul) {
+                iefs_v3_cleanup(cols, keys, i + 1);
+                return v_err("iefs: column name not NUL-terminated");
+            }
+            keys[i] = v_str((char *)(names + name_off));
+            named++;
+        } else {
+            keys[i] = NULL;
+        }
+    }
+    if (n_ext == 1 && !named) {
+        V *out = cols[0];
+        free(cols);
+        free(keys);
+        return out;
+    }
+    V *klist = v_list((int64_t)n_ext);
+    V *vlist = v_list((int64_t)n_ext);
+    for (uint32_t i = 0; i < n_ext; i++) {
+        klist->L[i] = keys[i] ? keys[i] : v_str("");
+        vlist->L[i] = cols[i];
+    }
+    free(cols);
+    free(keys);
+    return v_table_own(klist, vlist);
+}
+
 V *iefs_decode(const unsigned char *buf, size_t len) {
     if (!buf || len < IEFS_HEADER_SIZE)
         return v_err("iefs: truncated header");
     if (memcmp(buf, IEFS_MAGIC, 4) != 0)
         return v_err("iefs: bad magic");
     uint16_t ver = get_u16(buf + 4);
+    if (ver == 3)
+        return iefs_decode_v3(buf, len, NULL, 1);
     if (ver != IEFS_VERSION)
         return v_errf("iefs: unsupported version %u", (unsigned)ver);
     uint64_t payload_len = get_u64(buf + 8);
@@ -657,8 +884,10 @@ V *iefs_decode_mapped(const unsigned char *buf, size_t len, IefsMapRegion *reg) 
     if (memcmp(buf, IEFS_MAGIC, 4) != 0)
         return v_err("iefs: bad magic");
     uint16_t ver = get_u16(buf + 4);
+    if (ver == 3)
+        return iefs_decode_v3(buf, len, reg, 0);
     if (ver != IEFS_VERSION)
-        return v_errf("iefs: unsupported version %u (iefs.map requires v1)", (unsigned)ver);
+        return v_errf("iefs: unsupported version %u (iefs.map requires v1 or v3)", (unsigned)ver);
     uint64_t payload_len = get_u64(buf + 8);
     if (payload_len > IEFS_MAX_PAYLOAD)
         return v_err("iefs: payload too large");
