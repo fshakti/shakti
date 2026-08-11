@@ -170,6 +170,20 @@ endif
 
 ifeq ($(SHAKTI_IEFS),1)
   CFLAGS += -DSHAKTI_HAVE_IEFS=1
+  # IEFS v3 zstd extents (STAC Basic day shards). Default on when zstd.h is present.
+  SHAKTI_WITH_ZSTD ?= 1
+  ZSTD_HEADER := $(firstword $(wildcard /usr/include/zstd.h /opt/homebrew/include/zstd.h /usr/local/include/zstd.h))
+  ifeq ($(SHAKTI_WITH_ZSTD),1)
+    ifneq ($(ZSTD_HEADER),)
+      CFLAGS += -DSHAKTI_HAVE_ZSTD=1
+      ifneq ($(filter /opt/homebrew/% /usr/local/%,$(ZSTD_HEADER)),)
+        CFLAGS += -I$(dir $(ZSTD_HEADER))
+        LDFLAGS += -L$(dir $(ZSTD_HEADER))../lib -lzstd
+      else
+        LDFLAGS += -lzstd
+      endif
+    endif
+  endif
 endif
 
 ifeq ($(UNAME_S),Linux)

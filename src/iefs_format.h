@@ -19,10 +19,17 @@ extern "C" {
 #endif
 
 #define IEFS_MAGIC "IEF1"
-#define IEFS_VERSION 1u
+#define IEFS_VERSION 1u          /* default write version */
+#define IEFS_VERSION_MAX 3u      /* read up to Isolde TOC+extents */
 #define IEFS_HEADER_SIZE 24u
 #define IEFS_MAX_PAYLOAD (64ull << 30) /* 64 GiB hard cap (was 16; Basic one-day quotes ~25 GiB) */
 #define IEFS_MAX_ELEMS (1ull << 32)
+#define IEFS_V3_ALIGN (2u << 20) /* 2 MiB extent alignment */
+#define IEFS_V3_EXTENT_SIZE 48u
+#define IEFS_EXT_TLV 0xFEu       /* nested TLV blob extent (rare for Basic) */
+#define IEFS_CODEC_NONE 0
+#define IEFS_CODEC_ZSTD 1
+#define IEFS_CODEC_SNAPPY 2
 
 /* Encode value into a newly malloc'd buffer (*out_len includes header). 0 = ok. */
 int iefs_encode(V *v, unsigned char **out, size_t *out_len, char *err, size_t err_cap);
