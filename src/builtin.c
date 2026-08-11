@@ -1311,6 +1311,13 @@ static V *as_ivec_arg(V *v, const char *ctx){
     (void)ctx;
     return r;
 }
+/* Dense key-boundary ivec: b[0]==0, monotonic non-decreasing, b[i]<=n, b[last]==n. */
+static int ivec_dense_bounds_ok(const int64_t *b,int64_t bn,int64_t n){
+    if(!b||bn<1||b[0]!=0||b[bn-1]!=n)return 0;
+    for(int64_t i=1;i<bn;i++)
+        if(b[i]<b[i-1]||b[i]>n)return 0;
+    return 1;
+}
 /* Grouped asof index: right side sorted by (eq,time). */
 static V *bi_asof_bin(V**a,in){
     P(n<4,v_err("asof_bin(eq, time, query_eq, query_time)"))
@@ -1341,7 +1348,8 @@ static V *bi_asof_index_count(V**a,in){
     V *idx=a[0],*eq=idx->L[0],*tm=idx->L[1],*starts=idx->L[2];
     P(!eq||!tm||!starts||eq->t!=T_IVEC||tm->t!=T_IVEC||starts->t!=T_IVEC,
       v_err("asof_index_count: invalid index"))
-    P(eq->n!=tm->n,v_err("asof_index_count: invalid index lengths"))
+    P(eq->n!=tm->n||!ivec_dense_bounds_ok(starts->J,starts->n,tm->n),
+      v_err("asof_index_count: invalid index"))
     V *qeq=as_ivec_arg(a[1],"query_eq");
     if(!qeq) return v_err("asof_index_count: query_eq must be ivec or list[int]");
     if(a[2]->t!=T_INT){v_free(qeq);return v_err("asof_index_count: query_time must be int");}
@@ -1430,7 +1438,8 @@ static V *bi_winavg(V**a,in){
       *sums=idx->L[3],*counts=idx->L[4];
     P(!sym||!tm||!bounds||!sums||!counts||sym->t!=T_IVEC||tm->t!=T_IVEC||
       bounds->t!=T_IVEC||sums->t!=T_FVEC||counts->t!=T_IVEC||
-      sym->n!=tm->n||sums->n!=sym->n+1||counts->n!=sym->n+1,
+      sym->n!=tm->n||sums->n!=sym->n+1||counts->n!=sym->n+1||
+      !ivec_dense_bounds_ok(bounds->J,bounds->n,tm->n),
       v_err("winavg: invalid index"))
     V *keyset=as_ivec_arg(a[1],"keys"),*starts=as_ivec_arg(a[2],"starts");
     if(!keyset||!starts){if(keyset)v_free(keyset);if(starts)v_free(starts);
@@ -1530,11 +1539,11 @@ static V *bi_wavg(V**a,in){
       v_err("wavg(index, keys, t0, t1)"))
     V *idx=a[0],*tm=idx->L[0],*products=idx->L[1],*weights=idx->L[2],
       *bounds=idx->L[3];
-    /* Shape checks only — builder guarantees bounds monotonicity. */
+    /* Full bounds validation — do not trust hand-built/mutated indexes. */
     P(!tm||!products||!weights||!bounds||tm->t!=T_IVEC||
       products->t!=T_FVEC||weights->t!=T_FVEC||bounds->t!=T_IVEC||
-      products->n!=tm->n+1||weights->n!=tm->n+1||bounds->n<1||
-      bounds->J[0]!=0||bounds->J[bounds->n-1]!=tm->n,
+      products->n!=tm->n+1||weights->n!=tm->n+1||
+      !ivec_dense_bounds_ok(bounds->J,bounds->n,tm->n),
       v_err("wavg: invalid index"))
     V *keyset=as_ivec_arg(a[1],"keys");
     if(!keyset)return v_err("wavg: keys must be ivec or list[int]");
@@ -1609,11 +1618,8 @@ static V *bi_range_max(V**a,in){
       v_err("range_max(index, keys, t0, t1)"))
     V *idx=a[0],*tm=idx->L[0],*vals=idx->L[1],*bounds=idx->L[2];
     P(!tm||!vals||!bounds||tm->t!=T_IVEC||vals->t!=T_FVEC||bounds->t!=T_IVEC||
-      tm->n!=vals->n||bounds->n<1||bounds->J[0]!=0||
-      bounds->J[bounds->n-1]!=tm->n,v_err("range_max: invalid index"))
-    for(int64_t i=1;i<bounds->n;i++)
-        P(bounds->J[i]<bounds->J[i-1]||bounds->J[i]>tm->n,
-          v_err("range_max: invalid index"))
+      tm->n!=vals->n||!ivec_dense_bounds_ok(bounds->J,bounds->n,tm->n),
+      v_err("range_max: invalid index"))
     V *keyset=as_ivec_arg(a[1],"keys");
     if(!keyset)return v_err("range_max: keys must be ivec or list[int]");
     if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(keyset);
@@ -2094,6 +2100,7 @@ static V *bi_shape(V**a,in){
     V*r=v_list(2);r->L[0]=v_int(a[0]->n);r->L[1]=v_int(mat_cols(a[0]));return r;}
 static V *bi_head(V**a,in){
     P(n<1,v_nil())int64_t cnt=n>=2&&a[1]->t==T_INT?a[1]->j:5;V*v=a[0];
+    if(cnt<0)cnt=0;
     if(v->t==T_IVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_ivec(m);memcpy(r->J,v->J,m*8);return r;}
     if(v->t==T_FVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_fvec(m);memcpy(r->F,v->F,m*8);return r;}
     if(v->t==T_LIST){int64_t m=cnt<v->n?cnt:v->n;V*r=v_list(m);for(int64_t i=0;i<m;i++)r->L[i]=v_ref(v->L[i]);return r;}
@@ -2107,6 +2114,7 @@ static V *bi_head(V**a,in){
     return v_nil();}
 static V *bi_tail(V**a,in){
     P(n<1,v_nil())int64_t cnt=n>=2&&a[1]->t==T_INT?a[1]->j:5;V*v=a[0];
+    if(cnt<0)cnt=0;
     int64_t start=v->n>cnt?v->n-cnt:0,m=v->n-start;
     if(v->t==T_IVEC){V*r=v_ivec(m);memcpy(r->J,v->J+start,m*8);return r;}
     if(v->t==T_FVEC){V*r=v_fvec(m);memcpy(r->F,v->F+start,m*8);return r;}

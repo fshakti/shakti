@@ -493,6 +493,11 @@ V *bi_ipc_listen(V **a, int n) {
 
 #ifdef SHAKTI_HAVE_RDMA
     if (tr == IPC_TR_RDMA) {
+        if (host && host[0] && !ipc_is_localhost(host)) {
+            const char *allow = getenv("SHAKTI_IPC_ALLOW_PUBLIC");
+            if (!allow || strcmp(allow, "1") != 0)
+                return v_err("ipc: non-loopback bind requires SHAKTI_IPC_ALLOW_PUBLIC=1");
+        }
         IpcRdmaConn *rdma = NULL;
         if (ipc_rdma_listen(host, port, &rdma, err, sizeof err) != 0)
             return v_err(err[0] ? err : "ipc_listen: rdma failed");

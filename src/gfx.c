@@ -195,10 +195,22 @@ void gfx_fill_rect(int x, int y, int w, int h, uint32_t color) {
 }
 
 void gfx_line(int x0, int y0, int x1, int y1, uint32_t color) {
+    int64_t dx64, dy64;
+    int dx, dy, sx, sy, err, e2, lim;
     if (!g.fb) return;
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy, e2;
+    dx64 = (int64_t)x1 - (int64_t)x0;
+    dy64 = (int64_t)y1 - (int64_t)y0;
+    if (dx64 < 0) dx64 = -dx64;
+    if (dy64 < 0) dy64 = -dy64;
+    lim = g.design_w > g.design_h ? g.design_w : g.design_h;
+    if (lim < 1) lim = 1;
+    /* Skip absurd spans (hang / INT_MIN abs UB); pixels outside fb are no-ops. */
+    if (dx64 > (int64_t)lim * 4 || dy64 > (int64_t)lim * 4) return;
+    dx = (int)dx64;
+    dy = -(int)dy64;
+    sx = x0 < x1 ? 1 : -1;
+    sy = y0 < y1 ? 1 : -1;
+    err = dx + dy;
     for (;;) {
         gfx_put(x0, y0, color);
         if (x0 == x1 && y0 == y1) break;
@@ -210,8 +222,11 @@ void gfx_line(int x0, int y0, int x1, int y1, uint32_t color) {
 }
 
 void gfx_fill_circle(int cx, int cy, int r, uint32_t color) {
-    int y;
+    int y, rmax;
     if (!g.fb || r <= 0) return;
+    rmax = g.design_w > g.design_h ? g.design_w : g.design_h;
+    if (rmax < 1) rmax = 1;
+    if (r > rmax) r = rmax;
     for (y = -r; y <= r; y++) {
         int64_t dy2 = (int64_t)r * (int64_t)r - (int64_t)y * (int64_t)y;
         int dx = dy2 > 0 ? (int)sqrt((double)dy2) : 0;
@@ -369,8 +384,10 @@ static const unsigned char GFX_FONT[][7] = {
 };
 
 static void gfx_glyph5x7(int x, int y, char ch, uint32_t color, int scale) {
-    int idx = gfx_glyph_idx(ch), row, col, px, py;
+    int idx = gfx_glyph_idx(ch), row, col, px, py, smax;
     if (scale < 1) scale = 1;
+    smax = g.design_h > 0 ? g.design_h : 1;
+    if (scale > smax) scale = smax;
     if (idx < 0) {
         /* Unknown glyph: hollow box */
         gfx_fill_rect(x, y, 5 * scale, scale, color);
@@ -388,9 +405,11 @@ static void gfx_glyph5x7(int x, int y, char ch, uint32_t color, int scale) {
 }
 
 void gfx_text(int x, int y, const char *s, uint32_t color, int scale) {
-    int i, adv;
+    int i, adv, smax;
     if (!g.fb || !s) return;
     if (scale < 1) scale = 1;
+    smax = g.design_h > 0 ? g.design_h : 1;
+    if (scale > smax) scale = smax;
     adv = 6 * scale;
     for (i = 0; s[i]; i++) {
         if (s[i] == '\n') {
@@ -405,9 +424,11 @@ void gfx_text(int x, int y, const char *s, uint32_t color, int scale) {
 }
 
 int gfx_text_width(const char *s, int scale) {
-    int n = 0, i;
+    int n = 0, i, smax;
     if (!s) return 0;
     if (scale < 1) scale = 1;
+    smax = g.design_h > 0 ? g.design_h : 1;
+    if (scale > smax) scale = smax;
     for (i = 0; s[i] && s[i] != '\n'; i++) n++;
     return n * 6 * scale;
 }

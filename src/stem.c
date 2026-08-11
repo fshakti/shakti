@@ -504,6 +504,21 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
 
     if (!have_fmt || !have_data || data_pos < 0) { fclose(fp); return -1; }
     if (fmt != 1 || (bps != 16 && bps != 32) || ch < 1 || ch > 2) { fclose(fp); return -1; }
+    /* Clamp declared data size to remaining file bytes and a 256 MiB sample cap. */
+    {
+        long file_end;
+        unsigned int avail, frame_bytes, max_bytes = 256u * 1024u * 1024u;
+        if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return -1; }
+        file_end = ftell(fp);
+        if (file_end < data_pos) { fclose(fp); return -1; }
+        avail = (unsigned int)((file_end - data_pos) > (long)UINT_MAX
+                               ? UINT_MAX : (file_end - data_pos));
+        if (data_bytes > avail) data_bytes = avail;
+        frame_bytes = (unsigned)ch * (bps / 8u);
+        if (frame_bytes == 0) { fclose(fp); return -1; }
+        if (data_bytes / frame_bytes > max_bytes / frame_bytes)
+            data_bytes = (max_bytes / frame_bytes) * frame_bytes;
+    }
     if (fseek(fp, data_pos, SEEK_SET) != 0) { fclose(fp); return -1; }
 
     if (bps == 16) {
