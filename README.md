@@ -76,7 +76,7 @@ shakti
 
 Unknown flags exit with status 2.
 
-Bare REPL meta-commands (banner also lists them): `\d` docs, `\v` vars, `\w` names,
+Bare REPL meta-commands (banner also lists them): `\d` grammar card, `\v` vars, `\w` names,
 `\q` / `\q N` (process exit with optional status). Soft leave: `quit` or `exit`.
 
 ```bash
