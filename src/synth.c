@@ -1527,7 +1527,12 @@ void synth_close(void) {
 int synth_alive(void) { return g.open && g.alive; }
 int synth_tick(char *err, size_t err_cap) {
     int cfg_count = 0, pending_w = 0, pending_h = 0;
-    int headless = getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
+    int headless =
+#ifdef __EMSCRIPTEN__
+        1;
+#else
+        getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
+#endif
     (void)err;
     (void)err_cap;
     P(!g.open || !g.alive,0)
