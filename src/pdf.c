@@ -1008,6 +1008,7 @@ static int pdf_extract_text_from_content(const unsigned char *data, size_t len, 
             continue;
         }
         /* operator token */
+        size_t op0 = p.pos;
         while (p.pos < p.len) {
             unsigned char x = p.data[p.pos];
             if (x == ' ' || x == '\t' || x == '\r' || x == '\n' || x == '\f' ||
@@ -1016,6 +1017,8 @@ static int pdf_extract_text_from_content(const unsigned char *data, size_t len, 
                 break;
             p.pos++;
         }
+        /* Bare ), ], > (etc.) match no branch and leave pos unchanged — advance. */
+        if (p.pos == op0) p.pos++;
     }
     return 0;
 }

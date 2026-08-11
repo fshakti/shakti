@@ -3,6 +3,7 @@
 #include "synth_ui.h"
 #include "synth_render.h"
 #include "fb_present.h"
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -739,8 +740,22 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
         fclose(f);
         return -1;
     }
+    /* Clamp declared data size to remaining file bytes and a 256 MiB sample cap. */
+    {
+        long file_end;
+        unsigned int avail, max_bytes = 256u * 1024u * 1024u;
+        if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
+        file_end = ftell(f);
+        if (file_end < data_pos) { fclose(f); return -1; }
+        avail = (unsigned int)((file_end - data_pos) > (long)UINT_MAX
+                               ? UINT_MAX : (file_end - data_pos));
+        if (data_bytes > avail) data_bytes = avail;
+        if (data_bytes > max_bytes) data_bytes = max_bytes;
+    }
     bps = (size_t)fmt_ch * ((size_t)fmt_bits / 8u);
+    if (!bps) { fclose(f); return -1; }
     frames = (int)(data_bytes / bps);
+    if (frames < 1) { fclose(f); return -1; }
     pcm = (float *)malloc((size_t)frames * sizeof(float));
     if (!pcm) {
         fclose(f);
