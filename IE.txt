@@ -1,0 +1,37 @@
+shakti VERSION
+run   ./shakti · ./shakti f.ie · ./shakti -c '…'
+\d    this manual (hl) · doc.md (prose)
+
+bind   : assign              = compare  (== unsupported)
+call   n(-1) after name      not n - 1  → use n + (-1)
+indent suites under def/if/elif/else/while/for/class
+
+stmt   x: e · def f(a, b:2): · return e · import m
+       if e: / elif / else: · while e: · for x in e:
+       @deco · class C: · try/except/finally
+
+expr   lit name e.f e[i] e[a:b] f(…) f@ xs  xs f@ ys
+       + - * / // % ** · = != < > <= >= · and or not
+       , list · {k: v} · (a, b) · [[…]] matrix
+
+type   int float bool str None · list dict table ktable
+       ivec fvec bvec · matrix[int|float|bool]
+built  range sum min max avg abs dot mmul
+       eval clock timer exit
+       read write load save json_loads json_dumps
+
+sql    import sql · select … by … from t where …
+note   . attr/col · @ each / deco · mmul matmul · == unsupported
+
+demos (verified ./shakti -c · make test)
+i : 0
+while i < 3:
+    print(i)
+    i : i + 1
+a : range(5); print(dot(a, a))
+import sql
+t : table(dept:["eng","sales","eng"], amount:[10,20,30])
+r : select amount by dept from t where amount > 15
+
+out of card
+modules · full builtin list → doc.md
