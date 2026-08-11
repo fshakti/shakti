@@ -145,7 +145,7 @@ Start with `./.build/shakti` (or `-i` after `--command`). Banner line:
 
 | Input | Effect |
 |-------|--------|
-| `\d` / `\help` / `help` | Print [Syntax and builtins](#syntax-and-builtins) from this doc |
+| `\d` / `\help` / `help` | Print the fixed-width grammar card from [`IE.txt`](IE.txt); full prose remains in this doc |
 | `\v` | Bound names and values |
 | `\w` | Bound names only |
 | `\q` | Process exit status `0` |
@@ -686,7 +686,7 @@ k : ktable(a:1, b:2)
 
 - REPL: `\q` or `\q N` — terminate the process with integer status (default `0`), q-style (Isolde parity). Invalid `\q` args print `usage: \q [N]` and stay in the REPL.
 - Soft leave: type `quit` or `exit` to leave the REPL loop without forcing a non-zero status.
-- Other meta-commands: `\d` / `\help` / `help` (this section), `\v` (vars), `\w` (names). See [REPL](#repl) under the CLI section.
+- Other meta-commands: `\d` / `\help` / `help` (grammar card [`IE.txt`](IE.txt)), `\v` (vars), `\w` (names). See [REPL](#repl) under the CLI section.
 
 ## Tables from files
 

@@ -5935,9 +5935,9 @@ static const char *HL_BIS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt",
     "sort","reverse","zip","enumerate","map","filter",
-    "table","columns","shape","head","tail",
+    "table","ktable","columns","shape","head","tail",
     "append","pop","keys","values",
-    "load","save","input","repr","clock","eval",
+    "load","save","input","repr","clock","timer","eval","exit",
     "read","write","readlines",
     "listdir","walk","stat",
     "path_join","path_exists","path_isdir","path_isfile",
@@ -6137,157 +6137,116 @@ static char *read_line(const char *prompt) {
     return buf;
 }
 #endif
-static FILE *repl_open_runtime_doc(void) {
+/* Open named root doc (e.g. IE.txt). SHAKTI_DOC overrides only when basename matches. */
+static int repl_doc_path_from_lib(char *path, size_t path_cap, const char *lib, const char *name) {
+    size_t n = strlen(lib);
+    size_t strip = 0;
+    if (n > 4 && !strcmp(lib + n - 4, "/lib")) strip = 4;
+    if (!strip) return -1;
+    if (n - strip + 1 + strlen(name) + 1 >= path_cap) return -1;
+    memcpy(path, lib, n - strip);
+    path[n - strip] = 0;
+    snprintf(path + n - strip, path_cap - (n - strip), "/%s", name);
+    return 0;
+}
+static FILE *repl_open_doc_from_libdir(const char *lib, const char *name) {
     char path[4096];
-    if (g_lib_path[0]) {
-        size_t n = strlen(g_lib_path);
-        if (n > 4 && !strcmp(g_lib_path + n - 4, "/lib")) {
-            memcpy(path, g_lib_path, n - 4);
-            path[n - 4] = 0;
-            snprintf(path + n - 4, sizeof path - (n - 4), "/doc.md");
-            FILE *f = fopen(path, "r");
+    char open_err[256];
+    if (repl_doc_path_from_lib(path, sizeof path, lib, name) == 0) {
+        open_err[0] = 0;
+        FILE *f = fopen_regular(path, open_err, sizeof open_err);
+        if (f) return f;
+    }
+    snprintf(path, sizeof path, "%s/../%s", lib, name);
+    open_err[0] = 0;
+    return fopen_regular(path, open_err, sizeof open_err);
+}
+static FILE *repl_open_doc(const char *name) {
+    char path[4096];
+    char open_err[256];
+    const char *doc = getenv("SHAKTI_DOC");
+    if (doc && doc[0]) {
+        const char *base = strrchr(doc, '/');
+        const char *base_bs = strrchr(doc, '\\');
+        if (!base || (base_bs && base_bs > base)) base = base_bs;
+        base = base ? base + 1 : doc;
+        if (!strcmp(base, name)) {
+            open_err[0] = 0;
+            FILE *f = fopen_regular(doc, open_err, sizeof open_err);
             if (f) return f;
         }
     }
-    const char *doc = getenv("SHAKTI_DOC");
-    if (doc && doc[0]) {
-        FILE *f = fopen(doc, "r");
+    if (g_lib_path[0]) {
+        FILE *f = repl_open_doc_from_libdir(g_lib_path, name);
         if (f) return f;
     }
     const char *lib = getenv("SHAKTI_LIB");
     if (lib && lib[0]) {
-        snprintf(path, sizeof path, "%s/../doc.md", lib);
-        FILE *f = fopen(path, "r");
+        FILE *f = repl_open_doc_from_libdir(lib, name);
         if (f) return f;
     }
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
     {
-        /* Prefer realpath over readlink to avoid Level-5 TOCTOU findings. */
         char *exe = realpath("/proc/self/exe", NULL);
         if (exe) {
             char *slash = strrchr(exe, '/');
             if (slash) {
                 *slash = 0;
-                snprintf(path, sizeof path, "%s/doc.md", exe);
-                FILE *f = fopen(path, "r");
+                snprintf(path, sizeof path, "%s/%s", exe, name);
+                open_err[0] = 0;
+                FILE *f = fopen_regular(path, open_err, sizeof open_err);
                 if (f) { free(exe); return f; }
+                /* Binary often lives in .build/; card is at repo root. */
+                slash = strrchr(exe, '/');
+                if (slash) {
+                    *slash = 0;
+                    snprintf(path, sizeof path, "%s/%s", exe, name);
+                    open_err[0] = 0;
+                    f = fopen_regular(path, open_err, sizeof open_err);
+                    if (f) { free(exe); return f; }
+                }
             }
             free(exe);
         }
     }
 #endif
-    return fopen("doc.md", "r");
+    snprintf(path, sizeof path, "%s", name);
+    open_err[0] = 0;
+    return fopen_regular(path, open_err, sizeof open_err);
 }
-static int repl_doc_top_heading(const char *line) {
-    return line[0] == '#' && line[1] == ' ' && line[2] != '#';
-}
-static int repl_md_table_sep(const char *s) {
-    if (!s || s[0] != '|') return 0;
-    for (; *s; s++) {
-        if (*s != '|' && *s != '-' && *s != ':' && *s != ' ') return 0;
-    }
-    return 1;
-}
-static void repl_md_strip_links(char *s) {
-    char *w = s;
-    for (char *p = s; *p; ) {
-        if (*p == '[') {
-            char *close = strchr(p + 1, ']');
-            char *open = close ? strchr(close, '(') : NULL;
-            char *end = open ? strchr(open, ')') : NULL;
-            if (close && open == close + 1 && end) {
-                size_t n = (size_t)(close - (p + 1));
-                if (n) { memcpy(w, p + 1, n); w += n; }
-                p = end + 1;
-                continue;
-            }
-        }
-        *w++ = *p++;
-    }
-    *w = 0;
-}
-static void repl_md_strip_emphasis(char *s) {
-    char *w = s;
-    for (char *p = s; *p; p++) {
-        if (*p == '*' && p[1] == '*') { p++; continue; }
-        if (*p == '`') continue;
-        *w++ = *p;
-    }
-    *w = 0;
-}
-static void repl_md_format_table(char *s) {
-    if (s[0] != '|') return;
-    char *p = s;
-    if (*p == '|') p++;
-    char *w = s;
-    int col = 0;
-    for (; *p; p++) {
-        if (*p == '|') {
-            if (col) { *w++ = ' '; *w++ = ' '; }
-            col = 1;
-            continue;
-        }
-        *w++ = *p;
-    }
-    while (w > s && (w[-1] == ' ')) w--;
-    *w = 0;
-}
-static void repl_md_plain_line(char *line) {
-    char *p = line;
-    while (*p == '#') {
-        p++;
-        if (*p == ' ') p++;
-    }
-    if (p != line) memmove(line, p, strlen(p) + 1);
-    repl_md_strip_links(line);
-    repl_md_strip_emphasis(line);
-    repl_md_format_table(line);
-}
-static void repl_print_runtime_doc(void) {
-    FILE *f = repl_open_runtime_doc();
+/* Fixed-width grammar card with REPL syntax highlighting (IE.txt). */
+static void repl_print_hl_doc(const char *name) {
+    FILE *f = repl_open_doc(name);
     if (!f) {
-        fprintf(stderr, "Cannot open doc.md (set SHAKTI_DOC to override)\n");
+        fprintf(stderr,
+            "Cannot open %s (set SHAKTI_DOC to a path whose basename is %s)\n",
+            name, name);
         return;
     }
     char line[4096];
-    int in_code = 0;
-    int prev_blank = 1;
-    int in_section = 0;
+    int first = 1;
     while (fgets(line, (int)sizeof line, f)) {
         size_t n = strlen(line);
         while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
-        if (!in_section) {
-            if (!strncmp(line, "# Syntax and builtins", 21)) in_section = 1;
-            else continue;
-        } else if (repl_doc_top_heading(line) && strncmp(line, "# Syntax and builtins", 21)) {
-            break;
+        /* First line product/version header — rewrite live pkg version when present. */
+        if (first) {
+            if (!strncmp(line, "shakti ", 7)) {
+                char hdr[128];
+                snprintf(hdr, sizeof hdr, "shakti %s", SHAKTI_PKG_VERSION);
+                n = strlen(hdr);
+                if (n >= sizeof line) n = sizeof line - 1;
+                memcpy(line, hdr, n);
+                line[n] = 0;
+            }
+            first = 0;
         }
-        if (n >= 3 && line[0] == '`' && line[1] == '`' && line[2] == '`') {
-            in_code = !in_code;
-            if (!prev_blank) putchar('\n');
-            prev_blank = 1;
-            continue;
-        }
-        if (in_code) {
 #if SHAKTI_HL
-            hl_render(line,n);putchar('\n');
+        hl_render(line, (int)n);
+        putchar('\n');
 #else
-            puts(line);
-#endif
-            prev_blank = (n == 0);
-            continue;
-        }
-        if (repl_md_table_sep(line)) continue;
-        repl_md_plain_line(line);
-        if (line[0] == 0) {
-            if (!prev_blank) putchar('\n');
-            prev_blank = 1;
-            continue;
-        }
         puts(line);
-        prev_blank = 0;
+#endif
     }
-    if (!prev_blank) putchar('\n');
     fclose(f);
 }
 static void run_repl(Env *e) {
@@ -6330,7 +6289,7 @@ static void run_repl(Env *e) {
             continue;
         }
         if (strcmp(line, "\\d") == 0 || strcmp(line, "\\help") == 0 || strcmp(line, "help") == 0) {
-            repl_print_runtime_doc();
+            repl_print_hl_doc("IE.txt");
             continue;
         }
         /* \q / \q N — process exit (optional status), same as Isolde */
