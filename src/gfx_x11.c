@@ -127,13 +127,20 @@ int gfx_platform_poll(void) {
         case ClientMessage:
             gfx_core_set_alive(0);
             return -1;
-        case ConfigureNotify:
-            if (gfx_core_fb_resize(ev.xconfigure.width, ev.xconfigure.height) != 0) break;
+        case ConfigureNotify: {
+            int nw = ev.xconfigure.width, nh = ev.xconfigure.height;
             XImage *next = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, NULL,
-                                        ev.xconfigure.width, ev.xconfigure.height, 32, 0);
+                                        nw, nh, 32, 0);
             if (!next) break;
             next->data = (char *)malloc((size_t)next->bytes_per_line * (size_t)next->height);
             if (!next->data) {
+                XDestroyImage(next);
+                break;
+            }
+            /* Publish present size only after the XImage buffer is ready. */
+            if (gfx_core_fb_resize(nw, nh) != 0) {
+                free(next->data);
+                next->data = NULL;
                 XDestroyImage(next);
                 break;
             }
@@ -141,6 +148,7 @@ int gfx_platform_poll(void) {
             g.img = next;
             gfx_core_mark_dirty();
             break;
+        }
         case ButtonPress:
             if (ev.xbutton.button != Button1) break;
             input_hub_inject_mouse(ev.xbutton.x, ev.xbutton.y, 1);

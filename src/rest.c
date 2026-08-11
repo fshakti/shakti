@@ -124,6 +124,11 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
         if ((a & 0xffff0000u) == 0xc0a80000u) return 1; /* 192.168/16 */
         if ((a & 0xffff0000u) == 0xa9fe0000u) return 1; /* 169.254/16 */
         if ((a & 0xff000000u) == 0x00000000u) return 1; /* 0/8 */
+        if ((a & 0xffc00000u) == 0x64400000u) return 1; /* 100.64/10 CGNAT */
+        if ((a & 0xffffff00u) == 0xc0000000u) return 1; /* 192.0.0.0/24 */
+        if ((a & 0xfffe0000u) == 0xc6120000u) return 1; /* 198.18/15 */
+        if ((a & 0xf0000000u) == 0xf0000000u) return 1; /* 240/4 + 255.255.255.255 */
+        if ((a & 0xf0000000u) == 0xe0000000u) return 1; /* 224/4 multicast */
         return 0;
     }
 #if defined(AF_INET6)
@@ -135,15 +140,24 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
         if (zero && (b[15] == 0 || b[15] == 1)) return 1; /* :: / ::1 */
         if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return 1; /* fe80::/10 */
         if ((b[0] & 0xfe) == 0xfc) return 1; /* fc00::/7 */
-        /* IPv4-mapped */
-        int mapped = 1;
-        for (int i = 0; i < 10; i++) if (b[i]) { mapped = 0; break; }
-        if (mapped && b[10] == 0xff && b[11] == 0xff) {
-            struct sockaddr_in v4;
-            memset(&v4, 0, sizeof v4);
-            v4.sin_family = AF_INET;
-            memcpy(&v4.sin_addr, b + 12, 4);
-            return rest_host_is_blocked_ip((struct sockaddr *)&v4);
+        /* IPv4-mapped ::ffff:a.b.c.d and IPv4-compatible ::a.b.c.d */
+        {
+            int mapped = 1, compat = 1;
+            for (int i = 0; i < 10; i++) if (b[i]) { mapped = 0; compat = 0; break; }
+            if (mapped && b[10] == 0xff && b[11] == 0xff) {
+                struct sockaddr_in v4;
+                memset(&v4, 0, sizeof v4);
+                v4.sin_family = AF_INET;
+                memcpy(&v4.sin_addr, b + 12, 4);
+                return rest_host_is_blocked_ip((struct sockaddr *)&v4);
+            }
+            if (compat && b[10] == 0 && b[11] == 0) {
+                struct sockaddr_in v4;
+                memset(&v4, 0, sizeof v4);
+                v4.sin_family = AF_INET;
+                memcpy(&v4.sin_addr, b + 12, 4);
+                return rest_host_is_blocked_ip((struct sockaddr *)&v4);
+            }
         }
     }
 #endif
@@ -522,7 +536,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
      * literal argument, so URL/header/token contents cannot inject a command. */
     int nextra = (extra_hdrs && extra_hdrs->t == T_DICT) ? (int)extra_hdrs->keys->n : 0;
-    int max_args = 28 + nextra * 2;
+    int max_args = 34 + nextra * 2;
     char **argv = calloc((size_t)max_args, sizeof(char *));
     char **hdr_lines = calloc((size_t)(nextra > 0 ? nextra : 1), sizeof(char *));
     if (!argv || !hdr_lines) {
@@ -536,6 +550,10 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     argv[ac++] = "-sS";
     argv[ac++] = "-m";
     argv[ac++] = "60";
+    argv[ac++] = "--proto";
+    argv[ac++] = "=http,https";
+    argv[ac++] = "--noproxy";
+    argv[ac++] = "*";
     argv[ac++] = "--resolve";
     argv[ac++] = resolve_pin;
     argv[ac++] = "-X";
