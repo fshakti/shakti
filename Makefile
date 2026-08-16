@@ -30,7 +30,7 @@ else
 endif
 
 CFLAGS := -O2 -g -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare -Wno-unused-result -Wno-format-truncation -Wno-missing-field-initializers -std=gnu11 -D_GNU_SOURCE \
-	-I$(BUILD) -Igen -Isrc \
+	-I$(BUILD) -Isrc \
 	$(OMP_CFLAGS)
 
 # Optional JNI headers for src/shakti_jni.c (Homebrew OpenJDK or JAVA_HOME).
@@ -229,16 +229,15 @@ $(BUILD)/shakti_version.h: src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' src/VERSION > $@
 
-# Regenerated from converters/ when scripts/embed_text.py is available.
-# src/shakti_lang.c includes these files via ../gen/... explicitly so stale
-# src/shakti_*_embed.h copies cannot shadow them.
+# Regenerated from src/converters/ when scripts/embed_text.py exists (scripts/ is
+# often local-only). src/shakti_lang.c includes embed/... via -Isrc.
 define make_embed_rule
-gen/shakti_$(1)_embed.h: converters/$(1).ie
-	@mkdir -p gen
+src/embed/shakti_$(1)_embed.h: src/converters/$(1).ie
+	@mkdir -p src/embed
 ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py converters/$(1).ie shakti_$(1)_source $$@
+	python3 scripts/embed_text.py src/converters/$(1).ie shakti_$(1)_source $$@
 else
-	@test -f $$@ || (echo "error: missing $$@ — restore scripts/embed_text.py to regenerate from converters/$(1).ie" >&2; exit 1)
+	@test -f $$@ || (echo "error: missing $$@ — restore scripts/embed_text.py to regenerate from src/converters/$(1).ie" >&2; exit 1)
 endif
 endef
 
@@ -343,15 +342,21 @@ shakti: $(SHAKTI)
 	fi
 	ln -sfn $(SHAKTI) shakti
 
-$(SHAKTI): $(BUILD)/shakti_version.h gen/shakti_p2s_embed.h gen/shakti_c2s_embed.h gen/shakti_cs2s_embed.h gen/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
+$(SHAKTI): $(BUILD)/shakti_version.h src/embed/shakti_p2s_embed.h src/embed/shakti_c2s_embed.h src/embed/shakti_cs2s_embed.h src/embed/shakti_j2s_embed.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
+
+# Optional JNI object for Java/Android hosts (tests/build_guards.sh).
+# Lives under $(BUILD)/ so `make test` does not drop a .o in the repo root.
+$(BUILD)/shakti_jni.o: src/shakti_jni.c src/a.h | $(BUILD)
+	$(CC) $(CFLAGS) $(JNI_CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/shakti_jni.c
+shakti_jni.o: $(BUILD)/shakti_jni.o
 
 SHAKTI_LIB_DIR := lib
 SHAKTI_TESTS := $(wildcard tests/*.ie)
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall
+.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o
 
 test: shakti
 ifneq ($(SHAKTI_TESTS),)

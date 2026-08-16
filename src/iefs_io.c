@@ -8,6 +8,7 @@
  * add io_uring later behind an optional compile probe for liburing.h.
  */
 #include "iefs_io.h"
+#include "iefs_format.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -16,6 +17,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* shakti a.h macros collide with common POSIX names. */
+#ifdef st
+#undef st
+#endif
 
 #ifndef IEFS_IO_ALIGN
 #define IEFS_IO_ALIGN 4096u
@@ -97,17 +103,14 @@ static void iefs_maybe_nocache(int fd, size_t len, int mode) {
 #endif
 }
 
-static void *aligned_alloc_pages(size_t nbytes) {
 #if defined(__linux__) && defined(O_DIRECT)
+static void *aligned_alloc_pages(size_t nbytes) {
     void *p = NULL;
     if (posix_memalign(&p, IEFS_IO_ALIGN, nbytes) != 0)
         return NULL;
     return p;
-#else
-    (void)nbytes;
-    return NULL;
-#endif
 }
+#endif
 
 int iefs_io_read_all(const char *path, unsigned char **out, size_t *out_len, char *err, size_t err_cap) {
     if (!path || !out || !out_len) {
@@ -138,6 +141,11 @@ int iefs_io_read_all(const char *path, unsigned char **out, size_t *out_len, cha
         return -1;
     }
     size_t n = (size_t)st.st_size;
+    if ((uint64_t)st.st_size > IEFS_MAX_PAYLOAD + (uint64_t)IEFS_HEADER_SIZE) {
+        set_err(err, err_cap, "iefs: file too large");
+        close(fd);
+        return -1;
+    }
     iefs_maybe_nocache(fd, n, IEFS_IO_AUTO);
     unsigned char *buf = malloc(n ? n : 1);
     if (!buf) {

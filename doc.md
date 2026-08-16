@@ -82,10 +82,10 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 
 | Tool | Description |
 |------|-------------|
-| `converters/p2s.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
-| `converters/c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
-| `converters/cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
-| `converters/j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
+| `src/converters/p2s.ie` | Strict Python 3 → Shakti converter ([docs](#python-3-shakti-converter)) |
+| `src/converters/c2s.ie` | Strict C → Shakti converter ([docs](#c-shakti-converter)) |
+| `src/converters/cs2s.ie` | Strict C# → Shakti converter ([docs](#c-shakti-converter-1)) |
+| `src/converters/j2s.ie` | Strict Java → Shakti converter ([docs](#java-shakti-converter)) |
 | `examples/python.py` / `examples/c.c` / `examples/csharp.cs` / `examples/java.java` | Tiny demos for each converter |
 | `example.py` / `example.c` / `example.cs` / `example.java` | Broader subset demos (`./.build/shakti examples/example.py` / `example.c` / `example.cs` / `example.java`) |
 
@@ -156,7 +156,7 @@ Unknown `\` commands print an error and stay in the REPL.
 
 Build note: the direct-run converters (`./.build/shakti file.py`, `./.build/shakti file.c`,
 `./.build/shakti file.cs`, `./.build/shakti file.java`) use embedded copies generated into
-`gen/` from `converters/p2s.ie`, `converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
+`src/embed/` from `src/converters/p2s.ie`, `src/converters/c2s.ie`, `src/converters/cs2s.ie`, and `src/converters/j2s.ie`.
 Repeated source runs use a disk transpile cache; set `SHAKTI_NO_TRANSPILE_CACHE=1`
 to force a fresh convert each process.
 
@@ -165,14 +165,14 @@ to force a fresh convert each process.
 # Python 3 → Shakti converter
 
 Strict subset converter written in Shakti. Embedded in the executable from
-generated headers under `gen/` for direct runs, and still available as
-`converters/p2s.ie` for emit-only conversion.
+generated headers under `src/embed/` for direct runs, and still available as
+`src/converters/p2s.ie` for emit-only conversion.
 
 ```bash
 ./.build/shakti file.py                 # transpile + run (supported subset)
 ./.build/shakti examples/python.py
-./.build/shakti converters/p2s.ie input.py -o out.ie
-./.build/shakti converters/p2s.ie examples/python.py -o python.ie
+./.build/shakti src/converters/p2s.ie input.py -o out.ie
+./.build/shakti src/converters/p2s.ie examples/python.py -o python.ie
 SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
@@ -211,8 +211,8 @@ Docstrings become `#` comments.
 # C → Shakti converter
 
 Strict subset converter written in Shakti. Embedded in the executable from
-generated headers under `gen/` for direct runs, and still available as
-`converters/c2s.ie` for emit-only conversion.
+generated headers under `src/embed/` for direct runs, and still available as
+`src/converters/c2s.ie` for emit-only conversion.
 
 If `main` is present, the converter appends a call so the program runs.
 `int main(void)` / `int main()` become `def main():` plus `main()`.
@@ -222,8 +222,8 @@ If `main` is present, the converter appends a call so the program runs.
 ```bash
 ./.build/shakti file.c                  # transpile + run (supported subset)
 ./.build/shakti examples/example.c
-./.build/shakti converters/c2s.ie input.c -o out.ie
-./.build/shakti converters/c2s.ie examples/c.c -o c.ie
+./.build/shakti src/converters/c2s.ie input.c -o out.ie
+./.build/shakti src/converters/c2s.ie examples/c.c -o c.ie
 SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
@@ -299,14 +299,14 @@ discarded. An unterminated block comment exits nonzero with the opening
 # C# → Shakti converter
 
 Strict subset converter written in Shakti. Embedded in the executable from
-generated headers under `gen/` for direct runs, and still available as
-`converters/cs2s.ie` for emit-only conversion.
+generated headers under `src/embed/` for direct runs, and still available as
+`src/converters/cs2s.ie` for emit-only conversion.
 
 ```bash
 ./.build/shakti file.cs                 # transpile + run (supported subset)
 ./.build/shakti examples/csharp.cs
-./.build/shakti converters/cs2s.ie input.cs -o out.ie
-./.build/shakti converters/cs2s.ie examples/csharp.cs -o csharp.ie
+./.build/shakti src/converters/cs2s.ie input.cs -o out.ie
+./.build/shakti src/converters/cs2s.ie examples/csharp.cs -o csharp.ie
 SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 
@@ -368,8 +368,8 @@ discarded. An unterminated block comment exits nonzero with the opening
 # Java → Shakti converter
 
 Strict subset converter written in Shakti. Embedded in the executable from
-generated headers under `gen/` for direct runs, and still available as
-`converters/j2s.ie` for emit-only conversion.
+generated headers under `src/embed/` for direct runs, and still available as
+`src/converters/j2s.ie` for emit-only conversion.
 
 One top-level class is accepted as a non-runtime shell for `static` fields and
 methods. If `main` is present, the converter appends `main(argv[1:])` so CLI
@@ -379,8 +379,8 @@ arguments match Java (no program name).
 ./.build/shakti file.java               # transpile + run (supported subset)
 ./.build/shakti examples/java.java
 ./.build/shakti examples/example.java
-./.build/shakti converters/j2s.ie input.java -o out.ie
-./.build/shakti converters/j2s.ie examples/java.java -o java.ie
+./.build/shakti src/converters/j2s.ie input.java -o out.ie
+./.build/shakti src/converters/j2s.ie examples/java.java -o java.ie
 SHAKTI_LIB=$PWD/lib ./.build/shakti out.ie
 ```
 

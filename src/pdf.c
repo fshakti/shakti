@@ -53,7 +53,10 @@ static PdfDoc *g_pdfs[PDF_MAX];
 static int buf_reserve(PdfBuf *b, size_t need) {
     if (need <= b->cap) return 0;
     size_t cap = b->cap ? b->cap : 256;
-    while (cap < need) cap *= 2;
+    while (cap < need) {
+        if (cap > ((size_t)-1) / 2) return -1;
+        cap *= 2;
+    }
     char *p = realloc(b->data, cap);
     if (!p) return -1;
     b->data = p;
@@ -62,6 +65,7 @@ static int buf_reserve(PdfBuf *b, size_t need) {
 }
 
 static int buf_append(PdfBuf *b, const void *p, size_t n) {
+    if (n > ((size_t)-1) - 1 || b->len > ((size_t)-1) - (n + 1)) return -1;
     if (buf_reserve(b, b->len + n + 1) < 0) return -1;
     memcpy(b->data + b->len, p, n);
     b->len += n;

@@ -37,6 +37,14 @@ static int ipc_valid_shm_user_name(const char *s) {
     return 1;
 }
 
+static void ipc_set_cloexec(int fd) {
+    int fl;
+    if (fd < 0) return;
+    fl = fcntl(fd, F_GETFD);
+    if (fl >= 0)
+        (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC);
+}
+
 typedef enum {
     IPC_KIND_NONE = 0,
     IPC_KIND_SOCK_LISTEN,
@@ -243,6 +251,7 @@ static int sock_listen_tcp(const char *host, int port, char *err, size_t err_cap
         snprintf(err, err_cap, "ipc: socket: %s", strerror(errno));
         return -1;
     }
+    ipc_set_cloexec(s);
     int opt = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof opt);
     struct sockaddr_in addr;
@@ -294,6 +303,7 @@ static int sock_listen_uds(int port, char *path_out, char *err, size_t err_cap) 
         snprintf(err, err_cap, "ipc: uds socket: %s", strerror(errno));
         return -1;
     }
+    ipc_set_cloexec(s);
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof addr);
     addr.sun_family = AF_UNIX;
@@ -323,6 +333,7 @@ static int sock_connect_tcp(const char *host, int port, char *err, size_t err_ca
         snprintf(err, err_cap, "ipc: socket: %s", strerror(errno));
         return -1;
     }
+    ipc_set_cloexec(s);
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
@@ -358,6 +369,7 @@ static int sock_connect_uds(int port, char *err, size_t err_cap) {
         snprintf(err, err_cap, "ipc: uds socket: %s", strerror(errno));
         return -1;
     }
+    ipc_set_cloexec(s);
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof addr);
     addr.sun_family = AF_UNIX;
@@ -563,6 +575,7 @@ V *bi_ipc_accept(V **a, int n) {
     P(ls->kind != IPC_KIND_SOCK_LISTEN, v_err("ipc_accept: not a listen handle"))
     int cfd = accept(ls->fd, NULL, NULL);
     if (cfd < 0) return v_err("ipc_accept: accept failed");
+    ipc_set_cloexec(cfd);
     sock_set_tcp_nodelay(cfd);
     int h = ipc_alloc();
     if (h < 0) {
@@ -807,8 +820,8 @@ V *bi_ipc_shm_open(V **a, int n) {
 #if !defined(__linux__) && !defined(__APPLE__)
     return v_err("ipc_shm_open: not supported on this platform");
 #else
+    if (a[1]->j <= 0) return v_err("ipc_shm_open: size must be positive");
     size_t size = (size_t)a[1]->j;
-    if (size == 0) return v_err("ipc_shm_open: size=0");
     int slot = -1;
     for (int i = 1; i < IPC_MAX_HANDLES; i++) {
         if (!g_shm[i].in_use) {

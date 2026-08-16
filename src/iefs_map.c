@@ -183,6 +183,10 @@ V *iefs_store_map(const char *path, int pages_mode) {
         close(fd);
         return v_err("iefs.map: truncated header");
     }
+    if ((uint64_t)st_buf.st_size > IEFS_MAX_PAYLOAD + (uint64_t)IEFS_HEADER_SIZE) {
+        close(fd);
+        return v_err("iefs.map: file too large");
+    }
     void *file_map = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (file_map == MAP_FAILED)
