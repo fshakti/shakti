@@ -536,7 +536,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
      * literal argument, so URL/header/token contents cannot inject a command. */
     int nextra = (extra_hdrs && extra_hdrs->t == T_DICT) ? (int)extra_hdrs->keys->n : 0;
-    int max_args = 34 + nextra * 2;
+    int max_args = 36 + nextra * 2;
     char **argv = calloc((size_t)max_args, sizeof(char *));
     char **hdr_lines = calloc((size_t)(nextra > 0 ? nextra : 1), sizeof(char *));
     if (!argv || !hdr_lines) {
@@ -588,6 +588,10 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         argv[ac++] = "--data-binary";
         argv[ac++] = data_at;
     }
+    char max_fs[32];
+    snprintf(max_fs, sizeof max_fs, "%d", REST_MAX_BODY);
+    argv[ac++] = "--max-filesize";
+    argv[ac++] = max_fs;
     argv[ac++] = "-D";
     argv[ac++] = g_rest_hdr_path;
     argv[ac++] = "-o";
@@ -622,18 +626,65 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     return out;
 }
 
+#ifndef SHAKTI_WASM
+static void rest_set_cloexec(int fd) {
+    int fl;
+    if (fd < 0) return;
+    fl = fcntl(fd, F_GETFD);
+    if (fl >= 0)
+        (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC);
+}
+#endif
+
 static V *rest_do_listen(int port, const char *host) {
     if (port < 1 || port > 65535) return v_err("rest_listen: invalid port");
     if (!host || !host[0]) host = "127.0.0.1";
+    if (!strcmp(host, "localhost")) host = "127.0.0.1";
+    int loopback = !strcmp(host, "127.0.0.1") || !strcmp(host, "::1") || !strcmp(host, "localhost");
     {
-        int loopback = !strcmp(host, "127.0.0.1") || !strcmp(host, "::1") || !strcmp(host, "localhost");
         const char *allow = getenv("SHAKTI_REST_ALLOW_PUBLIC");
         if (!loopback && !(allow && allow[0] == '1' && allow[1] == '\0'))
             return v_err("rest_listen: non-loopback bind requires SHAKTI_REST_ALLOW_PUBLIC=1");
     }
 
+#if defined(AF_INET6)
+    if (!strcmp(host, "::1")) {
+        int fd6 = socket(AF_INET6, SOCK_STREAM, 0);
+        if (fd6 < 0) return v_err("rest_listen: socket failed");
+        rest_set_cloexec(fd6);
+        int on6 = 1;
+        setsockopt(fd6, SOL_SOCKET, SO_REUSEADDR, &on6, sizeof on6);
+#ifdef IPV6_V6ONLY
+        setsockopt(fd6, IPPROTO_IPV6, IPV6_V6ONLY, &on6, sizeof on6);
+#endif
+        struct sockaddr_in6 addr6;
+        memset(&addr6, 0, sizeof addr6);
+        addr6.sin6_family = AF_INET6;
+        addr6.sin6_port = htons((uint16_t)port);
+        if (inet_pton(AF_INET6, "::1", &addr6.sin6_addr) != 1) {
+            close(fd6);
+            return v_err("rest_listen: invalid host");
+        }
+        if (bind(fd6, (struct sockaddr *)&addr6, sizeof addr6) < 0) {
+            close(fd6);
+            return v_err("rest_listen: bind failed");
+        }
+        if (listen(fd6, 16) < 0) {
+            close(fd6);
+            return v_err("rest_listen: listen failed");
+        }
+        int h6 = rest_alloc(REST_KIND_LISTEN, fd6);
+        if (h6 < 0) {
+            close(fd6);
+            return v_err("rest_listen: too many handles");
+        }
+        return v_int(h6);
+    }
+#endif
+
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return v_err("rest_listen: socket failed");
+    rest_set_cloexec(fd);
 
     int on = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
@@ -668,10 +719,11 @@ static V *rest_do_accept(int listen_h) {
     RestHandle *srv = rest_slot(listen_h);
     if (!srv || srv->kind != REST_KIND_LISTEN) return v_err("rest_accept: invalid listen handle");
 
-    struct sockaddr_in peer;
+    struct sockaddr_storage peer;
     socklen_t plen = sizeof peer;
     int cfd = accept(srv->fd, (struct sockaddr *)&peer, &plen);
     if (cfd < 0) return v_err("rest_accept: accept failed");
+    rest_set_cloexec(cfd);
 
     int h = rest_alloc(REST_KIND_CONN, cfd);
     if (h < 0) {

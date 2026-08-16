@@ -23,7 +23,7 @@ extern "C" {
 #define IEFS_VERSION_MAX 3u      /* read up to Isolde TOC+extents */
 #define IEFS_HEADER_SIZE 24u
 #define IEFS_MAX_PAYLOAD (64ull << 30) /* 64 GiB hard cap (was 16; Basic one-day quotes ~25 GiB) */
-#define IEFS_MAX_ELEMS (1ull << 32)
+#define IEFS_MAX_ELEMS UINT32_MAX
 #define IEFS_V3_ALIGN (2u << 20) /* 2 MiB extent alignment */
 #define IEFS_V3_EXTENT_SIZE 48u
 #define IEFS_EXT_TLV 0xFEu       /* nested TLV blob extent (rare for Basic) */

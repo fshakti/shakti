@@ -91,7 +91,7 @@ V *bi_fread(V **a, in) {
     size_t got = fread(b, 1, (size_t)z, f);
     b[got] = 0;
     fclose(f);
-    return v_str(b);
+    return v_str_take(b);
 }
 V *bi_fwrite(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("write(path, data)"))

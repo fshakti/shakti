@@ -4,7 +4,8 @@
 #include <string.h>
 
 /* Optional JVM bridge — not linked into .build/shakti. Build via `make shakti_jni.o`
- * when an external Java/Android host needs Java_com_shakti_shakti_ShaktiNative_runFile. */
+ * (writes .build/shakti_jni.o) when an external Java/Android host needs
+ * Java_com_shakti_shakti_ShaktiNative_runFile. */
 
 extern int shakti_lang_main(int argc, char **argv);
 

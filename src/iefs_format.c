@@ -345,7 +345,7 @@ typedef struct {
 } IefsR;
 
 static int need(IefsR *r, size_t nbytes) {
-    if (r->off + nbytes > r->n) {
+    if (r->off > r->n || nbytes > r->n - r->off) {
         snprintf(r->err, sizeof r->err, "iefs: truncated payload");
         return -1;
     }

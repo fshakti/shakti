@@ -1611,13 +1611,16 @@ static V *append_cell(V *col, V *cell) {
                 if (v_ensure_writable(col) != 0)
                     return v_err("insert: out of memory");
             }
-            int cap = (int)col->_ht_cap >= (int)col->n ? (int)col->_ht_cap : (int)col->n;
-            if (col->n >= cap) {
-                cap = cap ? cap * 2 : 8;
-                int64_t *nj = realloc(col->J, (size_t)cap * sizeof(int64_t));
+            int64_t cap64 = (int64_t)col->_ht_cap;
+            if (cap64 < col->n) cap64 = col->n;
+            if (col->n >= cap64) {
+                if (cap64 > (int64_t)(UINT32_MAX / 2))
+                    return v_err("insert: too large");
+                int64_t new_cap = cap64 ? cap64 * 2 : 8;
+                int64_t *nj = realloc(col->J, (size_t)new_cap * sizeof(int64_t));
                 if (!nj) return v_err("insert: out of memory");
                 col->J = nj;
-                col->_ht_cap = cap;
+                col->_ht_cap = (uint32_t)new_cap;
             }
             col->J[col->n++] = val;
             return col;
