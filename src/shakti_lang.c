@@ -14,12 +14,10 @@
 #ifndef SHAKTI_PKG_VERSION
 #define SHAKTI_PKG_VERSION "0.12.0"
 #endif
-/* Resolve embedded converter sources from the generated tree explicitly so
- * stale src/shakti_*_embed.h files can never shadow them via include order. */
-#include "../gen/shakti_p2s_embed.h"
-#include "../gen/shakti_c2s_embed.h"
-#include "../gen/shakti_cs2s_embed.h"
-#include "../gen/shakti_j2s_embed.h"
+#include "embed/shakti_p2s_embed.h"
+#include "embed/shakti_c2s_embed.h"
+#include "embed/shakti_cs2s_embed.h"
+#include "embed/shakti_j2s_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
@@ -186,7 +184,8 @@ V *v_errf(const char *fmt, ...) {
 }
 V *v_ivec(int64_t n) {
     V *v=v_alloc(T_IVEC); v->n=n;
-    v->_ht_cap = n > 0 ? (int)n : 0;
+    if (n > (int64_t)UINT32_MAX) shakti_oom("v_ivec");
+    v->_ht_cap = n > 0 ? (uint32_t)n : 0;
     v->J = x_malloc(x_mul((size_t)(n > 0 ? n : 1), sizeof(int64_t), "v_ivec"), "v_ivec");
     return v;
 }

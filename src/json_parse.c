@@ -38,9 +38,27 @@ static V*parse_string(const char*s,const char**end_out){
     int d0=hex_digit(s[0]),d1=hex_digit(s[1]),d2=hex_digit(s[2]),d3=hex_digit(s[3]);
     if(d0<0||d1<0||d2<0||d3<0){free(buf);return v_err("json: bad \\u");}
     int h=(d0<<12)|(d1<<8)|(d2<<4)|d3;
-    c=(char)(h&0xff);
     s+=4;
-    break;}
+    {
+        unsigned uh=(unsigned)h;
+        int nbytes=(uh<=0x7Fu)?1:(uh<=0x7FFu)?2:3;
+        while(len+(size_t)nbytes+1>=cap){
+         if(cap>=SHAKTI_JSON_MAX_STRING){free(buf);return v_err("json: string too long");}
+         cap*=2;
+         char*nb=realloc(buf,cap);
+         if(!nb){free(buf);return v_err("json: oom");}
+         buf=nb;}
+        if(nbytes==1) buf[len++]=(char)uh;
+        else if(nbytes==2){
+         buf[len++]=(char)(0xC0u|(uh>>6));
+         buf[len++]=(char)(0x80u|(uh&0x3Fu));}
+        else{
+         buf[len++]=(char)(0xE0u|(uh>>12));
+         buf[len++]=(char)(0x80u|((uh>>6)&0x3Fu));
+         buf[len++]=(char)(0x80u|(uh&0x3Fu));}
+        continue;
+    }
+    }
    default:free(buf);return v_err("json: bad escape");}}
   if(len+2>=cap){
    if(cap>=SHAKTI_JSON_MAX_STRING){free(buf);return v_err("json: string too long");}

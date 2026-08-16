@@ -48,8 +48,9 @@ current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make clean` removes `.build/` and the `./shakti` symlink.
 The linked binary lives at `.build/shakti`; `make build` also creates `./shakti` →
 `.build/shakti` so a workspace directory on `PATH` finds `shakti` (same idea as Isolde).
-Embedded converter headers are generated under `gen/` from `converters/p2s.ie`,
-`converters/c2s.ie`, `converters/cs2s.ie`, and `converters/j2s.ie`.
+Embedded converter headers live under `src/embed/` and are generated from
+`src/converters/p2s.ie`, `src/converters/c2s.ie`, `src/converters/cs2s.ie`, and
+`src/converters/j2s.ie`.
 
 Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_STEM`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
 
@@ -91,7 +92,7 @@ printf '\\q 7\n' | ./shakti -q        # quit with status 7
 ./shakti file.java  # supported Java subset → Shakti, then run
 ```
 
-Converters: [`converters/p2s.ie`](converters/p2s.ie) (Python), [`converters/c2s.ie`](converters/c2s.ie) (C), [`converters/cs2s.ie`](converters/cs2s.ie) (C#), [`converters/j2s.ie`](converters/j2s.ie) (Java). Their embedded CLI copies are generated into `gen/`.  
+Converters: [`src/converters/p2s.ie`](src/converters/p2s.ie) (Python), [`src/converters/c2s.ie`](src/converters/c2s.ie) (C), [`src/converters/cs2s.ie`](src/converters/cs2s.ie) (C#), [`src/converters/j2s.ie`](src/converters/j2s.ie) (Java). Their embedded CLI copies are generated into `src/embed/`.  
 More detail: [doc.md](doc.md). Examples: [examples/example.ie](examples/example.ie), [examples/example.py](examples/example.py), [examples/example.c](examples/example.c), [examples/example.cs](examples/example.cs), [examples/example.java](examples/example.java).  
 Tiny converter demos: [examples/python.py](examples/python.py), [examples/c.c](examples/c.c), [examples/csharp.cs](examples/csharp.cs), [examples/java.java](examples/java.java).
 C / C# / Java converters reject unterminated strings and `/* ... */` block
