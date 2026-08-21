@@ -1,0 +1,77 @@
+# csv — save/load (possibly sloppy/messy) csv files
+#
+# After `import csv`, use:
+#
+#   a: csv.load("filename.csv")
+#   a: csv.load("filename.tsv",fs:"\t")
+#   csv.save(a, "file2.csv")
+#
+# n.b. options:
+#   fs=field separator (usually "," or "\t")
+#   rs=row separator (usually "\n" or "\r\n" but sometimes "\r")
+#   esc=escaped quote pattern ('""' and "\\\"" are common, but None disables)
+#   charset=optional lambda to fixup the character set of strings
+#
+def load(filename,*pluck,esc:'""',fs:",",rs:"\n",charset:None):
+	t:{}
+	h:[]
+	re:'^([^'+fs+']*|"[^"]*"([^'+fs+']*"[^"]*")*)'
+	def u(x):
+		if x[0]!='"':
+			return x
+		return re_sub(esc,'"',x[1:-1])
+	def nu(x):
+		return x
+	def head(r):
+		for k in r:
+			h.append(k)
+			if not(len(pluck)) or k in pluck:
+				t[k]:[]
+	def data(r):
+		for k,v in zip(h,r):
+			if not(len(pluck)) or k in pluck:
+				t[k].append(v)
+	s:head
+	if charset=None:
+		charset:nu
+	if esc=None:
+		u:charset
+	for r in re_split(rs,read(filename)):
+		row:[]
+		while(len(r)>0):
+			c:re_findall(re,r)
+			c:c[0]
+			if c="":
+				row.append(u(charset(r)))
+				break
+			row.append(u(charset(c)))
+			j:len(c)+1
+			r:r[j:]
+		s(row)
+		s:data
+	return table(t)
+
+def save(obj, filename, esc:'""',fs:",",rs:"\n",charset:None):
+	cols:columns(obj)
+	def nu(x):
+		return x
+	if charset=None:
+		charset:nu
+	def enc(x):
+		x:str(x)
+		if re_match('"', x):
+			return '"'+re_sub('"',esc,x)+'"'
+		return x
+	def line(x):
+		r:""
+		for c in x:
+			r+:fs+enc(charset(c))
+		r+:rs
+		return r[1:]
+	text:line(cols)
+	for i in range(len(obj[cols[0]])):
+		row:[]
+		for k in cols:
+			row.append(obj[k][i])
+		text+:line(row)
+	return write(filename, text)

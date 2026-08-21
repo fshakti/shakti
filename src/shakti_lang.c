@@ -27,6 +27,7 @@
 #include <unistd.h>
 #endif
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <errno.h>
 #include <limits.h>
@@ -197,6 +198,12 @@ V *v_fvec(int64_t n) {
 V *v_bvec(int64_t n) {
     V *v=v_alloc(T_BVEC); v->n=n;
     v->B = x_calloc(n?n:1, 1, "v_bvec");
+    return v;
+}
+V *v_subprocess(int fd, int64_t pid) {
+    V *v = v_alloc(T_SUBPROCESS);
+    v->j = fd;
+    v->n = pid;
     return v;
 }
 V *v_imat(int64_t rows, int64_t cols) {
@@ -576,6 +583,15 @@ void v_free(V *v) {
     case T_INPUT:
         free(v->s);
         break;
+    case T_SUBPROCESS:
+#ifndef _WIN32
+        if (v->j >= 0) close((int)v->j);
+        if (v->n > 1) {
+            int wstatus;
+            waitpid((pid_t)v->n, &wstatus, 0);
+        }
+#endif
+        break;
     default: break;
     }
 #ifdef SHAKTI_HAVE_IEFS
@@ -627,9 +643,10 @@ const char *type_name(int t) {
         "datetime",
         "time",
         "input_stream",
-        "matrix[int]", "matrix[float]", "matrix[bool]"
+        "matrix[int]", "matrix[float]", "matrix[bool]",
+        "subprocess"
     };
-    P(t >= 0 && t <= T_BMAT, names[t])
+    P(t >= 0 && t <= T_SUBPROCESS, names[t])
     return "unknown";
 }
 V *v_copy(V *v) {
@@ -659,6 +676,7 @@ V *v_copy(V *v) {
         V *r=v_dict(k,vl); v_free(k); v_free(vl); return r;
     }
     case T_DATETIME: return v_datetime(v->j);
+    case T_SUBPROCESS: return v_ref(v);
     case T_TABLE: {
         V *kc = v_copy(v->keys);
         V *vl = v_copy(v->vals);
@@ -1274,6 +1292,7 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
     }
     case T_FN: fprintf(fp, "<fn>"); break;
     case T_INPUT: fprintf(fp, "<input>"); break;
+    case T_SUBPROCESS: fprintf(fp, "<proc>"); break;
     }
 }
 static void print_val(V *v, FILE *fp, int repr_mode) {
@@ -3002,6 +3021,7 @@ static int is_truthy(V *v) {
     case T_DATE: return v->j != 0;
     case T_TIME: return v->j != 0;
     case T_ERR:  return 0;
+    case T_SUBPROCESS: return v->j >= 0;
     default: return 1;
     }
 }
@@ -5479,6 +5499,10 @@ V *eval(Node *n, Env *e) {
             V *found = v_dict_get(obj, n->sval);
             if(found) { V *r = v_ref(found); v_free(obj); return r; }
         }
+        if(obj->t == T_SUBPROCESS) {
+            if(strcmp(n->sval, "pid") == 0) { V *r = v_int(obj->n); v_free(obj); return r; }
+            if(strcmp(n->sval, "status") == 0) { V *r = subprocess_status(obj); v_free(obj); return r; }
+        }
         v_free(obj);
         return v_errf("attribute '%s' not found", n->sval);
     }
@@ -5531,6 +5555,18 @@ V *eval(Node *n, Env *e) {
                 free(args);
                 return result;
             }
+            if(obj->t == T_SUBPROCESS) {
+                V *r;
+                if(!nargs) r = subprocess_next(obj, -1);
+                else if(nargs == 1 && args[0]->t == T_FLOAT) r = subprocess_next(obj, args[0]->f);
+                else if(nargs == 1 && args[0]->t == T_INT) r = subprocess_next(obj, (double)args[0]->j);
+                else if(nargs == 1 && args[0]->t == T_NIL) r = subprocess_next(obj, -1.0);
+                else r = v_int(subprocess_send(obj, args, nargs));
+                v_free(obj);
+                for(int i=0;i<nargs;i++) v_free(args[i]);
+                free(args);
+                return r;
+            }
             V *r = method_call(obj, method, args, nargs, e);
             v_free(obj);
             for(int i=0;i<nargs;i++) v_free(args[i]);
@@ -5577,6 +5613,22 @@ V *eval(Node *n, Env *e) {
             if(fn) fn = v_ref(fn);
         } else {
             fn = eval(fn_node, e);
+        }
+        if (fn && fn->t == T_SUBPROCESS) {
+            V *result;
+            if (nargs && args[0]->t == T_FLOAT)
+                result = subprocess_next(fn, args[0]->f);
+            else if (nargs && args[0]->t == T_INT)
+                result = subprocess_next(fn, (double)args[0]->j);
+            else if (!nargs || args[0]->t == T_NIL)
+                result = subprocess_next(fn, -1.0);
+            else
+                result = v_int(subprocess_send(fn, args, nargs));
+            v_free(fn);
+            for(int i=0;i<nargs;i++) v_free(args[i]);
+            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+            free(args); free(kwnames); free(kwvals);
+            return result;
         }
         if(!fn || fn->t != T_FN) {
             if(fn) v_free(fn);
@@ -5686,6 +5738,18 @@ V *eval(Node *n, Env *e) {
                 V *ch = v_str(buf);
                 for_set_vars(vars, ch, e);
                 v_free(ch); v_free(r);
+                r = eval(n->ch[2], e);
+                if(g_returning||g_error) { v_free(iter); return r; }
+                if(g_breaking) { g_breaking=0; break; }
+                if(g_continuing) { g_continuing=0; }
+            }
+        } else if(iter->t == T_SUBPROCESS) {
+            for(;;) {
+                V *item = subprocess_next(iter, 0.0);
+                if(g_error) { v_free(iter); return item; }
+                if(!item || item->t == T_NIL) { v_free(item); break; }
+                for_set_vars(vars, item, e);
+                v_free(item); v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
