@@ -2,6 +2,11 @@
 #include "vec_kernels.h"
 #include "input.h"
 #include <limits.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 extern int is_isolde_builtin(const char *name);
 extern V *isolde_builtin_call(const char *name, V **args, int nargs);
 extern V *bi_fread(V**,in);
@@ -2275,6 +2280,7 @@ static V *bi_format_time(V **a, in) {
     return v_str(buf);
 }
 static V *bi_next(V**a,in){
+    if(n>=1 && a[0]->t==T_SUBPROCESS) return subprocess_next(*a,-1.0);
     P(n<1||a[0]->t!=T_LIST||a[0]->n==0,n>1?v_ref(a[1]):v_nil())
     return v_ref(a[0]->L[0]);}
 typedef V *(*BiCall)(V **a, in, V **kwn, V **kwv, int nkw, Env *e);
@@ -2814,6 +2820,28 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
             size_t plen = strlen(path);
             if (plen >= 5 && !strcmp(path + plen - 5, ".iefs"))
                 return iefs_store_read(path);
+        }
+#endif
+#ifndef _WIN32
+        {
+            struct stat sb;
+            if (stat(args[0]->s, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+                int saved = open(".", O_RDONLY);
+                if (saved < 0) return v_err("load: cannot open cwd");
+                if (chdir(args[0]->s) != 0) {
+                    close(saved);
+                    return v_err("load: chdir");
+                }
+                V *result = subprocess(args + 1, nargs - 1);
+                int fch = fchdir(saved);
+                close(saved);
+                if (fch != 0) {
+                    if (result) v_free(result);
+                    return v_err("load: fchdir");
+                }
+                if (result) return result;
+                return v_err("load: subprocess (missing run in directory)");
+            }
         }
 #endif
         V *cols = NULL;

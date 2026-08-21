@@ -1,0 +1,146 @@
+# Bridge hand dealer — solves the bridge challenge at http://www.lescasse.com/Content/Quiz.aspx
+# Copyright (c) 2026 Daniel Martin
+#
+# Usage (from repo root):
+#   make prod
+#   ./shakti examples/bridge.ie
+
+pips : "SHDC"
+crds : "AKQJX98765432"
+
+def index_of(s, ch):
+    i : 0
+    while i < len(s):
+        if s[i] = ch:
+            return i
+        i : i + 1
+    return -1
+
+def pad2(n):
+    s : str(n)
+    if len(s) < 2:
+        s : "0" + s
+    return s
+
+def Dist():
+    deck : []
+    for s in pips:
+        for c in crds:
+            deck.append(s + c)
+    lcg_a : 1664525
+    lcg_c : 1013904223
+    lcg_m : 4294967296
+    rng : int(clock() * 1000) % lcg_m
+    i : 51
+    while i > 0:
+        rng : (lcg_a * rng + lcg_c) % lcg_m
+        j : rng % (i + 1)
+        tmp : deck[i]
+        deck[i] : deck[j]
+        deck[j] : tmp
+        i : i + (-1)
+    hands : []
+    p : 0
+    while p < 4:
+        hands.append(deck[p * 13 : p * 13 + 13])
+        p : p + 1
+    return hands
+
+def SortDist(hands):
+    out : []
+    for hand in hands:
+        keyed : []
+        for card in hand:
+            pip_rank : index_of(pips, card[0])
+            crd_rank : index_of(crds, card[1])
+            key : pad2(pip_rank) + pad2(crd_rank)
+            keyed.append([key, card])
+        keyed : sorted(keyed)
+        sorted_hand : []
+        for pair in keyed:
+            sorted_hand.append(pair[1])
+        out.append(sorted_hand)
+    return out
+
+def Eval(sorted_hands):
+    scores : []
+    for hand in sorted_hands:
+        total : 0
+        for card in hand:
+            c : card[1]
+            if c = "A":
+                total : total + 4
+            elif c = "K":
+                total : total + 3
+            elif c = "Q":
+                total : total + 2
+            elif c = "J":
+                total : total + 1
+        scores.append(total)
+    return scores
+
+def hand_to_matrix(hand):
+    rows : {"S": ["S"], "H": ["H"], "D": ["D"], "C": ["C"]}
+    for card in hand:
+        rows[card[0]].append(card[1])
+    return [rows["S"], rows["H"], rows["D"], rows["C"]]
+
+def row_to_str(row, width):
+    s : ""
+    for item in row:
+        s : s + item + " "
+    while len(s) < width:
+        s : s + " "
+    return s
+
+def Split(sorted_hands):
+    matrices : []
+    for hand in sorted_hands:
+        matrices.append(hand_to_matrix(hand))
+    return matrices
+
+def pad_left(n):
+    s : ""
+    i : 0
+    while i < n:
+        s : s + " "
+        i : i + 1
+    return s
+
+def Display(matrices):
+    west_col : 2
+    col_width : 28
+    gap : 3
+    east_col : west_col + col_width + gap
+    north_col : (west_col + east_col) // 2
+    north : matrices[0]
+    west : matrices[1]
+    east : matrices[2]
+    south : matrices[3]
+    r : 0
+    while r < 4:
+        print(pad_left(north_col) + row_to_str(north[r], col_width))
+        r : r + 1
+    print("")
+    r : 0
+    while r < 4:
+        west_str : pad_left(west_col) + row_to_str(west[r], col_width)
+        while len(west_str) < east_col:
+            west_str : west_str + " "
+        print(west_str + row_to_str(east[r], col_width))
+        r : r + 1
+    print("")
+    r : 0
+    while r < 4:
+        print(pad_left(north_col) + row_to_str(south[r], col_width))
+        r : r + 1
+
+def Find(n):
+    sd : SortDist(Dist())
+    while Eval(sd)[0] < n:
+        sd : SortDist(Dist())
+    Display(Split(sd))
+    return sd
+
+# Deal until North holds at least 10 high-card points, then print the layout.
+Find(10)

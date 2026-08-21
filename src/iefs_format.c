@@ -282,6 +282,9 @@ static int encode_value(IefsBuf *b, V *v) {
     case T_INPUT:
         set_err(NULL, 0, "iefs: cannot serialize input streams");
         return -1;
+    case T_SUBPROCESS:
+        set_err(NULL, 0, "iefs: cannot serialize subprocess handles");
+        return -1;
     default:
         set_err(NULL, 0, "iefs: unsupported type");
         return -1;

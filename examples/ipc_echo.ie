@@ -1,0 +1,17 @@
+# Local IPC echo server — Unix domain socket on localhost (default port 19090).
+# Run in one terminal:  ./shakti examples/ipc_echo.ie
+# Run in another:       ./shakti examples/ipc_echo_client.ie
+
+import ipc
+
+port : 19090
+srv : ipc.listen(port)
+print("ipc echo listening on port", port, "(uds on localhost)")
+
+conn : ipc.accept(srv)
+msg : ipc.recv(conn)
+print("recv:", msg)
+ipc.send(conn, msg)
+ipc.close(conn)
+ipc.close(srv)
+print("done")

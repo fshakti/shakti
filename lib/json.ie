@@ -1,0 +1,32 @@
+# json — load/save json files
+#
+# After `import json`, use:
+#
+#   a: json.table(json.load("filename.json").rows)
+#   json.save(a, "file2.json")
+#
+def load(filename, *pluck, as_table:False):
+	j: json_load(filename)
+	if as_table or len(pluck):
+		return self.table(j,*pluck)
+	return j
+
+def table(j,*pluck):
+	if type(j)="dict":
+		return table(j)
+	n:0
+	d:{}
+	for r in j:
+		for k,v in r:
+			if len(pluck) and not(k in pluck):
+				continue
+			if not(k in d):
+				a:[]
+				while len(a) < n:
+					a.append(None)
+				d[k]:a
+			d[k].append(v)
+		n:n+1
+	return table(d)
+
+save : json_dump

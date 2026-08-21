@@ -1,0 +1,9 @@
+# Client for ipc_echo.ie — connects via UDS (localhost default).
+import ipc
+
+port : 19090
+c : ipc.connect("127.0.0.1", port)
+ipc.send(c, "hello from client")
+msg : ipc.recv(c)
+print("reply:", msg)
+ipc.close(c)

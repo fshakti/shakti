@@ -1,0 +1,18 @@
+# RDMA/RoCE IPC example — requires RDMA-capable NIC and rdma-core dev libraries.
+# Server:  ./shakti examples/ipc_rdma.ie
+# Client:  ./shakti examples/ipc_rdma_client.ie  (set host/port to match)
+
+import ipc
+
+if ipc.rdma_available() = 0:
+    print("no RDMA device — install rdma-core and configure RoCE NIC")
+else:
+    port : 19100
+    srv : ipc.listen(port, "0.0.0.0", "rdma")
+    print("rdma server on port", port)
+    conn : ipc.accept(srv)
+    msg : ipc.recv(conn)
+    print("recv:", msg)
+    ipc.send(conn, "rdma-ok")
+    ipc.close(conn)
+    ipc.close(srv)
