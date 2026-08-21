@@ -1,0 +1,13 @@
+def e(x):print(type(x),x)
+
+e(list())
+e(list[](10))
+e(list[bool](10))
+e(list[char](10))
+e(list[int](10))
+e(list[float](10))
+
+e(matrix[bool](3,3))
+e(matrix[char](3,3))
+e(matrix[int](3,3))
+e(matrix[float](3,3))

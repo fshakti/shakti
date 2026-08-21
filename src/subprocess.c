@@ -1,0 +1,136 @@
+#include "shakti.h"
+
+#include <spawn.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+#include <sys/uio.h>
+#include <errno.h>
+#include <string.h>
+
+#if defined(_WIN32)
+V*subprocess(V**a,in){
+  return v_err("nyi");
+}
+#else // linux, apple, etc
+V*subprocess(V**a,in){
+  extern char **environ;
+  {
+    const char *safe = getenv("SHAKTI_SAFE");
+    const char *allow = getenv("SHAKTI_ALLOW_EXEC");
+    if ((safe && safe[0] && strcmp(safe, "0") != 0) ||
+        (allow && allow[0] == '0' && allow[1] == '\0')) {
+      return v_err("subprocess: disabled (SHAKTI_SAFE or SHAKTI_ALLOW_EXEC=0)");
+    }
+  }
+  struct stat sb;
+  if(n>9||stat("run",&sb))return NULL;
+
+#if defined(__linux__)
+  int t;
+  do t=open("/dev/ptmx", O_RDWR|O_NOCTTY); while (t<0&&(errno==ENOSPC||errno==EAGAIN));
+  if(t<0)return v_err("/dev/ptmx");
+
+  int p = 0; ioctl(t,TIOCSPTLCK,&p); if(ioctl(t,TIOCGPTN,&p)) return close(t),v_err("TIOCGPTN");
+  char pts[20]; snprintf(pts,sizeof(pts)-1,"/dev/pts/%d",p);
+#else // apple, etc
+  int t = posix_openpt(O_RDWR|O_NOCTTY);
+  if(t<0)return v_err("posix_openpt");
+  grantpt(t);unlockpt(t);
+  char pts[1024];
+  if(ptsname_r(t,pts,sizeof(pts)-1)!=0)return close(t),v_err("ptsname_r");
+#endif
+
+ // todo cgroups etc
+  pid_t pid;
+  posix_spawn_file_actions_t file_actions;
+  posix_spawn_file_actions_init(&file_actions);
+  posix_spawn_file_actions_addopen(&file_actions, 0, pts, O_RDWR, 0666);
+  posix_spawn_file_actions_addopen(&file_actions, 1, pts, O_WRONLY, 0666);
+  posix_spawn_file_actions_adddup2(&file_actions, 2, 2);
+  const char *argv[n+2]; argv[0] = "./run"; i(n,argv[i+1]=(!a[i]||a[i]->t!=T_STR)?0:a[i]->s); argv[n+1] = 0;
+  int r = posix_spawn(&pid, *argv, &file_actions, NULL, (char*const*)argv, environ);
+  posix_spawn_file_actions_destroy(&file_actions);
+  if(r) return close(t),v_err("subprocess");
+  return v_subprocess(t, pid);
+}
+V *subprocess_next(V*p, double to) {
+  unsigned char buffer[16536];
+  fd_set rfds;
+  int r,t=p->j;
+  if(to>=0) {
+    FD_ZERO(&rfds);
+    FD_SET(t,&rfds);
+    long ms = (long)to;
+    if(ms < 0) ms = 0;
+    struct timeval tv;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    int sel;
+    while((sel=select(t+1, &rfds,NULL,NULL,&tv))==-1&&errno==EINTR);
+    if(sel <= 0) r = -1;
+    else {
+      fcntl(t, F_SETFL, fcntl(t, F_GETFL, 0) | O_NONBLOCK);
+      r = read(t, buffer, sizeof(buffer)-1);
+    }
+    fcntl(t, F_SETFL, fcntl(t, F_GETFL, 0) | O_NONBLOCK);
+  } else {
+    fcntl(t, F_SETFL, fcntl(t, F_GETFL, 0) & ~O_NONBLOCK);
+    r = read(t, buffer, sizeof(buffer)-1);
+  }
+  if(r == 0) return v_nil();
+  if(r > 0) {
+    for(int i = 0; i < r; ++i) if(
+      /* ascii control codes */ buffer[i]<7 || (buffer[i]>=14 && buffer[i]<=26)
+      /* invalid utf8 sequences */ ||buffer[i]>=0xf5||buffer[i]==0xc0||buffer[i]==0xc1) {
+      V*x = v_bvec(r);
+      memcpy(x->B,buffer,r);
+      return x;
+    }
+    buffer[r]=0;
+    return v_str((char*)buffer);
+  }
+  return v_nil();
+}
+V *subprocess_status(V*p) {
+  if(p->n > 1) {
+    int status;
+    if(waitpid(p->n, &status, WNOHANG)>0){
+       p->n=WIFEXITED(status)?0:-1;
+       p->b=WIFEXITED(status)?WEXITSTATUS(status):WTERMSIG(status);
+    }
+  }
+  switch(p->n){
+  case 0: return v_int(p->b);
+  case -1: return v_int(-p->b);
+  default: return v_nil(); /* no status (running) */
+  }
+}
+int64_t subprocess_send(V*p,V**a,in) {
+  struct iovec iov[n],*iovp=iov;int t=p->j;
+  for(int i=0;i<n;++i) {
+    switch(a[i]->t) {
+    case T_NIL: case T_FLOAT: __builtin_abort();
+    case T_STR: iov[i].iov_len = strlen(iov[i].iov_base = a[i]->s);  break;
+    case T_BVEC: iov[i].iov_base = a[i]->B; iov[i].iov_len = a[i]->n; break;
+    default: iov[i].iov_base = ""; iov[i].iov_len = 0; break;
+    };
+  }
+  int64_t s=0;
+  unsigned int flags = fcntl(t, F_GETFL, 0);
+  fcntl(t, F_SETFL, flags & ~O_NONBLOCK);
+  while(n > 0) {
+    ssize_t r = writev(t,iovp,n);
+    if(r < 0){ if(errno==EINTR) continue; break; }
+    if(r == 0) break;
+    if(r > 0)for(s+=r;iovp<&iovp[n];){if(r >= iovp->iov_len){r -= iovp->iov_len;n--;iovp++;}
+      else if(r > 0){iovp->iov_base += r;iovp->iov_len -= r;break;}}
+  }
+  fcntl(t, F_SETFL, flags | O_NONBLOCK);
+  return s;
+}
+
+#endif

@@ -209,6 +209,7 @@ enum {
     T_IMAT = 17,
     T_FMAT = 18,
     T_BMAT = 19,
+    T_SUBPROCESS = 20,
 };
 
 enum {
@@ -302,6 +303,7 @@ V *v_errf(const char *fmt, ...);
 V *v_ivec(int64_t n);
 V *v_fvec(int64_t n);
 V *v_bvec(int64_t n);
+V *v_subprocess(int fd, int64_t pid);
 V *v_imat(int64_t rows, int64_t cols);
 V *v_fmat(int64_t rows, int64_t cols);
 V *v_bmat(int64_t rows, int64_t cols);
@@ -376,6 +378,10 @@ V *list_union(V *left, V *right);
 V *table_asof_comma_join(V *left, V *right);
 int is_builtin(const char *name);
 void builtin_register(Env *e);
+V *subprocess(V **a, int n);
+int64_t subprocess_send(V *p, V **args, int n);
+V *subprocess_status(V *p);
+V *subprocess_next(V *p, double timeout);
 
 #ifdef _WIN32
 FILE *win_open_memstream(char **ptr, size_t *sizeloc);
