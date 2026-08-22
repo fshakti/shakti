@@ -107,8 +107,8 @@ static V*tbl_filter_mask(V*tbl,V*mask){
             double *dst = nc2->F;
             j = mat_compress_f64_masked(dst, j, src, B, nr);
             new_data->L[c] = nc2;
-        } else if (col->t == T_BVEC) {
-            V *nc2 = v_bvec(count);
+        } else if (col->t == T_BVEC || col->t == T_CVEC) {
+            V *nc2 = col->t == T_CVEC ? v_cvec(count) : v_bvec(count);
             int64_t j = 0;
             const unsigned char *src = col->B;
             unsigned char *dst = nc2->B;
@@ -125,7 +125,7 @@ static V*tbl_filter_mask(V*tbl,V*mask){
                 if (B[k]) dst[j++] = v_ref(src[k]);
             }
             new_data->L[c] = nc2;
-        } else if (col->t == T_IMAT || col->t == T_FMAT || col->t == T_BMAT) {
+        } else if (col->t == T_IMAT || col->t == T_FMAT || col->t == T_BMAT || col->t == T_CMAT) {
             int64_t cols = mat_cols(col);
             if (col->t == T_IMAT) {
                 V *nc2 = v_imat(count, cols);
@@ -134,6 +134,10 @@ static V*tbl_filter_mask(V*tbl,V*mask){
             } else if (col->t == T_FMAT) {
                 V *nc2 = v_fmat(count, cols);
                 mat_filter_fmat_rows(nc2->F, col->F, B, nr, cols);
+                new_data->L[c] = nc2;
+            } else if (col->t == T_CMAT) {
+                V *nc2 = v_cmat(count, cols);
+                mat_filter_bmat_rows(nc2->B, col->B, B, nr, cols);
                 new_data->L[c] = nc2;
             } else {
                 V *nc2 = v_bmat(count, cols);
@@ -1547,12 +1551,16 @@ V *table_sql_delete(V *from, V *cols, V *where) {
             empty_data->L[c] = v_fvec(0);
         } else if (col->t == T_BVEC) {
             empty_data->L[c] = v_bvec(0);
+        } else if (col->t == T_CVEC) {
+            empty_data->L[c] = v_cvec(0);
         } else if (col->t == T_IMAT) {
             empty_data->L[c] = v_imat(0, mat_cols(col));
         } else if (col->t == T_FMAT) {
             empty_data->L[c] = v_fmat(0, mat_cols(col));
         } else if (col->t == T_BMAT) {
             empty_data->L[c] = v_bmat(0, mat_cols(col));
+        } else if (col->t == T_CMAT) {
+            empty_data->L[c] = v_cmat(0, mat_cols(col));
         } else if (col->t == T_LIST) {
             empty_data->L[c] = v_list(0);
         } else {
@@ -1566,9 +1574,11 @@ static inline V*empty_column_like(V*sample){
     if(sample->t==T_IVEC)return v_ivec(0);
     if(sample->t==T_FVEC)return v_fvec(0);
     if(sample->t==T_BVEC)return v_bvec(0);
+    if(sample->t==T_CVEC)return v_cvec(0);
     if(sample->t==T_IMAT)return v_imat(0, mat_cols(sample));
     if(sample->t==T_FMAT)return v_fmat(0, mat_cols(sample));
     if(sample->t==T_BMAT)return v_bmat(0, mat_cols(sample));
+    if(sample->t==T_CMAT)return v_cmat(0, mat_cols(sample));
     return v_list(0);}
 static int mat_append_row(V *out, V *col, V *cell) {
     int64_t cols = mat_cols(col);
@@ -1598,6 +1608,21 @@ static int mat_append_row(V *out, V *col, V *cell) {
         }
         if (cell->t == T_LIST && cell->n == cols) {
             for (int64_t j = 0; j < cols; j++) out->B[mat_idx(out, col->n, j)] = cell->L[j]->b ? 1 : 0;
+            return 1;
+        }
+    } else if (col->t == T_CMAT) {
+        if (cell->t == T_CVEC && cell->n == cols) {
+            memcpy(out->B + mat_idx(out, col->n, 0), cell->B, (size_t)cols);
+            return 1;
+        }
+        if (cell->t == T_LIST && cell->n == cols) {
+            for (int64_t j = 0; j < cols; j++) {
+                V *e = cell->L[j];
+                unsigned char b = 0;
+                if (e && (e->t == T_CHAR || e->t == T_INT)) b = (unsigned char)e->j;
+                else if (e && e->t == T_BOOL) b = e->b ? 1 : 0;
+                out->B[mat_idx(out, col->n, j)] = b;
+            }
             return 1;
         }
     }
@@ -1642,6 +1667,15 @@ static V *append_cell(V *col, V *cell) {
         out->B[col->n] = (cell->t == T_BOOL && cell->b) || (cell->t == T_INT && cell->j);
         return out;
     }
+    if (col->t == T_CVEC) {
+        unsigned char val = 0;
+        if (cell->t == T_CHAR || cell->t == T_INT) val = (unsigned char)cell->j;
+        else if (cell->t == T_BOOL) val = cell->b ? 1 : 0;
+        V *out = v_cvec(col->n + 1);
+        if (col->n > 0) memcpy(out->B, col->B, (size_t)col->n);
+        out->B[col->n] = val;
+        return out;
+    }
     if (col->t == T_IMAT) {
         int64_t cols = mat_cols(col);
         V *out = v_imat(col->n + 1, cols);
@@ -1659,6 +1693,13 @@ static V *append_cell(V *col, V *cell) {
     if (col->t == T_BMAT) {
         int64_t cols = mat_cols(col);
         V *out = v_bmat(col->n + 1, cols);
+        if (col->n > 0) memcpy(out->B, col->B, (size_t)col->n * cols);
+        if (!mat_append_row(out, col, cell)) { v_free(out); return col; }
+        return out;
+    }
+    if (col->t == T_CMAT) {
+        int64_t cols = mat_cols(col);
+        V *out = v_cmat(col->n + 1, cols);
         if (col->n > 0) memcpy(out->B, col->B, (size_t)col->n * cols);
         if (!mat_append_row(out, col, cell)) { v_free(out); return col; }
         return out;

@@ -108,11 +108,11 @@ interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performanc
 
 ## security
 
-Shakti trusts the `.ie` programs it runs. A script can call `sh(cmd)` (shell),
+Shakti trusts the `.ie` programs it runs. A script can spawn `subprocess()`,
 read/write files, and use network builtins — treat untrusted input like an
 untrusted shell script.
 
-- Set `SHAKTI_SAFE=1` (or `SHAKTI_ALLOW_EXEC=0`) to disable `sh()`.
+- Set `SHAKTI_SAFE=1` (or `SHAKTI_ALLOW_EXEC=0`) to disable `subprocess()`.
 - Parser nesting and interpreter recursion are capped (defaults 40 / 3000;
   override call depth with `SHAKTI_CALL_MAX_DEPTH`).
 - REST temps use `$XDG_RUNTIME_DIR` / `$TMPDIR` when set, mode `0600`.
