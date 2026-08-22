@@ -86,7 +86,7 @@ V *subprocess_next(V*p, double to) {
     for(int i = 0; i < r; ++i) if(
       /* ascii control codes */ buffer[i]<7 || (buffer[i]>=14 && buffer[i]<=26)
       /* invalid utf8 sequences */ ||buffer[i]>=0xf5||buffer[i]==0xc0||buffer[i]==0xc1) {
-      V*x = v_bvec(r);
+      V*x = v_cvec(r);
       memcpy(x->B,buffer,r);
       return x;
     }
@@ -115,7 +115,7 @@ int64_t subprocess_send(V*p,V**a,in) {
     switch(a[i]->t) {
     case T_NIL: case T_FLOAT: __builtin_abort();
     case T_STR: iov[i].iov_len = strlen(iov[i].iov_base = a[i]->s);  break;
-    case T_BVEC: iov[i].iov_base = a[i]->B; iov[i].iov_len = a[i]->n; break;
+    case T_BVEC: case T_CVEC: iov[i].iov_base = a[i]->B; iov[i].iov_len = a[i]->n; break;
     default: iov[i].iov_base = ""; iov[i].iov_len = 0; break;
     };
   }

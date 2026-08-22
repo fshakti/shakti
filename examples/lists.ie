@@ -1,4 +1,5 @@
-def e(x):print(type(x),x)
+def e(x):
+    print(type(x), x)
 
 e(list())
 e(list[](10))

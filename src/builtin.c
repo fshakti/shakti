@@ -26,7 +26,6 @@ extern V *bi_getcwd(V**,in);
 extern V *bi_mkdir(V**,in);
 extern V *bi_getenv(V**,in);
 extern V *bi_machine(V**,in);
-extern V *bi_sh(V**,in);
 extern V *bi_re_findall(V**,in);
 extern V *bi_re_sub(V**,in);
 extern V *bi_re_match(V**,in);
@@ -266,7 +265,6 @@ static const char *BUILTINS[] = {
     "path_basename","path_dirname","path_splitext",
     "getcwd","mkdir","getenv",
     "machine",
-    "sh",
     "re_findall","re_sub","re_match","re_split",
     "json_loads","json_dumps","json_load","json_dump",
     "sorted","any","all","isinstance","hasattr","getattr",
@@ -326,7 +324,7 @@ static V *bi_print(V**a,in,V**kwn,V**kwv,int nkw){
 static V *bi_len(V**a,in){
     P(n<1,v_err("len()"))V*v=a[0];
     P(v->t==T_STR,v_int(strlen(v->s)))
-    P((v->t>=T_IVEC&&v->t<=T_LIST)||(v->t>=T_IMAT&&v->t<=T_BMAT),v_int(v->n))
+    P(is_vec_t(v->t)||v->t==T_LIST||is_mat_t(v->t),v_int(v->n))
     P(v->t==T_DICT||v->t==T_TABLE,v_int(v->n))
     return v_err("no len()");}
 static V *bi_range(V**a,in){
@@ -357,12 +355,12 @@ static V *bi_type(V**a,in){
 }
 static V *bi_int(V**a,in){
     P(n<1,v_int(0))V*v=a[0];
-    P(v->t==T_INT,v_int(v->j))P(v->t==T_FLOAT,v_int((int64_t)v->f))
+    P(v->t==T_INT,v_int(v->j))P(v->t==T_CHAR,v_int(v->j))P(v->t==T_FLOAT,v_int((int64_t)v->f))
     P(v->t==T_BOOL,v_int(v->b))P(v->t==T_STR,v_int(strtoll(v->s,NULL,0)))
     return v_err("cannot convert to int");}
 static V *bi_float(V**a,in){
     P(n<1,v_float(0))V*v=a[0];
-    P(v->t==T_FLOAT,v_float(v->f))P(v->t==T_INT,v_float((double)v->j))
+    P(v->t==T_FLOAT,v_float(v->f))P(v->t==T_INT,v_float((double)v->j))P(v->t==T_CHAR,v_float((double)v->j))
     P(v->t==T_BOOL,v_float(v->b))P(v->t==T_STR,v_float(strtod(v->s,NULL)))
     return v_err("cannot convert to float");}
 static V *bi_str(V**a,in){
@@ -371,15 +369,49 @@ static V *bi_str(V**a,in){
     char *s=v_to_str(a[0]);V*r=v_str(s);free(s);return r;}
 static V *bi_list(V**a,in){
     P(n<1,v_list(0))V*v=a[0];
+    if(v->t==T_CHAR){V*r=v_list(1);r->L[0]=v_char((unsigned char)v->j);return r;}
+    if(v->t==T_CVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_char(v->B[i]);return r;}
+    if(v->t==T_BVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_bool(v->B[i]!=0);return r;}
     if(v->t==T_IVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_int(v->J[i]);return r;}
     if(v->t==T_FVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_float(v->F[i]);return r;}
     P(v->t==T_LIST,v_copy(v))
     if(v->t==T_STR){int64_t sl=strlen(v->s);V*r=v_list(sl);for(int64_t i=0;i<sl;i++){char b[2]={v->s[i],0};r->L[i]=v_str(b);}return r;}
     if(v->t==T_DICT){V*r=v_copy(v->keys);return r;}
+    if(is_mat_t(v->t)){
+        V*r=v_list(v->n);
+        for(int64_t i=0;i<v->n;i++) r->L[i]=v_mat_row(v,i);
+        return r;
+    }
+    if(v->t==T_TABLE){
+        V*r=v_list(v->n);
+        for(int64_t i=0;i<v->n;i++){
+            V*d=v_dict_empty();
+            for(int64_t c=0;c<v->keys->n;c++){
+                if(v->keys->L[c]->t!=T_STR) continue;
+                V*col=v->vals->L[c];
+                V*cell;
+                if(col->t==T_IVEC) cell=v_int(col->J[i]);
+                else if(col->t==T_FVEC) cell=v_float(col->F[i]);
+                else if(col->t==T_BVEC) cell=v_bool(col->B[i]!=0);
+                else if(col->t==T_CVEC) cell=v_char(col->B[i]);
+                else if(col->t==T_LIST) cell=v_ref(col->L[i]);
+                else if(is_mat_t(col->t)) cell=v_mat_row(col,i);
+                else cell=v_nil();
+                v_dict_put(d, v->keys->L[c]->s, cell);
+            }
+            r->L[i]=d;
+        }
+        return r;
+    }
+    if(v->t==T_DATE||v->t==T_DATETIME||v->t==T_TIME){
+        V*r=v_list(1);r->L[0]=v_copy(v);return r;
+    }
+    if(v->t==T_SUBPROCESS||v->t==T_INPUT||v->t==T_FN)
+        return v_err("cannot convert to list");
     return v_err("cannot convert to list");}
 static V *bi_bool(V**a,in){
     P(n<1,v_bool(0))V*v=a[0];
-    P(v->t==T_BOOL,v_bool(v->b))P(v->t==T_INT,v_bool(v->j!=0))
+    P(v->t==T_BOOL,v_bool(v->b))P(v->t==T_INT,v_bool(v->j!=0))P(v->t==T_CHAR,v_bool(v->j!=0))
     P(v->t==T_FLOAT,v_bool(v->f!=0))P(v->t==T_STR,v_bool(v->s[0]!=0))
     P(v->t==T_NIL,v_bool(0))return v_bool(1);}
 static int bi_numvec(V *v) { return v->t == T_IVEC || v->t == T_FVEC || v->t == T_IMAT || v->t == T_FMAT; }
@@ -734,9 +766,11 @@ V_MAP_FUNC(tan, tan)
 #undef V_SCALAR_FLOAT
 static int cmp_i64(const void*a,const void*b){int64_t x=*(int64_t*)a,y=*(int64_t*)b;return(x>y)-(x<y);}
 static int cmp_f64(const void*a,const void*b){double x=*(double*)a,y=*(double*)b;return(x>y)-(x<y);}
+static int cmp_u8(const void*a,const void*b){unsigned char x=*(unsigned char*)a,y=*(unsigned char*)b;return(x>y)-(x<y);}
 static V *bi_sort(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_copy(v);qsort(r->J,r->n,8,cmp_i64);return r;}
     if(v->t==T_FVEC){V*r=v_copy(v);qsort(r->F,r->n,8,cmp_f64);return r;}
+    if(v->t==T_CVEC){V*r=v_copy(v);qsort(r->B,r->n,1,cmp_u8);return r;}
     return v_copy(v);}
 /* q-compatible bin(keys, query): last i with keys[i] <= query; -1 below range. */
 static V *bi_bin(V**a,in){
@@ -1986,6 +2020,8 @@ static V *bi_shakti_stats_ui(V**a,in){
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
+    if(v->t==T_CVEC){V*r=v_cvec(v->n);for(int64_t i=0;i<v->n;i++)r->B[i]=v->B[v->n-1-i];return r;}
+    if(v->t==T_BVEC){V*r=v_bvec(v->n);for(int64_t i=0;i<v->n;i++)r->B[i]=v->B[v->n-1-i];return r;}
     if(v->t==T_LIST){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_ref(v->L[v->n-1-i]);return r;}
     if(v->t==T_STR){int64_t sl=strlen(v->s);char*b=malloc(sl+1);for(int64_t i=0;i<sl;i++)b[i]=v->s[sl-1-i];b[sl]=0;V*r=v_str(b);free(b);return r;}
     return v_copy(v);}
@@ -2004,6 +2040,8 @@ static V *bi_zip(V**a,in){
     V*r=v_list(ml);for(int64_t i=0;i<ml;i++){V*u=v_list(n);
         for(int j=0;j<n;j++){if(a[j]->t==T_IVEC)u->L[j]=v_int(a[j]->J[i]);
             else if(a[j]->t==T_FVEC)u->L[j]=v_float(a[j]->F[i]);
+            else if(a[j]->t==T_CVEC)u->L[j]=v_char(a[j]->B[i]);
+            else if(a[j]->t==T_BVEC)u->L[j]=v_bool(a[j]->B[i]!=0);
             else if(a[j]->t==T_LIST)u->L[j]=v_ref(a[j]->L[i]);else u->L[j]=v_nil();}
         r->L[i]=u;}return r;}
 static V *bi_enumerate(V**a,in){
@@ -2022,6 +2060,8 @@ static V *bi_enumerate(V**a,in){
         V*u=v_list(2);
         u->L[0]=v_int(i);
         if(v->t==T_FVEC)u->L[1]=v_float(v->F[i]);
+        else if(v->t==T_CVEC)u->L[1]=v_char(v->B[i]);
+        else if(v->t==T_BVEC)u->L[1]=v_bool(v->B[i]!=0);
         else if(v->t==T_LIST)u->L[1]=v_ref(v->L[i]);
         else if(v->t==T_STR){char b[2]={v->s[i],0};u->L[1]=v_str(b);}
         else u->L[1]=v_nil();
@@ -2101,19 +2141,27 @@ static V *bi_shape(V**a,in){
     if (a[0]->t == T_TABLE) {
         V*r=v_list(2);r->L[0]=v_int(a[0]->n);r->L[1]=v_int(a[0]->keys->n);return r;
     }
-    P(a[0]->t<T_IMAT||a[0]->t>T_BMAT,v_err("shape()"))
+    P(!is_mat_t(a[0]->t),v_err("shape()"))
     V*r=v_list(2);r->L[0]=v_int(a[0]->n);r->L[1]=v_int(mat_cols(a[0]));return r;}
 static V *bi_head(V**a,in){
     P(n<1,v_nil())int64_t cnt=n>=2&&a[1]->t==T_INT?a[1]->j:5;V*v=a[0];
     if(cnt<0)cnt=0;
     if(v->t==T_IVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_ivec(m);memcpy(r->J,v->J,m*8);return r;}
     if(v->t==T_FVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_fvec(m);memcpy(r->F,v->F,m*8);return r;}
+    if(v->t==T_CVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_cvec(m);memcpy(r->B,v->B,(size_t)m);return r;}
+    if(v->t==T_BVEC){int64_t m=cnt<v->n?cnt:v->n;V*r=v_bvec(m);memcpy(r->B,v->B,(size_t)m);return r;}
     if(v->t==T_LIST){int64_t m=cnt<v->n?cnt:v->n;V*r=v_list(m);for(int64_t i=0;i<m;i++)r->L[i]=v_ref(v->L[i]);return r;}
     if(v->t==T_TABLE){int64_t m=cnt<v->n?cnt:v->n;int nc=v->keys->n;V*nd=v_list(nc);
         j(nc,{V*col=v->vals->L[j];
             if(col->t==T_IVEC){V*x=v_ivec(m);memcpy(x->J,col->J,m*8);nd->L[j]=x;}
             else if(col->t==T_FVEC){V*x=v_fvec(m);memcpy(x->F,col->F,m*8);nd->L[j]=x;}
+            else if(col->t==T_CVEC){V*x=v_cvec(m);memcpy(x->B,col->B,(size_t)m);nd->L[j]=x;}
+            else if(col->t==T_BVEC){V*x=v_bvec(m);memcpy(x->B,col->B,(size_t)m);nd->L[j]=x;}
             else if(col->t==T_LIST){V*x=v_list(m);for(int64_t i=0;i<m;i++)x->L[i]=v_ref(col->L[i]);nd->L[j]=x;}
+            else if(col->t==T_IMAT){int64_t cols=mat_cols(col);V*x=v_imat(m,cols);if(m)memcpy(x->J,col->J,(size_t)m*cols*8);nd->L[j]=x;}
+            else if(col->t==T_FMAT){int64_t cols=mat_cols(col);V*x=v_fmat(m,cols);if(m)memcpy(x->F,col->F,(size_t)m*cols*8);nd->L[j]=x;}
+            else if(col->t==T_BMAT){int64_t cols=mat_cols(col);V*x=v_bmat(m,cols);if(m)memcpy(x->B,col->B,(size_t)m*cols);nd->L[j]=x;}
+            else if(col->t==T_CMAT){int64_t cols=mat_cols(col);V*x=v_cmat(m,cols);if(m)memcpy(x->B,col->B,(size_t)m*cols);nd->L[j]=x;}
             else nd->L[j]=v_ref(col);})
         V*r=v_table(v->keys,nd);v_free(nd);return r;}
     return v_nil();}
@@ -2123,13 +2171,21 @@ static V *bi_tail(V**a,in){
     int64_t start=v->n>cnt?v->n-cnt:0,m=v->n-start;
     if(v->t==T_IVEC){V*r=v_ivec(m);memcpy(r->J,v->J+start,m*8);return r;}
     if(v->t==T_FVEC){V*r=v_fvec(m);memcpy(r->F,v->F+start,m*8);return r;}
+    if(v->t==T_CVEC){V*r=v_cvec(m);memcpy(r->B,v->B+start,(size_t)m);return r;}
+    if(v->t==T_BVEC){V*r=v_bvec(m);memcpy(r->B,v->B+start,(size_t)m);return r;}
     if(v->t==T_LIST){V*r=v_list(m);for(int64_t i=0;i<m;i++)r->L[i]=v_ref(v->L[start+i]);return r;}
     if(v->t==T_TABLE){
         int nc=v->keys->n;V*nd=v_list(nc);
         j(nc,{V*col=v->vals->L[j];
             if(col->t==T_IVEC){V*x=v_ivec(m);memcpy(x->J,col->J+start,m*8);nd->L[j]=x;}
             else if(col->t==T_FVEC){V*x=v_fvec(m);memcpy(x->F,col->F+start,m*8);nd->L[j]=x;}
+            else if(col->t==T_CVEC){V*x=v_cvec(m);memcpy(x->B,col->B+start,(size_t)m);nd->L[j]=x;}
+            else if(col->t==T_BVEC){V*x=v_bvec(m);memcpy(x->B,col->B+start,(size_t)m);nd->L[j]=x;}
             else if(col->t==T_LIST){V*x=v_list(m);for(int64_t i=0;i<m;i++)x->L[i]=v_ref(col->L[start+i]);nd->L[j]=x;}
+            else if(col->t==T_IMAT){int64_t cols=mat_cols(col);V*x=v_imat(m,cols);if(m)memcpy(x->J,col->J+start*cols,(size_t)m*cols*8);nd->L[j]=x;}
+            else if(col->t==T_FMAT){int64_t cols=mat_cols(col);V*x=v_fmat(m,cols);if(m)memcpy(x->F,col->F+start*cols,(size_t)m*cols*8);nd->L[j]=x;}
+            else if(col->t==T_BMAT){int64_t cols=mat_cols(col);V*x=v_bmat(m,cols);if(m)memcpy(x->B,col->B+start*cols,(size_t)m*cols);nd->L[j]=x;}
+            else if(col->t==T_CMAT){int64_t cols=mat_cols(col);V*x=v_cmat(m,cols);if(m)memcpy(x->B,col->B+start*cols,(size_t)m*cols);nd->L[j]=x;}
             else nd->L[j]=v_ref(col);})
         V*r=v_table(v->keys,nd);v_free(nd);return r;}
     return v_nil();}
@@ -2318,7 +2374,7 @@ static MS V *bi_w_time_ms(V **a,in,V **k,V **v,int nk,Env *e){
 BI0(fread) BI0(fwrite) BI0(readlines) BI0(listdir) BI0(walk) BI0(stat)
 BI0(path_join) BI0(path_exists) BI0(path_isdir) BI0(path_isfile)
 BI0(path_basename) BI0(path_dirname) BI0(path_splitext)
-BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine) BI0(sh)
+BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(machine)
 BI0(re_findall) BI0(re_sub) BI0(re_match) BI0(re_split)
 BI0(json_loads) BI0(json_dumps) BI0(json_load) BI0(json_dump)
 BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(chr) BI0(ord) BI0(hex)
@@ -2625,7 +2681,6 @@ static const BiEntry bi_tab[] = {
     {"rest_write", bi_w_rest_write},
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
-    {"sh", bi_w_sh},
     {"shakti_hibid", bi_w_shakti_hibid},
     {"shakti_hibid_index", bi_w_shakti_hibid_index},
     {"shakti_nbbo", bi_w_shakti_nbbo},
@@ -2831,6 +2886,11 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
                 if (chdir(args[0]->s) != 0) {
                     close(saved);
                     return v_err("load: chdir");
+                }
+                {
+                    V *dirkw = kw_get(kwn, kwv, nkw, "__dir__");
+                    if (dirkw && dirkw->t == T_STR)
+                        setenv("__dir__", dirkw->s, 1);
                 }
                 V *result = subprocess(args + 1, nargs - 1);
                 int fch = fchdir(saved);

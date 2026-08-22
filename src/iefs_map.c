@@ -75,13 +75,16 @@ static size_t payload_nbytes(const V *v) {
         return (size_t)(v->n > 0 ? v->n : 0) * 8;
     case T_BVEC:
         return (size_t)(v->n > 0 ? v->n : 0);
+    case T_CVEC:
+        return (size_t)(v->n > 0 ? v->n : 0);
     case T_IMAT:
     case T_FMAT: {
         int64_t cols = (int64_t)v->_ht_cap;
         int64_t cells = v->n * cols;
         return (size_t)(cells > 0 ? cells : 0) * 8;
     }
-    case T_BMAT: {
+    case T_BMAT:
+    case T_CMAT: {
         int64_t cols = (int64_t)v->_ht_cap;
         return (size_t)(v->n * cols > 0 ? v->n * cols : 0);
     }
@@ -127,7 +130,9 @@ int iefs_v_materialize(V *v) {
         v->F = (double *)dst;
         break;
     case T_BVEC:
+    case T_CVEC:
     case T_BMAT:
+    case T_CMAT:
         v->B = dst;
         break;
     default:

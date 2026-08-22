@@ -210,6 +210,9 @@ enum {
     T_FMAT = 18,
     T_BMAT = 19,
     T_SUBPROCESS = 20,
+    T_CHAR = 21,
+    T_CVEC = 22,
+    T_CMAT = 23,
 };
 
 enum {
@@ -303,12 +306,21 @@ V *v_errf(const char *fmt, ...);
 V *v_ivec(int64_t n);
 V *v_fvec(int64_t n);
 V *v_bvec(int64_t n);
+V *v_cvec(int64_t n);
+V *v_char(unsigned char b);
 V *v_subprocess(int fd, int64_t pid);
 V *v_imat(int64_t rows, int64_t cols);
 V *v_fmat(int64_t rows, int64_t cols);
 V *v_bmat(int64_t rows, int64_t cols);
+V *v_cmat(int64_t rows, int64_t cols);
 static inline int64_t mat_cols(V *m) { return (int64_t)m->_ht_cap; }
 static inline int64_t mat_idx(V *m, int64_t r, int64_t c) { return r * mat_cols(m) + c; }
+static inline int is_vec_t(int t) {
+    return t == T_IVEC || t == T_FVEC || t == T_BVEC || t == T_CVEC;
+}
+static inline int is_mat_t(int t) {
+    return t == T_IMAT || t == T_FMAT || t == T_BMAT || t == T_CMAT;
+}
 V *mat_matmul(V *a, V *b);
 V *v_mat_row(V *m, int64_t row);
 V *v_list(int64_t n);
