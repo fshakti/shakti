@@ -1897,11 +1897,25 @@ static Node *parse_jux_arg(Lexer *l) {
     return parse_atom(l);
 }
 
+static const char *expect_tok_name(int t) {
+    switch (t) {
+    case T_INDENT_: return "indent";
+    case T_DEDENT_: return "dedent";
+    case T_NEWLINE_: return "newline";
+    case T_NAME_: return "name";
+    case T_COLON_: return "':'";
+    case T_EOF_: return "end of input";
+    default: return NULL;
+    }
+}
 static void expect(Lexer *l, int type) {
     if (l->failed) return;
     Token t = lex_next(l);
     if(t.type != type) {
-        fprintf(stderr, "parse error: expected token %d, got %d", type, t.type);
+        const char *en = expect_tok_name(type);
+        const char *gn = expect_tok_name(t.type);
+        if (en && gn) fprintf(stderr, "parse error: expected %s, got %s", en, gn);
+        else fprintf(stderr, "parse error: expected token %d, got %d", type, t.type);
         if(t.type == T_NAME_ || t.type == T_STR_) fprintf(stderr, " (%s)", t.sval);
         fprintf(stderr, "\n");
     }
@@ -5963,6 +5977,47 @@ static int needs_more(const char *line) {
     }
     return (parens>0 || brackets>0 || braces>0);
 }
+static int repl_line_blank(const char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    return *s == 0;
+}
+static int repl_line_indent(const char *s) {
+    int n = 0;
+    while (*s == ' ') { n++; s++; }
+    while (*s == '\t') { n += 4; s++; }
+    return n;
+}
+static int repl_last_line(const char *buf, size_t n, const char **start, size_t *ln) {
+    const char *end;
+    P(n == 0,0)
+    end = buf + n;
+    if (end[-1] == '\n') end--;
+    *start = end;
+    while (*start > buf && (*start)[-1] != '\n') (*start)--;
+    *ln = (size_t)(end - *start);
+    return 1;
+}
+static int repl_buffer_needs_more(const char *buf, size_t n) {
+    const char *s;
+    size_t ln;
+    char tmp[65536];
+    P(!repl_last_line(buf, n, &s, &ln),0)
+    if (ln >= sizeof tmp) ln = sizeof tmp - 1;
+    memcpy(tmp, s, ln);
+    tmp[ln] = 0;
+    P(repl_line_blank(tmp),0)
+    P(needs_more(tmp),1)
+    return repl_line_indent(tmp) > 0;
+}
+static int repl_prefill_spaces(const char *buf, size_t n) {
+    const char *s;
+    size_t ln;
+    int ind;
+    P(!repl_last_line(buf, n, &s, &ln) || ln == 0,0)
+    ind = repl_line_indent(s);
+    if (s[ln - 1] == ':') return ind + 4;
+    return ind;
+}
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <termios.h>
 #include <unistd.h>
@@ -6135,9 +6190,11 @@ static void hl_redraw(const char *prompt, const char *buf, int len, int pos) {
 static int hl_read_char(char *c) {
     return input_hub_read_char(c);
 }
-static char *hl_readline(const char *prompt) {
+static char *hl_readline(const char *prompt, int nsp) {
     static char buf[65536];
     int len=0, pos=0, hidx=hl_hlen;
+    if(nsp < 0) nsp = 0;
+    if(nsp > 64) nsp = 64;
     if(!isatty(STDIN_FILENO)){
         printf("%s",prompt); fflush(stdout);
         if(!fgets(buf,sizeof(buf),stdin))return NULL;
@@ -6145,7 +6202,14 @@ static char *hl_readline(const char *prompt) {
         return buf;
     }
     hl_raw_on();
-    printf("\r%s",prompt); fflush(stdout);
+    if(nsp > 0){
+        memset(buf, ' ', (size_t)nsp);
+        len = pos = nsp;
+        buf[len] = 0;
+        hl_redraw(prompt, buf, len, pos);
+    } else {
+        printf("\r%s",prompt); fflush(stdout);
+    }
     for(;;) {
         char c; if(!hl_read_char(&c)){hl_raw_off();return NULL;}
         if(c=='\r'||c=='\n'){buf[len]=0;printf("\r\n");fflush(stdout);hl_raw_off();hl_hadd(buf);return buf;}
@@ -6322,7 +6386,7 @@ static void run_repl(Env *e) {
     atexit(input_hub_shutdown);
     for (;;) {
 #if SHAKTI_HL
-        char *line = hl_readline("> ");
+        char *line = hl_readline("> ", 0);
 #else
         char *line = read_line("> ");
 #endif
@@ -6383,14 +6447,14 @@ static void run_repl(Env *e) {
             fprintf(stderr, "Unknown REPL command: %s (try \\d for help)\n", line);
             continue;
         }
-        while (needs_more(line)) {
+        while (repl_buffer_needs_more(input, inlen)) {
 #if SHAKTI_HL
-            line = hl_readline("| ");
+            line = hl_readline("| ", isatty(STDIN_FILENO) ? repl_prefill_spaces(input, inlen) : 0);
 #else
             line = read_line("| ");
 #endif
             if (!line) break;
-            if (line[0] == 0) break;
+            if (repl_line_blank(line)) break;
             size_t ll = strlen(line);
             if (inlen + ll + 1 >= REPL_INPUT_CAP) {
                 fprintf(stderr, "REPL input too long (max %d bytes)\n", REPL_INPUT_CAP - 1);
