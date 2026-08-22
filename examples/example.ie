@@ -751,8 +751,11 @@ import rest
 srv_src : "import rest\nport : 29878\nloops : 60\nsrv : rest.listen(port)\nfor i in range(loops):\n    c : rest.accept(srv)\n    req : rest.read(c)\n    body : \"pong\"\n    if req[\"path\"] = \"/echo\":\n        body : req[\"body\"]\n    rest.write(c, 200, body, \"text/plain\")\n    rest.close(c)\nrest.close(srv)\n"
 write("/tmp/shakti_rest_ping_server.ie", srv_src)
 
-sh("./shakti /tmp/shakti_rest_ping_server.ie &")
-sh("sleep 0.5")
+import subprocess
+subprocess.Popen(["./shakti", "/tmp/shakti_rest_ping_server.ie"])
+t0 : clock()
+while clock() - t0 < 0.5:
+    pass
 
 print("GET /ping")
 resp : rest.get("http://127.0.0.1:29878/ping")
@@ -761,8 +764,10 @@ if rest.ok(resp):
 else:
     print("error status:", rest.status(resp))
 
-sh("./shakti /tmp/shakti_rest_ping_server.ie &")
-sh("sleep 0.5")
+subprocess.Popen(["./shakti", "/tmp/shakti_rest_ping_server.ie"])
+t0 : clock()
+while clock() - t0 < 0.5:
+    pass
 
 print("POST /echo")
 resp2 : rest.post_json("http://127.0.0.1:29878/echo", {"msg": "hello"})

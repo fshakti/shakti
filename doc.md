@@ -679,7 +679,7 @@ k : ktable(a:1, b:2)
 - `re_match`, `re_findall`, `re_sub`, `re_split` — POSIX regex on Unix/macOS
 - `argv` — script path plus remaining CLI args (set when running a script file)
 - `eval(src)` — parse and evaluate a Shakti source string in the **root** environment (returns the value, or an error value). Bindings persist across calls, including when `eval` is invoked from nested functions.
-- `sh(cmd)` — runs `cmd` via the host shell (`system`). Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`. Untrusted `.ie` input is otherwise equivalent to an untrusted shell script; see README security notes.
+- `subprocess()` / `load(dir_with_run, …)` — spawn a directory `run` helper (PTY). Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`. Untrusted `.ie` input is otherwise equivalent to an untrusted shell script; see README security notes.
 - Parser nesting is capped at 40; interpreter call depth defaults to 3000 (`SHAKTI_CALL_MAX_DEPTH`).
 
 ## Process / REPL

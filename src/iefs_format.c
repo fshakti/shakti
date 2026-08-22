@@ -227,9 +227,23 @@ static int encode_value(IefsBuf *b, V *v) {
             return -1;
         return buf_append(b, v->B, (size_t)v->n);
     }
+    case T_CHAR:
+        if (buf_putc(b, (unsigned char)T_CHAR) != 0)
+            return -1;
+        return buf_putc(b, (unsigned char)v->j);
+    case T_CVEC: {
+        if ((uint64_t)v->n > IEFS_MAX_ELEMS)
+            return -1;
+        if (buf_putc(b, (unsigned char)T_CVEC) != 0)
+            return -1;
+        if (buf_put_u64(b, (uint64_t)v->n) != 0)
+            return -1;
+        return buf_append(b, v->B, (size_t)v->n);
+    }
     case T_IMAT:
     case T_FMAT:
-    case T_BMAT: {
+    case T_BMAT:
+    case T_CMAT: {
         int64_t cols = mat_cols(v);
         uint64_t cells = (uint64_t)v->n * (uint64_t)(cols > 0 ? cols : 0);
         if ((uint64_t)v->n > IEFS_MAX_ELEMS || (uint64_t)cols > IEFS_MAX_ELEMS || cells > IEFS_MAX_ELEMS)
@@ -368,12 +382,16 @@ static V *alias_payload(IefsR *r, int t, int64_t n, int64_t cols, size_t nbytes,
         v = v_fvec(n);
     else if (t == T_BVEC)
         v = v_bvec(n);
+    else if (t == T_CVEC)
+        v = v_cvec(n);
     else if (t == T_IMAT)
         v = v_imat(n, cols);
     else if (t == T_FMAT)
         v = v_fmat(n, cols);
     else if (t == T_BMAT)
         v = v_bmat(n, cols);
+    else if (t == T_CMAT)
+        v = v_cmat(n, cols);
     else
         return v_err("iefs: alias type");
     /* Drop malloc'd payload; point into map when naturally aligned. */
@@ -539,9 +557,33 @@ static V *decode_value(IefsR *r) {
         r->off += nbytes;
         return v;
     }
+    case T_CHAR: {
+        if (need(r, 1) != 0)
+            return v_err(r->err);
+        return v_char(r->p[r->off++]);
+    }
+    case T_CVEC: {
+        if (need(r, 8) != 0)
+            return v_err(r->err);
+        uint64_t n = get_u64(r->p + r->off);
+        r->off += 8;
+        if (n > IEFS_MAX_ELEMS)
+            return v_err("iefs: cvec too large");
+        size_t nbytes = (size_t)n;
+        if (r->map_reg)
+            return alias_payload(r, T_CVEC, (int64_t)n, -1, nbytes, 2);
+        if (need(r, nbytes) != 0)
+            return v_err(r->err);
+        V *v = v_cvec((int64_t)n);
+        if (n)
+            memcpy(v->B, r->p + r->off, nbytes);
+        r->off += nbytes;
+        return v;
+    }
     case T_IMAT:
     case T_FMAT:
-    case T_BMAT: {
+    case T_BMAT:
+    case T_CMAT: {
         if (need(r, 16) != 0)
             return v_err(r->err);
         uint64_t rows = get_u64(r->p + r->off);
@@ -551,7 +593,7 @@ static V *decode_value(IefsR *r) {
         if (__builtin_mul_overflow(rows, cols, &cells) ||
             rows > IEFS_MAX_ELEMS || cols > IEFS_MAX_ELEMS || cells > IEFS_MAX_ELEMS)
             return v_err("iefs: matrix too large");
-        size_t esz = (t == T_BMAT) ? 1 : 8;
+        size_t esz = (t == T_BMAT || t == T_CMAT) ? 1 : 8;
         size_t nbytes = (size_t)cells * esz;
         if (r->map_reg) {
             int which = (t == T_IMAT) ? 0 : (t == T_FMAT) ? 1 : 2;
@@ -572,6 +614,11 @@ static V *decode_value(IefsR *r) {
                 v->F[i] = get_f64(r->p + r->off);
                 r->off += 8;
             }
+        } else if (t == T_CMAT) {
+            v = v_cmat((int64_t)rows, (int64_t)cols);
+            if (cells)
+                memcpy(v->B, r->p + r->off, (size_t)cells);
+            r->off += (size_t)cells;
         } else {
             v = v_bmat((int64_t)rows, (int64_t)cols);
             if (cells)
