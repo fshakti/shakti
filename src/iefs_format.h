@@ -22,6 +22,7 @@ extern "C" {
 #define IEFS_VERSION 1u          /* default write version */
 #define IEFS_VERSION_MAX 3u      /* read up to Isolde TOC+extents */
 #define IEFS_HEADER_SIZE 24u
+#define IEFS_TYPE_LAYOUT 1u /* Isolde: 0 = pre-char (tag 4 was str); 1 = char=4, str=5 */
 #define IEFS_MAX_PAYLOAD (64ull << 30) /* 64 GiB hard cap (was 16; Basic one-day quotes ~25 GiB) */
 #define IEFS_MAX_ELEMS UINT32_MAX
 #define IEFS_V3_ALIGN (2u << 20) /* 2 MiB extent alignment */
@@ -39,6 +40,10 @@ V *iefs_decode(const unsigned char *buf, size_t len);
 
 /* Decode mmap-backed buffer (skip CRC); alias payloads into reg when non-NULL. */
 V *iefs_decode_mapped(const unsigned char *buf, size_t len, struct IefsMapRegion *reg);
+/* colnames: list[str] of table columns to materialize (v3 skips other zstd extents).
+ * NULL/empty = all columns. */
+V *iefs_decode_mapped_cols(const unsigned char *buf, size_t len, struct IefsMapRegion *reg,
+                          V *colnames);
 
 /* Save/load helpers (atomic write, owned roundtrip). */
 int iefs_store_write(V *v, const char *path, int io_mode, char *err, size_t err_cap);

@@ -36,6 +36,8 @@ int iefs_v_materialize(V *v);
 
 /* Open path as mmap-backed value. pages: IEFS_MAP_PAGES_*. */
 V *iefs_store_map(const char *path, int pages_mode);
+/* colnames: list[str] to materialize; NULL/empty = all columns. */
+V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames);
 
 #ifdef __cplusplus
 }

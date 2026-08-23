@@ -169,6 +169,10 @@ static void *mmap_hugetlb(size_t len, int pages_mode, char *err, size_t err_cap)
 }
 
 V *iefs_store_map(const char *path, int pages_mode) {
+    return iefs_store_map_cols(path, pages_mode, NULL);
+}
+
+V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames) {
     if (!path || !path[0])
         return v_err("iefs.map: path");
     int fd = open(path, O_RDONLY);
@@ -230,7 +234,7 @@ V *iefs_store_map(const char *path, int pages_mode) {
         return v_err("iefs.map: out of memory");
     }
 
-    V *v = iefs_decode_mapped((const unsigned char *)base, len, reg);
+    V *v = iefs_decode_mapped_cols((const unsigned char *)base, len, reg, colnames);
     /* Creating ref (rc=1 at new) is distinct from per-alias refs taken in
      * iefs_v_set_map_alias. On decode failure, v_free of the partial tree
      * drops only alias refs and leaves this creating ref, so this release is

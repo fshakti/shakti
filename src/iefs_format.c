@@ -720,18 +720,74 @@ static int iefs_zstd_decompress(const unsigned char *src, size_t src_len,
 #endif
 }
 
-/* Basic STAC columns are T_IVEC / T_FVEC with bits=64. */
+/* Isolde type-layout 1 (char inserted at tag 4): ivec=8, fvec=9, cvec=10. */
+#define IEFS_ISL1_IVEC 8
+#define IEFS_ISL1_FVEC 9
+#define IEFS_ISL1_CVEC 10
+
+static int iefs_type_from_extent(int raw, uint32_t layout) {
+    if (layout == IEFS_TYPE_LAYOUT) {
+        if (raw == IEFS_ISL1_IVEC)
+            return T_IVEC;
+        if (raw == IEFS_ISL1_FVEC)
+            return T_FVEC;
+        if (raw == IEFS_ISL1_CVEC)
+            return T_CVEC;
+    }
+    return raw;
+}
+
+static size_t iefs_pack_nbytes(int64_t n, int bits) {
+    if (n <= 0 || bits <= 0)
+        return 1;
+    return (size_t)((n * (int64_t)bits + 7) / 8);
+}
+
+static int64_t iefs_pack_get_i(const unsigned char *B, int64_t i, int bits) {
+    int64_t bit = i * (int64_t)bits;
+    uint64_t v = 0;
+    for (int b = 0; b < bits; b++) {
+        int64_t p = bit + b;
+        if (B[p >> 3] & (unsigned char)(1u << (p & 7)))
+            v |= (uint64_t)1 << b;
+    }
+    if (bits <= 0 || bits >= 64)
+        return (int64_t)v;
+    uint64_t sign = (uint64_t)1 << (bits - 1);
+    if (v & sign)
+        return (int64_t)(v | ~(((uint64_t)1 << bits) - 1));
+    return (int64_t)v;
+}
+
+/* STAC year: Isolde v3 writes i64 ivec/f64, packed i24 ivec, and list[char]. */
 static V *iefs_v3_import_vec(int type, int bits, uint64_t nelem, const unsigned char *p, size_t nbytes,
                              IefsMapRegion *reg, int alias_ok) {
     if (nelem > IEFS_MAX_ELEMS)
         return v_err("iefs: extent too large");
+    if (type == T_CVEC) {
+        if (nbytes != (size_t)nelem)
+            return v_err("iefs: extent length mismatch");
+        V *v = v_cvec((int64_t)nelem);
+        if (nbytes)
+            memcpy(v->B, p, nbytes);
+        return v;
+    }
+    if (type == T_IVEC && bits > 0 && bits < 64) {
+        size_t needb = iefs_pack_nbytes((int64_t)nelem, bits);
+        if (needb != nbytes)
+            return v_err("iefs: extent length mismatch");
+        V *v = v_ivec((int64_t)nelem);
+        for (uint64_t i = 0; i < nelem; i++)
+            v->J[i] = iefs_pack_get_i(p, (int64_t)i, bits);
+        return v;
+    }
     if (bits != 0 && bits != 64)
-        return v_errf("iefs: unsupported extent bits %d (need 64)", bits);
+        return v_errf("iefs: unsupported extent bits %d (need 64 or packed i24)", bits);
     size_t needb = (size_t)nelem * 8u;
     if (needb != nbytes)
         return v_err("iefs: extent length mismatch");
     if (type != T_IVEC && type != T_FVEC)
-        return v_errf("iefs: unsupported extent type %d (need ivec/fvec)", type);
+        return v_errf("iefs: unsupported extent type %d (need ivec/fvec/cvec)", type);
     if (alias_ok && reg) {
         V *v = (type == T_FVEC) ? v_fvec((int64_t)nelem) : v_ivec((int64_t)nelem);
         free(v->J);
@@ -766,7 +822,65 @@ static void iefs_v3_cleanup(V **cols, V **keys, uint32_t n) {
     free(keys);
 }
 
-static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *reg, int verify_crc) {
+static int iefs_colnames_active(V *colnames) {
+    return colnames && colnames->t == T_LIST && colnames->n > 0;
+}
+
+static int iefs_want_col(V *colnames, const char *name) {
+    if (!iefs_colnames_active(colnames))
+        return 1;
+    if (!name || !name[0])
+        return 0;
+    for (int64_t i = 0; i < colnames->n; i++) {
+        V *s = colnames->L[i];
+        if (s && s->t == T_STR && s->s && strcmp(s->s, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static V *iefs_table_select_cols(V *tbl, V *colnames) {
+    if (!iefs_colnames_active(colnames))
+        return tbl;
+    if (!tbl || tbl->t == T_ERR)
+        return tbl;
+    if (tbl->t != T_TABLE || !tbl->keys || !tbl->vals) {
+        v_free(tbl);
+        return v_err("iefs: column list requires a table");
+    }
+    V *klist = v_list(colnames->n);
+    V *vlist = v_list(colnames->n);
+    for (int64_t i = 0; i < colnames->n; i++) {
+        V *want = colnames->L[i];
+        if (!want || want->t != T_STR || !want->s) {
+            v_free(klist);
+            v_free(vlist);
+            v_free(tbl);
+            return v_err("iefs: column names must be strings");
+        }
+        int found = 0;
+        for (int64_t j = 0; j < tbl->keys->n; j++) {
+            V *kn = tbl->keys->L[j];
+            if (kn && kn->t == T_STR && kn->s && strcmp(kn->s, want->s) == 0) {
+                klist->L[i] = v_ref(kn);
+                vlist->L[i] = v_ref(tbl->vals->L[j]);
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            v_free(klist);
+            v_free(vlist);
+            v_free(tbl);
+            return v_errf("iefs: column '%s' not in file", want->s);
+        }
+    }
+    v_free(tbl);
+    return v_table_own(klist, vlist);
+}
+
+static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *reg, int verify_crc,
+                         V *colnames) {
     uint64_t payload_len = get_u64(buf + 8);
     uint32_t expect_crc = get_u32(buf + 16);
     if (payload_len > IEFS_MAX_PAYLOAD)
@@ -774,6 +888,7 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
         return v_err("iefs: truncated file");
     const unsigned char *body = buf + IEFS_HEADER_SIZE;
+    uint32_t layout = get_u32(buf + 20);
     if (verify_crc) {
         uint32_t got = crc32_buf(body, (size_t)payload_len);
         if (got != expect_crc)
@@ -797,9 +912,10 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
         return v_err("iefs: out of memory");
     }
     int named = 0;
+    uint32_t n_keep = 0;
     for (uint32_t i = 0; i < n_ext; i++) {
         const unsigned char *er = body + 8 + (size_t)i * IEFS_V3_EXTENT_SIZE;
-        int type = er[0];
+        int type = iefs_type_from_extent((int)er[0], layout);
         int bits = er[1];
         int codec = er[2];
         int outer = er[3];
@@ -809,12 +925,30 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
         uint32_t ecrc = get_u32(er + 36);
         uint32_t name_off = get_u32(er + 40);
         if (file_off < IEFS_HEADER_SIZE || elen > len || file_off > len - elen) {
-            iefs_v3_cleanup(cols, keys, i);
+            iefs_v3_cleanup(cols, keys, n_keep);
             return v_err("iefs: bad extent offset");
         }
+        const char *cname = NULL;
+        if (name_off != 0xffffffffu && name_off < names_len) {
+            size_t rem = (size_t)names_len - (size_t)name_off;
+            int has_nul = 0;
+            for (size_t k = 0; k < rem; k++) {
+                if (names[name_off + k] == 0) {
+                    has_nul = 1;
+                    break;
+                }
+            }
+            if (!has_nul) {
+                iefs_v3_cleanup(cols, keys, n_keep);
+                return v_err("iefs: column name not NUL-terminated");
+            }
+            cname = (const char *)(names + name_off);
+        }
+        if (!iefs_want_col(colnames, cname))
+            continue;
         const unsigned char *ep = buf + file_off;
         if (verify_crc && crc32_buf(ep, (size_t)elen) != ecrc) {
-            iefs_v3_cleanup(cols, keys, i);
+            iefs_v3_cleanup(cols, keys, n_keep);
             return v_err("iefs: extent checksum mismatch");
         }
         unsigned char *plain = NULL;
@@ -824,17 +958,17 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
         int alias_ok = (reg != NULL) && (codec == IEFS_CODEC_NONE) && (outer == IEFS_CODEC_NONE) &&
                        (type != (int)IEFS_EXT_TLV);
         if (outer != IEFS_CODEC_NONE) {
-            iefs_v3_cleanup(cols, keys, i);
+            iefs_v3_cleanup(cols, keys, n_keep);
             return v_err("iefs: outer residual codecs not supported in Shakti v3 reader");
         }
         if (codec != IEFS_CODEC_NONE) {
             char err[256];
             if (codec != IEFS_CODEC_ZSTD) {
-                iefs_v3_cleanup(cols, keys, i);
+                iefs_v3_cleanup(cols, keys, n_keep);
                 return v_errf("iefs: unsupported extent codec %d (need none/zstd)", codec);
             }
             if (iefs_zstd_decompress(ep, (size_t)elen, &plain, &plain_len, err, sizeof err) != 0) {
-                iefs_v3_cleanup(cols, keys, i);
+                iefs_v3_cleanup(cols, keys, n_keep);
                 return v_err(err[0] ? err : "iefs: extent decompress failed");
             }
             pay = plain;
@@ -847,46 +981,61 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
             col = decode_value(&r);
             free(plain);
             if (!col || col->t == T_ERR) {
-                iefs_v3_cleanup(cols, keys, i);
+                iefs_v3_cleanup(cols, keys, n_keep);
                 return col ? col : v_err("iefs: TLV extent decode failed");
             }
         } else {
             col = iefs_v3_import_vec(type, bits ? bits : 64, nelem, pay, pay_len, reg, alias_ok);
             free(plain);
             if (!col || col->t == T_ERR) {
-                iefs_v3_cleanup(cols, keys, i);
+                iefs_v3_cleanup(cols, keys, n_keep);
                 return col ? col : v_err("iefs: extent import failed");
             }
         }
-        cols[i] = col;
-        if (name_off != 0xffffffffu && name_off < names_len) {
-            size_t rem = (size_t)names_len - (size_t)name_off;
-            int has_nul = 0;
-            for (size_t k = 0; k < rem; k++) {
-                if (names[name_off + k] == 0) {
-                    has_nul = 1;
+        cols[n_keep] = col;
+        if (cname) {
+            keys[n_keep] = v_str(cname);
+            named++;
+        } else {
+            keys[n_keep] = NULL;
+        }
+        n_keep++;
+    }
+    if (iefs_colnames_active(colnames)) {
+        for (int64_t ci = 0; ci < colnames->n; ci++) {
+            V *want = colnames->L[ci];
+            const char *wn = (want && want->t == T_STR) ? want->s : NULL;
+            if (!wn) {
+                iefs_v3_cleanup(cols, keys, n_keep);
+                return v_err("iefs: column names must be strings");
+            }
+            int found = 0;
+            for (uint32_t j = 0; j < n_keep; j++) {
+                if (keys[j] && keys[j]->s && strcmp(keys[j]->s, wn) == 0) {
+                    found = 1;
                     break;
                 }
             }
-            if (!has_nul) {
-                iefs_v3_cleanup(cols, keys, i + 1);
-                return v_err("iefs: column name not NUL-terminated");
+            if (!found) {
+                iefs_v3_cleanup(cols, keys, n_keep);
+                return v_errf("iefs: column '%s' not in file", wn);
             }
-            keys[i] = v_str((char *)(names + name_off));
-            named++;
-        } else {
-            keys[i] = NULL;
         }
     }
-    if (n_ext == 1 && !named) {
+    if (n_keep == 1 && !named) {
         V *out = cols[0];
         free(cols);
         free(keys);
         return out;
     }
-    V *klist = v_list((int64_t)n_ext);
-    V *vlist = v_list((int64_t)n_ext);
-    for (uint32_t i = 0; i < n_ext; i++) {
+    if (n_keep == 0) {
+        free(cols);
+        free(keys);
+        return v_err("iefs: no columns");
+    }
+    V *klist = v_list((int64_t)n_keep);
+    V *vlist = v_list((int64_t)n_keep);
+    for (uint32_t i = 0; i < n_keep; i++) {
         klist->L[i] = keys[i] ? keys[i] : v_str("");
         vlist->L[i] = cols[i];
     }
@@ -902,7 +1051,7 @@ V *iefs_decode(const unsigned char *buf, size_t len) {
         return v_err("iefs: bad magic");
     uint16_t ver = get_u16(buf + 4);
     if (ver == 3)
-        return iefs_decode_v3(buf, len, NULL, 1);
+        return iefs_decode_v3(buf, len, NULL, 1, NULL);
     if (ver != IEFS_VERSION)
         return v_errf("iefs: unsupported version %u", (unsigned)ver);
     uint64_t payload_len = get_u64(buf + 8);
@@ -929,13 +1078,17 @@ V *iefs_decode(const unsigned char *buf, size_t len) {
 }
 
 V *iefs_decode_mapped(const unsigned char *buf, size_t len, IefsMapRegion *reg) {
+    return iefs_decode_mapped_cols(buf, len, reg, NULL);
+}
+
+V *iefs_decode_mapped_cols(const unsigned char *buf, size_t len, IefsMapRegion *reg, V *colnames) {
     if (!buf || len < IEFS_HEADER_SIZE)
         return v_err("iefs: truncated header");
     if (memcmp(buf, IEFS_MAGIC, 4) != 0)
         return v_err("iefs: bad magic");
     uint16_t ver = get_u16(buf + 4);
     if (ver == 3)
-        return iefs_decode_v3(buf, len, reg, 0);
+        return iefs_decode_v3(buf, len, reg, 0, colnames);
     if (ver != IEFS_VERSION)
         return v_errf("iefs: unsupported version %u (iefs.map requires v1 or v3)", (unsigned)ver);
     uint64_t payload_len = get_u64(buf + 8);
@@ -953,7 +1106,7 @@ V *iefs_decode_mapped(const unsigned char *buf, size_t len, IefsMapRegion *reg) 
         v_free(v);
         return v_err("iefs: trailing payload bytes");
     }
-    return v;
+    return iefs_table_select_cols(v, colnames);
 }
 
 int iefs_store_write(V *v, const char *path, int io_mode, char *err, size_t err_cap) {
@@ -1054,19 +1207,38 @@ V *bi_iefs_load(V **a, int n) {
 
 V *bi_iefs_map(V **a, int n) {
     if (n < 1 || !a[0] || a[0]->t != T_STR)
-        return v_err("iefs_map(path[, pages])");
+        return v_err("iefs_map(path[, pages[, columns]])");
     int pages = IEFS_MAP_PAGES_THP;
-    if (n > 1 && a[1] && a[1]->t == T_STR) {
-        if (!strcmp(a[1]->s, "1g") || !strcmp(a[1]->s, "1G"))
+    V *colnames = NULL;
+    int argi = 1;
+    if (n > argi && a[argi] && a[argi]->t == T_LIST) {
+        colnames = a[argi];
+        argi++;
+    } else if (n > argi && a[argi] && a[argi]->t == T_STR) {
+        if (!strcmp(a[argi]->s, "1g") || !strcmp(a[argi]->s, "1G"))
             pages = IEFS_MAP_PAGES_1G;
-        else if (!strcmp(a[1]->s, "2m") || !strcmp(a[1]->s, "2M"))
+        else if (!strcmp(a[argi]->s, "2m") || !strcmp(a[argi]->s, "2M"))
             pages = IEFS_MAP_PAGES_2M;
-        else if (!strcmp(a[1]->s, "thp") || !a[1]->s[0])
+        else if (!strcmp(a[argi]->s, "thp") || !a[argi]->s[0])
             pages = IEFS_MAP_PAGES_THP;
         else
             return v_err("iefs_map: pages must be \"thp\", \"2m\", or \"1g\"");
+        argi++;
+        if (n > argi && a[argi] && a[argi]->t == T_LIST)
+            colnames = a[argi];
+    } else if (n > argi && a[argi]) {
+        return v_err("iefs_map(path[, pages[, columns]])");
     }
-    return iefs_store_map(a[0]->s, pages);
+    if (colnames) {
+        if (colnames->t != T_LIST)
+            return v_err("iefs_map: columns must be a list of strings");
+        for (int64_t i = 0; i < colnames->n; i++) {
+            V *s = colnames->L[i];
+            if (!s || s->t != T_STR)
+                return v_err("iefs_map: columns must be a list of strings");
+        }
+    }
+    return iefs_store_map_cols(a[0]->s, pages, colnames);
 }
 
 V *bi_iefs_direct_available(V **a, int n) {
