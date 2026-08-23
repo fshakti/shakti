@@ -700,7 +700,7 @@ static V *bi_abs(V **a, in) {
     P(v->t == T_FLOAT,v_float(fabs(v->f)))
     return v_int(0);
 }
-/* Integer bitwise helpers for converters (logical shifts on uint64 bits). */
+/* Integer bitwise helpers (logical shifts on uint64 bits). */
 static int64_t bi_as_i64(V *v) {
     if (v->t == T_INT) return v->j;
     if (v->t == T_FLOAT) return (int64_t)v->f;
