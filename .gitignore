@@ -52,12 +52,6 @@ CONTEXT.md
 /*benchmark*.md
 /*_coverage*.md
 
-# never recommit generated converter emit artifacts at repo root
-/c.ie
-/python.ie
-/csharp.ie
-/java.ie
-
 # local-only workspace trees (not in published repo)
 local/
 qa/

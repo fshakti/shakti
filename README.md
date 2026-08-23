@@ -48,9 +48,6 @@ current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make clean` removes `.build/` and the `./shakti` symlink.
 The linked binary lives at `.build/shakti`; `make build` also creates `./shakti` →
 `.build/shakti` so a workspace directory on `PATH` finds `shakti` (same idea as Isolde).
-Embedded converter headers live under `src/embed/` and are generated from
-`src/converters/p2s.ie`, `src/converters/c2s.ie`, `src/converters/cs2s.ie`, and
-`src/converters/j2s.ie`.
 
 Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_STEM`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
 
@@ -86,25 +83,13 @@ Bare REPL meta-commands (banner also lists them): `\d` grammar card, `\v` vars, 
 printf '\\q\n' | ./shakti -q          # quit with status 0
 printf '\\q 7\n' | ./shakti -q        # quit with status 7
 ./shakti --command '1+1'
-./shakti file.py    # supported Python subset → Shakti, then run
-./shakti file.c     # supported C subset → Shakti, then run
-./shakti file.cs    # supported C# subset → Shakti, then run
-./shakti file.java  # supported Java subset → Shakti, then run
 ```
 
-Converters: [`src/converters/p2s.ie`](src/converters/p2s.ie) (Python), [`src/converters/c2s.ie`](src/converters/c2s.ie) (C), [`src/converters/cs2s.ie`](src/converters/cs2s.ie) (C#), [`src/converters/j2s.ie`](src/converters/j2s.ie) (Java). Their embedded CLI copies are generated into `src/embed/`.  
-More detail: [doc.md](doc.md). Examples: [examples/example.ie](examples/example.ie), [examples/example.py](examples/example.py), [examples/example.c](examples/example.c), [examples/example.cs](examples/example.cs), [examples/example.java](examples/example.java).  
-Tiny converter demos: [examples/python.py](examples/python.py), [examples/c.c](examples/c.c), [examples/csharp.cs](examples/csharp.cs), [examples/java.java](examples/java.java).
-C / C# / Java converters reject unterminated strings and `/* ... */` block
-comments with source-line diagnostics instead of emitting partial programs.
+More detail: [doc.md](doc.md). Examples: [examples/example.ie](examples/example.ie).
 CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger inputs.
 
-`./shakti file.c` is **subset lowering + interpret**, not a C compiler. Repeated
-`.c` / `.py` / `.cs` / `.java` runs use a disk transpile cache (keyed by source
-and converter; set `SHAKTI_NO_TRANSPILE_CACHE=1` to disable). Prefer emitting
-`.ie` once for hot loops. Fast numeric work belongs on large vectors /
-`dot` / `mmul` / `make prod-speed` — scalar `for`/`while` micros stay in the AST
-interpreter. Fair VM peer is CPython; vs `cc -O2` see [doc.md](doc.md#performance-vs-cc--o2-methodology).
+Fast numeric work belongs on large vectors / `dot` / `mmul` / `make prod-speed` —
+scalar `for`/`while` micros stay in the AST interpreter.
 
 ## security
 
