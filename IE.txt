@@ -17,7 +17,7 @@ expr   lit name e.f e[i] e[a:b] f(…) f@ xs  xs f@ ys
 type   int float bool str None · list dict table ktable
        ivec fvec bvec · matrix[int|float|bool]
 built  range sum min max avg abs dot mmul
-       eval clock timer exit
+       eval clock timer exit sh
        read write load save json_loads json_dumps
 
 sql    import sql · select … by … from t where …
