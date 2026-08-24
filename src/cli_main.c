@@ -14,7 +14,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.12.0"
+#define SHAKTI_PKG_VERSION "0.13.0"
 #endif
 extern int shakti_lang_main(int argc, char **argv);
 static void shakti_print_banner(void) {
