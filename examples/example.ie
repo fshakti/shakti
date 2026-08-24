@@ -185,6 +185,19 @@ edge : load("/tmp/shakti_edge.tsv")
 print("tsv empty-edge load:")
 print(edge)
 
+# =============================================================================
+# sh_demo.ie
+# =============================================================================
+# Native sh(cmd) via /bin/sh -c. Returns wait status (0 = success).
+# Same gate as subprocess: SHAKTI_SAFE=1 or SHAKTI_ALLOW_EXEC=0 disables it.
+#   ./shakti examples/sh_demo.ie
+
+ok : sh("true")
+bad : sh("false")
+print("true wait status:", ok)
+print("false failed:", bad != 0)
+print("cwd:", getcwd())
+
 write("/tmp/shakti_short.tsv", "id\tval\n1\t\n")
 tsv_short : load("/tmp/shakti_short.tsv")
 print("tsv short-row load:")

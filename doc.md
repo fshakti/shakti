@@ -6,6 +6,7 @@ Version **0.12.0**.
 
 - [Examples index](#examples-index)
 - [Command-line interface](#command-line-interface)
+- [Language pipeline](#language-pipeline)
 - [Syntax and builtins](#syntax-and-builtins)
 - [Time-series indexes](#time-series-indexes)
 - [Decorators](#decorators)
@@ -51,7 +52,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | *(core)* | `decorators.ie` | Function, class, stacked, factory, and assignment decorators |
 | *(core)* | `each.ie` | `f@ xs` / `xs f@ ys` each |
 | *(core)* | `matrix.ie` | Matrices (`mmul`), `dot`, `sum` / `min` / `max` |
-| *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` (numeric + string columns) |
+| *(core)* | `sh_demo.ie` | `sh(cmd)` wait status (`true` / `false`) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
 | `import gfx` | `gfx_demo.ie` | Pixel window + click drawing |
@@ -96,6 +97,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `rest` | [REST module](#rest-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
 | CLI | [command-line interface](#command-line-interface) |
+| Pipeline | [language pipeline](#language-pipeline) |
 | REPL | [REPL](#repl) |
 | Time-series indexes | [time-series indexes](#time-series-indexes) |
 
@@ -138,6 +140,16 @@ Start with `./.build/shakti` (or `-i` after `--command`). Banner line:
 | `quit` / `exit` | Soft leave the REPL loop (process status `0`) |
 
 Unknown `\` commands print an error and stay in the REPL.
+
+## Language pipeline
+
+The standalone binary is a **tree-walk interpreter** (no bytecode VM). Source is
+tokenized in `src/lex.c`, parsed to an AST in `src/parse.c` / `src/ast.c`, and
+evaluated in `src/eval.c`. `src/shakti_lang.c` is the CLI/REPL driver. Cross-file
+inlining is recovered with LTO on the default link (see [README build](README.md#build)).
+
+Optional **`libisolde.so`** (set `ISOLDE_LIB`) may supply native `isolde_*`
+kernels for some vector reducers. Core builtins such as `sh` do not require it.
 
 ---
 
@@ -351,7 +363,7 @@ Same reducers as vectors, applied over all elements: `sum`, `min`, `max`, `avg`,
 
 On x86-64, `make prod-speed` uses `-march=x86-64-v2` with scalar C (+ OpenMP) for large numeric matrix `mmul`, element-wise ops, comparisons, and table filters. On arm64 (Apple Silicon), the same matrix operations use NEON; `prod-speed` passes `-mcpu=native` (M5 and other hosts) or `-mcpu=apple-m4` with `SHAKTI_PORTABLE_CPU=1` (install `libomp` for OpenMP row parallelism). Smaller matrices use scalar code.
 
-The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (NEON on arm64; scalar+OpenMP on x86; on Darwin with Accelerate, large `sum`/`dot` use `vDSP` and large float `mmul` uses `cblas_dgemm`). `prod-speed` also retunes C and ObjC units with `-O3` and the arch flags above. There is no GPU backend in the standalone binary.
+The default `make prod` build parallelizes large `ivec` `+` / `-` / `*` with OpenMP. Vector **`dot`** and large **`sum`** on `fvec` use the SIMD/OpenMP stack in `src/vec_kernels.c` (NEON on arm64; scalar+OpenMP on x86; on Darwin with Accelerate, large `sum`/`dot` use `vDSP` and large float `mmul` uses `cblas_dgemm`). `prod-speed` also retunes C and ObjC units with `-O3` and the arch flags above. Default `make` / `make prod` also enables LTO (`-flto` / `-flto=auto`) so lexer, parser, and eval still inline across `src/*.c` units. There is no GPU backend in the standalone binary.
 
 OpenMP thread count affects short vector timings. Keep `OMP_NUM_THREADS`
 fixed when comparing local runs.
@@ -381,10 +393,18 @@ k : ktable(a:1, b:2)
 
 - `read(path)`, `write(path, text)`, `readlines(path)`
 - `listdir(path)`, `walk(path)`
+- `getcwd()`, `mkdir(path)`, `getenv(name)` — `getenv` returns `None` if unset
+- `path_join`, `path_exists`, `path_isdir`, `path_isfile`, `path_basename`,
+  `path_dirname`, `path_splitext`
 - `json_loads(s)`, `json_dumps(x)` — JSON subset (no comments or trailing commas)
 - `re_match`, `re_findall`, `re_sub`, `re_split` — POSIX regex on Unix/macOS
 - `argv` — script path plus remaining CLI args (set when running a script file)
 - `eval(src)` — parse and evaluate a Shakti source string in the **root** environment (returns the value, or an error value). Bindings persist across calls, including when `eval` is invoked from nested functions.
+- `sh(cmd)` — run `cmd` via `/bin/sh -c` (POSIX). Returns the wait status
+  integer (`0` = success; any non-zero value means failure). Isolde-compatible:
+  this is the `waitpid` status, not a bash 0–255 exit code — test with
+  `rc = 0` / `rc != 0`. Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`.
+  Not available on Windows or WASM builds. Does **not** require Isolde.
 - `subprocess()` / `load(dir_with_run, …)` — spawn a directory `run` helper (PTY). Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`. Untrusted `.ie` input is otherwise equivalent to an untrusted shell script; see README security notes.
 - Parser nesting is capped at 40; interpreter call depth defaults to 3000 (`SHAKTI_CALL_MAX_DEPTH`).
 
@@ -1608,7 +1628,7 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 
 `import rest` uses `curl` on `PATH` for HTTP client requests (not linked at build time). The in-process HTTP server uses BSD sockets.
 
-Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it.
+Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it — including `sh(cmd)`, which is a native builtin (not loaded from Isolde).
 
 Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_STEM=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 

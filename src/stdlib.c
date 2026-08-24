@@ -402,6 +402,42 @@ V *bi_getenv(V **a, in) {
     const char *v = getenv(a[0]->s);
     return v ? v_str(v) : v_nil();
 }
+#if !defined(SHAKTI_WIN32_NATIVE) && !defined(__EMSCRIPTEN__) && !defined(__MINGW32__) && !defined(__MINGW64__)
+#include <spawn.h>
+#include <sys/wait.h>
+extern char **environ;
+/* Shell via posix_spawn of /bin/sh -c (Isolde-compatible wait status). */
+static int shakti_run_shell(const char *cmd) {
+    if (!cmd) return -1;
+    pid_t pid = 0;
+    char *argv[] = {"/bin/sh", "-c", (char *)cmd, NULL};
+    int rc = posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, environ);
+    if (rc != 0) return -1;
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    return status;
+}
+#endif
+V *bi_sh(V **a, in) {
+    P(n < 1 || a[0]->t != T_STR,v_err("sh(cmd)"))
+    {
+        const char *safe = getenv("SHAKTI_SAFE");
+        const char *allow = getenv("SHAKTI_ALLOW_EXEC");
+        if ((safe && safe[0] && strcmp(safe, "0") != 0) ||
+            (allow && allow[0] == '0' && allow[1] == '\0')) {
+            return v_err("sh: disabled (SHAKTI_SAFE or SHAKTI_ALLOW_EXEC=0)");
+        }
+    }
+#if defined(__EMSCRIPTEN__)
+    return v_err("sh: not available in WASM builds");
+#elif defined(SHAKTI_WIN32_NATIVE) || defined(__MINGW32__) || defined(__MINGW64__)
+    (void)a;
+    return v_err("sh: not available on this Windows build");
+#else
+    int rc = shakti_run_shell(a[0]->s);
+    return v_int(rc);
+#endif
+}
 #if defined(SHAKTI_HAVE_POSIX_REGEX)
 V *bi_re_findall(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("re_findall(pat, s)"))

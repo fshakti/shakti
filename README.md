@@ -45,6 +45,9 @@ arm64 / Apple Silicon, including M5; `-march=x86-64-v2` on x86-64).
 For a redistributable arm64 binary, use `SHAKTI_PORTABLE_CPU=1` (`-mcpu=apple-m4`;
 current Xcode clang does not yet accept `-mcpu=apple-m5`).
 `make prod-size` optimizes for size.
+Default `make` / `make prod` enables link-time optimization (`-flto` /
+`-flto=auto`) so the split language units (`src/lex.c`, `src/parse.c`,
+`src/eval.c`, …) still inline across translation units.
 `make clean` removes `.build/` and the `./shakti` symlink.
 The linked binary lives at `.build/shakti`; `make build` also creates `./shakti` →
 `.build/shakti` so a workspace directory on `PATH` finds `shakti` (same idea as Isolde).
@@ -85,19 +88,21 @@ printf '\\q 7\n' | ./shakti -q        # quit with status 7
 ./shakti --command '1+1'
 ```
 
-More detail: [doc.md](doc.md). Examples: [examples/example.ie](examples/example.ie).
+More detail: [doc.md](doc.md). Examples: [examples/example.ie](examples/example.ie),
+[examples/sh_demo.ie](examples/sh_demo.ie).
 CSV/TSV `load` buffers normal files; set `SHAKTI_CSV_MAX_BYTES` to stream larger inputs.
 
 Fast numeric work belongs on large vectors / `dot` / `mmul` / `make prod-speed` —
-scalar `for`/`while` micros stay in the AST interpreter.
+scalar `for`/`while` micros stay in the AST interpreter (`src/eval.c`).
 
 ## security
 
 Shakti trusts the `.ie` programs it runs. A script can spawn `subprocess()`,
-read/write files, and use network builtins — treat untrusted input like an
-untrusted shell script.
+run `sh(cmd)`, read/write files, and use network builtins — treat untrusted
+input like an untrusted shell script.
 
-- Set `SHAKTI_SAFE=1` (or `SHAKTI_ALLOW_EXEC=0`) to disable `subprocess()`.
+- Set `SHAKTI_SAFE=1` (or `SHAKTI_ALLOW_EXEC=0`) to disable `subprocess()` and
+  `sh()`.
 - Parser nesting and interpreter recursion are capped (defaults 40 / 3000;
   override call depth with `SHAKTI_CALL_MAX_DEPTH`).
 - REST temps use `$XDG_RUNTIME_DIR` / `$TMPDIR` when set, mode `0600`.

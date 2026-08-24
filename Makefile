@@ -91,7 +91,18 @@ else
   LDFLAGS += -lexpat
 endif
 
-LANG_STANDALONE := src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c src/fb_present.c
+# Language sources are separate TUs (lex/parse/eval/...). LTO recovers inlining
+# that the old single-file shakti_lang.c got for free — tiny eval() parse of
+# jupyter cells is parse-bound without it.
+ifeq ($(UNAME_S),Darwin)
+  CFLAGS += -flto
+  LDFLAGS += -flto
+else
+  CFLAGS += -flto=auto
+  LDFLAGS += -flto=auto
+endif
+
+LANG_STANDALONE := src/alloc.c src/value.c src/env.c src/lex.c src/ast.c src/parse.c src/vec_ops.c src/eval.c src/import.c src/repl.c src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c src/fb_present.c
 LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/isolde_bridge.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c
 
 SHAKTI_IPC ?= 1
@@ -328,7 +339,7 @@ shakti: $(SHAKTI)
 	fi
 	ln -sfn $(SHAKTI) shakti
 
-$(SHAKTI): $(BUILD)/shakti_version.h src/a.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
+$(SHAKTI): $(BUILD)/shakti_version.h src/a.h src/shakti.h src/shakti_internal.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 # Optional JNI object for Java/Android hosts (tests/build_guards.sh).
