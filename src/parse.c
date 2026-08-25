@@ -395,8 +395,19 @@ static Node *parse_postfix(Lexer *l) {
         } else if(is_jux_callee(n) && is_jux_arg_start(l) && !peek_each_verb_at(l)) {
             Node *call = node_new(N_CALL);
             node_add(call, n);
-            while(is_jux_arg_start(l) && !peek_each_verb_at(l))
-                node_add(call, parse_jux_arg(l));
+            /* Juxta assert takes a full expression so `assert a = b` is
+             * assert(a = b), not (assert a) = b. Other callees stay atoms
+             * so K-style `f x+y` remains (f x)+y. */
+            if (n->type == N_NAME && n->sval && !strcmp(n->sval, "assert")) {
+                node_add(call, parse_expr(l));
+                if (lex_peek(l).type == T_COMMA_) {
+                    lex_next(l);
+                    node_add(call, parse_expr(l));
+                }
+            } else {
+                while(is_jux_arg_start(l) && !peek_each_verb_at(l))
+                    node_add(call, parse_jux_arg(l));
+            }
             n = call;
         } else if(pk.type == T_DOT_) {
             lex_next(l);

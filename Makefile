@@ -356,6 +356,31 @@ BINDIR ?= $(PREFIX)/bin
 .PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o
 
 test: shakti
+	@if [ -f qa/tests/assert_prec.sh ]; then \
+	  SHAKTI=$(SHAKTI) bash qa/tests/assert_prec.sh || exit 1; \
+	elif [ -f tests/assert_prec.sh ]; then \
+	  SHAKTI=$(SHAKTI) bash tests/assert_prec.sh || exit 1; \
+	else \
+	  export SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR); \
+	  fail=0; \
+	  for src in 'assert 1 = 2' 'assert 1 < 0' 'assert 1 > 1' 'assert 1 != 1' 'assert 1 <= 0' 'assert 1 >= 2' 'assert type(1) = "str"' 'assert(1 = 2)'; do \
+	    set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
+	    if [ $$rc -eq 0 ]; then echo "FAIL: $$src — expected AssertionError, got exit 0" >&2; fail=1; \
+	    elif ! printf '%s\n' "$$out" | grep -q AssertionError; then echo "FAIL: $$src — no AssertionError" >&2; fail=1; \
+	    else echo "ok: $$src (AssertionError)"; fi; \
+	  done; \
+	  for src in 'assert 1 = 1' 'assert 0 < 1' 'assert type(1) = "int"' 'assert(1 = 1)'; do \
+	    set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
+	    if [ $$rc -ne 0 ]; then echo "FAIL: $$src — expected exit 0, got $$rc" >&2; echo "$$out" >&2; fail=1; \
+	    else echo "ok: $$src"; fi; \
+	  done; \
+	  dump=`$(SHAKTI) --parse-dump -c 'assert 1 = 2' 2>/dev/null || true`; \
+	  case "$$dump" in \
+	    *'(call `assert (n8 '*) echo "ok: parse-dump assert 1 = 2 is a call of a comparison";; \
+	    *) echo "FAIL: parse-dump unexpected AST: $$dump" >&2; fail=1;; \
+	  esac; \
+	  [ $$fail -eq 0 ] || exit 1; \
+	fi
 ifneq ($(SHAKTI_TESTS),)
 	@for f in $(SHAKTI_TESTS); do \
 	  echo "Running $$f..."; case "$$f" in \
