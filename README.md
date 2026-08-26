@@ -8,6 +8,8 @@ each (`f@`), table joins (`,` / `union` / `outer`), load-time time-series indexe
 graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
 
+<img src="assets/shakti_showcase.gif" alt="Shakti gfx showcase: movie, stem, pyplot, pong" width="800">
+
 ## grammar
 
 - **Bind** with `:` — `x : 1`, `def f(n:2):`
