@@ -1,0 +1,66 @@
+# Catalog a recorded showcase MP4 as a queryable .iefs table.
+# Env (set by tools/record_showcase.sh):
+#   SHAKTI_IEFS_NAME SHAKTI_IEFS_VERSION SHAKTI_IEFS_RECORDED_AT
+#   SHAKTI_IEFS_DURATION SHAKTI_IEFS_WIDTH SHAKTI_IEFS_HEIGHT SHAKTI_IEFS_BYTES
+#   SHAKTI_IEFS_SHA256 SHAKTI_IEFS_MP4 SHAKTI_IEFS_BLOB SHAKTI_IEFS_INDEX
+import iefs
+import sql
+
+def require_env(name):
+    v : getenv(name)
+    if v = None:
+        raise "missing env " + name
+    if v = "":
+        raise "empty env " + name
+    return v
+
+name : require_env("SHAKTI_IEFS_NAME")
+ver : require_env("SHAKTI_IEFS_VERSION")
+recorded : require_env("SHAKTI_IEFS_RECORDED_AT")
+duration_s : float(require_env("SHAKTI_IEFS_DURATION"))
+width : int(require_env("SHAKTI_IEFS_WIDTH"))
+height : int(require_env("SHAKTI_IEFS_HEIGHT"))
+nbytes : int(require_env("SHAKTI_IEFS_BYTES"))
+sha : require_env("SHAKTI_IEFS_SHA256")
+mp4 : require_env("SHAKTI_IEFS_MP4")
+blob_path : require_env("SHAKTI_IEFS_BLOB")
+index_path : require_env("SHAKTI_IEFS_INDEX")
+
+cat : table(
+    name:[name],
+    version:[ver],
+    recorded_at:[recorded],
+    duration_s:[duration_s],
+    width:[width],
+    height:[height],
+    bytes:[nbytes],
+    sha256:[sha],
+    mp4:[mp4],
+    blob_iefs:[blob_path]
+)
+
+iefs.save(cat, index_path)
+loaded : iefs.load(index_path)
+if type(loaded) != "table":
+    raise "index is not a table"
+if loaded["name"][0] != name:
+    raise "index name mismatch"
+print("index rows:", len(loaded))
+print("index:", index_path)
+
+blob : iefs.load(blob_path)
+if type(blob) != "list[char]":
+    raise "blob type want list[char] got " + type(blob)
+if len(blob) != nbytes:
+    raise "blob length mismatch"
+mapped : iefs.map(blob_path)
+if type(mapped) != "list[char]":
+    raise "map type want list[char] got " + type(mapped)
+if len(mapped) != nbytes:
+    raise "map length mismatch"
+print("blob bytes:", len(mapped))
+
+q : select name, version, duration_s, width, height, bytes, sha256 from index_path
+print("sql:")
+print(q)
+print("iefs_index_demo ok")

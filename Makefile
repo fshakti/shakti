@@ -356,7 +356,17 @@ SHAKTI_TESTS := $(wildcard tests/*.ie)
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o
+ifneq ($(wildcard tools/iefs_pack_cvec.c),)
+$(BUILD)/iefs_pack_cvec: tools/iefs_pack_cvec.c | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ tools/iefs_pack_cvec.c
+
+iefs-pack-cvec: $(BUILD)/iefs_pack_cvec
+
+record-showcase: prod $(BUILD)/iefs_pack_cvec
+	bash tools/record_showcase.sh
+endif
+
+.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase
 
 test: shakti
 	@if [ -f qa/tests/assert_prec.sh ]; then \
