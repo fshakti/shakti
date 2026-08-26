@@ -453,7 +453,7 @@ V *bi_graph_path(V **a, int n) {
 
     NodePool pool = {0};
     int from_id = pool_add(&pool, from);
-    P(from_id < 0, v_err("graph_path: out of memory"))
+    P(from_id < 0, (pool_free(&pool), v_err("graph_path: out of memory")))
 
     int *parent = calloc((size_t)pool.cap, sizeof(int));
     int *depth = calloc((size_t)pool.cap, sizeof(int));
