@@ -133,7 +133,7 @@ For automation, set `SHAKTI_GFX_SKIP=1` where demos support it.
 | `iefs` | Durable `.iefs` | [doc](doc.md#iefs-module) |
 | `input` / `ipc` / `rest` / `talk` | IO / network / STT | see [doc.md](doc.md) |
 
-Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie).
+Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie). Timed gfx tour (movie / stem / pyplot / pong; auto-exits): [`examples/showcase.ie`](examples/showcase.ie). Record and index in `.iefs` with `make record-showcase` (artifacts under `.build/`).
 
 ```bash
 ./shakti examples/pong_test.ie

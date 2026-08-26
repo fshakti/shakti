@@ -43,7 +43,7 @@ shakti-standalone
 
 # local helper scripts / captures at repo root
 *_scan.sh
-record_*.sh
+/record_*.sh
 /*.mp4
 
 # local workspace notes (never publish)
@@ -57,7 +57,7 @@ local/
 qa/
 tests
 tests/
-scripts/
+/scripts/
 samples/
 benchmarks/
 internal-bench/
