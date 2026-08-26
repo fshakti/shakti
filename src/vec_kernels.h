@@ -9,6 +9,8 @@ double shakti_max_f64(const double *d, int64_t n);
 int64_t shakti_min_i64(const int64_t *d, int64_t n);
 int64_t shakti_max_i64(const int64_t *d, int64_t n);
 double shakti_dot_f64(const double *a, const double *b, int64_t n);
+double shakti_dot_f32(const float *a, const float *b, int64_t n);
+double shakti_sumsq_f32(const float *d, int64_t n);
 double shakti_dot_numeric(const int64_t *aj, const double *af, int a_fvec,
                           const int64_t *bj, const double *bf, int b_fvec,
                           int64_t n);

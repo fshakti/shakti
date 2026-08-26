@@ -17,9 +17,6 @@
 #include <string.h>
 #include <time.h>
 
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #endif
@@ -41,6 +38,8 @@
 #undef i0
 #undef g0
 
+#include "stem_stats.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -55,7 +54,7 @@
 /* Hann² constant-overlap-add gain for hop = n_fft/4 */
 #define STEM_COLA 1.5f
 
-/* Shakti-owned offline MLP checkpoint (not Isolde STEMML01). */
+/* Offline MLP checkpoint (SHAKST01). */
 #define STEM_ML_MAGIC "SHAKST01"
 #define STEM_ML_HIDDEN_DEFAULT 64
 #define STEM_ML_BATCH_MAX 256
@@ -200,9 +199,33 @@ static void stem_fft(float *re, float *im, int n, int inverse) {
     }
 }
 
+/* Odd-even transposition on 17 lanes (HPSS window). Branchless CAS. */
+static void stem_sort17(float a[17]) {
+    int p, i;
+    for (p = 0; p < 17; p++) {
+        int start = p & 1;
+        for (i = start; i < 16; i += 2) {
+            float x = a[i], y = a[i + 1];
+            a[i] = x < y ? x : y;
+            a[i + 1] = x < y ? y : x;
+        }
+    }
+}
+
+static float stem_median17_f32(const float *v) {
+    float a[17];
+    int i;
+    if (!v) return 0.f;
+    for (i = 0; i < 17; i++) a[i] = v[i];
+    stem_sort17(a);
+    return a[8];
+}
+
 static float stem_median_copy(float *tmp, int n) {
     /* insertion sort; n <= STEM_HPSS_LEN */
     int i, j;
+    if (!tmp || n <= 0) return 0.f;
+    if (n == STEM_HPSS_LEN) return stem_median17_f32(tmp);
     for (i = 1; i < n; i++) {
         float v = tmp[i];
         for (j = i; j > 0 && tmp[j - 1] > v; j--) tmp[j] = tmp[j - 1];
@@ -213,14 +236,8 @@ static float stem_median_copy(float *tmp, int n) {
 
 static void stem_mag_from_cplx(const float *re, const float *im, float *mag, int n) {
     int b = 0;
-#if defined(__AVX2__)
-    for (; b + 8 <= n; b += 8) {
-        __m256 r = _mm256_loadu_ps(re + b);
-        __m256 imv = _mm256_loadu_ps(im + b);
-        __m256 m = _mm256_sqrt_ps(_mm256_fmadd_ps(r, r, _mm256_mul_ps(imv, imv)));
-        _mm256_storeu_ps(mag + b, m);
-    }
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (!re || !im || !mag || n <= 0) return;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
     for (; b + 4 <= n; b += 4) {
         float32x4_t r = vld1q_f32(re + b);
         float32x4_t imv = vld1q_f32(im + b);
@@ -253,22 +270,7 @@ static int stem_ring_pop(float *buf, int *r, int *w, int *n, float *out) {
 }
 
 static void stem_ola_add(StemState *st, int stem, const float *frame) {
-    int i = 0;
-    float *dst = st->ola[stem];
-#if defined(__AVX2__)
-    for (; i + 8 <= STEM_NFFT; i += 8) {
-        __m256 a = _mm256_loadu_ps(dst + i);
-        __m256 b = _mm256_loadu_ps(frame + i);
-        _mm256_storeu_ps(dst + i, _mm256_add_ps(a, b));
-    }
-#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-    for (; i + 4 <= STEM_NFFT; i += 4) {
-        float32x4_t a = vld1q_f32(dst + i);
-        float32x4_t b = vld1q_f32(frame + i);
-        vst1q_f32(dst + i, vaddq_f32(a, b));
-    }
-#endif
-    for (; i < STEM_NFFT; i++) dst[i] += frame[i];
+    stem_ola_add_f32(st->ola[stem], frame, STEM_NFFT);
     if (st->ola_len < STEM_NFFT) st->ola_len = STEM_NFFT;
 }
 
@@ -294,13 +296,9 @@ static void stem_process_frame(StemState *st) {
     float synth[STEM_NFFT];
     float bass_hi, voc_lo, voc_hi;
     int i, b, h, center, s;
-    float eps = 1e-8f;
 
     /* window + FFT */
-    for (i = 0; i < STEM_NFFT; i++) {
-        st->re[i] = st->frame[i] * st->win[i];
-        st->im[i] = 0.f;
-    }
+    stem_window_mul_f32(st->frame, st->win, st->re, st->im, STEM_NFFT);
     stem_fft(st->re, st->im, STEM_NFFT, 0);
 
     stem_mag_from_cplx(st->re, st->im, mag, STEM_BINS);
@@ -339,31 +337,8 @@ static void stem_process_frame(StemState *st) {
     bass_hi = stem_hz_to_bin(250.f, st->sr);
     voc_lo = stem_hz_to_bin(200.f, st->sr);
     voc_hi = stem_hz_to_bin(4000.f, st->sr);
-
-    for (b = 0; b < STEM_BINS; b++) {
-        float H = harm[b], P = perc[b];
-        float total = H + P + eps;
-        float soft_h = H / total;
-        float soft_p = P / total;
-        float bf = (float)b;
-        float bass_w = 1.f / (1.f + expf(0.35f * (bf - bass_hi)));
-        float voc_w = 1.f / (1.f + expf(-0.25f * (bf - voc_lo)));
-        voc_w *= 1.f / (1.f + expf(0.25f * (bf - voc_hi)));
-
-        masks[STEM_DRUMS][b] = soft_p;
-        masks[STEM_BASS][b] = soft_h * bass_w;
-        masks[STEM_VOCALS][b] = soft_h * voc_w * (1.f - 0.7f * bass_w);
-        {
-            float used = masks[STEM_DRUMS][b] + masks[STEM_BASS][b] + masks[STEM_VOCALS][b];
-            masks[STEM_OTHER][b] = fmaxf(0.f, 1.f - used);
-        }
-        /* renormalize so masks sum ~1 */
-        {
-            float ssum = masks[STEM_DRUMS][b] + masks[STEM_BASS][b] + masks[STEM_VOCALS][b] +
-                         masks[STEM_OTHER][b] + eps;
-            for (s = 0; s < STEM_N; s++) masks[s][b] /= ssum;
-        }
-    }
+    stem_wiener_irm_f32(harm, perc, masks[STEM_DRUMS], masks[STEM_BASS], masks[STEM_VOCALS],
+                        masks[STEM_OTHER], STEM_BINS, bass_hi, voc_lo, voc_hi);
 
     /* ISTFT each stem using the HPSS center frame's phase */
     for (s = 0; s < STEM_N; s++) {
@@ -378,8 +353,7 @@ static void stem_process_frame(StemState *st) {
             }
         }
         stem_fft(st->re, st->im, STEM_NFFT, 1);
-        for (i = 0; i < STEM_NFFT; i++)
-            synth[i] = (st->re[i] * st->win[i]) / STEM_COLA;
+        stem_win_scale_f32(st->re, st->win, 1.f / STEM_COLA, synth, STEM_NFFT);
         stem_ola_add(st, s, synth);
     }
     stem_ola_emit_hop(st);
@@ -429,182 +403,322 @@ static V *stem_dict_from_outs(StemState *st, int n_out) {
     return d;
 }
 
-/* ---- WAV helpers (PCM16 mono/stereo LE; RIFF chunk walk) ---- */
-static int stem_read_u32le(FILE *fp, unsigned int *out) {
-    unsigned char b[4];
-    if (fread(b, 1, 4, fp) != 4) return -1;
-    *out = (unsigned int)(b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24));
+#define STEM_MEDIA_MAX_FILE (256u * 1024u * 1024u)
+#define STEM_MEDIA_MAX_SAMPLES (64u * 1000u * 1000u)
+
+static int stem_mul_size(size_t a, size_t b, size_t *out) {
+    if (__builtin_mul_overflow(a, b, out)) return -1;
     return 0;
 }
 
-static int stem_read_u16le(FILE *fp, unsigned short *out) {
-    unsigned char b[2];
-    if (fread(b, 1, 2, fp) != 2) return -1;
-    *out = (unsigned short)(b[0] | (b[1] << 8));
+static void *stem_malloc_nm(size_t n, size_t elem) {
+    size_t bytes;
+    if (n == 0) return malloc(1);
+    if (stem_mul_size(n, elem, &bytes) != 0) return NULL;
+    return malloc(bytes);
+}
+
+static void *stem_calloc_nm(size_t n, size_t elem) {
+    size_t bytes;
+    void *p;
+    if (n == 0) return calloc(1, 1);
+    if (stem_mul_size(n, elem, &bytes) != 0) return NULL;
+    p = malloc(bytes);
+    if (p) memset(p, 0, bytes);
+    return p;
+}
+
+static int stem_wav_nframes(unsigned int data_bytes, unsigned int frame_bytes, int *n_out) {
+    unsigned int nf;
+    if (frame_bytes == 0 || !n_out) return -1;
+    nf = data_bytes / frame_bytes;
+    if (nf > (unsigned)INT_MAX) return -1;
+    if ((size_t)nf > STEM_MEDIA_MAX_SAMPLES) return -1;
+    *n_out = (int)nf;
     return 0;
 }
 
+/* ---- WAV helpers (PCM16/24/32-int / IEEE f32 read; pcm16/pcm24/f32 write) ---- */
 static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out) {
     FILE *fp = fopen(path, "rb");
     unsigned char riff[12];
-    unsigned int chunk_sz = 0, sr = 0, data_bytes = 0;
+    unsigned int sr = 0, data_bytes = 0;
     unsigned short ch = 0, bps = 0, fmt = 0;
-    int have_fmt = 0, have_data = 0;
-    long data_pos = -1;
-    int nframes, i, j;
+    int nframes, i, j, have_fmt = 0, have_data = 0;
+    long data_pos = 0, file_end = 0;
     int16_t *pcm;
-
     *out = NULL;
     if (!fp) return -1;
     if (fread(riff, 1, 12, fp) != 12) { fclose(fp); return -1; }
     if (memcmp(riff, "RIFF", 4) || memcmp(riff + 8, "WAVE", 4)) { fclose(fp); return -1; }
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return -1; }
+    file_end = ftell(fp);
+    if (file_end < 0 || (unsigned long)file_end > STEM_MEDIA_MAX_FILE) { fclose(fp); return -1; }
+    if (file_end < 12) { fclose(fp); return -1; }
+    if (fseek(fp, 12, SEEK_SET) != 0) { fclose(fp); return -1; }
 
     while (!have_data) {
-        unsigned char idb[4];
-        if (fread(idb, 1, 4, fp) != 4) break;
-        if (stem_read_u32le(fp, &chunk_sz) != 0) break;
-
-        if (memcmp(idb, "fmt ", 4) == 0) {
-            unsigned short audio_fmt = 0, channels = 0, bits = 0, align = 0;
-            unsigned int rate = 0, byterate = 0;
-            if (chunk_sz < 16) { fclose(fp); return -1; }
-            if (stem_read_u16le(fp, &audio_fmt) ||
-                stem_read_u16le(fp, &channels) ||
-                stem_read_u32le(fp, &rate) ||
-                stem_read_u32le(fp, &byterate) ||
-                stem_read_u16le(fp, &align) ||
-                stem_read_u16le(fp, &bits)) {
-                fclose(fp); return -1;
-            }
-            (void)byterate;
-            (void)align;
-            if (chunk_sz > 16 && fseek(fp, (long)(chunk_sz - 16), SEEK_CUR) != 0) {
-                fclose(fp); return -1;
-            }
-            if (chunk_sz & 1u) fseek(fp, 1, SEEK_CUR);
-            fmt = audio_fmt;
-            ch = channels;
-            sr = rate;
-            bps = bits;
+        unsigned char chdr[8];
+        unsigned int csz;
+        long cpos;
+        long skip;
+        if (fread(chdr, 1, 8, fp) != 8) break;
+        csz = (unsigned int)(chdr[4] | (chdr[5] << 8) | (chdr[6] << 16) | (chdr[7] << 24));
+        cpos = ftell(fp);
+        if (cpos < 0 || cpos > file_end) { fclose(fp); return -1; }
+        skip = cpos + (long)((csz + 1u) & ~1u);
+        if (skip < cpos || skip > file_end) { fclose(fp); return -1; }
+        if (!memcmp(chdr, "fmt ", 4)) {
+            unsigned char fbuf[40];
+            size_t need;
+            memset(fbuf, 0, sizeof fbuf);
+            if (csz < 16u) { fclose(fp); return -1; }
+            need = csz < 40 ? csz : 40;
+            if (fread(fbuf, 1, need, fp) != need) { fclose(fp); return -1; }
+            fmt = (unsigned short)(fbuf[0] | (fbuf[1] << 8));
+            ch = (unsigned short)(fbuf[2] | (fbuf[3] << 8));
+            sr = (unsigned int)(fbuf[4] | (fbuf[5] << 8) | (fbuf[6] << 16) | (fbuf[7] << 24));
+            bps = (unsigned short)(fbuf[14] | (fbuf[15] << 8));
             have_fmt = 1;
-            continue;
-        }
-
-        if (memcmp(idb, "data", 4) == 0) {
-            data_pos = ftell(fp);
-            data_bytes = chunk_sz;
+        } else if (!memcmp(chdr, "data", 4)) {
+            data_pos = cpos;
+            data_bytes = csz;
+            if ((unsigned long)data_bytes > (unsigned long)(file_end - data_pos))
+                data_bytes = (unsigned int)(file_end - data_pos);
             have_data = 1;
             break;
         }
-
-        if (fseek(fp, (long)chunk_sz + (long)(chunk_sz & 1u), SEEK_CUR) != 0) {
-            fclose(fp); return -1;
-        }
+        if (fseek(fp, skip, SEEK_SET) != 0) break;
     }
-
-    if (!have_fmt || !have_data || data_pos < 0) { fclose(fp); return -1; }
-    if (fmt != 1 || (bps != 16 && bps != 32) || ch < 1 || ch > 2) { fclose(fp); return -1; }
-    /* Clamp declared data size to remaining file bytes and a 256 MiB sample cap. */
-    {
-        long file_end;
-        unsigned int avail, frame_bytes, max_bytes = 256u * 1024u * 1024u;
-        if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return -1; }
-        file_end = ftell(fp);
-        if (file_end < data_pos) { fclose(fp); return -1; }
-        avail = (unsigned int)((file_end - data_pos) > (long)UINT_MAX
-                               ? UINT_MAX : (file_end - data_pos));
-        if (data_bytes > avail) data_bytes = avail;
-        frame_bytes = (unsigned)ch * (bps / 8u);
-        if (frame_bytes == 0) { fclose(fp); return -1; }
-        if (data_bytes / frame_bytes > max_bytes / frame_bytes)
-            data_bytes = (max_bytes / frame_bytes) * frame_bytes;
+    if (!have_fmt || !have_data) { fclose(fp); return -1; }
+    /* PCM 16/24/32-bit integer or IEEE float 32-bit; mono/stereo */
+    if (!((fmt == 1 && (bps == 16 || bps == 24 || bps == 32)) ||
+          (fmt == 3 && bps == 32)) ||
+        ch < 1 || ch > 2) {
+        fclose(fp);
+        return -1;
     }
     if (fseek(fp, data_pos, SEEK_SET) != 0) { fclose(fp); return -1; }
 
     if (bps == 16) {
-        if (data_bytes / (2u * (unsigned)ch) > (unsigned)INT_MAX) { fclose(fp); return -1; }
-        nframes = (int)(data_bytes / (2u * (unsigned)ch));
-        if (nframes < 1) { fclose(fp); return -1; }
-        pcm = (int16_t *)malloc((size_t)nframes * (size_t)ch * sizeof(int16_t));
+        if (stem_wav_nframes(data_bytes, 2u * (unsigned)ch, &nframes) != 0) {
+            fclose(fp);
+            return -1;
+        }
+        {
+            size_t nch;
+            if (stem_mul_size((size_t)nframes, (size_t)ch, &nch) != 0) { fclose(fp); return -1; }
+            pcm = (int16_t *)stem_malloc_nm(nch, sizeof(int16_t));
+        }
         if (!pcm) { fclose(fp); return -1; }
         if ((int)fread(pcm, 2 * ch, (size_t)nframes, fp) != nframes) {
             free(pcm); fclose(fp); return -1;
         }
-        *out = (float *)malloc((size_t)nframes * sizeof(float));
+        *out = (float *)stem_malloc_nm((size_t)nframes, sizeof(float));
         if (!*out) { free(pcm); fclose(fp); return -1; }
         for (i = 0; i < nframes; i++) {
             float acc = 0.f;
-            for (j = 0; j < ch; j++) acc += (float)pcm[i * ch + j] / 32768.f;
+            for (j = 0; j < ch; j++) acc += (float)pcm[(size_t)i * (size_t)ch + (size_t)j] / 32768.f;
             (*out)[i] = acc / (float)ch;
         }
         free(pcm);
+    } else if (bps == 24) {
+        unsigned char *raw;
+        int bpf = 3 * ch;
+        if (stem_wav_nframes(data_bytes, (unsigned)bpf, &nframes) != 0) {
+            fclose(fp);
+            return -1;
+        }
+        raw = (unsigned char *)stem_malloc_nm((size_t)nframes, (size_t)bpf);
+        if (!raw) { fclose(fp); return -1; }
+        if ((int)fread(raw, (size_t)bpf, (size_t)nframes, fp) != nframes) {
+            free(raw); fclose(fp); return -1;
+        }
+        *out = (float *)stem_malloc_nm((size_t)nframes, sizeof(float));
+        if (!*out) { free(raw); fclose(fp); return -1; }
+        for (i = 0; i < nframes; i++) {
+            float acc = 0.f;
+            for (j = 0; j < ch; j++) {
+                size_t o = (size_t)i * (size_t)bpf + (size_t)j * 3u;
+                int32_t s = (int32_t)(raw[o] | (raw[o + 1] << 8) | (raw[o + 2] << 16));
+                if (s & 0x800000) s |= ~0xFFFFFF;
+                acc += (float)s / 8388608.f;
+            }
+            (*out)[i] = acc / (float)ch;
+        }
+        free(raw);
+    } else if (fmt == 1 && bps == 32) {
+        int32_t *ipcm;
+        if (stem_wav_nframes(data_bytes, 4u * (unsigned)ch, &nframes) != 0) {
+            fclose(fp);
+            return -1;
+        }
+        {
+            size_t nch;
+            if (stem_mul_size((size_t)nframes, (size_t)ch, &nch) != 0) { fclose(fp); return -1; }
+            ipcm = (int32_t *)stem_malloc_nm(nch, sizeof(int32_t));
+        }
+        if (!ipcm) { fclose(fp); return -1; }
+        if ((int)fread(ipcm, 4 * ch, (size_t)nframes, fp) != nframes) {
+            free(ipcm); fclose(fp); return -1;
+        }
+        *out = (float *)stem_malloc_nm((size_t)nframes, sizeof(float));
+        if (!*out) { free(ipcm); fclose(fp); return -1; }
+        for (i = 0; i < nframes; i++) {
+            float acc = 0.f;
+            for (j = 0; j < ch; j++)
+                acc += (float)ipcm[(size_t)i * (size_t)ch + (size_t)j] / 2147483648.f;
+            (*out)[i] = acc / (float)ch;
+        }
+        free(ipcm);
     } else {
         float *fpcm;
-        if (data_bytes / (4u * (unsigned)ch) > (unsigned)INT_MAX) { fclose(fp); return -1; }
-        nframes = (int)(data_bytes / (4u * (unsigned)ch));
-        if (nframes < 1) { fclose(fp); return -1; }
-        fpcm = (float *)malloc((size_t)nframes * (size_t)ch * sizeof(float));
+        if (stem_wav_nframes(data_bytes, 4u * (unsigned)ch, &nframes) != 0) {
+            fclose(fp);
+            return -1;
+        }
+        {
+            size_t nch;
+            if (stem_mul_size((size_t)nframes, (size_t)ch, &nch) != 0) { fclose(fp); return -1; }
+            fpcm = (float *)stem_malloc_nm(nch, sizeof(float));
+        }
         if (!fpcm) { fclose(fp); return -1; }
         if ((int)fread(fpcm, 4 * ch, (size_t)nframes, fp) != nframes) {
             free(fpcm); fclose(fp); return -1;
         }
-        *out = (float *)malloc((size_t)nframes * sizeof(float));
+        *out = (float *)stem_malloc_nm((size_t)nframes, sizeof(float));
         if (!*out) { free(fpcm); fclose(fp); return -1; }
         for (i = 0; i < nframes; i++) {
             float acc = 0.f;
-            for (j = 0; j < ch; j++) acc += fpcm[i * ch + j];
+            for (j = 0; j < ch; j++) acc += fpcm[(size_t)i * (size_t)ch + (size_t)j];
             (*out)[i] = acc / (float)ch;
         }
         free(fpcm);
     }
-
     fclose(fp);
     *n_out = nframes;
     *sr_out = (int)sr;
     return 0;
 }
 
-static int stem_write_wav(const char *path, const float *x, int n, int sr) {
-    FILE *fp = fopen(path, "wb");
-    unsigned int data_bytes = (unsigned int)n * 2u;
+enum { STEM_WAV_PCM16 = 0, STEM_WAV_PCM24 = 1, STEM_WAV_F32 = 2 };
+
+static int stem_wav_parse_fmt(const char *s) {
+    if (!s || !s[0]) return STEM_WAV_PCM16;
+    if (!strcmp(s, "pcm16") || !strcmp(s, "16")) return STEM_WAV_PCM16;
+    if (!strcmp(s, "pcm24") || !strcmp(s, "24")) return STEM_WAV_PCM24;
+    if (!strcmp(s, "f32") || !strcmp(s, "float") || !strcmp(s, "float32")) return STEM_WAV_F32;
+    return -1;
+}
+
+static const char *stem_wav_fmt_name(int fmt) {
+    if (fmt == STEM_WAV_PCM24) return "pcm24";
+    if (fmt == STEM_WAV_F32) return "f32";
+    return "pcm16";
+}
+
+static void stem_u16le(unsigned char *p, unsigned int v) {
+    p[0] = (unsigned char)(v & 255u);
+    p[1] = (unsigned char)((v >> 8) & 255u);
+}
+
+static void stem_u32le(unsigned char *p, unsigned int v) {
+    p[0] = (unsigned char)(v & 255u);
+    p[1] = (unsigned char)((v >> 8) & 255u);
+    p[2] = (unsigned char)((v >> 16) & 255u);
+    p[3] = (unsigned char)((v >> 24) & 255u);
+}
+
+static int stem_write_wav(const char *path, const float *x, int n, int sr, int wavfmt) {
+    FILE *fp;
     unsigned char hdr[44];
+    unsigned int bps, align, br, data_bytes, riff_payload;
+    unsigned short audio_fmt;
     int i;
+    if (!path || n < 0 || sr <= 0) return -1;
+    if (n > 0 && !x) return -1;
+    if ((size_t)n > STEM_MEDIA_MAX_SAMPLES) return -1;
+    if (wavfmt != STEM_WAV_PCM16 && wavfmt != STEM_WAV_PCM24 && wavfmt != STEM_WAV_F32)
+        wavfmt = STEM_WAV_PCM16;
+    if (wavfmt == STEM_WAV_F32) {
+        audio_fmt = 3;
+        bps = 32;
+        align = 4;
+    } else if (wavfmt == STEM_WAV_PCM24) {
+        audio_fmt = 1;
+        bps = 24;
+        align = 3;
+    } else {
+        audio_fmt = 1;
+        bps = 16;
+        align = 2;
+    }
+    if (align == 0 || (size_t)n > (size_t)UINT_MAX / align) return -1;
+    if ((unsigned)sr > UINT_MAX / align) return -1;
+    data_bytes = (unsigned int)n * align;
+    br = (unsigned int)sr * align;
+    fp = fopen(path, "wb");
     if (!fp) return -1;
-    if (n < 0) { fclose(fp); return -1; }
+    riff_payload = 36u + data_bytes + (data_bytes & 1u);
     memset(hdr, 0, 44);
     memcpy(hdr, "RIFF", 4);
-    {
-        unsigned int chunk = 36u + data_bytes;
-        hdr[4] = chunk & 255; hdr[5] = (chunk >> 8) & 255;
-        hdr[6] = (chunk >> 16) & 255; hdr[7] = (chunk >> 24) & 255;
-    }
+    stem_u32le(hdr + 4, riff_payload);
     memcpy(hdr + 8, "WAVE", 4);
     memcpy(hdr + 12, "fmt ", 4);
-    hdr[16] = 16;
-    hdr[20] = 1; /* PCM */
-    hdr[22] = 1; /* mono */
-    hdr[24] = sr & 255; hdr[25] = (sr >> 8) & 255;
-    hdr[26] = (sr >> 16) & 255; hdr[27] = (sr >> 24) & 255;
-    {
-        unsigned int br = (unsigned int)sr * 2u;
-        hdr[28] = br & 255; hdr[29] = (br >> 8) & 255;
-        hdr[30] = (br >> 16) & 255; hdr[31] = (br >> 24) & 255;
-    }
-    hdr[32] = 2; hdr[34] = 16;
+    stem_u32le(hdr + 16, 16);
+    stem_u16le(hdr + 20, audio_fmt);
+    stem_u16le(hdr + 22, 1);
+    stem_u32le(hdr + 24, (unsigned int)sr);
+    stem_u32le(hdr + 28, br);
+    stem_u16le(hdr + 32, (unsigned short)align);
+    stem_u16le(hdr + 34, (unsigned short)bps);
     memcpy(hdr + 36, "data", 4);
-    hdr[40] = data_bytes & 255; hdr[41] = (data_bytes >> 8) & 255;
-    hdr[42] = (data_bytes >> 16) & 255; hdr[43] = (data_bytes >> 24) & 255;
-    if (fwrite(hdr, 1, 44, fp) != 44) { fclose(fp); return -1; }
-    for (i = 0; i < n; i++) {
-        float v = x[i];
-        int s;
-        unsigned char le[2];
-        if (v > 1.f) v = 1.f;
-        if (v < -1.f) v = -1.f;
-        s = (int)lrintf(v * 32767.f);
-        le[0] = (unsigned char)(s & 255);
-        le[1] = (unsigned char)((s >> 8) & 255);
-        if (fwrite(le, 1, 2, fp) != 2) { fclose(fp); return -1; }
+    stem_u32le(hdr + 40, data_bytes);
+    if (fwrite(hdr, 1, 44, fp) != 44) {
+        fclose(fp);
+        return -1;
+    }
+    if (wavfmt == STEM_WAV_F32) {
+        if (n > 0 && fwrite(x, 4, (size_t)n, fp) != (size_t)n) {
+            fclose(fp);
+            return -1;
+        }
+    } else if (wavfmt == STEM_WAV_PCM24) {
+        for (i = 0; i < n; i++) {
+            float v = x[i];
+            int s;
+            if (v > 1.f) v = 1.f;
+            if (v < -1.f) v = -1.f;
+            s = (int)lrintf(v * 8388607.f);
+            if (s > 8388607) s = 8388607;
+            if (s < -8388608) s = -8388608;
+            if (fputc(s & 255, fp) == EOF ||
+                fputc((s >> 8) & 255, fp) == EOF ||
+                fputc((s >> 16) & 255, fp) == EOF) {
+                fclose(fp);
+                return -1;
+            }
+        }
+    } else {
+        for (i = 0; i < n; i++) {
+            float v = x[i];
+            int s;
+            if (v > 1.f) v = 1.f;
+            if (v < -1.f) v = -1.f;
+            s = (int)lrintf(v * 32767.f);
+            if (fputc(s & 255, fp) == EOF || fputc((s >> 8) & 255, fp) == EOF) {
+                fclose(fp);
+                return -1;
+            }
+        }
+    }
+    if ((data_bytes & 1u) && fputc(0, fp) == EOF) {
+        fclose(fp);
+        return -1;
+    }
+    if (fflush(fp) != 0 || ferror(fp)) {
+        fclose(fp);
+        return -1;
     }
     if (fclose(fp) != 0) return -1;
     return 0;
@@ -840,16 +954,21 @@ V *bi_stem_separate_file(V **a, int n) {
     int acc_n = 0, acc_cap = 0;
     V *result, *argv[2], *open_rc;
     int was_open = g_stem.open;
+    int wavfmt = STEM_WAV_PCM16;
 
-    if (n < 1 || a[0]->t != T_STR) return v_err("stem_separate_file(path, [outdir])");
+    if (n < 1 || a[0]->t != T_STR) return v_err("stem_separate_file(path, [outdir], [wavfmt])");
     path = a[0]->s;
     if (n >= 2) {
         if (a[1]->t != T_STR) return v_err("stem_separate_file: outdir must be string");
         outdir = a[1]->s;
         if (outdir && !outdir[0]) outdir = NULL;
     }
+    if (n >= 3 && a[2]->t == T_STR && a[2]->s[0]) {
+        wavfmt = stem_wav_parse_fmt(a[2]->s);
+        if (wavfmt < 0) return v_err("stem_separate_file: wavfmt must be pcm16, pcm24, or f32");
+    }
     if (stem_read_wav(path, &mono, &n_samp, &sr) != 0)
-        return v_err("stem_separate_file: failed to read wav (PCM16/F32)");
+        return v_err("stem_separate_file: failed to read wav (PCM16/24/32-int or IEEE f32)");
     if (n_samp <= 0) {
         free(mono);
         return v_err("stem_separate_file: empty wav");
@@ -963,8 +1082,15 @@ V *bi_stem_separate_file(V **a, int n) {
 
     if (outdir) {
         for (s = 0; s < STEM_N; s++) {
+            int wrc;
             snprintf(outpath, sizeof outpath, "%s/%s.wav", outdir, names[s]);
-            stem_write_wav(outpath, acc[s] + delay, out_len, sr);
+            wrc = stem_write_wav(outpath, acc[s] + delay, out_len, sr, wavfmt);
+            if (wrc != 0) {
+                for (i = 0; i < STEM_N; i++) free(acc[i]);
+                free(mono);
+                bi_stem_close(NULL, 0);
+                return v_err("stem_separate_file: wav write failed");
+            }
         }
     }
 
@@ -980,34 +1106,13 @@ V *bi_stem_separate_file(V **a, int n) {
     v_dict_put(result, "n", v_int(out_len));
     v_dict_put(result, "latency_ms", v_float(stem_latency_ms_calc(sr)));
     v_dict_put(result, "latency_samples", v_int(delay));
+    v_dict_put(result, "wavfmt", v_str(stem_wav_fmt_name(wavfmt)));
     free(mono);
     bi_stem_close(NULL, 0);
     return result;
 }
 
 /* ---- SHAKST01 offline spectrogram MLP (CPU) ---- */
-
-static int stem_mul_size(size_t a, size_t b, size_t *out) {
-    if (__builtin_mul_overflow(a, b, out)) return -1;
-    return 0;
-}
-
-static void *stem_malloc_nm(size_t n, size_t elem) {
-    size_t bytes;
-    if (n == 0) return malloc(1);
-    if (stem_mul_size(n, elem, &bytes) != 0) return NULL;
-    return malloc(bytes);
-}
-
-static void *stem_calloc_nm(size_t n, size_t elem) {
-    size_t bytes;
-    void *p;
-    if (n == 0) return calloc(1, 1);
-    if (stem_mul_size(n, elem, &bytes) != 0) return NULL;
-    p = malloc(bytes);
-    if (p) memset(p, 0, bytes);
-    return p;
-}
 
 static void stem_ml_free(void) {
     free(g_ml.W1); free(g_ml.b1);
@@ -1381,20 +1486,25 @@ V *bi_stem_separate_file_ml(V **a, int n) {
     char outpath[1024];
     static const char *names[STEM_N] = {"drums", "bass", "vocals", "other"};
     V *result;
+    int wavfmt = STEM_WAV_PCM16;
 
     for (s = 0; s < STEM_N; s++) acc[s] = NULL;
 
     if (!g_ml.loaded)
         return v_err("stem_separate_file_ml: call stem_load_ml(path) first");
-    if (n < 1 || a[0]->t != T_STR) return v_err("stem_separate_file_ml(path, [outdir])");
+    if (n < 1 || a[0]->t != T_STR) return v_err("stem_separate_file_ml(path, [outdir], [wavfmt])");
     path = a[0]->s;
     if (n >= 2) {
         if (a[1]->t != T_STR) return v_err("stem_separate_file_ml: outdir must be string");
         outdir = a[1]->s;
         if (outdir && !outdir[0]) outdir = NULL;
     }
+    if (n >= 3 && a[2]->t == T_STR && a[2]->s[0]) {
+        wavfmt = stem_wav_parse_fmt(a[2]->s);
+        if (wavfmt < 0) return v_err("stem_separate_file_ml: wavfmt must be pcm16, pcm24, or f32");
+    }
     if (stem_read_wav(path, &mono, &n_samp, &sr) != 0)
-        return v_err("stem_separate_file_ml: failed to read wav");
+        return v_err("stem_separate_file_ml: failed to read wav (PCM16/24/32-int or IEEE f32)");
     if (n_samp < STEM_NFFT) {
         free(mono);
         return v_err("stem_separate_file_ml: audio too short");
@@ -1511,8 +1621,14 @@ V *bi_stem_separate_file_ml(V **a, int n) {
 
     if (outdir) {
         for (s = 0; s < STEM_N; s++) {
+            int wrc;
             snprintf(outpath, sizeof outpath, "%s/%s_ml.wav", outdir, names[s]);
-            stem_write_wav(outpath, acc[s], n_out, sr);
+            wrc = stem_write_wav(outpath, acc[s], n_out, sr, wavfmt);
+            if (wrc != 0) {
+                for (i = 0; i < STEM_N; i++) free(acc[i]);
+                free(re_s); free(im_s); free(mag_s); free(mono);
+                return v_err("stem_separate_file_ml: wav write failed");
+            }
         }
     }
 
@@ -1530,6 +1646,128 @@ V *bi_stem_separate_file_ml(V **a, int n) {
     v_dict_put(result, "backend", v_str("ml"));
     v_dict_put(result, "device_gpu", v_bool(0));
     v_dict_put(result, "nhidden", v_int(g_ml.nhidden));
+    v_dict_put(result, "wavfmt", v_str(stem_wav_fmt_name(wavfmt)));
     free(re_s); free(im_s); free(mag_s); free(mono);
     return result;
+}
+
+V *bi_stem_si_sdr(V **a, int n) {
+    double *pe = NULL, *pr = NULL;
+    int64_t ne = 0, nr = 0, i;
+    int fe, fr;
+    float *est = NULL, *ref = NULL;
+    float sdr;
+    if (n < 2) return v_err("stem_si_sdr(est, ref)");
+    fe = stem_as_mono(a[0], &pe, &ne);
+    if (fe < 0) return v_err("stem_si_sdr: est must be fvec or list");
+    fr = stem_as_mono(a[1], &pr, &nr);
+    if (fr < 0) {
+        if (fe == 1) free(pe);
+        return v_err("stem_si_sdr: ref must be fvec or list");
+    }
+    if (ne != nr) {
+        if (fe == 1) free(pe);
+        if (fr == 1) free(pr);
+        return v_err("stem_si_sdr: length mismatch");
+    }
+    if (ne == 0) {
+        if (fe == 1) free(pe);
+        if (fr == 1) free(pr);
+        return v_float(0.0);
+    }
+    if (ne > (int64_t)STEM_MEDIA_MAX_SAMPLES) {
+        if (fe == 1) free(pe);
+        if (fr == 1) free(pr);
+        return v_err("stem_si_sdr: too long");
+    }
+    est = (float *)stem_malloc_nm((size_t)ne, sizeof(float));
+    ref = (float *)stem_malloc_nm((size_t)ne, sizeof(float));
+    if (!est || !ref) {
+        free(est);
+        free(ref);
+        if (fe == 1) free(pe);
+        if (fr == 1) free(pr);
+        return v_err("stem_si_sdr: oom");
+    }
+    for (i = 0; i < ne; i++) {
+        est[i] = (float)pe[i];
+        ref[i] = (float)pr[i];
+    }
+    sdr = stem_si_sdr_f32(est, ref, (int)ne);
+    free(est);
+    free(ref);
+    if (fe == 1) free(pe);
+    if (fr == 1) free(pr);
+    return v_float((double)sdr);
+}
+
+V *bi_stem_write_wav(V **a, int n) {
+    const char *path;
+    const char *fmt = "pcm16";
+    double *ps = NULL;
+    int64_t ns = 0, i;
+    int own, sr = 44100, wavfmt, rc;
+    float *buf;
+    if (n < 2 || a[0]->t != T_STR) return v_err("stem_write_wav(path, samples, [sr], [fmt])");
+    path = a[0]->s;
+    own = stem_as_mono(a[1], &ps, &ns);
+    if (own < 0) return v_err("stem_write_wav: samples must be fvec or list");
+    if (n >= 3) {
+        if (a[2]->t == T_INT) sr = (int)a[2]->j;
+        else if (a[2]->t == T_FLOAT) sr = (int)a[2]->f;
+        else {
+            if (own == 1) free(ps);
+            return v_err("stem_write_wav: sr must be numeric");
+        }
+    }
+    if (n >= 4) {
+        if (a[3]->t != T_STR) {
+            if (own == 1) free(ps);
+            return v_err("stem_write_wav: fmt must be string");
+        }
+        fmt = a[3]->s;
+    }
+    wavfmt = stem_wav_parse_fmt(fmt);
+    if (wavfmt < 0) {
+        if (own == 1) free(ps);
+        return v_err("stem_write_wav: fmt must be pcm16, pcm24, or f32");
+    }
+    if (sr < 8000) sr = 8000;
+    if (sr > 192000) sr = 192000;
+    if (ns > (int64_t)STEM_MEDIA_MAX_SAMPLES) {
+        if (own == 1) free(ps);
+        return v_err("stem_write_wav: too long");
+    }
+    buf = NULL;
+    if (ns > 0) {
+        buf = (float *)stem_malloc_nm((size_t)ns, sizeof(float));
+        if (!buf) {
+            if (own == 1) free(ps);
+            return v_err("stem_write_wav: oom");
+        }
+        for (i = 0; i < ns; i++) buf[i] = (float)ps[i];
+    }
+    rc = stem_write_wav(path, buf, (int)ns, sr, wavfmt);
+    free(buf);
+    if (own == 1) free(ps);
+    if (rc != 0) return v_err("stem_write_wav: write failed");
+    return v_nil();
+}
+
+V *bi_stem_read_wav(V **a, int n) {
+    float *mono = NULL;
+    int n_samp = 0, sr = 0, i;
+    V *d, *fv;
+    if (n < 1 || a[0]->t != T_STR) return v_err("stem_read_wav(path)");
+    if (stem_read_wav(a[0]->s, &mono, &n_samp, &sr) != 0)
+        return v_err("stem_read_wav: failed to read wav (PCM16/24/32-int or IEEE f32)");
+    fv = v_fvec(n_samp);
+    for (i = 0; i < n_samp; i++) fv->F[i] = (double)mono[i];
+    free(mono);
+    d = v_dict_empty();
+    v_dict_set(d, "samples", fv);
+    v_free(fv);
+    v_dict_put(d, "sr", v_int(sr));
+    v_dict_put(d, "n", v_int(n_samp));
+    return d;
 }

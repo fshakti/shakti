@@ -1,4 +1,4 @@
-/* vec_kernels.c — SIMD/OpenMP vector reductions (dot, sum). Ported from isolde k.c. */
+/* vec_kernels.c — SIMD/OpenMP vector reductions (dot, sum). */
 #include "vec_kernels.h"
 #include "a.h"
 #include <math.h>
@@ -356,4 +356,17 @@ void shakti_asof_bin_i64(const int64_t *eq, const int64_t *tm, int64_t n,
         int64_t rel = shakti_bin_i64(tm + start, end - start, qtm);
         out[j] = (rel < 0) ? -1 : (start + rel);
     }
+}
+
+double shakti_dot_f32(const float *a, const float *b, int64_t n) {
+    int64_t i;
+    double r = 0.0;
+    if (n <= 0 || !a || !b) return 0.0;
+    for (i = 0; i < n; i++) r += (double)a[i] * (double)b[i];
+    return r;
+}
+
+double shakti_sumsq_f32(const float *d, int64_t n) {
+    if (n <= 0 || !d) return 0.0;
+    return shakti_dot_f32(d, d, n);
 }

@@ -269,8 +269,11 @@ $(BUILD)/dsp.o: src/dsp.c src/dsp.h src/shakti.h src/a.h $(BUILD)/shakti_version
 endif
 
 ifeq ($(SHAKTI_STEM),1)
-$(BUILD)/stem.o: src/stem.c src/stem.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+$(BUILD)/stem.o: src/stem.c src/stem.h src/stem_stats.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/stem.c
+
+$(BUILD)/stem_stats.o: src/stem_stats.c src/stem_stats.h src/vec_kernels.h | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ src/stem_stats.c
 endif
 
 ifeq ($(SHAKTI_PDF),1)
@@ -317,7 +320,7 @@ GFX_MAC_OBJ := $(if $(and $(filter Darwin,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX)))
 GFX_X11_OBJ := $(if $(and $(filter Linux,$(UNAME_S)),$(filter 1,$(SHAKTI_GFX))),$(BUILD)/gfx_x11.o)
 SONICPI_OBJ := $(if $(filter 1,$(SHAKTI_SONICPI)),$(BUILD)/sonicpi.o)
 DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),$(BUILD)/dsp.o)
-STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),$(BUILD)/stem.o)
+STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),$(BUILD)/stem.o $(BUILD)/stem_stats.o)
 PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),$(BUILD)/pdf.o)
 MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),$(BUILD)/midi.o)
 IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),$(BUILD)/iefs_io.o $(BUILD)/iefs_format.o $(BUILD)/iefs_map.o)
@@ -379,6 +382,28 @@ test: shakti
 	    *'(call `assert (n8 '*) echo "ok: parse-dump assert 1 = 2 is a call of a comparison";; \
 	    *) echo "FAIL: parse-dump unexpected AST: $$dump" >&2; fail=1;; \
 	  esac; \
+	  [ $$fail -eq 0 ] || exit 1; \
+	fi
+	@if [ -f qa/tests/stem_wav.sh ]; then \
+	  SHAKTI=$(SHAKTI) bash qa/tests/stem_wav.sh || exit 1; \
+	elif [ -f tests/stem_wav.sh ]; then \
+	  SHAKTI=$(SHAKTI) bash tests/stem_wav.sh || exit 1; \
+	else \
+	  export SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR); \
+	  fail=0; \
+	  src=`printf '%s\n' 'import stem' 'ident : stem.si_sdr([1.0, 0.0, -1.0], [1.0, 0.0, -1.0])' 'assert(ident > 40.0)'`; \
+	  set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
+	  if [ $$rc -ne 0 ]; then echo "FAIL: stem.si_sdr identity" >&2; echo "$$out" >&2; fail=1; else echo "ok: stem.si_sdr identity"; fi; \
+	  src=`printf '%s\n' 'import stem' 'src : [0.0, 0.5, -0.5, 0.25]' 'stem.write_wav("/tmp/shakti_stem_canary_f32.wav", src, 44100, "f32")' 'rf : stem.read_wav("/tmp/shakti_stem_canary_f32.wav")' 'assert(rf["n"] = 4)' 'd : rf["samples"][1] - 0.5' 'if d < 0:' '    d : -d' 'assert(d <= 1e-6)'`; \
+	  set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
+	  if [ $$rc -ne 0 ]; then echo "FAIL: stem f32 wav round-trip" >&2; echo "$$out" >&2; fail=1; else echo "ok: stem f32 wav round-trip"; fi; \
+	  if [ -e /dev/full ]; then \
+	    src=`printf '%s\n' 'import stem' 'print(stem.write_wav("/dev/full", [0.1, -0.1, 0.2], 44100, "pcm16"))'`; \
+	    set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
+	    if [ $$rc -ne 0 ]; then echo "FAIL: stem write /dev/full" >&2; echo "$$out" >&2; fail=1; \
+	    elif ! printf '%s\n' "$$out" | grep -q Error; then echo "FAIL: stem write /dev/full — expected Error" >&2; echo "$$out" >&2; fail=1; \
+	    else echo "ok: stem write /dev/full fails"; fi; \
+	  fi; \
 	  [ $$fail -eq 0 ] || exit 1; \
 	fi
 ifneq ($(SHAKTI_TESTS),)

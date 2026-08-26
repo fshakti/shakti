@@ -2,7 +2,7 @@
 
 [Discord](https://discord.gg/PkKwUk9Tf) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
 
-Small interpreted language (0.13.0) with vectors, matrices, tables, decorators,
+Small interpreted language (0.13.1) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), load-time time-series indexes
 (weighted avg / range max / windowed avg / keyed stats / asof), and optional SQL,
 graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
@@ -50,7 +50,7 @@ Default `make` / `make prod` enables link-time optimization (`-flto` /
 `src/eval.c`, …) still inline across translation units.
 `make clean` removes `.build/` and the `./shakti` symlink.
 The linked binary lives at `.build/shakti`; `make build` also creates `./shakti` →
-`.build/shakti` so a workspace directory on `PATH` finds `shakti` (same idea as Isolde).
+`.build/shakti` so a workspace directory on `PATH` finds `shakti`.
 
 Optional build flags (default on unless noted): `SHAKTI_GFX`, `SHAKTI_SYNTH`, `SHAKTI_DSP`, `SHAKTI_STEM`, `SHAKTI_SONICPI`, `SHAKTI_PDF`, `SHAKTI_MIDI`, `SHAKTI_IEFS`, `SHAKTI_IPC`, `SHAKTI_TALK` (macOS default on).
 
