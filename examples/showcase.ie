@@ -1,0 +1,199 @@
+# Timed gfx tour — movie, stem bars, pyplot, pong dual-AI. Auto-exits.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/showcase.ie
+#   SHAKTI_SHOWCASE_SECS=5 ./shakti examples/showcase.ie
+# Headless: SHAKTI_GFX_SKIP=1 skips the window (exit 0).
+import gfx
+import stem
+import pyplot
+import pong_core
+import pong_skins
+import pong_gfx_render
+
+TWOPI : 6.283185307179586
+
+def pkg_ver():
+    v : getenv("SHAKTI_SHOWCASE_VERSION")
+    if v != None:
+        return v
+    raw : read("src/VERSION")
+    if type(raw) = "str":
+        n : len(raw)
+        if n > 0:
+            if raw[n - 1] = "\n":
+                raw : raw[0:n - 1]
+        if len(raw) > 0:
+            return raw
+    return "0.13.1"
+
+def scene_secs():
+    s : getenv("SHAKTI_SHOWCASE_SECS")
+    if s = None:
+        return 5.0
+    n : float(s)
+    if n < 1.0:
+        return 1.0
+    return n
+
+def going(deadline):
+    if not gfx.alive():
+        return 0
+    if clock() >= deadline:
+        return 0
+    return 1
+
+def left_ai(st):
+    target : pong_core.PYMAX / 2.0
+    if st["bvx"] < 0.0:
+        if st["bx"] < pong_core.W * 0.5:
+            target : st["bpy"] - pong_core.PH / 2.0
+    c : st["ly"] + (pong_core.PH / 2.0)
+    aim : target + (pong_core.PH / 2.0)
+    dead : 0.85
+    if aim < c - dead:
+        pong_core.move_left(st, 0.0 - pong_core.AISPD)
+    if aim > c + dead:
+        pong_core.move_left(st, pong_core.AISPD)
+
+def tone_block(pos, n, sr):
+    blk : []
+    i : 0
+    while i < n:
+        t : (pos + i) / sr
+        x : 0.22 * sin(TWOPI * 110.0 * t)
+        x : x + 0.18 * sin(TWOPI * 440.0 * t)
+        x : x + 0.08 * sin(TWOPI * 2000.0 * t)
+        if (pos + i) % 4410 < 40:
+            x : x + 0.35
+        append(blk, x)
+        i : i + 1
+    return blk
+
+def stem_energy(s):
+    n : len(s)
+    e : 0.0
+    j : 0
+    while j < n:
+        v : s[j]
+        e : e + v * v
+        j : j + 1
+    if n <= 0:
+        return 0.0
+    return sqrt(e / float(n))
+
+def scene_movie(ver, deadline):
+    t0 : clock()
+    banner : "Shakti " + ver
+    while going(deadline):
+        t : clock() - t0
+        cx : 480 + int(220.0 * cos(t * 1.3))
+        cy : 270 + int(140.0 * sin(t * 1.3))
+        bx : 80 + int((t * 160.0) % 720.0)
+        bounce : abs(((t * 110.0) % 360.0) - 180.0)
+        by_pos : 80 + int(bounce)
+        sx : 60 + int((t * 140.0) % 840.0)
+        sy : 460 - int(abs(((t * 80.0) % 200.0) - 100.0))
+        bar_x : 40 + int((t * 220.0) % 840.0)
+        gfx.clear(0x0a0a12)
+        gfx.fill_rect(40, 40, 880, 8, 0x1a1a2e)
+        gfx.fill_rect(bar_x, 36, 48, 16, 0x4488ff)
+        gfx.fill_rect(bx, by_pos, 56, 56, 0xff6644)
+        gfx.fill_circle(cx, cy, 44, 0x44dd88)
+        gfx.line(sx, sy, cx, cy, 0xffffff)
+        gfx.fill_circle(sx, sy, 14, 0xffcc00)
+        gfx.text(24, 12, banner, 0xe8e8f0, 3)
+        gfx.text(24, 500, "gfx movie", 0x8899aa, 2)
+        if gfx.click_pending():
+            gfx.fill_circle(gfx.click_x(), gfx.click_y(), 22, 0xffffff)
+            gfx.consume_click()
+        gfx.tick()
+
+def scene_stem(deadline):
+    names : ["drums", "bass", "vocals", "other"]
+    colors : [0xff6644, 0x4488ff, 0x44dd88, 0xffcc00]
+    energy : {"drums": 0.0, "bass": 0.0, "vocals": 0.0, "other": 0.0}
+    sr : 44100.0
+    block_sz : 256
+    pos : 0
+    stem.open(44100, 256)
+    while going(deadline):
+        blk : tone_block(pos, block_sz, sr)
+        out : stem.process(blk)
+        pos : pos + block_sz
+        gfx.clear(0x0a0a12)
+        gfx.text(24, 12, "stem  4-stem STFT / HPSS", 0xe8e8f0, 2)
+        i : 0
+        while i < 4:
+            name : names[i]
+            e : 0.85 * energy[name] + 0.15 * stem_energy(out[name])
+            energy[name] : e
+            h : int(e * 900.0)
+            if h > 360:
+                h : 360
+            x : 80 + i * 220
+            y : 460 - h
+            gfx.fill_rect(x, 100, 160, 360, 0x12121c)
+            if h > 0:
+                gfx.fill_rect(x, y, 160, h, colors[i])
+            gfx.text(x + 8, 480, name, 0xe8e8f0, 2)
+            i : i + 1
+        gfx.tick()
+    stem.close()
+
+def scene_pyplot(deadline):
+    pyplot.clf()
+    pyplot.plot([0, 1, 2, 3, 4, 5], [0, 1, 4, 9, 16, 25], color:"C0", label:"sq")
+    pyplot.scatter([0, 1, 2, 3, 4, 5], [0, 1.5, 3, 6, 12, 20], color:"C1", label:"pts")
+    pyplot.bar([0.3, 1.3, 2.3], [4, 2, 5], color:"C2", label:"bars")
+    pyplot.title("pyplot")
+    pyplot.xlabel("x")
+    pyplot.ylabel("y")
+    pyplot.grid(1)
+    pyplot.legend()
+    pyplot.draw()
+    while going(deadline):
+        gfx.tick()
+
+def scene_pong(deadline):
+    st : pong_core.new_state()
+    tick_dt : 1.0 / 60.0
+    acc : 0.0
+    last : clock()
+    while going(deadline):
+        if st["over"] = 1:
+            st : pong_core.new_state()
+        now : clock()
+        acc : acc + (now - last)
+        last : now
+        if acc > tick_dt * 4.0:
+            acc : tick_dt * 4.0
+        while acc >= tick_dt:
+            left_ai(st)
+            pong_core.ai_move(st)
+            pong_core.step(st)
+            acc : acc - tick_dt
+        pong_gfx_render.render(gfx, st, pong_skins.SKIN_GRASS, 1, "CPU L", "CPU R")
+        gfx.text(24, 500, "pong dual-AI", 0xe8e8f0, 2)
+        gfx.tick()
+
+if getenv("SHAKTI_GFX_SKIP") = "1":
+    print("showcase: gfx skipped (SHAKTI_GFX_SKIP=1)")
+elif not gfx.available():
+    print("showcase: gfx not available")
+else:
+    ver : pkg_ver()
+    dur : scene_secs()
+    r : gfx.open("Shakti " + ver)
+    if type(r) = "error":
+        print("showcase: cannot open window:", r)
+    else:
+        t : clock()
+        scene_movie(ver, t + dur)
+        if gfx.alive():
+            scene_stem(clock() + dur)
+        if gfx.alive():
+            scene_pyplot(clock() + dur)
+        if gfx.alive():
+            scene_pong(clock() + dur)
+        gfx.close()
+        print("showcase done")

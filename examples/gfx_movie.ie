@@ -2,9 +2,21 @@
 # Close the window to stop.
 import gfx
 
+def pkg_ver():
+    raw : read("src/VERSION")
+    if type(raw) = "str":
+        n : len(raw)
+        if n > 0:
+            if raw[n - 1] = "\n":
+                raw : raw[0:n - 1]
+        if len(raw) > 0:
+            return raw
+    return "0.13.1"
+
 if not gfx.available():
     print("gfx not available")
 else:
+    banner : "Shakti " + pkg_ver()
     gfx.open("Shakti GFX movie")
     t0 : clock()
     frames : 0
@@ -36,6 +48,7 @@ else:
         gfx.fill_circle(cx, cy, 44, 0x44dd88)
         gfx.line(sx, sy, cx, cy, 0xffffff)
         gfx.fill_circle(sx, sy, 14, 0xffcc00)
+        gfx.text(24, 12, banner, 0xe8e8f0, 3)
 
         if gfx.click_pending():
             # Click plants a brief flash disk at the pointer
