@@ -168,6 +168,9 @@ extern V *bi_stem_ml_info(V**,in);
 extern V *bi_stem_write_ml_synth(V**,in);
 extern V *bi_stem_ml_spike(V**,in);
 extern V *bi_stem_separate_file_ml(V**,in);
+extern V *bi_stem_si_sdr(V**,in);
+extern V *bi_stem_write_wav(V**,in);
+extern V *bi_stem_read_wav(V**,in);
 #endif
 #ifdef SHAKTI_HAVE_PDF
 extern V *bi_pdf_create(V**,in);
@@ -304,6 +307,7 @@ static const char *BUILTINS[] = {
     "stem_latency_ms","stem_mix","stem_separate_file","stem_info",
     "stem_load_ml","stem_unload_ml","stem_ml_info","stem_write_ml_synth",
     "stem_ml_spike","stem_separate_file_ml",
+    "stem_si_sdr","stem_read_wav","stem_write_wav",
     "pdf_create","pdf_add_page","pdf_text_at","pdf_save","pdf_open","pdf_page_count","pdf_info","pdf_text","pdf_close",
     "midi_open","midi_close","midi_alive","midi_backend","midi_list","midi_connect","midi_disconnect",
     "midi_note_on","midi_note_off","midi_cc","midi_program","midi_raw","midi_poll",
@@ -2452,6 +2456,7 @@ BI0(stem_open) BI0(stem_close) BI0(stem_alive) BI0(stem_process) BI0(stem_set_ga
 BI0(stem_gains) BI0(stem_latency_ms) BI0(stem_mix) BI0(stem_separate_file) BI0(stem_info)
 BI0(stem_load_ml) BI0(stem_unload_ml) BI0(stem_ml_info) BI0(stem_write_ml_synth)
 BI0(stem_ml_spike) BI0(stem_separate_file_ml)
+BI0(stem_si_sdr) BI0(stem_read_wav) BI0(stem_write_wav)
 #endif
 #ifdef SHAKTI_HAVE_PDF
 BI0(pdf_create) BI0(pdf_add_page) BI0(pdf_text_at) BI0(pdf_save) BI0(pdf_open)
@@ -2723,11 +2728,14 @@ static const BiEntry bi_tab[] = {
     {"stem_ml_spike", bi_w_stem_ml_spike},
     {"stem_open", bi_w_stem_open},
     {"stem_process", bi_w_stem_process},
+    {"stem_read_wav", bi_w_stem_read_wav},
     {"stem_separate_file", bi_w_stem_separate_file},
     {"stem_separate_file_ml", bi_w_stem_separate_file_ml},
     {"stem_set_gains", bi_w_stem_set_gains},
+    {"stem_si_sdr", bi_w_stem_si_sdr},
     {"stem_unload_ml", bi_w_stem_unload_ml},
     {"stem_write_ml_synth", bi_w_stem_write_ml_synth},
+    {"stem_write_wav", bi_w_stem_write_wav},
 #endif
     {"str", bi_w_str},
     {"sum", bi_w_sum},

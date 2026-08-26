@@ -12,6 +12,13 @@
 #   stem.write_ml_synth("ckpt.stemw", 32)
 #   stem.load_ml("ckpt.stemw")
 #   out : stem.separate_file_ml("mix.wav")
+#
+# WAV I/O is the edge only (engine stays f32). Read: PCM16 / PCM24 / PCM32 integer /
+# IEEE float32. Write: pcm16 (default) / pcm24 / f32.
+#   stem.si_sdr(est, ref)           # scale-invariant SDR (dB)
+#   stem.write_wav("x.wav", samples, 44100, "f32")
+#   r : stem.read_wav("x.wav")      # {"samples","sr","n"}
+#   stem.separate_file("mix.wav", "out", wavfmt="pcm24")
 
 def open(sr:44100, block:256):
     return stem_open(sr, block)
@@ -37,7 +44,9 @@ def latency_ms():
 def mix(stems):
     return stem_mix(stems)
 
-def separate_file(path, outdir:""):
+def separate_file(path, outdir:"", wavfmt:""):
+    if wavfmt:
+        return stem_separate_file(path, outdir, wavfmt)
     if outdir:
         return stem_separate_file(path, outdir)
     return stem_separate_file(path)
@@ -60,7 +69,18 @@ def write_ml_synth(path, nhidden:64):
 def ml_spike(batch:64, iters:20):
     return stem_ml_spike(batch, iters)
 
-def separate_file_ml(path, outdir:""):
+def si_sdr(est, ref):
+    return stem_si_sdr(est, ref)
+
+def write_wav(path, samples, sr:44100, fmt:"pcm16"):
+    return stem_write_wav(path, samples, sr, fmt)
+
+def read_wav(path):
+    return stem_read_wav(path)
+
+def separate_file_ml(path, outdir:"", wavfmt:""):
+    if wavfmt:
+        return stem_separate_file_ml(path, outdir, wavfmt)
     if outdir:
         return stem_separate_file_ml(path, outdir)
     return stem_separate_file_ml(path)

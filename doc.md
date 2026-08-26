@@ -1,6 +1,6 @@
 # Shakti documentation
 
-Version **0.13.0**.
+Version **0.13.1**.
 
 ## Contents
 
@@ -1361,6 +1361,8 @@ Streaming 4-stem separator (drums / bass / vocals / other) via STFT + HPSS + ban
 
 Also includes an **offline CPU spectrogram MLP** path (`SHAKST01` checkpoint format): magnitude frames → two ReLU layers → sigmoid stem masks → ISTFT. Generate a synthetic checkpoint with `stem.write_ml_synth` for tests; no GPU backend.
 
+WAV I/O is the file edge only (engine stays f32). Read: PCM16 / PCM24 / PCM32 integer / IEEE float32. Write: `pcm16` (default) / `pcm24` / `f32`. Live STFT/HPSS is scalar C (NEON hypot on arm64).
+
 ```bash
 export SHAKTI_LIB=$PWD/lib
 ```
@@ -1376,12 +1378,15 @@ export SHAKTI_LIB=$PWD/lib
 | `stem.mix(stems)` | Sum stem dict → fvec |
 | `stem.latency_ms()` | Algorithmic latency |
 | `stem.info()` | `n_fft` / `hop` / `hpss_len` / latency |
-| `stem.separate_file(path, outdir)` | Offline file split (classical engine) |
+| `stem.separate_file(path, outdir, wavfmt)` | Offline file split (classical engine); `wavfmt` is `pcm16` / `pcm24` / `f32` |
 | `stem.write_ml_synth(path, nhidden)` | Write synthetic `SHAKST01` checkpoint |
 | `stem.load_ml(path)` / `stem.unload_ml()` | Load/unload MLP weights |
 | `stem.ml_info()` | Checkpoint dims / flags (CPU-only) |
 | `stem.ml_spike(batch, iters)` | Time one MVM layer |
-| `stem.separate_file_ml(path, outdir)` | Offline file split via MLP masks (**44100 Hz** WAV required) |
+| `stem.separate_file_ml(path, outdir, wavfmt)` | Offline file split via MLP masks (**44100 Hz** WAV required) |
+| `stem.si_sdr(est, ref)` | Scale-invariant SDR (dB) |
+| `stem.write_wav(path, samples, sr, fmt)` | Write mono WAV (`pcm16` / `pcm24` / `f32`) |
+| `stem.read_wav(path)` | Read WAV → `{"samples","sr","n"}` |
 | `stem.close()` / `stem.alive()` | Lifecycle |
 
 ## Example
