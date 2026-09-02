@@ -667,6 +667,18 @@ V *bi_chr(V **a, in) {
     b[1] = 0;
     return v_str(b);
 }
+V *bi_char(V **a, in) {
+    P(n < 1, v_err("char()"))
+    if (a[0]->t == T_CHAR) return v_char((unsigned char)a[0]->j);
+    if (a[0]->t == T_INT) return v_char((unsigned char)a[0]->j);
+    if (a[0]->t == T_IVEC) {
+        V *r = v_cvec(a[0]->n);
+        for (int64_t i = 0; i < a[0]->n; i++)
+            r->B[i] = (unsigned char)a[0]->J[i];
+        return r;
+    }
+    return v_err("char: need int, char, or list[int]");
+}
 V *bi_ord(V **a, in) {
     P(n < 1 || a[0]->t != T_STR || !a[0]->s[0],v_err("ord"))
     return v_int((unsigned char)a[0]->s[0]);

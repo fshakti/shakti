@@ -186,6 +186,7 @@ enum {
     T_SEMI_ = 78,
     T_UNION_ = 79,
     T_OUTER_ = 80,
+    T_CHARZ_ = 81,
 };
 
 enum {
@@ -262,6 +263,7 @@ enum {
     N_WITH = 43,
     N_UNION_JOIN = 44,
     N_OUTER_JOIN = 45,
+    N_CHARS = 46,
 };
 
 enum {
@@ -367,6 +369,8 @@ void shakti_format_time_ms(int64_t ms_in_day, char *buf, size_t cap);
 const char *type_name(int t);
 V *vec_cmp(V *a, V *b, int op);
 Node *parse(const char *src);
+int shakti_parse_check(const char *src, char *err, size_t errcap);
+int shakti_parse_errors(void);
 V *eval(Node *n, Env *e);
 /* Evaluate a user-function body with interpreter call-depth accounting. */
 V *eval_fn(Node *body, Env *e);

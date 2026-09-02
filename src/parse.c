@@ -1,5 +1,64 @@
 /* shakti/src/parse.c — Pratt parser + statements */
 #include "shakti_internal.h"
+#include <stdarg.h>
+
+static int  g_parse_error_count = 0;
+static int  g_parse_quiet = 0;
+static int  g_parse_q_call_hint = 0;
+static char g_parse_err_msg[256] = "";
+static char g_parse_err_first[256] = "";
+
+static int src_has_semi_in_parens(const char *s) {
+    int d = 0;
+    size_t i, n;
+    if (!s) return 0;
+    n = strlen(s);
+    for (i = 0; i < n; i++) {
+        char ch = s[i];
+        if (ch == '#') {
+            while (i < n && s[i] != '\n') i++;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            char q = ch;
+            if (i + 2 < n && s[i + 1] == q && s[i + 2] == q) {
+                i += 3;
+                while (i + 2 < n && !(s[i] == q && s[i + 1] == q && s[i + 2] == q)) {
+                    if (s[i] == '\\' && i + 1 < n) i += 2;
+                    else i++;
+                }
+                if (i + 2 < n) i += 2;
+                else i = n;
+                continue;
+            }
+            i++;
+            while (i < n && s[i] != q) {
+                if (s[i] == '\\' && i + 1 < n) i += 2;
+                else i++;
+            }
+            continue;
+        }
+        if (ch == '(') d++;
+        else if (ch == ')') d--;
+        else if (ch == ';' && d > 0) return 1;
+    }
+    return 0;
+}
+static int src_has_table_lbrack(const char *s) {
+    return s && strstr(s, "table([") != NULL;
+}
+
+int shakti_parse_errors(void) { return g_parse_error_count; }
+void parse_fail(const char *fmt, ...) {
+    va_list ap;
+    g_parse_error_count++;
+    va_start(ap, fmt);
+    vsnprintf(g_parse_err_msg, sizeof g_parse_err_msg, fmt, ap);
+    va_end(ap);
+    if (g_parse_error_count == 1)
+        snprintf(g_parse_err_first, sizeof g_parse_err_first, "%s", g_parse_err_msg);
+    if (!g_parse_quiet && !g_parse_q_call_hint) fprintf(stderr, "%s\n", g_parse_err_msg);
+}
 
 static Node *parse_power(Lexer *l);
 
@@ -73,7 +132,7 @@ static Node *parse_atom(Lexer *l);
 
 static int is_jux_arg_token(int tt) {
     return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_
-        || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_;
+        || tt == T_CHARZ_ || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_;
 }
 
 static int is_jux_arg_start(Lexer *l) {
@@ -85,6 +144,25 @@ static int is_jux_arg_start(Lexer *l) {
 
 static int is_jux_callee(Node *n) {
     return n && (n->type == N_NAME || n->type == N_DOT || n->type == N_CALL);
+}
+static int is_table_callee(Node *n) {
+    return n && n->type == N_NAME && n->sval && !strcmp(n->sval, "table");
+}
+static int is_call_arg_sep(Lexer *l, int table_call) {
+    int t = lex_peek(l).type;
+    return t == T_COMMA_ || (table_call && t == T_SEMI_);
+}
+static Node *parse_call_arg(Lexer *l) {
+    Node *arg = parse_expr(l);
+    if(arg && arg->type == N_NAME && lex_peek(l).type == T_COLON_) {
+        lex_next(l);
+        Node *kw = node_new(N_KWARG);
+        kw->sval = strdup(arg->sval);
+        node_free(arg);
+        node_add(kw, parse_expr(l));
+        return kw;
+    }
+    return arg;
 }
 
 static Node *parse_jux_arg(Lexer *l) {
@@ -108,10 +186,8 @@ static void expect(Lexer *l, int type) {
     if(t.type != type) {
         const char *en = expect_tok_name(type);
         const char *gn = expect_tok_name(t.type);
-        if (en && gn) fprintf(stderr, "parse error: expected %s, got %s", en, gn);
-        else fprintf(stderr, "parse error: expected token %d, got %d", type, t.type);
-        if(t.type == T_NAME_ || t.type == T_STR_) fprintf(stderr, " (%s)", t.sval);
-        fprintf(stderr, "\n");
+        if (en && gn) parse_fail("parse error: expected %s, got %s", en, gn);
+        else parse_fail("parse error: expected token %d, got %d", type, t.type);
     }
 }
 static Node *parse_atom_body(Lexer *l) {
@@ -120,6 +196,8 @@ static Node *parse_atom_body(Lexer *l) {
     switch(t.type) {
     case T_INT_:
         n = node_new(N_INT); n->ival = t.ival; return n;
+    case T_CHARZ_:
+        n = node_new(N_CHARS); n->ival = t.ival; return n;
     case T_DATETIME_:
         n = node_new(N_DATETIME); n->ival = t.ival; return n;
     case T_FLOAT_:
@@ -229,7 +307,7 @@ static Node *parse_atom_body(Lexer *l) {
         l->has_peek = 1; l->peek = t;
         return parse_query(l);
     default:
-        fprintf(stderr, "parse error: unexpected token %d ('%s')\n", t.type, t.sval);
+        parse_fail("parse error: unexpected token %d ('%s')", t.type, t.sval);
         return node_new(N_NONE);
     }
 }
@@ -248,13 +326,13 @@ static Node *parse_postfix(Lexer *l) {
     Node *n = parse_atom(l);
     if (!n) return NULL;
     /* q/k-style numeric vectors: 1 2 3 or 1 -2 3 → N_LIST */
-    if((n->type == N_INT || n->type == N_FLOAT)) {
+    if((n->type == N_INT || n->type == N_FLOAT || n->type == N_CHARS)) {
         Token pk0 = lex_peek(l);
-        if(pk0.type == T_INT_ || pk0.type == T_FLOAT_
+        if(pk0.type == T_INT_ || pk0.type == T_FLOAT_ || pk0.type == T_CHARZ_
             || (pk0.type == T_MINUS_ && lex_peek_is_signed_literal(l))) {
             Node *vec = node_new(N_LIST);
             node_add(vec, n);
-            while((pk0 = lex_peek(l)).type == T_INT_ || pk0.type == T_FLOAT_
+            while((pk0 = lex_peek(l)).type == T_INT_ || pk0.type == T_FLOAT_ || pk0.type == T_CHARZ_
                   || (pk0.type == T_MINUS_ && lex_peek_is_signed_literal(l)))
                 node_add(vec, parse_jux_arg(l));
             n = vec;
@@ -263,35 +341,16 @@ static Node *parse_postfix(Lexer *l) {
     for(;;) {
         Token pk = lex_peek(l);
         if(pk.type == T_LPAREN_) {
+            int table_call = is_table_callee(n);
             lex_next(l);
             Node *call = node_new(N_CALL);
             node_add(call, n);
             if(lex_peek(l).type != T_RPAREN_) {
-                Node *arg = parse_expr(l);
-                if(arg->type == N_NAME && lex_peek(l).type == T_COLON_) {
-                    lex_next(l);
-                    Node *kw = node_new(N_KWARG);
-                    kw->sval = strdup(arg->sval);
-                    node_free(arg);
-                    node_add(kw, parse_expr(l));
-                    node_add(call, kw);
-                } else {
-                    node_add(call, arg);
-                }
-                W(lex_peek(l).type == T_COMMA_,{
+                node_add(call, parse_call_arg(l));
+                W(is_call_arg_sep(l, table_call),{
                     lex_next(l);
                     if(lex_peek(l).type == T_RPAREN_) break;
-                    arg = parse_expr(l);
-                    if(arg->type == N_NAME && lex_peek(l).type == T_COLON_) {
-                        lex_next(l);
-                        Node *kw = node_new(N_KWARG);
-                        kw->sval = strdup(arg->sval);
-                        node_free(arg);
-                        node_add(kw, parse_expr(l));
-                        node_add(call, kw);
-                    } else {
-                        node_add(call, arg);
-                    }
+                    node_add(call, parse_call_arg(l));
                 })
             }
             expect(l, T_RPAREN_);
@@ -393,6 +452,8 @@ static Node *parse_postfix(Lexer *l) {
                 }
             }
         } else if(is_jux_callee(n) && is_jux_arg_start(l) && !peek_each_verb_at(l)) {
+            if (lex_peek_minus_is_subtraction(l))
+                break;
             Node *call = node_new(N_CALL);
             node_add(call, n);
             /* Juxta assert takes a full expression so `assert a = b` is
@@ -1187,14 +1248,66 @@ static Node *parse_stmt(Lexer *l) {
 Node *parse(const char *src) {
     Lexer l;
     lex_init(&l, src);
+    g_parse_error_count = 0;
+    g_parse_err_msg[0] = 0;
+    g_parse_err_first[0] = 0;
+    g_parse_q_call_hint = src_has_semi_in_parens(src) || src_has_table_lbrack(src);
     Node *prog = node_new(N_BLOCK);
     W(lex_peek(&l).type != T_EOF_ && !l.failed,{
+        Token pk = lex_peek(&l);
+        if(pk.type == T_INDENT_ || pk.type == T_DEDENT_ || pk.type == T_NEWLINE_) {
+            lex_next(&l);
+            continue;
+        }
         Node *s = parse_stmt(&l);
         if(s) node_add(prog, s);
     })
+    if (g_parse_error_count > 0 && g_parse_q_call_hint) {
+        /* Keep unexpected-character (and similar) as the reported error.
+         * Prefer table() kwargs hint when table([…] is present. */
+        if (!strstr(g_parse_err_first, "unexpected character")) {
+            if (src_has_table_lbrack(src))
+                snprintf(g_parse_err_msg, sizeof g_parse_err_msg,
+                         "parse error: table() takes name:col kwargs, not []. Try: table(a:1 2, b:3 4)");
+            else if (src && strstr(src, "table(") && src_has_semi_in_parens(src))
+                snprintf(g_parse_err_msg, sizeof g_parse_err_msg,
+                         "parse error: table() takes name:col kwargs. Try: table(a:1 2, b:3 4)");
+            else if (src_has_semi_in_parens(src))
+                snprintf(g_parse_err_msg, sizeof g_parse_err_msg,
+                         "parse error: ';' inside (...) is not valid. Use commas between arguments");
+        }
+        if (!g_parse_quiet) fprintf(stderr, "%s\n", g_parse_err_msg);
+    }
     if(l.failed && !g_error) {
         g_error = 1;
         g_error_val = v_errf("parse: %s", l.error[0] ? l.error : "invalid input");
     }
+    if(g_parse_error_count > 0 && !g_error) {
+        g_error = 1;
+        g_error_val = v_errf("parse: %s", g_parse_err_msg[0] ? g_parse_err_msg : "invalid input");
+    }
     return prog;
+}
+
+int shakti_parse_check(const char *src, char *err, size_t errcap) {
+    Node *prog;
+    if (err && errcap) err[0] = 0;
+    g_parse_error_count = 0;
+    g_parse_err_msg[0] = 0;
+    g_parse_quiet = 1;
+    prog = parse(src ? src : "");
+    g_parse_quiet = 0;
+    int nerr = g_parse_error_count;
+    if (g_error) {
+        if (!nerr) nerr = 1;
+        if (g_error_val && g_error_val->s && !g_parse_err_msg[0])
+            snprintf(g_parse_err_msg, sizeof g_parse_err_msg, "%s", g_error_val->s);
+        g_error = 0;
+        if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+    }
+    if (prog) node_free(prog);
+    if (nerr == 0) return 1;
+    if (err && errcap)
+        snprintf(err, errcap, "%s", g_parse_err_msg[0] ? g_parse_err_msg : "parse error");
+    return 0;
 }

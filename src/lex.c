@@ -35,7 +35,7 @@ static int lex_append(Lexer *l, Token *t, int *len, char ch) {
 static void lex_note_token(Lexer *l, Token t) {
     switch (t.type) {
     case T_INT_: case T_FLOAT_: case T_STR_: case T_FSTR_: case T_DATETIME_:
-    case T_TRUE_: case T_FALSE_: case T_NONE_: case T_NAME_:
+    case T_TRUE_: case T_FALSE_: case T_NONE_: case T_NAME_: case T_CHARZ_:
     case T_RPAREN_: case T_RBRACKET_: case T_RBRACE_:
         l->noun_pos = 1;
         break;
@@ -64,6 +64,23 @@ int lex_peek_is_signed_literal(Lexer *l) {
         if (prev != ' ' && prev != '\t') return 0;
     }
     return lex_src_is_digit_start(l, l->pos);
+}
+int lex_peek_minus_is_subtraction(Lexer *l) {
+    if (!l->has_peek)
+        lex_peek(l);
+    if (l->peek.type != T_MINUS_ || !lex_peek_is_signed_literal(l))
+        return 0;
+    size_t save_pos = l->pos;
+    int save_line = l->line;
+    int save_peek = l->has_peek;
+    Token save_tok = l->peek;
+    (void)lex_next(l);
+    Token t = lex_peek(l);
+    l->pos = save_pos;
+    l->line = save_line;
+    l->has_peek = save_peek;
+    l->peek = save_tok;
+    return t.type == T_INT_;
 }
 static Token lex_fstring(Lexer *l) {
     const char *s = l->src;
@@ -252,7 +269,16 @@ static Token lex_raw(Lexer *l) {
         int is_float = 0;
         if(c=='0' && p+1<l->len && (s[p+1]=='x'||s[p+1]=='X')) {
             p += 2;
+            size_t hex0 = p;
             W(p<l->len && isxdigit((unsigned char)s[p]),p++)
+            size_t ndig = p - hex0;
+            if (!neg_lit && ndig == 2) {
+                Token ct = {.type = T_CHARZ_};
+                ct.ival = strtoll(s + start, NULL, 16);
+                ct.line = l->line;
+                l->pos = p;
+                return ct;
+            }
             t.ival = strtoll(s+start, NULL, 16);
             if (neg_lit) t.ival = -t.ival;
         } else {
@@ -395,8 +421,11 @@ static Token lex_raw(Lexer *l) {
     case ';': return make_tok(T_SEMI_);
     case '@': return make_tok(T_AT_);
     }
-    l->pos = p+1;
-    return make_tok(T_EOF_);
+    {
+        char shown = (c >= 32 && c < 127) ? (char)c : '?';
+        parse_fail("parse error: unexpected character '%c' (0x%02x)", shown, (unsigned char)c);
+        return make_tok(T_NEWLINE_);
+    }
 }
 Token lex_next(Lexer *l) {
     Token t;

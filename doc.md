@@ -1,6 +1,6 @@
 # Shakti documentation
 
-Version **0.13.1**.
+Version **0.13.2**.
 
 ## Contents
 
@@ -8,7 +8,7 @@ Version **0.13.1**.
 - [Command-line interface](#command-line-interface)
 - [Language pipeline](#language-pipeline)
 - [Syntax and builtins](#syntax-and-builtins)
-- [Time-series indexes](#time-series-indexes)
+- [Table joins](#table-joins)
 - [Decorators](#decorators)
 - [Each (`@`)](#each)
 - [`sql` module](#sql-module)
@@ -99,7 +99,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | CLI | [command-line interface](#command-line-interface) |
 | Pipeline | [language pipeline](#language-pipeline) |
 | REPL | [REPL](#repl) |
-| Time-series indexes | [time-series indexes](#time-series-indexes) |
+| Table joins | [table joins](#table-joins) |
 
 ## Command-line interface
 
@@ -164,6 +164,10 @@ kernels for some vector reducers. Core builtins such as `sh` do not require it.
 - Integer bitwise helpers: `band(a,b)`, `bor(a,b)`, `bxor(a,b)`, `bnot(a)`,
   `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical shifts on the low 64 bits;
   shift counts must be in `0..63`
+- `0xHH` (exactly two hex digits) is `char`; longer `0x…` is `int`
+- `char(n)` builds a `char` from an int (distinct from `chr`, which returns a
+  one-character `str`)
+- `parse_check(src)` returns `dict(ok, error)` — syntax only, no eval
 
 String and formatted-string token text is limited to 8191 bytes, and source
 indentation is limited to 255 nested levels. Inputs beyond either limit fail
@@ -185,7 +189,8 @@ import sql
 r : select id, amount by dept from t where amount > 15
 ```
 
-**Note:** `n - 1` after a variable parses as a call (`n(-1)`). Use `n + (-1)` instead.
+**Note:** After a name, write `n(-1)` to pass a negative argument. `x -1`
+subtracts; `abs -1.2` is juxtaposition (`abs(-1.2)`).
 
 ## Decorators
 
@@ -286,7 +291,7 @@ Leading `@` decorates. `mmul(a, b)` multiplies matrices.
 | `append(x)` | `list` |
 | `pop()` | `list` |
 | `keys()`, `values()` | `dict`, `table` |
-| `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `matrix[int]`, `matrix[float]`, `matrix[bool]` |
+| `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `list[char]`, `matrix[int]`, `matrix[float]`, `matrix[bool]`, `matrix[char]` |
 
 ## Vectors
 
@@ -314,7 +319,6 @@ native CPU tuning (`-mcpu=native` on arm64, including Apple Silicon M5;
 `-march=x86-64-v2` on x86-64). `SHAKTI_PORTABLE_CPU=1` uses `-mcpu=apple-m4` on
 arm64 (clang does not yet expose `-mcpu=apple-m5` on current Xcode).
 With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
-For windowed weighted averages over many keys, see [time-series indexes](#time-series-indexes).
 
 ## Matrices
 
@@ -386,6 +390,8 @@ CSV/TSV/XML load and CSV/TSV save do **not** round-trip matrix columns as typed 
 ```ie
 d : dict(a:1, b:2)
 t : table(a:[1, 2], b:[3, 4])
+t : table(a:1 2, b:3 4)
+t : table(a:1 2; b:3 4)
 k : ktable(a:1, b:2)
 ```
 
@@ -399,6 +405,7 @@ k : ktable(a:1, b:2)
 - `json_loads(s)`, `json_dumps(x)` — JSON subset (no comments or trailing commas)
 - `re_match`, `re_findall`, `re_sub`, `re_split` — POSIX regex on Unix/macOS
 - `argv` — script path plus remaining CLI args (set when running a script file)
+- `parse_check(src)` — syntax-only check; returns `dict(ok, error)`
 - `eval(src)` — parse and evaluate a Shakti source string in the **root** environment (returns the value, or an error value). Bindings persist across calls, including when `eval` is invoked from nested functions.
 - `sh(cmd)` — run `cmd` via `/bin/sh -c` (POSIX). Returns the wait status
   integer (`0` = success; any non-zero value means failure). Isolde-compatible:
@@ -487,8 +494,6 @@ delete from u where id = 2
 
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Prefer core `,` / `union` / `outer` table joins (see [Table joins](#table-joins----union--outer)); SQL `t1 join t2 on col` is not yet implemented.
 
-For high-throughput windowed averages / range aggregates over dense keys, prefer the [time-series indexes](#time-series-indexes) instead of a full SQL scan.
-
 ## Modules
 
 | Module | Doc | Example |
@@ -508,80 +513,7 @@ Index: [examples index](#examples-index).
 
 ---
 
-# Time-series indexes
-
-Core builtins (no `import`) for load-time prefix / sorted indexes over columnar `ivec` / `fvec` data. Build the index **once** outside the timed query path; query with binary search over half-open `[t0, t1)` windows.
-
-Keys and group ids must be dense nonnegative integers (`max_id ≤ row count`). Windows are half-open: include `t0`, exclude `t1`.
-
-## Weighted average (`wavg*`)
-
-Σ(value·weight) / Σ(weight) for a key set over a time window:
-
-```ie
-idx : wavg_index(rows.key, rows.time, rows.value, rows.weight)
-avg : wavg(idx, keys, t0, t1)   # 0 if weight sum is 0
-```
-
-| Builtin | Role |
-|---------|------|
-| `wavg_index(key, time, value, weight)` | Sort by `(key, time)`; return `[time, product_prefix, weight_prefix, bounds]` |
-| `wavg(index, keys, t0, t1)` | Scalar weighted average for keys in `keys` over `[t0, t1)` |
-
-`value` / `weight` may be `fvec` or other numeric columns. The query does not reorder the caller’s key list. Prefer a pre-sorted key list to skip an internal sort.
-
-## Windowed average (`winavg*`)
-
-Per-key mean of a numeric column over one or more windows (returns the **last** window’s grouped table):
-
-| Builtin | Role |
-|---------|------|
-| `winavg_index(key, time, value)` | Dense key starts + prefix sums/counts |
-| `winavg(index, keys, starts, window)` | For each start in `starts`, mean over `[start, start+window)` |
-
-Result columns: `key`, `avg`.
-
-## Range maximum (`range_max*`)
-
-Per-key `max(value)` over a key set and time window:
-
-| Builtin | Role |
-|---------|------|
-| `range_max_index(key, time, value)` | Sort by `(key, time)`; return `[time, value, bounds]` |
-| `range_max(index, keys, t0, t1)` | `max(value)` by `key` for keys in `keys` over `[t0, t1)` |
-
-Result columns: `key`, `value`.
-
-## Key max/min (`key_maxmin*`)
-
-Per-key `max(col_hi)` and `min(col_lo)`:
-
-| Builtin | Role |
-|---------|------|
-| `key_maxmin_index(key, col_hi, col_lo)` | Build the grouped table once at load |
-| `key_maxmin(index)` | Return the precomputed table (or pass raw columns for a one-shot scan) |
-
-Result columns: `key`, `col_hi`, `col_lo`.
-
-## Time-series stats (`ts_stats*`)
-
-Aggregates by key for one group id over a time window:
-
-| Builtin | Role |
-|---------|------|
-| `ts_stats_index(group, time, key, value)` | Sort by `(group, time)` |
-| `ts_stats_agg(index, group_id, t0, t1)` | `count` / `sum` / `min` / `max` / `avg` by `key` |
-| `ts_stats_bucket(index, group_id, t0, t1, bucket)` | Fixed-width time buckets; returns the last bucket’s table (no sum column) |
-
-## Cumulative multiplier hits (`cum_mult_hits`)
-
-For the first `n_rows` rows with positive `value`, scan forward within `horizon` on the same key and count hits when the cumulative same-key sum reaches 2×, 4×, and 20× the initial value.
-
-| Builtin | Role |
-|---------|------|
-| `cum_mult_hits(key, time, value, n_rows, horizon)` | Return hit count (int) |
-
-## Table joins (`,` / `union` / `outer`)
+# Table joins
 
 Dyadic `,` joins two tables on the **first column** when names and types match:
 
@@ -609,7 +541,7 @@ SQL `t1 join t2 on col` remains unimplemented.
 
 ## See also
 
-- [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where` (slower for full-table weighted-average scans)
+- [SQL](#sql) / [`sql` module](#sql-module) — general `select` / `where`
 
 ---
 
