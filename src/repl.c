@@ -290,8 +290,8 @@ static char *hl_readline(const char *prompt, int nsp) {
         char c; if(!hl_read_char(&c)){hl_raw_off();return NULL;}
         if(c=='\r'||c=='\n'){buf[len]=0;printf("\r\n");fflush(stdout);hl_raw_off();hl_hadd(buf);return buf;}
         if(c==3){len=pos=0;printf("\r\n%s",prompt);fflush(stdout);continue;}
-        if(c==4){if(len==0){printf("\r\n");hl_raw_off();return NULL;}continue;}
-        if(c==127||c==8){if(pos>0){memmove(buf+pos-1,buf+pos,len-pos);pos--;len--;}}
+        if(c==4){if(len==0){printf("\r\n");hl_raw_off();return NULL;}if(pos<len){memmove(buf+pos,buf+pos+1,len-pos-1);len--;}else continue;}
+        else if(c==127||c==8){if(pos>0){memmove(buf+pos-1,buf+pos,len-pos);pos--;len--;}}
         else if(c==1){pos=0;}
         else if(c==5){pos=len;}
         else if(c==21){memmove(buf,buf+pos,len-pos);len-=pos;pos=0;}
