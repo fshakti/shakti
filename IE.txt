@@ -1,4 +1,4 @@
-shakti VERSION
+shakti 0.13.2
 run   ./shakti · ./shakti f.ie · ./shakti -c '…'
 \d    this manual (hl) · doc.md (prose)
 
@@ -14,14 +14,17 @@ expr   lit name e.f e[i] e[a:b] f(…) f@ xs  xs f@ ys
        + - * / // % ** · = != < > <= >= · and or not
        , list · {k: v} · (a, b) · [[…]] matrix
 
-type   int float bool str None · list dict table ktable
-       ivec fvec bvec · matrix[int|float|bool]
+type   int float bool char str None · list dict table ktable
+       list[int|float|char|bool] · matrix[int|float|char|bool]
+       date datetime time
 built  range sum min max avg abs dot mmul
-       eval clock timer exit sh
+       parse_check eval char chr hex clock timer exit sh
        read write load save json_loads json_dumps
 
 sql    import sql · select … by … from t where …
 note   . attr/col · @ each / deco · mmul matmul · == unsupported
+       0xHH char (two hex digits) · longer 0x int
+       table(a:1 2, b:3 4) · table(a:1 2; b:3 4)
 
 demos (verified ./shakti -c · make test)
 i : 0
