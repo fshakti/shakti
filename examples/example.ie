@@ -256,7 +256,7 @@ else:
     gfx.open("Shakti GFX")
     gfx.clear(0x0a0a12)
     gfx.fill_rect(80, 60, 800, 40, 0x2244aa)
-    gfx.text(100, 68, "Shakti 0.13.1", 0xffffff, 2)
+    gfx.text(100, 68, "Shakti 0.13.2", 0xffffff, 2)
     gfx.fill_rect(120, 160, 200, 200, 0xff6644)
     gfx.fill_circle(640, 300, 90, 0x44dd88)
     gfx.line(40, 500, 920, 40, 0xffffff)

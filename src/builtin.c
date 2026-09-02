@@ -42,6 +42,7 @@ extern V *bi_isinstance(V**,in);
 extern V *bi_hasattr(V**,in);
 extern V *bi_getattr(V**,in);
 extern V *bi_chr(V**,in);
+extern V *bi_char(V**,in);
 extern V *bi_ord(V**,in);
 extern V *bi_hex(V**,in);
 extern V *bi_dict(V**,int nargs,V**,V**,int nkw);
@@ -241,14 +242,8 @@ static const char *BUILTINS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","band","bor","bxor","bnot","shl","shr",
     "sqrt","floor","ceil","exp","log","sin","cos","tan",
-    "bin","asof_sort","asof_bin","asof_index","asof_index_count","winavg_index","winavg",
-    "ts_stats_index","ts_stats_agg","ts_stats_bucket",
-    "wavg","wavg_index","range_max","range_max_index","key_maxmin","key_maxmin_index","cum_mult_hits",
-    /* STAC-M3 compatibility aliases (see bi_shakti_* wrappers). */
-    "shakti_winavg_index","shakti_winavg_query",
-    "shakti_stats_index","shakti_stats_agg","shakti_stats_ui",
-    "shakti_vwbid","shakti_vwbid_index","shakti_hibid","shakti_hibid_index",
-    "shakti_nbbo","shakti_nbbo_index","shakti_theopl",
+    "bin","asof_sort","asof_bin","asof_index","asof_index_count",
+    "parse_check",
     "sort","reverse","zip","enumerate","map","filter",
     "table","columns","shape","head","tail","group_sum",
     "append","pop","keys","values",
@@ -272,7 +267,7 @@ static const char *BUILTINS[] = {
     "re_findall","re_sub","re_match","re_split",
     "json_loads","json_dumps","json_load","json_dump",
     "sorted","any","all","isinstance","hasattr","getattr",
-    "chr","ord","hex",
+    "char","chr","ord","hex",
     "dict","ktable","set",
     "next","assert",
     "datetime","format_datetime","date","format_date","time_ms","format_time",
@@ -1407,621 +1402,6 @@ static V *bi_asof_index_count(V**a,in){
     v_free(qeq);
     return v_int(hits);
 }
-typedef struct {
-    int64_t sym;
-    int64_t time;
-    double value;
-} WinavgRow;
-static int winavg_row_cmp(const void *va,const void *vb){
-    const WinavgRow *a=va,*b=vb;
-    if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
-    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
-    return 0;
-}
-static int numeric_value_at(V *v,int64_t i,double *out){
-    if(v->t==T_IVEC){*out=(double)v->J[i];return 1;}
-    if(v->t==T_FVEC){*out=v->F[i];return 1;}
-    if(v->t==T_LIST&&v->L[i]){
-        if(v->L[i]->t==T_INT){*out=(double)v->L[i]->j;return 1;}
-        if(v->L[i]->t==T_FLOAT){*out=v->L[i]->f;return 1;}
-    }
-    return 0;
-}
-/* Load-time windowed-average index: [sorted sym, sorted time, dense starts,
- * global prefix sums, global prefix counts]. */
-static V *bi_winavg_index(V**a,in){
-    P(n<3||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
-      v_err("winavg_index(key, time, value)"))
-    int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("winavg_index: length mismatch"))
-    WinavgRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("winavg_index: allocation failed");
-    for(int64_t i=0;i<rows;i++){
-        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0||!numeric_value_at(a[2],i,&tmp[i].value)){
-            int bad_sym=tmp[i].sym<0;free(tmp);
-            return v_err(bad_sym?"winavg_index: key must be nonnegative":
-                         "winavg_index: value must be numeric");
-        }
-    }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),winavg_row_cmp);
-    int64_t max_key=rows?tmp[rows-1].sym:-1;
-    if(max_key>rows){free(tmp);return v_err("winavg_index: key range is not dense");}
-    V *sym=v_ivec(rows),*tm=v_ivec(rows),*starts=v_ivec(max_key+2);
-    V *sums=v_fvec(rows+1),*counts=v_ivec(rows+1);
-    for(int64_t i=0;i<rows;i++){
-        sym->J[i]=tmp[i].sym;tm->J[i]=tmp[i].time;
-        sums->F[i+1]=sums->F[i]+tmp[i].value;
-        counts->J[i+1]=counts->J[i]+1;
-    }
-    int64_t pos=0;
-    for(int64_t key=0;key<=max_key+1;key++){
-        while(pos<rows&&sym->J[pos]<key)pos++;
-        starts->J[key]=pos;
-    }
-    free(tmp);
-    V *r=v_list(5);r->L[0]=sym;r->L[1]=tm;r->L[2]=starts;r->L[3]=sums;r->L[4]=counts;
-    return r;
-}
-static int64_t ivec_lower_bound(const int64_t *v,int64_t n,int64_t x){
-    int64_t lo=0,hi=n;
-    while(lo<hi){int64_t mid=lo+(hi-lo)/2;if(v[mid]<x)lo=mid+1;else hi=mid;}
-    return lo;
-}
-static V *winavg_result_table(V *sym,V *avg){
-    V *keys=v_list(2),*data=v_list(2);
-    keys->L[0]=v_str("key");keys->L[1]=v_str("avg");
-    data->L[0]=sym;data->L[1]=avg;
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-/* Query every requested window and retain the final grouped-average table. */
-static V *bi_winavg(V**a,in){
-    P(n<4||a[0]->t!=T_LIST||a[0]->n<5,
-      v_err("winavg(index, keys, starts, window)"))
-    V *idx=a[0],*sym=idx->L[0],*tm=idx->L[1],*bounds=idx->L[2],
-      *sums=idx->L[3],*counts=idx->L[4];
-    P(!sym||!tm||!bounds||!sums||!counts||sym->t!=T_IVEC||tm->t!=T_IVEC||
-      bounds->t!=T_IVEC||sums->t!=T_FVEC||counts->t!=T_IVEC||
-      sym->n!=tm->n||sums->n!=sym->n+1||counts->n!=sym->n+1||
-      !ivec_dense_bounds_ok(bounds->J,bounds->n,tm->n),
-      v_err("winavg: invalid index"))
-    V *keyset=as_ivec_arg(a[1],"keys"),*starts=as_ivec_arg(a[2],"starts");
-    if(!keyset||!starts){if(keyset)v_free(keyset);if(starts)v_free(starts);
-        return v_err("winavg: keys and starts must contain ints");}
-    if(a[3]->t!=T_INT){v_free(keyset);v_free(starts);
-        return v_err("winavg: window must be int");}
-    if(starts->n==0){v_free(keyset);v_free(starts);return v_nil();}
-    V *last=NULL;
-    for(int64_t w=0;w<starts->n;w++){
-        int64_t t0=starts->J[w],t1;
-        if(__builtin_add_overflow(t0,a[3]->j,&t1))t1=a[3]->j>=0?INT64_MAX:INT64_MIN;
-        int64_t ng=0;
-        for(int64_t key=0;key+1<bounds->n;key++){
-            int wanted=0;for(int64_t j=0;j<keyset->n;j++)if(keyset->J[j]==key){wanted=1;break;}
-            if(!wanted)continue;
-            int64_t begin=bounds->J[key],end=bounds->J[key+1];
-            int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,t0);
-            int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,t1);
-            if(counts->J[hi]-counts->J[lo]>0)ng++;
-        }
-        V *out_sym=v_ivec(ng),*out_avg=v_fvec(ng);int64_t out=0;
-        for(int64_t key=0;key+1<bounds->n;key++){
-            int wanted=0;for(int64_t j=0;j<keyset->n;j++)if(keyset->J[j]==key){wanted=1;break;}
-            if(!wanted)continue;
-            int64_t begin=bounds->J[key],end=bounds->J[key+1];
-            int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,t0);
-            int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,t1);
-            int64_t count=counts->J[hi]-counts->J[lo];
-            if(count>0){out_sym->J[out]=key;out_avg->F[out]=(sums->F[hi]-sums->F[lo])/(double)count;out++;}
-        }
-        V *current=winavg_result_table(out_sym,out_avg);
-        if(last)v_free(last);last=current;
-    }
-    v_free(keyset);v_free(starts);return last;
-}
-typedef struct {
-    int64_t sym;
-    int64_t time;
-    double product;
-    double weight;
-} WavgRow;
-static int wavg_row_cmp(const void *va,const void *vb){
-    const WavgRow *a=va,*b=vb;
-    if(a->sym<b->sym)return -1;if(a->sym>b->sym)return 1;
-    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
-    return 0;
-}
-/* Load-time weighted-average index: [sorted time, value*weight prefix, weight prefix,
- * dense key starts]. Bounds are trusted at query time. */
-static V *bi_wavg_index(V**a,in){
-    P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
-      v_err("wavg_index(key, time, value, weight)"))
-    int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows||a[3]->n!=rows,
-      v_err("wavg_index: length mismatch"))
-    WavgRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("wavg_index: allocation failed");
-    int value_fvec=a[2]->t==T_FVEC,weight_fvec=a[3]->t==T_FVEC;
-    for(int64_t i=0;i<rows;i++){
-        double value,weight;
-        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0){free(tmp);return v_err("wavg_index: key must be nonnegative");}
-        if(value_fvec)value=a[2]->F[i];
-        else if(!numeric_value_at(a[2],i,&value)){free(tmp);
-            return v_err("wavg_index: value and weight must be numeric");}
-        if(weight_fvec)weight=a[3]->F[i];
-        else if(!numeric_value_at(a[3],i,&weight)){free(tmp);
-            return v_err("wavg_index: value and weight must be numeric");}
-        tmp[i].product=value*weight;tmp[i].weight=weight;
-    }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),wavg_row_cmp);
-    int64_t max_key=rows?tmp[rows-1].sym:-1;
-    if(max_key>rows){free(tmp);return v_err("wavg_index: key range is not dense");}
-    V *tm=v_ivec(rows),*products=v_fvec(rows+1),*weights=v_fvec(rows+1),
-      *bounds=v_ivec(max_key+2);
-    products->F[0]=0.0;weights->F[0]=0.0;
-    for(int64_t i=0;i<rows;i++){
-        tm->J[i]=tmp[i].time;
-        products->F[i+1]=products->F[i]+tmp[i].product;
-        weights->F[i+1]=weights->F[i]+tmp[i].weight;
-    }
-    int64_t pos=0;
-    for(int64_t key=0;key<=max_key+1;key++){
-        while(pos<rows&&tmp[pos].sym<key)pos++;
-        bounds->J[key]=pos;
-    }
-    free(tmp);
-    V *r=v_list(4);r->L[0]=tm;r->L[1]=products;r->L[2]=weights;r->L[3]=bounds;
-    return r;
-}
-static int ivec_is_sorted_asc(const int64_t *v,int64_t n){
-    for(int64_t i=1;i<n;i++)if(v[i]<v[i-1])return 0;
-    return 1;
-}
-static V *bi_wavg(V**a,in){
-    P(n<4||a[0]->t!=T_LIST||a[0]->n<4,
-      v_err("wavg(index, keys, t0, t1)"))
-    V *idx=a[0],*tm=idx->L[0],*products=idx->L[1],*weights=idx->L[2],
-      *bounds=idx->L[3];
-    /* Full bounds validation — do not trust hand-built/mutated indexes. */
-    P(!tm||!products||!weights||!bounds||tm->t!=T_IVEC||
-      products->t!=T_FVEC||weights->t!=T_FVEC||bounds->t!=T_IVEC||
-      products->n!=tm->n+1||weights->n!=tm->n+1||
-      !ivec_dense_bounds_ok(bounds->J,bounds->n,tm->n),
-      v_err("wavg: invalid index"))
-    V *keyset=as_ivec_arg(a[1],"keys");
-    if(!keyset)return v_err("wavg: keys must be ivec or list[int]");
-    if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(keyset);
-        return v_err("wavg: t0 and t1 must be int");}
-    if(keyset->n==0||a[2]->j>=a[3]->j){v_free(keyset);return v_float(0.0);}
-    /* Own a mutable copy only when sorting is required (do not reorder caller). */
-    if(!ivec_is_sorted_asc(keyset->J,keyset->n)){
-        V *sorted=v_ivec(keyset->n);
-        memcpy(sorted->J,keyset->J,(size_t)keyset->n*sizeof(int64_t));
-        v_free(keyset);keyset=sorted;
-        qsort(keyset->J,(size_t)keyset->n,sizeof(int64_t),cmp_i64);
-    }
-    double num=0.0,den=0.0;int64_t previous=INT64_MIN;
-    for(int64_t j=0;j<keyset->n;j++){
-        int64_t key=keyset->J[j];
-        if(key==previous)continue;
-        previous=key;
-        if(key<0||key+1>=bounds->n)continue;
-        int64_t begin=bounds->J[key],end=bounds->J[key+1];
-        int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,a[2]->j);
-        int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,a[3]->j);
-        if(lo>=hi)continue;
-        num+=products->F[hi]-products->F[lo];
-        den+=weights->F[hi]-weights->F[lo];
-    }
-    v_free(keyset);
-    return v_float(den==0.0?0.0:num/den);
-}
-/* Load-time range-max index: [sorted time, value, dense key starts]. */
-static V *bi_range_max_index(V**a,in){
-    P(n<3||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC,
-      v_err("range_max_index(key, time, value)"))
-    P(a[2]->t!=T_IVEC&&a[2]->t!=T_FVEC,
-      v_err("range_max_index: value must be ivec or fvec"))
-    int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("range_max_index: length mismatch"))
-    WinavgRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("range_max_index: allocation failed");
-    int value_fvec=a[2]->t==T_FVEC;
-    for(int64_t i=0;i<rows;i++){
-        tmp[i].sym=a[0]->J[i];tmp[i].time=a[1]->J[i];
-        if(tmp[i].sym<0){free(tmp);return v_err("range_max_index: key must be nonnegative");}
-        if(value_fvec)tmp[i].value=a[2]->F[i];
-        else if(!numeric_value_at(a[2],i,&tmp[i].value)){free(tmp);
-            return v_err("range_max_index: value must be numeric");}
-    }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),winavg_row_cmp);
-    int64_t max_key=rows?tmp[rows-1].sym:-1;
-    if(max_key>rows){free(tmp);return v_err("range_max_index: key range is not dense");}
-    V *tm=v_ivec(rows),*vals=v_fvec(rows),*bounds=v_ivec(max_key+2);
-    for(int64_t i=0;i<rows;i++){tm->J[i]=tmp[i].time;vals->F[i]=tmp[i].value;}
-    int64_t pos=0;
-    for(int64_t key=0;key<=max_key+1;key++){
-        while(pos<rows&&tmp[pos].sym<key)pos++;
-        bounds->J[key]=pos;
-    }
-    free(tmp);
-    V *r=v_list(3);r->L[0]=tm;r->L[1]=vals;r->L[2]=bounds;return r;
-}
-static V *range_max_result_table(V *sym,V *vals){
-    V *keys=v_list(2),*data=v_list(2);
-    keys->L[0]=v_str("key");keys->L[1]=v_str("value");
-    data->L[0]=sym;data->L[1]=vals;
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-static V *range_max_empty_table(void){
-    return range_max_result_table(v_ivec(0),v_fvec(0));
-}
-static V *bi_range_max(V**a,in){
-    P(n<4||a[0]->t!=T_LIST||a[0]->n<3,
-      v_err("range_max(index, keys, t0, t1)"))
-    V *idx=a[0],*tm=idx->L[0],*vals=idx->L[1],*bounds=idx->L[2];
-    P(!tm||!vals||!bounds||tm->t!=T_IVEC||vals->t!=T_FVEC||bounds->t!=T_IVEC||
-      tm->n!=vals->n||!ivec_dense_bounds_ok(bounds->J,bounds->n,tm->n),
-      v_err("range_max: invalid index"))
-    V *keyset=as_ivec_arg(a[1],"keys");
-    if(!keyset)return v_err("range_max: keys must be ivec or list[int]");
-    if(a[2]->t!=T_INT||a[3]->t!=T_INT){v_free(keyset);
-        return v_err("range_max: t0 and t1 must be int");}
-    if(keyset->n==0||a[2]->j>=a[3]->j){v_free(keyset);return range_max_empty_table();}
-    if(!ivec_is_sorted_asc(keyset->J,keyset->n)){
-        V *sorted=v_ivec(keyset->n);
-        memcpy(sorted->J,keyset->J,(size_t)keyset->n*sizeof(int64_t));
-        v_free(keyset);keyset=sorted;
-        qsort(keyset->J,(size_t)keyset->n,sizeof(int64_t),cmp_i64);
-    }
-    V *out_sym=v_ivec(keyset->n),*out_vals=v_fvec(keyset->n);int64_t out=0;
-    int64_t previous=INT64_MIN;
-    for(int64_t j=0;j<keyset->n;j++){
-        int64_t key=keyset->J[j];
-        if(key==previous)continue;
-        previous=key;
-        if(key<0||key+1>=bounds->n)continue;
-        int64_t begin=bounds->J[key],end=bounds->J[key+1];
-        int64_t lo=begin+ivec_lower_bound(tm->J+begin,end-begin,a[2]->j);
-        int64_t hi=begin+ivec_lower_bound(tm->J+begin,end-begin,a[3]->j);
-        if(lo>=hi)continue;
-        double maximum=vals->F[lo];
-        for(int64_t i=lo+1;i<hi;i++)if(vals->F[i]>maximum)maximum=vals->F[i];
-        out_sym->J[out]=key;out_vals->F[out]=maximum;out++;
-    }
-    out_sym->n=out;out_vals->n=out;
-    v_free(keyset);
-    return range_max_result_table(out_sym,out_vals);
-}
-static V *key_maxmin_result_table(V *sym,V *col_hi,V *col_lo){
-    V *keys=v_list(3),*data=v_list(3);
-    keys->L[0]=v_str("key");keys->L[1]=v_str("col_hi");keys->L[2]=v_str("col_lo");
-    data->L[0]=sym;data->L[1]=col_hi;data->L[2]=col_lo;
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-static V *key_maxmin_empty_table(void){
-    return key_maxmin_result_table(v_ivec(0),v_fvec(0),v_fvec(0));
-}
-/* Per-key max(col_hi) and min(col_lo). */
-static V *key_maxmin_build_table(V *sym_col,V *hi_col,V *lo_col){
-    int64_t rows=sym_col->n;
-    if(rows==0)return key_maxmin_empty_table();
-    int64_t max_sym=-1;
-    for(int64_t i=0;i<rows;i++){
-        if(sym_col->J[i]<0)return v_err("key_maxmin: key must be nonnegative");
-        if(sym_col->J[i]>max_sym)max_sym=sym_col->J[i];
-    }
-    if(max_sym>rows)return v_err("key_maxmin: key range is not dense");
-    size_t slots=(size_t)max_sym+1;
-    double *his=malloc(slots*sizeof(double)),*los=malloc(slots*sizeof(double));
-    unsigned char *seen=calloc(slots,1);
-    if(!his||!los||!seen){free(his);free(los);free(seen);return v_err("key_maxmin: allocation failed");}
-    int64_t ng=0;
-    if(hi_col->t==T_FVEC&&lo_col->t==T_FVEC){
-        for(int64_t i=0;i<rows;i++){
-            int64_t key=sym_col->J[i];
-            double hi=hi_col->F[i],lo=lo_col->F[i];
-            if(!seen[key]){seen[key]=1;his[key]=hi;los[key]=lo;ng++;}
-            else{
-                if(hi>his[key])his[key]=hi;
-                if(lo<los[key])los[key]=lo;
-            }
-        }
-    }else{
-        for(int64_t i=0;i<rows;i++){
-            int64_t key=sym_col->J[i];double hi,lo;
-            if(!numeric_value_at(hi_col,i,&hi)||!numeric_value_at(lo_col,i,&lo)){
-                free(his);free(los);free(seen);
-                return v_err("key_maxmin: col_hi and col_lo must be numeric");
-            }
-            if(!seen[key]){seen[key]=1;his[key]=hi;los[key]=lo;ng++;}
-            else{
-                if(hi>his[key])his[key]=hi;
-                if(lo<los[key])los[key]=lo;
-            }
-        }
-    }
-    V *out_sym=v_ivec(ng),*out_hi=v_fvec(ng),*out_lo=v_fvec(ng);int64_t out=0;
-    for(int64_t key=0;key<=max_sym;key++)if(seen[key]){
-        out_sym->J[out]=key;out_hi->F[out]=his[key];out_lo->F[out]=los[key];out++;
-    }
-    free(his);free(los);free(seen);
-    return key_maxmin_result_table(out_sym,out_hi,out_lo);
-}
-static V *bi_key_maxmin_index(V**a,in){
-    P(n<3||a[0]->t!=T_IVEC,
-      v_err("key_maxmin_index(key, col_hi, col_lo)"))
-    P(a[1]->n!=a[0]->n||a[2]->n!=a[0]->n,
-      v_err("key_maxmin_index: length mismatch"))
-    return key_maxmin_build_table(a[0],a[1],a[2]);
-}
-static V *bi_key_maxmin(V**a,in){
-    if(n==1&&a[0]->t==T_TABLE){
-        P(a[0]->keys->n<3,v_err("key_maxmin: invalid index"))
-        return v_copy(a[0]);
-    }
-    P(n<3||a[0]->t!=T_IVEC,v_err("key_maxmin(index_or_key, col_hi, col_lo)"))
-    P(a[1]->n!=a[0]->n||a[2]->n!=a[0]->n,v_err("key_maxmin: length mismatch"))
-    return key_maxmin_build_table(a[0],a[1],a[2]);
-}
-/* Cumulative multiplier hits: first n positive rows, same-key horizon scan. */
-static V *bi_cum_mult_hits(V**a,in){
-    P(n!=5||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC||a[2]->t!=T_IVEC||
-      a[3]->t!=T_INT||a[4]->t!=T_INT,
-      v_err("cum_mult_hits(key, time, value, n_rows, horizon)"))
-    int64_t rows=a[0]->n,n_rows=a[3]->j;
-    P(a[1]->n!=rows||a[2]->n!=rows,v_err("cum_mult_hits: length mismatch"))
-    P(n_rows<0,v_err("cum_mult_hits: n_rows must be nonnegative"))
-    int64_t picked=0,hits=0;
-    for(int64_t r=0;r<rows&&picked<n_rows;r++){
-        int64_t initial=a[2]->J[r];
-        if(initial<=0)continue;
-        __int128 target2=(__int128)initial*2;
-        __int128 target4=(__int128)initial*4;
-        __int128 target20=(__int128)initial*20;
-        int64_t t_end;
-        if(__builtin_add_overflow(a[1]->J[r],a[4]->j,&t_end))
-            t_end=a[4]->j>=0?INT64_MAX:INT64_MIN;
-        __int128 cumulative=0;
-        int got2=0,got4=0;
-        for(int64_t j=r+1;j<rows&&a[1]->J[j]<=t_end;j++){
-            if(a[0]->J[j]!=a[0]->J[r])continue;
-            cumulative+=(__int128)a[2]->J[j];
-            if(!got2&&cumulative>=target2){got2=1;hits++;}
-            if(!got4&&cumulative>=target4){got4=1;hits++;}
-            if(cumulative>=target20){hits++;break;}
-        }
-        picked++;
-    }
-    return v_int(hits);
-}
-typedef struct {
-    int64_t exchange;
-    int64_t time;
-    int64_t sym;
-    double price;
-} StatsRow;
-static int stats_row_cmp(const void *va,const void *vb){
-    const StatsRow *a=va,*b=vb;
-    if(a->exchange<b->exchange)return -1;if(a->exchange>b->exchange)return 1;
-    if(a->time<b->time)return -1;if(a->time>b->time)return 1;
-    return 0;
-}
-static int64_t stats_lower_bound(const int64_t *v,int64_t n,int64_t x){
-    int64_t lo=0,hi=n;
-    while(lo<hi){int64_t mid=lo+(hi-lo)/2;if(v[mid]<x)lo=mid+1;else hi=mid;}
-    return lo;
-}
-static V *stats_empty_agg(int with_sum){
-    V *keys=v_list(with_sum?6:5),*data=v_list(with_sum?6:5);
-    keys->L[0]=v_str("key");keys->L[1]=v_str("count");
-    data->L[0]=v_ivec(0);data->L[1]=v_ivec(0);
-    if(with_sum){
-        keys->L[2]=v_str("sum");keys->L[3]=v_str("min");keys->L[4]=v_str("max");keys->L[5]=v_str("avg");
-        data->L[2]=v_fvec(0);data->L[3]=v_fvec(0);data->L[4]=v_fvec(0);data->L[5]=v_fvec(0);
-    }else{
-        keys->L[2]=v_str("avg");keys->L[3]=v_str("min");keys->L[4]=v_str("max");
-        data->L[2]=v_fvec(0);data->L[3]=v_fvec(0);data->L[4]=v_fvec(0);
-    }
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-static V *stats_agg_range(const int64_t *sym,const double *price,int64_t lo,int64_t hi,int with_sum){
-    if(lo>=hi)return stats_empty_agg(with_sum);
-    int64_t max_sym=-1;
-    for(int64_t i=lo;i<hi;i++){
-        if(sym[i]<0)return v_err("ts_stats: key must be nonnegative");
-        if(sym[i]>max_sym)max_sym=sym[i];
-    }
-    uint64_t slots64=(uint64_t)max_sym+1;
-    if(slots64>SIZE_MAX/sizeof(int64_t)||slots64>SIZE_MAX/sizeof(double))
-        return v_err("ts_stats: key range too large");
-    size_t slots=(size_t)slots64;
-    int64_t *cnt=calloc(slots,sizeof(int64_t));
-    double *sum=calloc(slots,sizeof(double));
-    double *mn=malloc(slots*sizeof(double));
-    double *mx=malloc(slots*sizeof(double));
-    unsigned char *seen=calloc(slots,1);
-    if(!cnt||!sum||!mn||!mx||!seen){
-        free(cnt);free(sum);free(mn);free(mx);free(seen);
-        return v_err("ts_stats: allocation failed");
-    }
-    int64_t ng=0;
-    for(int64_t i=lo;i<hi;i++){
-        int64_t s=sym[i];double p=price[i];
-        if(!seen[s]){seen[s]=1;cnt[s]=1;sum[s]=p;mn[s]=p;mx[s]=p;ng++;}
-        else{
-            cnt[s]++;sum[s]+=p;
-            if(p<mn[s])mn[s]=p;
-            if(p>mx[s])mx[s]=p;
-        }
-    }
-    V *out_sym=v_ivec(ng),*out_cnt=v_ivec(ng);
-    V *out_sum=with_sum?v_fvec(ng):NULL,*out_avg=v_fvec(ng),*out_min=v_fvec(ng),*out_max=v_fvec(ng);
-    int64_t out=0;
-    for(size_t s=0;s<slots;s++)if(seen[s]){
-        out_sym->J[out]=(int64_t)s;out_cnt->J[out]=cnt[s];
-        out_avg->F[out]=sum[s]/(double)cnt[s];out_min->F[out]=mn[s];out_max->F[out]=mx[s];
-        if(with_sum)out_sum->F[out]=sum[s];
-        out++;
-    }
-    free(cnt);free(sum);free(mn);free(mx);free(seen);
-    V *keys=v_list(with_sum?6:5),*data=v_list(with_sum?6:5);
-    keys->L[0]=v_str("key");keys->L[1]=v_str("count");
-    data->L[0]=out_sym;data->L[1]=out_cnt;
-    if(with_sum){
-        keys->L[2]=v_str("sum");keys->L[3]=v_str("min");keys->L[4]=v_str("max");keys->L[5]=v_str("avg");
-        data->L[2]=out_sum;data->L[3]=out_min;data->L[4]=out_max;data->L[5]=out_avg;
-    }else{
-        keys->L[2]=v_str("avg");keys->L[3]=v_str("min");keys->L[4]=v_str("max");
-        data->L[2]=out_avg;data->L[3]=out_min;data->L[4]=out_max;
-    }
-    V *r=v_table(keys,data);v_free(keys);v_free(data);return r;
-}
-/* Load-time STATS index: [sorted time, sym, price, dense exchange starts]. */
-static V *bi_ts_stats_index(V**a,in){
-    P(n<4||a[0]->t!=T_IVEC||a[1]->t!=T_IVEC||a[2]->t!=T_IVEC,
-      v_err("ts_stats_index(group, time, key, value)"))
-    int64_t rows=a[0]->n;
-    P(a[1]->n!=rows||a[2]->n!=rows||a[3]->n!=rows,v_err("ts_stats_index: length mismatch"))
-    StatsRow *tmp=malloc((size_t)(rows?rows:1)*sizeof(*tmp));
-    if(!tmp)return v_err("ts_stats_index: allocation failed");
-    for(int64_t i=0;i<rows;i++){
-        tmp[i].exchange=a[0]->J[i];tmp[i].time=a[1]->J[i];tmp[i].sym=a[2]->J[i];
-        if(tmp[i].exchange<0||tmp[i].sym<0||!numeric_value_at(a[3],i,&tmp[i].price)){
-            int bad_ex=tmp[i].exchange<0,bad_sym=tmp[i].sym<0;free(tmp);
-            return v_err(bad_ex?"ts_stats_index: group must be nonnegative":
-                         bad_sym?"ts_stats_index: key must be nonnegative":
-                         "ts_stats_index: value must be numeric");
-        }
-    }
-    qsort(tmp,(size_t)rows,sizeof(*tmp),stats_row_cmp);
-    int64_t max_ex=rows?tmp[rows-1].exchange:-1;
-    if(max_ex>rows){free(tmp);return v_err("ts_stats_index: group range is not dense");}
-    V *tm=v_ivec(rows),*sym=v_ivec(rows),*price=v_fvec(rows),*starts=v_ivec(max_ex+2);
-    for(int64_t i=0;i<rows;i++){
-        tm->J[i]=tmp[i].time;sym->J[i]=tmp[i].sym;price->F[i]=tmp[i].price;
-    }
-    int64_t pos=0;
-    for(int64_t key=0;key<=max_ex+1;key++){
-        while(pos<rows&&tmp[pos].exchange<key)pos++;
-        starts->J[key]=pos;
-    }
-    free(tmp);
-    V *r=v_list(4);r->L[0]=tm;r->L[1]=sym;r->L[2]=price;r->L[3]=starts;
-    return r;
-}
-static int stats_unpack_index(V *idx,V **tm,V **sym,V **price,V **starts,const char *ctx){
-    if(!idx||idx->t!=T_LIST||idx->n<4)return 0;
-    *tm=idx->L[0];*sym=idx->L[1];*price=idx->L[2];*starts=idx->L[3];
-    if(!*tm||!*sym||!*price||!*starts)return 0;
-    if((*tm)->t!=T_IVEC||(*sym)->t!=T_IVEC||(*price)->t!=T_FVEC||(*starts)->t!=T_IVEC)return 0;
-    if((*tm)->n!=(*sym)->n||(*tm)->n!=(*price)->n||(*starts)->n<1)return 0;
-    int64_t prev=0;
-    for(int64_t i=0;i<(*starts)->n;i++){
-        int64_t x=(*starts)->J[i];
-        if(x<prev||x>(*tm)->n)return 0;
-        prev=x;
-    }
-    if((*starts)->J[(*starts)->n-1]!=(*tm)->n)return 0;
-    (void)ctx;return 1;
-}
-static V *bi_ts_stats_agg(V**a,in){
-    P(n<4,v_err("ts_stats_agg(index, group_id, t0, t1)"))
-    V *tm,*sym,*price,*starts;
-    P(!stats_unpack_index(a[0],&tm,&sym,&price,&starts,"ts_stats_agg"),
-      v_err("ts_stats_agg: invalid index"))
-    P(a[1]->t!=T_INT||a[2]->t!=T_INT||a[3]->t!=T_INT,v_err("ts_stats_agg: group_id/t0/t1 must be int"))
-    int64_t ex=a[1]->j,t0=a[2]->j,t1=a[3]->j;
-    if(ex<0||ex+1>=starts->n)return stats_empty_agg(1);
-    int64_t begin=starts->J[ex],end=starts->J[ex+1];
-    int64_t lo=begin+stats_lower_bound(tm->J+begin,end-begin,t0);
-    int64_t hi=begin+stats_lower_bound(tm->J+begin,end-begin,t1);
-    return stats_agg_range(sym->J,price->F,lo,hi,1);
-}
-static V *bi_ts_stats_bucket(V**a,in){
-    P(n<5,v_err("ts_stats_bucket(index, group_id, t0, t1, bucket_ns)"))
-    V *tm,*sym,*price,*starts;
-    P(!stats_unpack_index(a[0],&tm,&sym,&price,&starts,"ts_stats_bucket"),
-      v_err("ts_stats_bucket: invalid index"))
-    P(a[1]->t!=T_INT||a[2]->t!=T_INT||a[3]->t!=T_INT||a[4]->t!=T_INT,
-      v_err("ts_stats_bucket: group_id/t0/t1/bucket_ns must be int"))
-    int64_t ex=a[1]->j,t0=a[2]->j,t1=a[3]->j,minute=a[4]->j;
-    P(minute<=0,v_err("ts_stats_bucket: bucket_ns must be positive"))
-    if(ex<0||ex+1>=starts->n)return stats_empty_agg(0);
-    int64_t begin=starts->J[ex],end=starts->J[ex+1];
-    V *last=NULL;
-    for(int64_t t=t0;t<t1;){
-        int64_t te;
-        if(__builtin_add_overflow(t,minute,&te))te=INT64_MAX;
-        if(te>t1)te=t1;
-        int64_t lo=begin+stats_lower_bound(tm->J+begin,end-begin,t);
-        int64_t hi=begin+stats_lower_bound(tm->J+begin,end-begin,te);
-        V *current=stats_agg_range(sym->J,price->F,lo,hi,0);
-        if(current->t==T_ERR){if(last)v_free(last);return current;}
-        if(last)v_free(last);last=current;
-        if(te<=t)break;
-        t=te;
-    }
-    return last?last:stats_empty_agg(0);
-}
-/* STAC-M3 name compatibility: renamed generics keep STAC column names via thin wrappers. */
-static V *table_rename_keys(V *t,const char *const *names,int nnames){
-    if(!t||t->t!=T_TABLE)return t;
-    int64_t nk=t->keys->n;
-    if(nnames>nk)nnames=(int)nk;
-    V *keys=v_list(nk),*data=v_list(nk);
-    for(int64_t i=0;i<nk;i++){
-        keys->L[i]=(i<nnames)?v_str(names[i]):v_copy(t->keys->L[i]);
-        data->L[i]=v_ref(t->vals->L[i]);
-    }
-    V *r=v_table(keys,data);v_free(keys);v_free(data);v_free(t);return r;
-}
-static V *bi_shakti_hibid_index(V**a,in){return bi_range_max_index(a,n);}
-static V *bi_shakti_hibid(V**a,in){
-    V *r=bi_range_max(a,n);
-    if(!r||r->t==T_ERR)return r;
-    static const char *names[]={"sym_id","bid"};
-    return table_rename_keys(r,names,2);
-}
-static V *bi_shakti_vwbid_index(V**a,in){return bi_wavg_index(a,n);}
-static V *bi_shakti_vwbid(V**a,in){return bi_wavg(a,n);}
-static V *bi_shakti_nbbo_index(V**a,in){
-    V *r=bi_key_maxmin_index(a,n);
-    if(!r||r->t==T_ERR)return r;
-    static const char *names[]={"sym_id","bid","ask"};
-    return table_rename_keys(r,names,3);
-}
-static V *bi_shakti_nbbo(V**a,in){
-    V *r=bi_key_maxmin(a,n);
-    if(!r||r->t!=T_TABLE)return r;
-    /* Fresh builds use key/col_hi/col_lo; pre-renamed index tables already have STAC names. */
-    if(r->keys->n>=1&&r->keys->L[0]->t==T_STR&&strcmp(r->keys->L[0]->s,"sym_id")==0)
-        return r;
-    static const char *names[]={"sym_id","bid","ask"};
-    return table_rename_keys(r,names,3);
-}
-static V *bi_shakti_theopl(V**a,in){return bi_cum_mult_hits(a,n);}
-static V *bi_shakti_winavg_index(V**a,in){return bi_winavg_index(a,n);}
-static V *bi_shakti_winavg_query(V**a,in){
-    V *r=bi_winavg(a,n);
-    if(!r||r->t!=T_TABLE)return r;
-    static const char *names[]={"sym_id","avg_size"};
-    return table_rename_keys(r,names,2);
-}
-static V *bi_shakti_stats_index(V**a,in){return bi_ts_stats_index(a,n);}
-static V *bi_shakti_stats_agg(V**a,in){
-    V *r=bi_ts_stats_agg(a,n);
-    if(!r||r->t!=T_TABLE)return r;
-    static const char *names[]={"sym_id"};
-    return table_rename_keys(r,names,1);
-}
-static V *bi_shakti_stats_ui(V**a,in){
-    V *r=bi_ts_stats_bucket(a,n);
-    if(!r||r->t!=T_TABLE)return r;
-    static const char *names[]={"sym_id"};
-    return table_rename_keys(r,names,1);
-}
 static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_ivec(v->n);for(int64_t i=0;i<v->n;i++)r->J[i]=v->J[v->n-1-i];return r;}
     if(v->t==T_FVEC){V*r=v_fvec(v->n);for(int64_t i=0;i<v->n;i++)r->F[i]=v->F[v->n-1-i];return r;}
@@ -2356,13 +1736,9 @@ BIKW(dict) BIKW(ktable) BI0(set)
 BI0(sum) BI0(avg) BI0(min) BI0(max) BI0(dot) BI0(mmul) BI0(abs)
 BI0(band) BI0(bor) BI0(bxor) BI0(bnot) BI0(shl) BI0(shr)
 BI0(sqrt) BI0(floor) BI0(ceil) BI0(exp) BI0(log) BI0(sin) BI0(cos) BI0(tan)
-BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(asof_index) BI0(asof_index_count) BI0(winavg_index) BI0(winavg)
-BI0(ts_stats_index) BI0(ts_stats_agg) BI0(ts_stats_bucket)
-BI0(range_max) BI0(range_max_index) BI0(key_maxmin) BI0(key_maxmin_index) BI0(cum_mult_hits)
-BI0(wavg) BI0(wavg_index)
-BI0(shakti_hibid) BI0(shakti_hibid_index) BI0(shakti_nbbo) BI0(shakti_nbbo_index)
-BI0(shakti_stats_agg) BI0(shakti_stats_index) BI0(shakti_stats_ui) BI0(shakti_theopl)
-BI0(shakti_vwbid) BI0(shakti_vwbid_index) BI0(shakti_winavg_index) BI0(shakti_winavg_query)
+BI0(bin) BI0(asof_sort) BI0(asof_bin) BI0(asof_index) BI0(asof_index_count)
+static V *bi_parse_check(V **a, int n);
+BI0(parse_check)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
 BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
@@ -2382,7 +1758,16 @@ BI0(path_basename) BI0(path_dirname) BI0(path_splitext)
 BI0(getcwd) BI0(mkdir) BI0(getenv) BI0(sh) BI0(machine)
 BI0(re_findall) BI0(re_sub) BI0(re_match) BI0(re_split)
 BI0(json_loads) BI0(json_dumps) BI0(json_load) BI0(json_dump)
-BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(chr) BI0(ord) BI0(hex)
+BI0(any) BI0(all) BI0(isinstance) BI0(hasattr) BI0(getattr) BI0(char) BI0(chr) BI0(ord) BI0(hex)
+static V *bi_parse_check(V **a, int n) {
+    char err[256];
+    P(n < 1 || a[0]->t != T_STR, v_err("parse_check(src)"))
+    int ok = shakti_parse_check(a[0]->s, err, sizeof err);
+    V *d = v_dict_empty();
+    v_dict_put(d, "ok", v_bool(ok));
+    v_dict_put(d, "error", v_str(ok ? "" : err));
+    return d;
+}
 static V *bi_eval(V **a, int n, Env *e) {
     Node *prog;
     V *r;
@@ -2506,10 +1891,10 @@ static const BiEntry bi_tab[] = {
     {"bor", bi_w_bor},
     {"bxor", bi_w_bxor},
     {"ceil", bi_w_ceil},
+    {"char", bi_w_char},
     {"chr", bi_w_chr},
     {"columns", bi_w_columns},
     {"cos", bi_w_cos},
-    {"cum_mult_hits", bi_w_cum_mult_hits},
     {"date", bi_w_date},
     {"datetime", bi_w_datetime},
     {"dict", bi_w_dict},
@@ -2610,8 +1995,6 @@ static const BiEntry bi_tab[] = {
     {"json_dumps", bi_w_json_dumps},
     {"json_load", bi_w_json_load},
     {"json_loads", bi_w_json_loads},
-    {"key_maxmin", bi_w_key_maxmin},
-    {"key_maxmin_index", bi_w_key_maxmin_index},
     {"keys", bi_w_keys},
     {"ktable", bi_w_ktable},
     {"len", bi_w_len},
@@ -2641,6 +2024,7 @@ static const BiEntry bi_tab[] = {
     {"mmul", bi_w_mmul},
     {"next", bi_w_next},
     {"ord", bi_w_ord},
+    {"parse_check", bi_w_parse_check},
     {"path_basename", bi_w_path_basename},
     {"path_dirname", bi_w_path_dirname},
     {"path_exists", bi_w_path_exists},
@@ -2665,8 +2049,6 @@ static const BiEntry bi_tab[] = {
     {"pop", bi_w_pop},
     {"print", bi_w_print},
     {"range", bi_w_range},
-    {"range_max", bi_w_range_max},
-    {"range_max_index", bi_w_range_max_index},
     {"re_findall", bi_w_re_findall},
     {"re_match", bi_w_re_match},
     {"re_split", bi_w_re_split},
@@ -2688,18 +2070,6 @@ static const BiEntry bi_tab[] = {
     {"reverse", bi_w_reverse},
     {"set", bi_w_set},
     {"sh", bi_w_sh},
-    {"shakti_hibid", bi_w_shakti_hibid},
-    {"shakti_hibid_index", bi_w_shakti_hibid_index},
-    {"shakti_nbbo", bi_w_shakti_nbbo},
-    {"shakti_nbbo_index", bi_w_shakti_nbbo_index},
-    {"shakti_stats_agg", bi_w_shakti_stats_agg},
-    {"shakti_stats_index", bi_w_shakti_stats_index},
-    {"shakti_stats_ui", bi_w_shakti_stats_ui},
-    {"shakti_theopl", bi_w_shakti_theopl},
-    {"shakti_vwbid", bi_w_shakti_vwbid},
-    {"shakti_vwbid_index", bi_w_shakti_vwbid_index},
-    {"shakti_winavg_index", bi_w_shakti_winavg_index},
-    {"shakti_winavg_query", bi_w_shakti_winavg_query},
     {"shape", bi_w_shape},
     {"shl", bi_w_shl},
     {"shr", bi_w_shr},
@@ -2813,17 +2183,10 @@ static const BiEntry bi_tab[] = {
 #endif
     {"tan", bi_w_tan},
     {"time_ms", bi_w_time_ms},
-    {"ts_stats_agg", bi_w_ts_stats_agg},
-    {"ts_stats_bucket", bi_w_ts_stats_bucket},
-    {"ts_stats_index", bi_w_ts_stats_index},
     {"type", bi_w_type},
     {"values", bi_w_values},
     {"wait", bi_w_wait},
     {"walk", bi_w_walk},
-    {"wavg", bi_w_wavg},
-    {"wavg_index", bi_w_wavg_index},
-    {"winavg", bi_w_winavg},
-    {"winavg_index", bi_w_winavg_index},
     {"write", bi_w_fwrite},
     {"zip", bi_w_zip},
 };

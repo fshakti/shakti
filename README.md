@@ -2,9 +2,8 @@
 
 [Discord](https://discord.gg/PkKwUk9Tf) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
 
-Small interpreted language (0.13.1) with vectors, matrices, tables, decorators,
-each (`f@`), table joins (`,` / `union` / `outer`), load-time time-series indexes
-(weighted avg / range max / windowed avg / keyed stats / asof), and optional SQL,
+Small interpreted language (0.13.2) with vectors, matrices, tables, decorators,
+each (`f@`), table joins (`,` / `union` / `outer`), asof helpers, and optional SQL,
 graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
 
@@ -16,9 +15,9 @@ and IEFS modules.
 - **Compare** with `=` — `if x = 1:`
 - `==` is not supported
 - Leading `@` decorates; expression `@` is each; matrix multiply is `mmul(a, b)`
-- Time-series indexes: `wavg_index` / `wavg`, `range_max_*`, `key_maxmin_*`,
-  `winavg_*`, `ts_stats_*`, `cum_mult_hits`, `asof_sort` / `asof_bin` — see
-  [doc.md](doc.md#time-series-indexes)
+- `0xHH` (exactly two hex digits) is `char`; longer `0x` is `int`
+- Asof helpers: `asof_sort` / `asof_bin` — see
+  [doc.md](doc.md#asof-join-helpers)
 
 ```ie
 values : [1, -2, 3]

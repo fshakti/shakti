@@ -995,6 +995,7 @@ V *eval(Node *n, Env *e) {
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
     switch(n->type) {
     case N_INT:  return v_int(n->ival);
+    case N_CHARS: return v_char((unsigned char)n->ival);
     case N_FLOAT:return v_float(n->fval);
     case N_STR:  return v_str(n->sval);
     case N_BOOL: return v_bool(n->ival);
