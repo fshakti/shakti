@@ -53,6 +53,9 @@ extern V *bi_talk_listen(V**,in);
 extern V *bi_talk_set_locale(V**,in);
 extern V *bi_talk_set_model(V**,in);
 extern V *bi_synth_open(V**,in);
+extern V *bi_synth_open_audio(V**,in);
+extern V *bi_synth_step_pos(V**,in);
+extern V *bi_synth_spectrum(V**,in);
 extern V *bi_synth_close(V**,in);
 extern V *bi_synth_alive(V**,in);
 extern V *bi_synth_tick(V**,in);
@@ -273,7 +276,7 @@ static const char *BUILTINS[] = {
     "datetime","format_datetime","date","format_date","time_ms","format_time",
     "save_context","load_context",
     "talk_listen","talk_set_locale","talk_set_model",
-    "synth_open","synth_close","synth_alive","synth_tick","synth_set_steps","synth_steps",
+    "synth_open","synth_open_audio","synth_close","synth_alive","synth_tick","synth_set_steps","synth_steps","synth_step_pos","synth_spectrum",
     "synth_set_metro","synth_metro_on","synth_set_metro_sound","synth_metro_sound",
     "synth_set_mute","synth_mute_on",
     "synth_note_on","synth_note_off","synth_set_bpm","synth_bpm",
@@ -1804,8 +1807,8 @@ static V *bi_eval(V **a, int n, Env *e) {
 BI0(talk_listen) BI0(talk_set_locale) BI0(talk_set_model)
 #endif
 #ifdef SHAKTI_HAVE_SYNTH
-BI0(synth_open) BI0(synth_close) BI0(synth_alive) BI0(synth_tick)
-BI0(synth_set_steps) BI0(synth_steps) BI0(synth_set_metro) BI0(synth_metro_on)
+BI0(synth_open) BI0(synth_open_audio) BI0(synth_close) BI0(synth_alive) BI0(synth_tick)
+BI0(synth_set_steps) BI0(synth_steps) BI0(synth_step_pos) BI0(synth_spectrum) BI0(synth_set_metro) BI0(synth_metro_on)
 BI0(synth_set_metro_sound) BI0(synth_metro_sound) BI0(synth_set_mute) BI0(synth_mute_on)
 BI0(synth_note_on) BI0(synth_note_off) BI0(synth_set_bpm) BI0(synth_bpm)
 BI0(synth_set_tuning) BI0(synth_tuning)
@@ -2134,6 +2137,7 @@ static const BiEntry bi_tab[] = {
     {"synth_note_off", bi_w_synth_note_off},
     {"synth_note_on", bi_w_synth_note_on},
     {"synth_open", bi_w_synth_open},
+    {"synth_open_audio", bi_w_synth_open_audio},
     {"synth_pitch_bend", bi_w_synth_pitch_bend},
     {"synth_play", bi_w_synth_play},
     {"synth_playing", bi_w_synth_playing},
@@ -2167,6 +2171,8 @@ static const BiEntry bi_tab[] = {
     {"synth_set_tuning", bi_w_synth_set_tuning},
     {"synth_set_viz", bi_w_synth_set_viz},
     {"synth_skin", bi_w_synth_skin},
+    {"synth_spectrum", bi_w_synth_spectrum},
+    {"synth_step_pos", bi_w_synth_step_pos},
     {"synth_steps", bi_w_synth_steps},
     {"synth_sustain", bi_w_synth_sustain},
     {"synth_tick", bi_w_synth_tick},

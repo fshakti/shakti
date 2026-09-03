@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 int gfx_open(const char *title, char *err, size_t err_cap);
+int gfx_open_ex(const char *title, int design_w, int design_h, char *err, size_t err_cap);
 void gfx_close(void);
 int gfx_alive(void);
 int gfx_tick(char *err, size_t err_cap);
@@ -39,6 +40,9 @@ void gfx_core_set_alive(int alive);
 int gfx_core_is_alive(void);
 void gfx_core_mark_dirty(void);
 int gfx_core_fb_resize(int w, int h);
+uint32_t *gfx_core_design_pixels(void);
+int gfx_core_design_width(void);
+int gfx_core_design_height(void);
 
 #ifdef __cplusplus
 }

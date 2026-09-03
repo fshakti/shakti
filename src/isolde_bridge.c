@@ -1,7 +1,7 @@
 /* isolde_bridge.c — runtime dlopen of libisolde.so so import isolde uses native kernels. */
 #include "shakti.h"
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>

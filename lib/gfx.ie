@@ -1,6 +1,8 @@
 # gfx — standalone pixel window (cross-platform where built).
 
-def open(title:"Shakti GFX"):
+def open(title:"Shakti GFX", w:0, h:0):
+    if w > 0 and h > 0:
+        return gfx_open(title, w, h)
     r : gfx_open(title)
     return r
 

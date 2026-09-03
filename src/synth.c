@@ -17,7 +17,7 @@
 #include "synth_platform.h"
 #include <pthread.h>
 #include <unistd.h>
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
 #undef in
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -97,7 +97,7 @@ typedef struct MetroVoice {
 typedef struct SynthState {
     int open;
     int alive;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     Display *dpy;
     Window win;
     GC gc;
@@ -155,12 +155,12 @@ typedef struct SynthState {
     int reverb_ci;
     SynthVoice voices[SYNTH_VOICES];
     MetroVoice metro;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     pthread_t audio_tid;
 #endif
     pthread_mutex_t mu;
     int audio_run;
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     snd_pcm_t *pcm;
 #endif
     double phase_samples;
@@ -375,7 +375,7 @@ static void synth_ui_blit(void) {
     g.dirty = 0;
     synth_core_audio_unlock();
     Pv(!dirty)
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     Pv(!g.dpy || !g.img)
 #endif
     if (g.fb && g.present) synth_core_present_scale();
@@ -625,7 +625,7 @@ int synth_core_fb_resize(int w, int h) {
 
     synth_letterbox_update();
     synth_layout_compute(&g.layout);
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     if (g.dpy && g.img) {
         g.img->data = NULL;
         XDestroyImage(g.img);
@@ -635,7 +635,7 @@ int synth_core_fb_resize(int w, int h) {
     free(g.present);
     g.present = (uint32_t *)calloc((size_t)g.win_w * (size_t)g.win_h, sizeof(uint32_t));
     P(!g.present,-1)
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     if (g.dpy) {
         g.img = XCreateImage(g.dpy, DefaultVisual(g.dpy, g.scr), 24, ZPixmap, 0, (char *)g.present, g.win_w,
                              g.win_h, 32, 0);
@@ -1218,7 +1218,7 @@ void synth_core_render(float *out, int n) {
     synth_ui_push_audio_samples(out, n);
     synth_core_audio_unlock();
 }
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
 static void *synth_audio_loop(void *arg) {
     float mono[SYNTH_BUF];
     int16_t stereo[SYNTH_BUF * 2];
@@ -1255,7 +1255,7 @@ static void *synth_audio_loop(void *arg) {
     return NULL;
 }
 #endif
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
 static int synth_x11_init(char *err, size_t cap) {
     int scr;
     XSetWindowAttributes swa;
@@ -1484,7 +1484,7 @@ int synth_open(char *err, size_t err_cap) {
         getenv("SHAKTI_SYNTH_HEADLESS") != NULL;
 #endif
     P(g.open && g.alive,0)
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     if (!headless && !getenv("DISPLAY")) {
         snprintf(err, err_cap, "synth_open: DISPLAY not set");
         return -1;
@@ -1843,7 +1843,7 @@ int synth_set_skin(const char *name, char *err, size_t err_cap) {
     (void)err;
     (void)err_cap;
     synth_ui_set_skin(name);
-#ifdef __linux__
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
     if (g.open && g.dpy && g.win) XStoreName(g.dpy, g.win, synth_ui_window_title());
 #endif
     g.dirty = 1;
@@ -1984,6 +1984,23 @@ int synth_core_present_height(void) { return g.win_h; }
 int synth_core_dirty(void) { return g.dirty; }
 void synth_core_clear_dirty(void) { g.dirty = 0; }
 void synth_core_mark_dirty(void) { g.dirty = 1; }
+int synth_open_audio(char *err, size_t err_cap) {
+    int rc = synth_open(err, err_cap);
+    if (rc != 0) return rc;
+    synth_core_set_audio_run(1);
+    return 0;
+}
+int synth_step_pos(void) { return g.step_pos; }
+int synth_spectrum_copy(float *out, int maxn) {
+    float spec[64];
+    int n = 0, i;
+    synth_ui_get_spectrum(spec, &n);
+    if (n > maxn) n = maxn;
+    if (out) {
+        for (i = 0; i < n; i++) out[i] = spec[i];
+    }
+    return n;
+}
 #else
 int synth_open(char *err, size_t err_cap) {
     if (err && err_cap)
@@ -1994,6 +2011,15 @@ int synth_open(char *err, size_t err_cap) {
         snprintf(err, err_cap, "synth: Linux desktop only (build with SHAKTI_SYNTH=1)");
 #endif
     return -1;
+}
+int synth_open_audio(char *err, size_t err_cap) {
+    return synth_open(err, err_cap);
+}
+int synth_step_pos(void) { return 0; }
+int synth_spectrum_copy(float *out, int maxn) {
+    (void)out;
+    (void)maxn;
+    return 0;
 }
 void synth_close(void) {}
 int synth_alive(void) { return 0; }
@@ -2277,6 +2303,30 @@ V *bi_synth_open(V **a, int n) {
     err[0] = 0;
     P(synth_open(err, sizeof err) != 0,synth_err(err))
     return v_nil();
+}
+V *bi_synth_open_audio(V **a, int n) {
+    char err[512];
+    (void)a;
+    (void)n;
+    err[0] = 0;
+    P(synth_open_audio(err, sizeof err) != 0,synth_err(err))
+    return v_nil();
+}
+V *bi_synth_step_pos(V **a, int n) {
+    (void)a;
+    (void)n;
+    return v_int(synth_step_pos());
+}
+V *bi_synth_spectrum(V **a, int n) {
+    float spec[64];
+    int got, i;
+    V *v;
+    (void)a;
+    (void)n;
+    got = synth_spectrum_copy(spec, 64);
+    v = v_fvec(got);
+    for (i = 0; i < got; i++) v->F[i] = (double)spec[i];
+    return v;
 }
 V *bi_synth_close(V **a, int n) {
     (void)a;
