@@ -15,6 +15,9 @@ def open():
         print("synth open — window active; close it or type \\q to leave repl")
     return r
 
+def open_audio():
+    return synth_open_audio()
+
 def close():
     synth_close()
 
@@ -29,6 +32,12 @@ def set_steps(n):
 
 def steps():
     return synth_steps()
+
+def step_pos():
+    return synth_step_pos()
+
+def spectrum():
+    return synth_spectrum()
 
 def set_metro(n):
     synth_set_metro(n)
