@@ -111,7 +111,7 @@ static V*parse_array(const char*s,const char**end_out,int depth){
   if(++count>SHAKTI_JSON_MAX_ELEMS){v_free(r);return v_err("json: too many array elements");}
   s=skip_ws(e);
   if(*s==']'){*end_out=s+1;return r;}
-  Pr(*s!=',',v_free(r);v_err("json: expected , or ]");)s=skip_ws(s+1);}}
+  if(*s!=','){v_free(r);return v_err("json: expected , or ]");}s=skip_ws(s+1);}}
 static V*parse_object(const char*s,const char**end_out,int depth){
  P(depth>=SHAKTI_JSON_MAX_DEPTH,v_err("json: nesting too deep"))
  P(*s!='{',v_err("json: expected {"))
@@ -125,7 +125,7 @@ static V*parse_object(const char*s,const char**end_out,int depth){
   V*key=parse_string(s,&e);
   if(!key||key->t==T_ERR){v_free(keys);v_free(vals);return key?key:v_err("json: object key");}
   s=skip_ws(e);
-  Pr(*s!=':',v_free(key);v_free(keys);v_free(vals);v_err("json: expected :");)
+  if(*s!=':'){v_free(key);v_free(keys);v_free(vals);return v_err("json: expected :");}
   s=skip_ws(s+1);
   V*val=parse_value(s,&e,depth+1);
   if(!val||val->t==T_ERR){v_free(key);v_free(keys);v_free(vals);return val?val:v_err("json: object value");}
@@ -136,7 +136,7 @@ static V*parse_object(const char*s,const char**end_out,int depth){
   if(++count>SHAKTI_JSON_MAX_ELEMS){v_free(keys);v_free(vals);return v_err("json: too many object members");}
   s=skip_ws(e);
   if(*s=='}'){*end_out=s+1;return v_dict_own(keys,vals);}
-  Pr(*s!=',',v_free(keys);v_free(vals);v_err("json: expected , or }");)s=skip_ws(s+1);}}
+  if(*s!=','){v_free(keys);v_free(vals);return v_err("json: expected , or }");}s=skip_ws(s+1);}}
 static V*parse_value(const char*s,const char**end_out,int depth){
  s=skip_ws(s);
  P(*s=='"',parse_string(s,end_out))

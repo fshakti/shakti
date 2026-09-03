@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #if defined(SHAKTI_HAVE_GFX) && ( \
+    defined(__EMSCRIPTEN__) || \
     (defined(__linux__) && __has_include(<X11/Xlib.h>)) || \
     (defined(__APPLE__) && !defined(__IOS__)) \
 )
@@ -48,15 +49,17 @@ static void gfx_put(int x, int y, uint32_t c) {
 }
 
 static void gfx_letterbox(void) {
-    int ww = g.win_w > 0 ? g.win_w : GFX_DESIGN_W;
-    int wh = g.win_h > 0 ? g.win_h : GFX_DESIGN_H;
-    float sx = (float)ww / (float)GFX_DESIGN_W;
-    float sy = (float)wh / (float)GFX_DESIGN_H;
+    int dw = g.design_w > 0 ? g.design_w : GFX_DESIGN_W;
+    int dh = g.design_h > 0 ? g.design_h : GFX_DESIGN_H;
+    int ww = g.win_w > 0 ? g.win_w : dw;
+    int wh = g.win_h > 0 ? g.win_h : dh;
+    float sx = (float)ww / (float)dw;
+    float sy = (float)wh / (float)dh;
     g.ui_scale = sx < sy ? sx : sy;
-    g.off_x = (ww - (int)(GFX_DESIGN_W * g.ui_scale)) / 2;
-    g.off_y = (wh - (int)(GFX_DESIGN_H * g.ui_scale)) / 2;
+    g.off_x = (ww - (int)(dw * g.ui_scale)) / 2;
+    g.off_y = (wh - (int)(dh * g.ui_scale)) / 2;
     if (!g.present || g.win_w <= 0 || g.win_h <= 0 || !g.fb) return;
-    fb_letterbox_nn(g.present, g.win_w, g.win_h, g.fb, GFX_DESIGN_W, GFX_DESIGN_H,
+    fb_letterbox_nn(g.present, g.win_w, g.win_h, g.fb, dw, dh,
                     g.ui_scale, g.off_x, g.off_y, GFX_LETTERBOX);
 }
 
@@ -66,6 +69,9 @@ void gfx_core_set_alive(int a) { g.alive = a ? 1 : 0; }
 uint32_t *gfx_core_present_pixels(void) { return g.present; }
 int gfx_core_present_width(void) { return g.win_w; }
 int gfx_core_present_height(void) { return g.win_h; }
+uint32_t *gfx_core_design_pixels(void) { return g.fb; }
+int gfx_core_design_width(void) { return g.design_w; }
+int gfx_core_design_height(void) { return g.design_h; }
 
 int gfx_core_fb_resize(int w, int h) {
     uint32_t *np;
@@ -108,14 +114,18 @@ void gfx_core_mouse_move(int wx, int wy, int down) {
 
 int gfx_available(void) { return 1; }
 
-int gfx_open(const char *title, char *err, size_t err_cap) {
+int gfx_open_ex(const char *title, int design_w, int design_h, char *err, size_t err_cap) {
     (void)title;
+    if (design_w < 64 || design_h < 64 || design_w > GFX_MAX_WINDOW_DIM || design_h > GFX_MAX_WINDOW_DIM) {
+        if (err && err_cap) snprintf(err, err_cap, "gfx_open: design size out of range");
+        return -1;
+    }
     /* Tear down any prior session, including a failed open that left
      * present/platform state without fb (issue #2 reopen path). */
     if (g.fb || g.present || g.alive) gfx_close();
-    g.design_w = GFX_DESIGN_W;
-    g.design_h = GFX_DESIGN_H;
-    g.fb = (uint32_t *)calloc((size_t)GFX_DESIGN_W * (size_t)GFX_DESIGN_H, sizeof(uint32_t));
+    g.design_w = design_w;
+    g.design_h = design_h;
+    g.fb = (uint32_t *)calloc((size_t)design_w * (size_t)design_h, sizeof(uint32_t));
     if (!g.fb) {
         if (err && err_cap) snprintf(err, err_cap, "gfx_open: out of memory");
         return -1;
@@ -131,6 +141,10 @@ int gfx_open(const char *title, char *err, size_t err_cap) {
     return 0;
 }
 
+int gfx_open(const char *title, char *err, size_t err_cap) {
+    return gfx_open_ex(title, GFX_DESIGN_W, GFX_DESIGN_H, err, err_cap);
+}
+
 void gfx_close(void) {
     gfx_platform_shutdown();
     free(g.fb);
@@ -141,7 +155,6 @@ void gfx_close(void) {
 int gfx_alive(void) { return g.alive && g.fb != NULL; }
 
 int gfx_tick(char *err, size_t err_cap) {
-    const char *nosleep;
     (void)err;
     (void)err_cap;
     if (!gfx_alive()) return 0;
@@ -152,10 +165,14 @@ int gfx_tick(char *err, size_t err_cap) {
         gfx_platform_present();
         g.dirty = 0;
     }
+#ifndef __EMSCRIPTEN__
     /* Pace like synth (~60 Hz). SHAKTI_GFX_NO_SLEEP=1 restores busy-wait. */
-    nosleep = getenv("SHAKTI_GFX_NO_SLEEP");
-    if (!nosleep || !(*nosleep == '1' || *nosleep == 'y' || *nosleep == 'Y'))
-        usleep(16000);
+    {
+        const char *nosleep = getenv("SHAKTI_GFX_NO_SLEEP");
+        if (!nosleep || !(*nosleep == '1' || *nosleep == 'y' || *nosleep == 'Y'))
+            usleep(16000);
+    }
+#endif
     return 0;
 }
 
@@ -477,10 +494,13 @@ void gfx_copy_rect(int sx, int sy, int w, int h, int dx, int dy) {
 #else /* stubs */
 
 int gfx_available(void) { return 0; }
-int gfx_open(const char *title, char *err, size_t err_cap) {
-    (void)title;
+int gfx_open_ex(const char *title, int design_w, int design_h, char *err, size_t err_cap) {
+    (void)title;(void)design_w;(void)design_h;
     if (err && err_cap) snprintf(err, err_cap, "gfx: not available on this build");
     return -1;
+}
+int gfx_open(const char *title, char *err, size_t err_cap) {
+    return gfx_open_ex(title, 0, 0, err, err_cap);
 }
 void gfx_close(void) {}
 int gfx_alive(void) { return 0; }
@@ -502,6 +522,9 @@ int gfx_mouse_down(void) { return 0; }
 uint32_t *gfx_core_present_pixels(void) { return NULL; }
 int gfx_core_present_width(void) { return 0; }
 int gfx_core_present_height(void) { return 0; }
+uint32_t *gfx_core_design_pixels(void) { return NULL; }
+int gfx_core_design_width(void) { return 0; }
+int gfx_core_design_height(void) { return 0; }
 void gfx_core_set_alive(int a) { (void)a; }
 int gfx_core_is_alive(void) { return 0; }
 void gfx_core_mark_dirty(void) {}
@@ -523,8 +546,15 @@ static V *gfx_err(char *err) { P(!err[0], v_err("gfx: failed")); return v_err(er
 V *bi_gfx_open(V **a, int n) {
     char err[512];
     const char *title = "Shakti GFX";
+    int dw = 960, dh = 540;
     err[0] = 0;
     if (n >= 1 && a[0]->t == T_STR) title = a[0]->s;
+    if (n >= 3) {
+        dw = gfx_arg_int(a, n, 1, dw);
+        dh = gfx_arg_int(a, n, 2, dh);
+        P(gfx_open_ex(title, dw, dh, err, sizeof err) != 0, gfx_err(err));
+        return v_nil();
+    }
     P(gfx_open(title, err, sizeof err) != 0, gfx_err(err));
     return v_nil();
 }
@@ -535,6 +565,7 @@ V *bi_gfx_tick(V **a, int n) { char err[512]; (void)a;(void)n; err[0]=0; gfx_tic
 V *bi_gfx_sync_keys(V **a, int n) {
     (void)a;(void)n;
 #if defined(SHAKTI_HAVE_GFX) && ( \
+    defined(__EMSCRIPTEN__) || \
     (defined(__linux__) && __has_include(<X11/Xlib.h>)) || \
     (defined(__APPLE__) && !defined(__IOS__)) \
 )
