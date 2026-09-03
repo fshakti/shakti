@@ -366,7 +366,7 @@ record-showcase: prod $(BUILD)/iefs_pack_cvec
 	bash tools/record_showcase.sh
 endif
 
-.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase
+.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase wasm
 
 test: shakti
 	@if [ -f qa/tests/assert_prec.sh ]; then \
@@ -516,3 +516,6 @@ install: shakti
 
 uninstall:
 	rm -f "$(BINDIR)/shakti"
+
+wasm:
+	bash -lc 'source "$$HOME/emsdk/emsdk_env.sh" && $(MAKE) -C web'

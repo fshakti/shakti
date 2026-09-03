@@ -12,6 +12,9 @@ extern "C" {
 #define SYNTH_DEFAULT_STEPS 16
 
 int synth_open(char *err, size_t err_cap);
+int synth_open_audio(char *err, size_t err_cap);
+int synth_step_pos(void);
+int synth_spectrum_copy(float *out, int maxn);
 void synth_close(void);
 int synth_alive(void);
 int synth_tick(char *err, size_t err_cap);
