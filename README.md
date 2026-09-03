@@ -80,6 +80,8 @@ Unknown flags exit with status 2.
 
 Bare REPL meta-commands (banner also lists them): `\d` grammar card, `\v` vars, `\w` names,
 `\q` / `\q N` (process exit with optional status). Soft leave: `quit` or `exit`.
+Line editing: `^D` deletes the character under the cursor (empty line: EOF) —
+[llelf](https://github.com/llelf).
 
 ```bash
 ./shakti file.ie
