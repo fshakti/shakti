@@ -24,6 +24,7 @@ Env *env_new(Env *parent) {
     e->names  = x_calloc(16, sizeof(char*), "env_new");
     e->vals   = x_calloc(16, sizeof(V*), "env_new");
     e->hashes = x_calloc(16, sizeof(uint32_t), "env_new");
+    e->kinds  = x_calloc(16, sizeof(uint8_t), "env_new");
     e->parent = parent;
     if(parent) parent->rc++;
     return e;
@@ -66,12 +67,13 @@ void env_release(Env *e) {
     e->rc = 1;
     shakti_env_pool[shakti_env_pool_n++] = e;
 }
-void env_set(Env *e, const char *name, V *val) {
+void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
     uint32_t h = fnv1a(name);
     for(int i=0; i<e->len; i++) {
         if(e->hashes[i] == h && strcmp(e->names[i], name)==0) {
             v_free(e->vals[i]);
             e->vals[i] = v_ref(val);
+            e->kinds[i] = (uint8_t)kind;
             return;
         }
     }
@@ -80,11 +82,24 @@ void env_set(Env *e, const char *name, V *val) {
         e->names  = x_realloc(e->names,  e->cap * sizeof(char*), "env_set");
         e->vals   = x_realloc(e->vals,   e->cap * sizeof(V*), "env_set");
         e->hashes = x_realloc(e->hashes, e->cap * sizeof(uint32_t), "env_set");
+        e->kinds  = x_realloc(e->kinds,  e->cap * sizeof(uint8_t), "env_set");
     }
     e->names[e->len]  = x_strdup(name, "env_set");
     e->vals[e->len]   = v_ref(val);
     e->hashes[e->len] = h;
+    e->kinds[e->len]  = (uint8_t)kind;
     e->len++;
+}
+void env_set(Env *e, const char *name, V *val) {
+    env_set_kind(e, name, val, ENV_BIND_USER);
+}
+int env_slot_listed(const Env *e, int i) {
+    const char *n;
+    if(!e || i < 0 || i >= e->len) return 0;
+    if(e->kinds && e->kinds[i] != ENV_BIND_USER) return 0;
+    n = e->names[i];
+    if(n && n[0] == '_' && n[1] == '_') return 0;
+    return 1;
 }
 /* Mutate an existing INT binding in place when uniquely owned (rc==1). */
 int env_set_int_inplace(Env *e, const char *name, int64_t j) {
@@ -139,7 +154,7 @@ void env_free(Env *e) {
     Pv(!e)
     Pv(--e->rc > 0)
     i(e->len,{free(e->names[i]); v_free(e->vals[i]);})
-    free(e->names); free(e->vals); free(e->hashes);
+    free(e->names); free(e->vals); free(e->hashes); free(e->kinds);
     if(e->parent) env_free(e->parent);
     free(e);
 }

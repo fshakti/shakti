@@ -103,14 +103,17 @@ V *do_import(const char *name, Env *e) {
             nk->L[0] = v_str(child);
             nv->L[0] = v_ref(mod_dict);
             V *ns = v_dict(nk, nv);
-            env_set(e, parent, ns);
+            env_set_kind(e, parent, ns, ENV_BIND_IMPORT);
             v_free(nk); v_free(nv); v_free(ns);
         }
     } else {
-        env_set(e, name, mod_dict);
+        env_set_kind(e, name, mod_dict, ENV_BIND_IMPORT);
     }
-    if (is_sql_import(name))
-        env_set(e, SHAKTI_SQL_FLAG, v_bool(1));
+    if (is_sql_import(name)) {
+        V *flag = v_bool(1);
+        env_set_kind(e, SHAKTI_SQL_FLAG, flag, ENV_BIND_INTERNAL);
+        v_free(flag);
+    }
     v_free(mod_dict);
     env_free(mod_env);
     return v_nil();
