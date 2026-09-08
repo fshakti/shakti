@@ -480,6 +480,7 @@ void run_repl(Env *e) {
         input[inlen] = 0;
         if (strcmp(line, "\\v") == 0) {
             for(int i=0; i<e->len; i++) {
+                if(!env_slot_listed(e, i)) continue;
                 printf("%-15s", e->names[i]);
                 print_val(e->vals[i], stdout, 1);
                 printf("\n");
@@ -488,6 +489,7 @@ void run_repl(Env *e) {
         }
         if (strcmp(line, "\\w") == 0) {
             for(int i=0; i<e->len; i++) {
+                if(!env_slot_listed(e, i)) continue;
                 printf("%s\n", e->names[i]);
             }
             continue;

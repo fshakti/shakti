@@ -239,7 +239,7 @@ int shakti_lang_main(int argc, char **argv) {
             int narg = argc - i;
             V *av = v_list(narg);
             for (int k = 0; k < narg; k++) av->L[k] = v_str(argv[i + k]);
-            env_set(global, "argv", av);
+            env_set_kind(global, "argv", av, ENV_BIND_INTERNAL);
             v_free(av);
         }
         char *src = read_file(argv[i]);
