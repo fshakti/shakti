@@ -68,12 +68,19 @@ struct Node {
     int fn_ast_i;
 };
 
+enum {
+    ENV_BIND_USER = 0,
+    ENV_BIND_IMPORT = 1,
+    ENV_BIND_INTERNAL = 2
+};
+
 struct Env {
     int rc;
     int cap, len;
     char **names;
     V **vals;
     uint32_t *hashes;
+    uint8_t *kinds;
     Env *parent;
 };
 
@@ -344,6 +351,8 @@ char *v_repr(V *v);
 char *v_to_str(V *v);
 Env *env_new(Env *parent);
 void env_set(Env *e, const char *name, V *val);
+void env_set_kind(Env *e, const char *name, V *val, unsigned kind);
+int env_slot_listed(const Env *e, int i);
 void env_set_local(Env *e, const char *name, V *val);
 V *env_get(Env *e, const char *name);
 void env_ref(Env *e);
