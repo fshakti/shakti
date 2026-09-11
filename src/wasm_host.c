@@ -187,6 +187,7 @@ static char *wasm_repl_vars(int names_only) {
         if (start < 0) start = 0;
         if (start > g_env->len) start = g_env->len;
         for (i = start; i < g_env->len; i++) {
+            if (!env_slot_listed(g_env, i)) continue;
             if (names_only) {
                 fprintf(fp, "%s\n", g_env->names[i] ? g_env->names[i] : "");
             } else {
