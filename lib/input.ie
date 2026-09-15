@@ -35,12 +35,6 @@ def set_hz(n):
 def set_own_gui(enable):
     input_set_own_gui(enable)
 
-def key_down(code):
-    return input_key_down(code)
-
-def keys_clear():
-    input_keys_clear()
-
 def reload_qwerty():
     input_qwerty_reload()
 
@@ -51,6 +45,12 @@ def refresh_side():
     wheel : input_get_wheel()
     qwerty : input_get_qwerty()
     hz : input_get_hz()
+
+def key_down(code):
+    return input_key_down(code)
+
+def keys_clear():
+    input_keys_clear()
 
 x : input_get_x()
 y : input_get_y()
