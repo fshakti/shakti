@@ -2,7 +2,7 @@
 
 [Discord](https://discord.gg/PkKwUk9Tf) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
 
-Small interpreted language (0.13.2) with vectors, matrices, tables, decorators,
+Small interpreted language (0.14.0) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), asof helpers, and optional SQL,
 graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
