@@ -27,7 +27,17 @@ int gfx_platform_poll(void) { return gfx_core_is_alive() ? 0 : -1; }
 
 void gfx_platform_present(void) {}
 
+int gfx_platform_present_gpu(void) { return 0; }
+
 void gfx_platform_sync_keys(void) {}
+
+int gfx_platform_screen_size(int *w, int *h) {
+    if (w) *w = g_w;
+    if (h) *h = g_h;
+    return 0;
+}
+
+void gfx_platform_set_fullscreen(int on) { (void)on; }
 
 void gfx_wasm_set_window(int w, int h) {
     if (w > 64 && h > 64) {
