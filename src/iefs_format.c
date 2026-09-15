@@ -339,7 +339,7 @@ int iefs_encode(V *v, unsigned char **out, size_t *out_len, char *err, size_t er
     put_u16(file + 6, 0); /* flags */
     put_u64(file + 8, (uint64_t)payload.len);
     put_u32(file + 16, crc);
-    put_u32(file + 20, 0); /* reserved */
+    put_u32(file + 20, IEFS_TYPE_LAYOUT);
     if (payload.len)
         memcpy(file + IEFS_HEADER_SIZE, payload.data, payload.len);
     free(payload.data);
@@ -674,7 +674,7 @@ static V *decode_value(IefsR *r) {
     }
 }
 
-/* ---- IEFS v3 (TOC + 2MiB extents; Isolde Basic / STAC day shards) ---- */
+/* ---- IEFS v3 (TOC + 2MiB extents; STAC day shards) ---- */
 
 static int iefs_zstd_decompress(const unsigned char *src, size_t src_len,
                                 unsigned char **out, size_t *out_len, char *err, size_t err_cap) {
@@ -720,23 +720,6 @@ static int iefs_zstd_decompress(const unsigned char *src, size_t src_len,
 #endif
 }
 
-/* Isolde type-layout 1 (char inserted at tag 4): ivec=8, fvec=9, cvec=10. */
-#define IEFS_ISL1_IVEC 8
-#define IEFS_ISL1_FVEC 9
-#define IEFS_ISL1_CVEC 10
-
-static int iefs_type_from_extent(int raw, uint32_t layout) {
-    if (layout == IEFS_TYPE_LAYOUT) {
-        if (raw == IEFS_ISL1_IVEC)
-            return T_IVEC;
-        if (raw == IEFS_ISL1_FVEC)
-            return T_FVEC;
-        if (raw == IEFS_ISL1_CVEC)
-            return T_CVEC;
-    }
-    return raw;
-}
-
 static size_t iefs_pack_nbytes(int64_t n, int bits) {
     if (n <= 0 || bits <= 0)
         return 1;
@@ -759,7 +742,7 @@ static int64_t iefs_pack_get_i(const unsigned char *B, int64_t i, int bits) {
     return (int64_t)v;
 }
 
-/* STAC year: Isolde v3 writes i64 ivec/f64, packed i24 ivec, and list[char]. */
+/* STAC year: v3 writes i64 ivec/f64, packed i24 ivec, and list[char]. */
 static V *iefs_v3_import_vec(int type, int bits, uint64_t nelem, const unsigned char *p, size_t nbytes,
                              IefsMapRegion *reg, int alias_ok) {
     if (nelem > IEFS_MAX_ELEMS)
@@ -879,8 +862,18 @@ static V *iefs_table_select_cols(V *tbl, V *colnames) {
     return v_table_own(klist, vlist);
 }
 
+static V *iefs_check_type_layout(const unsigned char *buf) {
+    uint32_t layout = get_u32(buf + 20);
+    if (layout != IEFS_TYPE_LAYOUT)
+        return v_err("iefs: type layout predates char (tag 4 was str); re-save required");
+    return NULL;
+}
+
 static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *reg, int verify_crc,
                          V *colnames) {
+    V *layout_err = iefs_check_type_layout(buf);
+    if (layout_err)
+        return layout_err;
     uint64_t payload_len = get_u64(buf + 8);
     uint32_t expect_crc = get_u32(buf + 16);
     if (payload_len > IEFS_MAX_PAYLOAD)
@@ -888,7 +881,6 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
         return v_err("iefs: truncated file");
     const unsigned char *body = buf + IEFS_HEADER_SIZE;
-    uint32_t layout = get_u32(buf + 20);
     if (verify_crc) {
         uint32_t got = crc32_buf(body, (size_t)payload_len);
         if (got != expect_crc)
@@ -915,7 +907,7 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     uint32_t n_keep = 0;
     for (uint32_t i = 0; i < n_ext; i++) {
         const unsigned char *er = body + 8 + (size_t)i * IEFS_V3_EXTENT_SIZE;
-        int type = iefs_type_from_extent((int)er[0], layout);
+        int type = (int)er[0];
         int bits = er[1];
         int codec = er[2];
         int outer = er[3];
@@ -1049,6 +1041,11 @@ V *iefs_decode(const unsigned char *buf, size_t len) {
         return v_err("iefs: truncated header");
     if (memcmp(buf, IEFS_MAGIC, 4) != 0)
         return v_err("iefs: bad magic");
+    {
+        V *layout_err = iefs_check_type_layout(buf);
+        if (layout_err)
+            return layout_err;
+    }
     uint16_t ver = get_u16(buf + 4);
     if (ver == 3)
         return iefs_decode_v3(buf, len, NULL, 1, NULL);
@@ -1086,6 +1083,11 @@ V *iefs_decode_mapped_cols(const unsigned char *buf, size_t len, IefsMapRegion *
         return v_err("iefs: truncated header");
     if (memcmp(buf, IEFS_MAGIC, 4) != 0)
         return v_err("iefs: bad magic");
+    {
+        V *layout_err = iefs_check_type_layout(buf);
+        if (layout_err)
+            return layout_err;
+    }
     uint16_t ver = get_u16(buf + 4);
     if (ver == 3)
         return iefs_decode_v3(buf, len, reg, 0, colnames);
@@ -1174,8 +1176,6 @@ static int iefs_mode_from_arg(V *v, int *out_mode) {
 
 static int iefs_mode_from_env(void) {
     const char *e = getenv("SHAKTI_IEFS_DIRECT");
-    if (!e || !*e)
-        e = getenv("ISOLDE_IEFS_DIRECT");
     if (e && (*e == '1' || *e == 'y' || *e == 'Y'))
         return IEFS_IO_DIRECT;
     if (e && (*e == '0' || *e == 'n' || *e == 'N'))
