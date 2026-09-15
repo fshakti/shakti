@@ -26,7 +26,14 @@ def _headers():
     return {"Authorization": "Bot " + _token(), "Content-Type": "application/json"}
 
 def _url(path):
-    return _API + path
+    p : str(path)
+    if len(p) = 0:
+        raise "discord: path must start with /"
+    if p[0] != "/":
+        raise "discord: path must start with /"
+    if re_match("://", p):
+        raise "discord: path must not contain ://"
+    return _API + p
 
 def _check(resp):
     if rest.ok(resp):

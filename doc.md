@@ -126,6 +126,8 @@ shakti
 
 Unknown flags exit with status 2. A silent leading `run` argument is accepted for Android launchers only.
 
+A script whose path ends in `.py`, `.c`, `.cs`, or `.java` is transpiled with the matching converter (`p2s` / `c2s` / `cs2s` / `j2s` under `src/converters/`) and then evaluated. `.ie` is parsed as-is. Standalone: `./shakti src/converters/p2s.ie input.py [-o out.ie]` (needs `SHAKTI_LIB`).
+
 ### REPL
 
 Start with `./.build/shakti` (or `-i` after `--command`). Banner line:

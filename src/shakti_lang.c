@@ -7,6 +7,10 @@
 #ifndef SHAKTI_PKG_VERSION
 #define SHAKTI_PKG_VERSION "0.14.0"
 #endif
+#include "embed/shakti_p2s_embed.h"
+#include "embed/shakti_c2s_embed.h"
+#include "embed/shakti_cs2s_embed.h"
+#include "embed/shakti_j2s_embed.h"
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
 #ifndef STDIN_FILENO
@@ -66,6 +70,112 @@ static char *read_file(const char *path) {
     fclose(f);
     return buf;
 }
+static int shakti_path_has_ext(const char *path, const char *ext) {
+    size_t n, e;
+    if (!path || !ext) return 0;
+    n = strlen(path);
+    e = strlen(ext);
+    return n >= e && !strcmp(path + (n - e), ext);
+}
+static char *shakti_transpile_embedded(const char *src_text, const char *filename,
+                                       Env *global, const char *converter_source,
+                                       const char *cache_key, const char *label) {
+    V *mod = env_get(global, cache_key);
+    if (!mod || mod->t != T_DICT) {
+        Env *mod_env = env_new(global);
+        Node *prog = parse(converter_source);
+        V *er = eval(prog, mod_env);
+        int load_err = g_error || (er && er->t == T_ERR);
+        if (load_err) {
+            if (g_error && g_error_val) {
+                fprintf(stderr, "Error: %s\n", g_error_val->s);
+                v_free(g_error_val); g_error_val = NULL; g_error = 0;
+            } else if (er && er->t == T_ERR)
+                fprintf(stderr, "Error: %s\n", er->s);
+            else
+                fprintf(stderr, "Error: failed to load embedded %s converter\n", label);
+            v_free(er);
+            node_free(prog);
+            env_free(mod_env);
+            return NULL;
+        }
+        v_free(er);
+        node_free(prog);
+
+        V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);
+        i(mod_env->len, {
+            mk->L[i] = v_str(mod_env->names[i]);
+            mv->L[i] = v_ref(mod_env->vals[i]);
+        })
+        V *mod_dict = v_dict(mk, mv);
+        v_free(mk); v_free(mv);
+        env_set_kind(global, cache_key, mod_dict, ENV_BIND_INTERNAL);
+        v_free(mod_dict);
+        env_free(mod_env);
+        mod = env_get(global, cache_key);
+    }
+    if (!mod || mod->t != T_DICT) {
+        fprintf(stderr, "Error: embedded %s module missing\n", label);
+        return NULL;
+    }
+
+    V *fn = v_dict_get(mod, "transpile");
+    if (!fn || fn->t != T_FN) {
+        fprintf(stderr, "Error: embedded %s.transpile not found\n", label);
+        return NULL;
+    }
+    fn = v_ref(fn);
+
+    V *al = v_list(2);
+    al->L[0] = v_str(src_text);
+    al->L[1] = v_str(filename);
+    if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+    g_error = 0;
+    V *out = builtin_call("__invoke__", (V*[]){fn, al}, 2, NULL, NULL, 0, global);
+    v_free(fn);
+    v_free(al);
+
+    char *ie = NULL;
+    if (g_error && g_error_val) {
+        fprintf(stderr, "Error: %s\n", g_error_val->s);
+        v_free(g_error_val); g_error_val = NULL; g_error = 0;
+    } else if (!out || out->t == T_ERR) {
+        fprintf(stderr, "Error: %s\n", (out && out->s) ? out->s : "transpile failed");
+    } else if (out->t != T_STR) {
+        fprintf(stderr, "Error: transpile did not return a string\n");
+    } else {
+        ie = x_strdup(out->s, "shakti_lang");
+    }
+    v_free(out);
+    return ie;
+}
+static char *shakti_transpile_python(const char *py_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(py_src, filename, global, shakti_p2s_source,
+                                     "__shakti_p2s__", "p2s");
+}
+static char *shakti_transpile_c(const char *c_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(c_src, filename, global, shakti_c2s_source,
+                                     "__shakti_c2s__", "c2s");
+}
+static char *shakti_transpile_csharp(const char *cs_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(cs_src, filename, global, shakti_cs2s_source,
+                                     "__shakti_cs2s__", "cs2s");
+}
+static char *shakti_transpile_java(const char *java_src, const char *filename, Env *global) {
+    return shakti_transpile_embedded(java_src, filename, global, shakti_j2s_source,
+                                     "__shakti_j2s__", "j2s");
+}
+static char *shakti_transpile_script(const char *path, const char *src, Env *global) {
+    if (shakti_path_has_ext(path, ".py"))
+        return shakti_transpile_python(src, path, global);
+    if (shakti_path_has_ext(path, ".cs"))
+        return shakti_transpile_csharp(src, path, global);
+    if (shakti_path_has_ext(path, ".java"))
+        return shakti_transpile_java(src, path, global);
+    if (shakti_path_has_ext(path, ".c"))
+        return shakti_transpile_c(src, path, global);
+    return NULL;
+}
 #ifndef SHAKTI_NO_MAIN
 static void shakti_print_usage(FILE *out) {
     fprintf(out,
@@ -73,6 +183,8 @@ static void shakti_print_usage(FILE *out) {
         "  shakti [options] [script [args...]]\n"
         "  shakti [options] -c|--command <code> [-i|--interactive]\n"
         "  shakti\n"
+        "\n"
+        "Scripts: .ie, plus .py / .c / .cs / .java via p2s / c2s / cs2s / j2s.\n"
         "\n"
         "Options:\n"
         "  -h, --help                     Show this help and exit\n"
@@ -244,6 +356,20 @@ int shakti_lang_main(int argc, char **argv) {
         }
         char *src = read_file(argv[i]);
         P(!src,1)
+        {
+            char *ie = shakti_transpile_script(argv[i], src, global);
+            if (ie) {
+                free(src);
+                src = ie;
+            } else if (shakti_path_has_ext(argv[i], ".py")
+                       || shakti_path_has_ext(argv[i], ".c")
+                       || shakti_path_has_ext(argv[i], ".cs")
+                       || shakti_path_has_ext(argv[i], ".java")) {
+                free(src);
+                env_free(global);
+                return 1;
+            }
+        }
         Node *prog = parse(src);
         V *r = eval(prog, global);
         int script_err = g_error || (r && r->t == T_ERR);

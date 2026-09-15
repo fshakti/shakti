@@ -192,6 +192,16 @@ int gfx_platform_poll(void) {
 
 void gfx_platform_sync_keys(void) {}
 
+int gfx_platform_present_gpu(void) { return 0; }
+
+int gfx_platform_screen_size(int *w, int *h) {
+    if (w) *w = 0;
+    if (h) *h = 0;
+    return -1;
+}
+
+void gfx_platform_set_fullscreen(int on) { (void)on; }
+
 #else
 #include <stddef.h>
 #include <stdio.h>
@@ -205,5 +215,12 @@ void gfx_platform_shutdown(void) {}
 void gfx_platform_present(void) {}
 int gfx_platform_poll(void) { return -1; }
 void gfx_platform_sync_keys(void) {}
+int gfx_platform_present_gpu(void) { return 0; }
+int gfx_platform_screen_size(int *w, int *h) {
+    if (w) *w = 0;
+    if (h) *h = 0;
+    return -1;
+}
+void gfx_platform_set_fullscreen(int on) { (void)on; }
 
 #endif
