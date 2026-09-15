@@ -393,6 +393,9 @@ def draw():
     gfx.tick()
 
 def show():
+    if getenv("SHAKTI_GFX_SKIP") = "1":
+        print("pyplot: show skipped (SHAKTI_GFX_SKIP=1)")
+        return
     if not gfx.available():
         print("pyplot: gfx not available")
         return
