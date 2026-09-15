@@ -1,4 +1,4 @@
-shakti 0.13.2
+shakti 0.14.0
 run   ./shakti · ./shakti f.ie · ./shakti -c '…'
 \d    this manual (hl) · doc.md (prose)
 
@@ -24,6 +24,7 @@ built  range sum min max avg abs dot mmul
 sql    import sql · select … by … from t where …
 note   . attr/col · @ each / deco · mmul matmul · == unsupported
        0xHH char (two hex digits) · longer 0x int
+       iefs layout 1 (char=4 str=5) · layout 0 refused
        table(a:1 2, b:3 4) · table(a:1 2; b:3 4)
 
 demos (verified ./shakti -c · make test)

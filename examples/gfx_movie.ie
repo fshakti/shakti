@@ -11,7 +11,7 @@ def pkg_ver():
                 raw : raw[0:n - 1]
         if len(raw) > 0:
             return raw
-    return "0.13.2"
+    return "0.14.0"
 
 if not gfx.available():
     print("gfx not available")

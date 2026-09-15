@@ -15,7 +15,7 @@
 #define IEFS_MAGIC "IEF1"
 #define IEFS_VERSION 1u
 #define IEFS_HEADER_SIZE 24u
-#define T_CVEC 22
+#define T_CVEC 10
 #define IEFS_MAX_ELEMS UINT32_MAX
 
 static uint32_t crc32_table[256];
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
     put_u16(file + 4, (uint16_t)IEFS_VERSION);
     put_u16(file + 6, 0);
     put_u64(file + 8, (uint64_t)pay_len);
-    put_u32(file + 20, 0);
+    put_u32(file + 20, 1);
     file[IEFS_HEADER_SIZE] = (unsigned char)T_CVEC;
     put_u64(file + IEFS_HEADER_SIZE + 1, (uint64_t)n);
     if (n)
