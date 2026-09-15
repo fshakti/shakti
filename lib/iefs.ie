@@ -13,7 +13,6 @@
 # Also reachable via global save/load when the path ends in .iefs.
 # SQL `select … from "….iefs"` opens via map (not CRC load).
 # Env: SHAKTI_IEFS_DIRECT=0|1, SHAKTI_IEFS_DIRECT_MIN=<bytes>
-# (ISOLDE_IEFS_* still accepted as aliases.)
 
 def save(x, path, direct:-1):
     if direct = -1:

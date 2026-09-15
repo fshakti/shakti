@@ -1,6 +1,8 @@
 # Shakti documentation
 
-Version **0.13.2**.
+Version **0.14.0**.
+
+Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]` … `list`), dict/table/function/datetime/time/input/subprocess, then matrices through `matrix[bool]`. IEFS writes that layout in header word 20 and rejects layout 0 (tag 4 was `str`); re-save those files.
 
 ## Contents
 
@@ -1497,7 +1499,9 @@ print(iefs.direct_available())
 
 Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, vectors, matrices, lists, dicts, tables. Functions, errors, and input streams are rejected.
 
-Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>` (`ISOLDE_IEFS_*` aliases still accepted).
+Type layout 1 (`char`=4, `str`=5) is stored at header offset 20. Writers stamp layout 1 and version 1 (flags 0). Readers reject any other layout (`iefs: type layout predates char (tag 4 was str); re-save required`). v3 TOC+extents remain readable; v3 vector extents use tags 8/9/10 (`list[int]` / `list[float]` / `list[char]`).
+
+Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>`.
 On Darwin, `direct_available()` is 0; large AUTO reads/writes still set `F_NOCACHE` above the same size threshold.
 
 Disable at build: `SHAKTI_IEFS=0 make prod`.

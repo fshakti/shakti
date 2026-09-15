@@ -523,19 +523,19 @@ int v_ensure_writable(V *v) {
 
 const char *type_name(int t) {
     const char *names[] = {
-        "NoneType", "bool", "int", "float", "str",
+        "NoneType", "bool", "int", "float", "char",
+        "str",
         "date",
         "error",
-        "list[int]", "list[float]", "list[bool]",
+        "list[int]", "list[float]", "list[char]", "list[bool]",
         "list", "dict", "table", "function",
         "datetime",
         "time",
         "input_stream",
-        "matrix[int]", "matrix[float]", "matrix[bool]",
         "subprocess",
-        "char", "list[char]", "matrix[char]"
+        "matrix[int]", "matrix[float]", "matrix[char]", "matrix[bool]"
     };
-    P(t >= 0 && t <= T_CMAT, names[t])
+    P(t >= 0 && t <= T_BMAT, names[t])
     return "unknown";
 }
 V *v_copy(V *v) {

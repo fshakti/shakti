@@ -56,8 +56,6 @@ int iefs_io_direct_available(void) {
 
 size_t iefs_io_direct_threshold(void) {
     const char *e = getenv("SHAKTI_IEFS_DIRECT_MIN");
-    if (!e || !*e)
-        e = getenv("ISOLDE_IEFS_DIRECT_MIN");
     if (e && *e) {
         char *end = NULL;
         unsigned long long v = strtoull(e, &end, 10);
@@ -77,8 +75,6 @@ static int want_direct(size_t len, int mode) {
     /* AUTO */
     {
         const char *force = getenv("SHAKTI_IEFS_DIRECT");
-        if (!force || !*force)
-            force = getenv("ISOLDE_IEFS_DIRECT");
         if (force && (*force == '1' || *force == 'y' || *force == 'Y'))
             return 1;
         if (force && (*force == '0' || *force == 'n' || *force == 'N'))

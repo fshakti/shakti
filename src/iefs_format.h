@@ -20,9 +20,9 @@ extern "C" {
 
 #define IEFS_MAGIC "IEF1"
 #define IEFS_VERSION 1u          /* default write version */
-#define IEFS_VERSION_MAX 3u      /* read up to Isolde TOC+extents */
+#define IEFS_VERSION_MAX 3u      /* read up to v3 TOC+extents */
 #define IEFS_HEADER_SIZE 24u
-#define IEFS_TYPE_LAYOUT 1u /* Isolde: 0 = pre-char (tag 4 was str); 1 = char=4, str=5 */
+#define IEFS_TYPE_LAYOUT 1u /* 0 = pre-char (tag 4 was str); 1 = char=4, str=5 */
 #define IEFS_MAX_PAYLOAD (64ull << 30) /* 64 GiB hard cap (was 16; Basic one-day quotes ~25 GiB) */
 #define IEFS_MAX_ELEMS UINT32_MAX
 #define IEFS_V3_ALIGN (2u << 20) /* 2 MiB extent alignment */
