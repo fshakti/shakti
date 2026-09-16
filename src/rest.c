@@ -1,5 +1,8 @@
 #include "rest.h"
 #include "json_parse.h"
+#ifdef SHAKTI_HAVE_TLS
+#include "tls.h"
+#endif
 
 #include <ctype.h>
 #include <errno.h>
@@ -10,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 #ifndef O_NOFOLLOW
@@ -39,6 +43,10 @@ typedef struct {
     int closed;
     RestKind kind;
     int fd;
+    void *ssl;
+    void *ssl_ctx;
+    char *ws_key;
+    char *ws_protocol;
 } RestHandle;
 
 static char g_rest_token[4096];
@@ -416,35 +424,62 @@ static int rest_alloc(RestKind kind, int fd) {
             g_rest_handles[i].closed = 0;
             g_rest_handles[i].kind = kind;
             g_rest_handles[i].fd = fd;
+            g_rest_handles[i].ssl = NULL;
+            g_rest_handles[i].ssl_ctx = NULL;
+            g_rest_handles[i].ws_key = NULL;
+            g_rest_handles[i].ws_protocol = NULL;
             return i;
         }
     }
     return -1;
 }
 
-static ssize_t rest_read_full(int fd, char *buf, size_t want) {
-    size_t got = 0;
-    while (got < want) {
-        ssize_t n = read(fd, buf + got, want - got);
-        if (n < 0) {
+static ssize_t rest_io_read(RestHandle *conn, void *buf, size_t n) {
+    if (!conn) return -1;
+#ifdef SHAKTI_HAVE_TLS
+    if (conn->ssl) return tls_read(conn->ssl, buf, n);
+#endif
+    for (;;) {
+        ssize_t r = read(conn->fd, buf, n);
+        if (r < 0 && errno == EINTR) continue;
+        return r;
+    }
+}
+
+static ssize_t rest_io_write(RestHandle *conn, const void *buf, size_t n) {
+    if (!conn) return -1;
+#ifdef SHAKTI_HAVE_TLS
+    if (conn->ssl) return tls_write(conn->ssl, buf, n);
+#endif
+    size_t sent = 0;
+    while (sent < n) {
+        ssize_t w = write(conn->fd, (const char *)buf + sent, n - sent);
+        if (w < 0) {
             if (errno == EINTR) continue;
             return -1;
         }
+        sent += (size_t)w;
+    }
+    return (ssize_t)sent;
+}
+
+static ssize_t rest_read_full(RestHandle *conn, char *buf, size_t want) {
+    size_t got = 0;
+    while (got < want) {
+        ssize_t n = rest_io_read(conn, buf + got, want - got);
+        if (n < 0) return -1;
         if (n == 0) break;
         got += (size_t)n;
     }
     return (ssize_t)got;
 }
 
-static ssize_t rest_read_line(int fd, char *buf, size_t cap) {
+static ssize_t rest_read_line(RestHandle *conn, char *buf, size_t cap) {
     size_t i = 0;
     while (i + 1 < cap) {
         char c;
-        ssize_t n = read(fd, &c, 1);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
+        ssize_t n = rest_io_read(conn, &c, 1);
+        if (n < 0) return -1;
         if (n == 0) break;
         buf[i++] = c;
         if (c == '\n') break;
@@ -453,6 +488,45 @@ static ssize_t rest_read_line(int fd, char *buf, size_t cap) {
     if (i + 1 >= cap && (i == 0 || buf[i - 1] != '\n'))
         return -1;
     return (ssize_t)i;
+}
+
+static void rest_clear_ws_meta(RestHandle *s) {
+    if (!s) return;
+    free(s->ws_key);
+    free(s->ws_protocol);
+    s->ws_key = NULL;
+    s->ws_protocol = NULL;
+}
+
+int rest_peek_ws_key(int h, char *out, size_t out_cap) {
+    RestHandle *s = rest_slot(h);
+    if (!s || !s->ws_key || !out || out_cap == 0) return -1;
+    if (snprintf(out, out_cap, "%s", s->ws_key) >= (int)out_cap) return -1;
+    return 0;
+}
+
+int rest_peek_ws_protocol(int h, char *out, size_t out_cap) {
+    RestHandle *s = rest_slot(h);
+    if (!s || !out || out_cap == 0) return -1;
+    if (!s->ws_protocol) {
+        out[0] = 0;
+        return 0;
+    }
+    if (snprintf(out, out_cap, "%s", s->ws_protocol) >= (int)out_cap) return -1;
+    return 0;
+}
+
+int rest_take_conn(int h, int *out_fd, void **out_ssl) {
+    RestHandle *s = rest_slot(h);
+    if (!s || s->kind != REST_KIND_CONN || !out_fd || !out_ssl) return -1;
+    *out_fd = s->fd;
+    *out_ssl = s->ssl;
+    rest_clear_ws_meta(s);
+    s->fd = -1;
+    s->ssl = NULL;
+    s->closed = 1;
+    s->in_use = 0;
+    return 0;
 }
 
 /* Run curl with an explicit argv (no shell) and capture its stdout (the
@@ -725,20 +799,60 @@ static V *rest_do_accept(int listen_h) {
     if (cfd < 0) return v_err("rest_accept: accept failed");
     rest_set_cloexec(cfd);
 
+    void *ssl = NULL;
+#ifdef SHAKTI_HAVE_TLS
+    if (srv->ssl_ctx) {
+        ssl = tls_accept(cfd, srv->ssl_ctx);
+        if (!ssl) {
+            close(cfd);
+            return v_err("rest_accept: tls handshake failed");
+        }
+    }
+#endif
+
     int h = rest_alloc(REST_KIND_CONN, cfd);
     if (h < 0) {
-        close(cfd);
+#ifdef SHAKTI_HAVE_TLS
+        if (ssl) tls_close(ssl, cfd);
+        else
+#endif
+            close(cfd);
         return v_err("rest_accept: too many handles");
     }
+    g_rest_handles[h].ssl = ssl;
     return v_int(h);
 }
+
+#ifdef SHAKTI_HAVE_TLS
+static V *rest_do_listen_tls(int port, const char *host, const char *cert, const char *key) {
+    if (!cert || !key || !cert[0] || !key[0])
+        return v_err("rest_listen_tls: cert and key required");
+    void *ctx = tls_server_ctx(cert, key);
+    if (!ctx) return v_err("rest_listen_tls: failed to load cert/key");
+    V *h = rest_do_listen(port, host);
+    if (h->t == T_ERR) {
+        tls_server_ctx_free(ctx);
+        return h;
+    }
+    RestHandle *srv = rest_slot((int)h->j);
+    if (!srv) {
+        tls_server_ctx_free(ctx);
+        v_free(h);
+        return v_err("rest_listen_tls: internal error");
+    }
+    srv->ssl_ctx = ctx;
+    return h;
+}
+#endif
 
 static V *rest_do_read(int conn_h) {
     RestHandle *conn = rest_slot(conn_h);
     if (!conn || conn->kind != REST_KIND_CONN) return v_err("rest_read: invalid connection handle");
 
+    rest_clear_ws_meta(conn);
+
     char line[8192];
-    if (rest_read_line(conn->fd, line, sizeof line) <= 0)
+    if (rest_read_line(conn, line, sizeof line) <= 0)
         return v_err("rest_read: read failed");
 
     char method[32], path[4096], version[32];
@@ -751,7 +865,7 @@ static V *rest_do_read(int conn_h) {
     hdr_block[0] = 0;
 
     for (;;) {
-        if (rest_read_line(conn->fd, line, sizeof line) < 0) {
+        if (rest_read_line(conn, line, sizeof line) < 0) {
             v_free(hdrs);
             return v_err("rest_read: header read failed");
         }
@@ -774,6 +888,24 @@ static V *rest_do_read(int conn_h) {
             char *val = colon + 1;
             while (*val == ' ' || *val == '\t') val++;
             v_dict_put(hdrs, line, v_str(val));
+            if (!strcasecmp(line, "Sec-WebSocket-Key")) {
+                free(conn->ws_key);
+                conn->ws_key = strdup(val);
+            } else if (!strcasecmp(line, "Sec-WebSocket-Protocol")) {
+                free(conn->ws_protocol);
+                char *comma = strchr(val, ',');
+                if (comma) {
+                    size_t n = (size_t)(comma - val);
+                    while (n > 0 && (val[n - 1] == ' ' || val[n - 1] == '\t')) n--;
+                    conn->ws_protocol = malloc(n + 1);
+                    if (conn->ws_protocol) {
+                        memcpy(conn->ws_protocol, val, n);
+                        conn->ws_protocol[n] = 0;
+                    }
+                } else {
+                    conn->ws_protocol = strdup(val);
+                }
+            }
         }
     }
 
@@ -797,7 +929,7 @@ static V *rest_do_read(int conn_h) {
         return v_err("rest: out of memory");
     }
     if (content_len > 0) {
-        if (rest_read_full(conn->fd, body, content_len) != (ssize_t)content_len) {
+        if (rest_read_full(conn, body, content_len) != (ssize_t)content_len) {
             free(body);
             v_free(hdrs);
             return v_err("rest_read: body read failed");
@@ -846,20 +978,16 @@ static V *rest_do_write(int conn_h, int status, const char *body, const char *co
 
     size_t sent = 0;
     while (sent < (size_t)hn) {
-        ssize_t w = write(conn->fd, hdr + sent, (size_t)hn - sent);
-        if (w < 0) {
-            if (errno == EINTR) continue;
+        ssize_t w = rest_io_write(conn, hdr + sent, (size_t)hn - sent);
+        if (w < 0)
             return v_err("rest_write: write failed");
-        }
         sent += (size_t)w;
     }
     sent = 0;
     while (sent < blen) {
-        ssize_t w = write(conn->fd, body + sent, blen - sent);
-        if (w < 0) {
-            if (errno == EINTR) continue;
+        ssize_t w = rest_io_write(conn, body + sent, blen - sent);
+        if (w < 0)
             return v_err("rest_write: write failed");
-        }
         sent += (size_t)w;
     }
     return v_nil();
@@ -868,10 +996,38 @@ static V *rest_do_write(int conn_h, int status, const char *body, const char *co
 static V *rest_do_close(int h) {
     RestHandle *s = rest_slot(h);
     if (!s) return v_err("rest_close: invalid handle");
-    if (s->fd >= 0) close(s->fd);
+    rest_clear_ws_meta(s);
+#ifdef SHAKTI_HAVE_TLS
+    if (s->ssl) {
+        tls_close(s->ssl, s->fd);
+        s->ssl = NULL;
+        s->fd = -1;
+    } else
+#endif
+    if (s->fd >= 0) {
+        close(s->fd);
+        s->fd = -1;
+    }
+#ifdef SHAKTI_HAVE_TLS
+    if (s->ssl_ctx) {
+        tls_server_ctx_free(s->ssl_ctx);
+        s->ssl_ctx = NULL;
+    }
+#endif
     s->closed = 1;
     s->in_use = 0;
-    s->fd = -1;
+    return v_nil();
+}
+
+static V *rest_do_set_nonblock(int h, int enabled) {
+    RestHandle *s = rest_slot(h);
+    if (!s) return v_err("rest_set_nonblock: invalid handle");
+    if (s->fd < 0) return v_err("rest_set_nonblock: no fd");
+    int flags = fcntl(s->fd, F_GETFL, 0);
+    if (flags < 0) return v_err("rest_set_nonblock: fcntl failed");
+    if (enabled) flags |= O_NONBLOCK;
+    else flags &= ~O_NONBLOCK;
+    if (fcntl(s->fd, F_SETFL, flags) < 0) return v_err("rest_set_nonblock: fcntl failed");
     return v_nil();
 }
 
@@ -951,6 +1107,25 @@ V *bi_rest_listen(V **a, int n) {
 #endif
 }
 
+V *bi_rest_listen_tls(V **a, int n) {
+#ifdef SHAKTI_WASM
+    (void)a;
+    (void)n;
+    return v_err("rest: not available in WASM");
+#else
+#ifndef SHAKTI_HAVE_TLS
+    (void)a;
+    (void)n;
+    return v_err("rest_listen_tls: TLS not built");
+#else
+    P(n < 3 || a[0]->t != T_INT || a[1]->t != T_STR || a[2]->t != T_STR,
+      v_err("rest_listen_tls(port, cert, key[, host])"))
+    const char *host = (n > 3 && a[3]->t == T_STR) ? a[3]->s : "127.0.0.1";
+    return rest_do_listen_tls((int)a[0]->j, host, a[1]->s, a[2]->s);
+#endif
+#endif
+}
+
 V *bi_rest_accept(V **a, int n) {
 #ifdef SHAKTI_WASM
     (void)a;
@@ -996,3 +1171,39 @@ V *bi_rest_close(V **a, int n) {
     return rest_do_close((int)a[0]->j);
 #endif
 }
+
+V *bi_rest_set_nonblock(V **a, int n) {
+#ifdef SHAKTI_WASM
+    (void)a;
+    (void)n;
+    return v_err("rest: not available in WASM");
+#else
+    P(n < 2 || a[0]->t != T_INT, v_err("rest_set_nonblock(h, enabled)"))
+    int en = 0;
+    if (a[1]->t == T_INT) en = a[1]->j != 0;
+    else if (a[1]->t == T_FLOAT) en = a[1]->f != 0;
+    else return v_err("rest_set_nonblock: enabled must be int");
+    return rest_do_set_nonblock((int)a[0]->j, en);
+#endif
+}
+
+#ifdef SHAKTI_WASM
+int rest_take_conn(int h, int *out_fd, void **out_ssl) {
+    (void)h;
+    (void)out_fd;
+    (void)out_ssl;
+    return -1;
+}
+int rest_peek_ws_key(int h, char *out, size_t out_cap) {
+    (void)h;
+    (void)out;
+    (void)out_cap;
+    return -1;
+}
+int rest_peek_ws_protocol(int h, char *out, size_t out_cap) {
+    (void)h;
+    (void)out;
+    (void)out_cap;
+    return -1;
+}
+#endif

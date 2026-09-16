@@ -57,6 +57,9 @@ def json(resp):
 def listen(port, host:"127.0.0.1"):
     return rest_listen(port, host)
 
+def listen_tls(port, cert, key, host:"127.0.0.1"):
+    return rest_listen_tls(port, cert, key, host)
+
 def accept(listen_h):
     return rest_accept(listen_h)
 
@@ -68,6 +71,9 @@ def write(conn, status, body:"", content_type:"text/plain"):
 
 def respond_json(conn, status, obj):
     return rest_write(conn, status, json_dumps(obj), "application/json")
+
+def set_nonblock(h, enabled):
+    return rest_set_nonblock(h, enabled)
 
 def close(h):
     return rest_close(h)

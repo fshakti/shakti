@@ -21,6 +21,8 @@ Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]`
 - [`input` module](#input-module)
 - [IPC module](#ipc-module)
 - [REST module](#rest-module)
+- [WebSocket module](#websocket-module)
+- [JSON-RPC daemon](#json-rpc-daemon)
 - [`synth` module](#synth-module)
 - [`dsp` module](#dsp-module)
 - [`stem` module](#stem-module)
@@ -110,6 +112,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `talk` | [talk module](#talk-module-macos) |
 | `ipc` | [IPC module](#ipc-module) |
 | `rest` | [REST module](#rest-module) |
+| `ws` | [WebSocket module](#websocket-module) |
 | Language & builtins | [syntax and builtins](#syntax-and-builtins) |
 | CLI | [command-line interface](#command-line-interface) |
 | Pipeline | [language pipeline](#language-pipeline) |
@@ -522,6 +525,7 @@ delete from u where id = 2
 | `talk` | [talk module](#talk-module-macos) | `talk_demo.ie` |
 | `ipc` | [IPC module](#ipc-module) | `ipc_echo.ie` |
 | `rest` | [REST module](#rest-module) | `rest_demo.ie` |
+| `ws` | [WebSocket module](#websocket-module) | |
 
 Index: [examples index](#examples-index).
 
@@ -1174,11 +1178,21 @@ rest.close(srv)
 | Function | Description |
 |----------|-------------|
 | `rest.listen(port[, host])` | Listen on TCP (default host `127.0.0.1`; non-loopback needs `SHAKTI_REST_ALLOW_PUBLIC=1`) |
+| `rest.listen_tls(port, cert, key[, host])` | TLS listen (PEM cert + key); handshake runs in `rest.accept` |
 | `rest.accept(listen_h)` | Accept connection handle |
 | `rest.read(conn)` | Read request → `{method, path, body, headers}` |
 | `rest.write(conn, status[, body, content_type])` | Send HTTP/1.1 response |
 | `rest.respond_json(conn, status, obj)` | JSON response helper |
+| `rest.set_nonblock(h, enabled)` | Non-blocking fd |
 | `rest.close(h)` | Close listen or connection handle |
+
+`rest.listen_tls` is for long-lived sockets (HTTPS mini-server, `wss` upgrade). The HTTP **client** still uses `curl`.
+
+```ie
+srv : rest.listen_tls(9443, "server.crt", "server.key")
+conn : rest.accept(srv)
+req : rest.read(conn)
+```
 
 ## Example
 
@@ -1187,13 +1201,101 @@ rest.close(srv)
 ## Limitations
 
 - Client shells out to `curl` per request (latency dominated by process spawn).
-- Server is not production-grade: no TLS, no HTTP/2, no chunked encoding, no keep-alive.
+- Server is not production-grade: no HTTP/2, no chunked encoding, no keep-alive.
+- TLS listen requires OpenSSL at build time (`SHAKTI_TLS=1`, default on native).
 - Not available in WASM builds.
 
 ## See also
 
+- [WebSocket module](#websocket-module) — RFC6455 upgrade from `rest.read`
+- [JSON-RPC daemon](#json-rpc-daemon) — `server_serve`
 - [IPC module](#ipc-module) — length-prefixed TCP/UDS messaging (not HTTP)
-- [third-party](#third-party-dependencies-and-optional-assets) — `curl` dependency
+- [third-party](#third-party-dependencies-and-optional-assets) — `curl` / OpenSSL
+
+---
+
+# WebSocket module
+
+RFC6455 client and server after `import ws`. Build requires OpenSSL (`-lssl -lcrypto`; `SHAKTI_WS=1` implies `SHAKTI_TLS=1`). Caps: 128 handles, 1 MiB payload, FIN required (no fragments). Binary frames are `list[char]`.
+
+## Client
+
+```ie
+import ws
+
+c : ws.connect("ws://127.0.0.1:9000/echo")
+ws.send(c, "hello")
+msg : ws.recv(c)          # dict(type: "text"|"bin"|"close", data: ...)
+print(msg["type"], msg["data"])
+ws.close(c)
+
+c : ws.connect("wss://example.com/chat")
+c : ws.connect("wss://127.0.0.1:9443/echo", insecure:1)  # skip cert verify
+```
+
+| Function | Description |
+|----------|-------------|
+| `ws.connect(url[, insecure])` | `ws://` or `wss://` |
+| `ws.send(h, text)` | Text frame |
+| `ws.send_bin(h, data)` | Binary; `str` or `list[char]` |
+| `ws.recv(h)` | Blocks; auto-answers ping |
+| `ws.poll(handles, timeout_ms)` | Readable / closed handles |
+| `ws.close(h)` | Sends close (1000) then frees |
+| `ws.set_nonblock(h, enabled)` | Non-blocking fd |
+
+## Server
+
+Upgrade a connection from `rest.listen` / `rest.listen_tls` after `rest.read`:
+
+```ie
+import rest
+import ws
+
+srv : rest.listen(9000)
+conn : rest.accept(srv)
+req : rest.read(conn)
+w : ws.accept(conn)       # writes 101; consumes conn
+msg : ws.recv(w)
+ws.send(w, msg["data"])
+ws.close(w)
+rest.close(srv)
+```
+
+Not available in WASM builds.
+
+---
+
+# JSON-RPC daemon
+
+Blocking HTTP daemon: `server_serve(port)` (default 8080). Loopback bind unless `SHAKTI_SERVE_ALLOW_PUBLIC=1`. Non-loopback bind requires `SHAKTI_SERVE_TOKEN`. Optional HTTPS: `SHAKTI_TLS_CERT` and `SHAKTI_TLS_KEY` (PEM).
+
+Routes:
+
+- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0
+  - `handle_rpc(method, params, id)` if defined in the calling environment
+  - else built-in `ping` → `"pong"`
+- other methods/paths — `handle_request(method, path, body, content_type)` if defined (must return a dict with `status` / `content_type` / `body`)
+
+CORS: localhost Origin only; mutating cross-origin requests get 403. Optional bearer: `Authorization: Bearer …` matching `SHAKTI_SERVE_TOKEN`.
+
+```ie
+def handle_rpc(method, params, id):
+    if method = "echo":
+        return params
+    if method = "ping":
+        return "pong"
+    return None
+
+server_serve(8080)
+```
+
+```bash
+curl -s -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"ping","id":1}' \
+  http://127.0.0.1:8080/rpc
+```
+
+Not available in WASM builds.
 
 ---
 
@@ -1637,13 +1739,14 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | Cocoa, Core Audio, Core Foundation | GFX + synth UI | macOS |
 | Speech, AVFoundation | `import talk` | macOS |
 | librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
+| libssl, libcrypto | TLS (`rest.listen_tls`, `wss://`, `server_serve` HTTPS) | Linux, macOS (`SHAKTI_TLS=1`) |
 | libgomp | OpenMP (matrix `mmul`, large `ivec` `+`/`-`/`*`, vector `dot` / large `sum`) | Linux (default with GCC) |
 | libomp | OpenMP (`brew install libomp`) | macOS |
 | libpthread, libm, librt, libdl | Runtime | Linux |
 
-`import rest` uses `curl` on `PATH` for HTTP client requests (not linked at build time). The in-process HTTP server uses BSD sockets.
+`import rest` uses `curl` on `PATH` for HTTP client requests (not linked at build time). The in-process HTTP server uses BSD sockets; TLS uses OpenSSL when `SHAKTI_TLS=1`.
 
-Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_STEM=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
+Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_STEM=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`, `SHAKTI_TLS=0`, `SHAKTI_WS=0`, `SHAKTI_SERVER=0`.
 
 
 ## Platform SDKs

@@ -107,6 +107,41 @@ LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1
+SHAKTI_TLS ?= 1
+SHAKTI_WS ?= 1
+SHAKTI_SERVER ?= 1
+
+ifeq ($(SHAKTI_WS),1)
+  SHAKTI_TLS := 1
+endif
+
+ifeq ($(SHAKTI_TLS),1)
+  CFLAGS += -DSHAKTI_HAVE_TLS=1
+  LIBSRCS_STANDALONE += src/tls.c
+  ifeq ($(UNAME_S),Darwin)
+    ifneq ($(wildcard /opt/homebrew/opt/openssl@3/include/openssl/ssl.h),)
+      CFLAGS += -I/opt/homebrew/opt/openssl@3/include
+      TLS_LDFLAGS := -L/opt/homebrew/opt/openssl@3/lib -lssl -lcrypto
+    else ifneq ($(wildcard /usr/local/opt/openssl@3/include/openssl/ssl.h),)
+      CFLAGS += -I/usr/local/opt/openssl@3/include
+      TLS_LDFLAGS := -L/usr/local/opt/openssl@3/lib -lssl -lcrypto
+    else
+      TLS_LDFLAGS := -lssl -lcrypto
+    endif
+  else
+    TLS_LDFLAGS := -lssl -lcrypto
+  endif
+endif
+
+ifeq ($(SHAKTI_WS),1)
+  CFLAGS += -DSHAKTI_HAVE_WS=1
+  LIBSRCS_STANDALONE += src/ws.c
+endif
+
+ifeq ($(SHAKTI_SERVER),1)
+  CFLAGS += -DSHAKTI_HAVE_SERVER=1
+  LIBSRCS_STANDALONE += src/server.c
+endif
 
 ifeq ($(SHAKTI_IPC),1)
   CFLAGS += -DSHAKTI_HAVE_IPC=1
@@ -343,7 +378,7 @@ shakti: $(SHAKTI)
 	ln -sfn $(SHAKTI) shakti
 
 $(SHAKTI): $(BUILD)/shakti_version.h src/a.h src/shakti.h src/shakti_internal.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(TLS_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 # Optional JNI object for Java/Android hosts (tests/build_guards.sh).
 # Lives under $(BUILD)/ so `make test` does not drop a .o in the repo root.

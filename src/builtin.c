@@ -249,10 +249,39 @@ extern V *bi_rest_post(V**,in);
 extern V *bi_rest_put(V**,in);
 extern V *bi_rest_delete(V**,in);
 extern V *bi_rest_listen(V**,in);
+extern V *bi_rest_listen_tls(V**,in);
 extern V *bi_rest_accept(V**,in);
 extern V *bi_rest_read(V**,in);
 extern V *bi_rest_write(V**,in);
 extern V *bi_rest_close(V**,in);
+extern V *bi_rest_set_nonblock(V**,in);
+#ifdef SHAKTI_HAVE_WS
+extern V *bi_ws_connect(V**,in);
+extern V *bi_ws_accept(V**,in);
+extern V *bi_ws_send(V**,in);
+extern V *bi_ws_send_bin(V**,in);
+extern V *bi_ws_recv(V**,in);
+extern V *bi_ws_poll(V**,in);
+extern V *bi_ws_close(V**,in);
+extern V *bi_ws_set_nonblock(V**,in);
+#else
+static V *bi_ws_connect(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_accept(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_send(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_send_bin(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_recv(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_poll(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_close(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+static V *bi_ws_set_nonblock(V **a, in) { (void)a; (void)n; return v_err("ws: not available"); }
+#endif
+#ifdef SHAKTI_HAVE_SERVER
+extern V *bi_server_serve(V**,in,Env*);
+#else
+static V *bi_server_serve(V **a, in, Env *e) {
+    (void)a; (void)n; (void)e;
+    return v_err("server_serve: not available");
+}
+#endif
 extern V *bi_pcm_open(V**,in);
 extern V *bi_pcm_write(V**,in);
 extern V *bi_pcm_close(V**,in);
@@ -278,7 +307,9 @@ static const char *BUILTINS[] = {
     "graph_create","graph_add","graph_query","graph_neighbors","graph_path",
     "graph_from_table","graph_to_table","graph_count","graph_clear",
     "rest_request","rest_get","rest_post","rest_put","rest_delete",
-    "rest_listen","rest_accept","rest_read","rest_write","rest_close",
+    "rest_listen","rest_listen_tls","rest_accept","rest_read","rest_write","rest_close","rest_set_nonblock",
+    "ws_connect","ws_accept","ws_send","ws_send_bin","ws_recv","ws_poll","ws_close","ws_set_nonblock",
+    "server_serve",
     "pcm_open","pcm_write","pcm_close",
     "read","write","readlines",
     "listdir","walk","stat",
@@ -1883,7 +1914,11 @@ BI0(ipc_shm_open) BI0(ipc_shm_view)
 BI0(graph_create) BI0(graph_add) BI0(graph_query) BI0(graph_neighbors) BI0(graph_path)
 BI0(graph_from_table) BI0(graph_to_table) BI0(graph_count) BI0(graph_clear)
 BI0(rest_request) BI0(rest_get) BI0(rest_post) BI0(rest_put) BI0(rest_delete)
-BI0(rest_listen) BI0(rest_accept) BI0(rest_read) BI0(rest_write) BI0(rest_close)
+BI0(rest_listen) BI0(rest_listen_tls) BI0(rest_accept) BI0(rest_read) BI0(rest_write) BI0(rest_close)
+BI0(rest_set_nonblock)
+BI0(ws_connect) BI0(ws_accept) BI0(ws_send) BI0(ws_send_bin) BI0(ws_recv) BI0(ws_poll)
+BI0(ws_close) BI0(ws_set_nonblock)
+BIE(server_serve)
 BI0(pcm_open) BI0(pcm_write) BI0(pcm_close)
 #undef BI0
 #undef BIKW
@@ -2098,12 +2133,15 @@ static const BiEntry bi_tab[] = {
     {"rest_delete", bi_w_rest_delete},
     {"rest_get", bi_w_rest_get},
     {"rest_listen", bi_w_rest_listen},
+    {"rest_listen_tls", bi_w_rest_listen_tls},
     {"rest_post", bi_w_rest_post},
     {"rest_put", bi_w_rest_put},
     {"rest_read", bi_w_rest_read},
     {"rest_request", bi_w_rest_request},
+    {"rest_set_nonblock", bi_w_rest_set_nonblock},
     {"rest_write", bi_w_rest_write},
     {"reverse", bi_w_reverse},
+    {"server_serve", bi_w_server_serve},
     {"set", bi_w_set},
     {"sh", bi_w_sh},
     {"shape", bi_w_shape},
@@ -2227,6 +2265,14 @@ static const BiEntry bi_tab[] = {
     {"wait", bi_w_wait},
     {"walk", bi_w_walk},
     {"write", bi_w_fwrite},
+    {"ws_accept", bi_w_ws_accept},
+    {"ws_close", bi_w_ws_close},
+    {"ws_connect", bi_w_ws_connect},
+    {"ws_poll", bi_w_ws_poll},
+    {"ws_recv", bi_w_ws_recv},
+    {"ws_send", bi_w_ws_send},
+    {"ws_send_bin", bi_w_ws_send_bin},
+    {"ws_set_nonblock", bi_w_ws_set_nonblock},
     {"zip", bi_w_zip},
 };
 static BiCall bi_find(const char *name) {
