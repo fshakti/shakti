@@ -4,6 +4,14 @@ SHAKTI := $(BUILD)/shakti
 .DEFAULT_GOAL := build
 UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
 UNAME_M := $(shell uname -m 2>/dev/null || echo unknown)
+ifeq ($(UNAME_S),Linux)
+  DIST_OS := linux
+else ifeq ($(UNAME_S),Darwin)
+  DIST_OS := darwin
+endif
+DIST_ARCH := $(UNAME_M)
+DIST_DIR := build/$(DIST_OS)-$(DIST_ARCH)
+DIST_BIN := $(DIST_DIR)/shakti
 
 ifeq ($(UNAME_S),Darwin)
   CC ?= clang
@@ -463,7 +471,7 @@ record-showcase: prod $(BUILD)/iefs_pack_cvec
 	bash tools/record_showcase.sh
 endif
 
-.PHONY: all build test clean prod prod-size prod-speed clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase wasm
+.PHONY: all build test clean prod prod-size prod-speed dist clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase wasm
 
 test: shakti
 	@if [ -f qa/tests/assert_prec.sh ]; then \
@@ -530,7 +538,7 @@ endif
 
 clean:
 	rm -f shakti shakti-standalone *.o *.tmp *.plist
-	rm -rf $(BUILD) build/ shakti/ *.dSYM shakti.zip
+	rm -rf $(BUILD) shakti/ *.dSYM shakti.zip
 
 PROD_RELEASE_CFLAGS := -fstack-protector-strong
 
@@ -546,6 +554,15 @@ endif
 prod: shakti
 	strip $(SHAKTI)
 	$(MACOS_RESIGN)
+
+# Copy the stripped host binary into the committed per-platform slot.
+# Does not run on `make prod` / `make build` — only this target writes build/.
+dist: prod
+	@if [ -z "$(DIST_OS)" ]; then echo "error: make dist: unknown OS '$(UNAME_S)'" >&2; exit 1; fi
+	mkdir -p $(DIST_DIR)
+	cp -f $(SHAKTI) $(DIST_BIN)
+	chmod 755 $(DIST_BIN)
+	@echo "dist $(DIST_BIN)"
 
 PROD_SIZE_CFLAGS := $(filter-out -O2 -g,$(CFLAGS)) -Os -DNDEBUG -DSHAKTI_MINSIZE=1 $(PROD_RELEASE_CFLAGS)
 PROD_SIZE_LDFLAGS := $(LDFLAGS)

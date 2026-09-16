@@ -37,6 +37,7 @@ for value in abs@ values:
 # macOS: brew install libomp expat
 make build          # default: same as `make` / `make all`
 make prod           # strip release binary under .build/; refresh ./shakti symlink
+make dist           # copy stripped binary to build/<os>-<arch>/shakti
 make install        # optional: ~/.local/bin/shakti → this tree's .build/shakti
 export SHAKTI_LIB=$PWD/lib
 ```
@@ -49,7 +50,11 @@ current Xcode clang does not yet accept `-mcpu=apple-m5`).
 Default `make` / `make prod` enables link-time optimization (`-flto` /
 `-flto=auto`) so the split language units (`src/lex.c`, `src/parse.c`,
 `src/eval.c`, …) still inline across translation units.
-`make clean` removes `.build/` and the `./shakti` symlink.
+`make clean` removes `.build/` and the `./shakti` symlink; it does not delete
+`build/`. `make dist` copies the stripped host binary to
+`build/<os>-<arch>/shakti` (for example `build/linux-x86_64/shakti`). That slot
+is the committed prebuilt; `make prod` / `make build` do not update it. Point
+`SHAKTI_LIB` at this tree's `lib/` when running a prebuilt.
 The linked binary lives at `.build/shakti`; `make build` also creates `./shakti` →
 `.build/shakti` so a workspace directory on `PATH` finds `shakti`.
 

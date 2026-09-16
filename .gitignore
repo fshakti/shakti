@@ -7,7 +7,10 @@ Thumbs.db
 .claude/
 
 # build outputs
-**/build/
+# Nested compile `build/` dirs. Repo-root /build/ is committed prebuilts.
+/*/**/build/
+!/build/
+!/build/**
 **/.build/
 **/dist/
 **/node_modules/
@@ -34,6 +37,7 @@ Thumbs.db
 *.tmp
 *.bundle
 shakti
+!/build/**/shakti
 shakti-standalone
 **/build-static-test/
 
