@@ -204,6 +204,13 @@ extern V *bi_midi_poll(V**,in);
 #include "iefs_format.h"
 #include "iefs_io.h"
 #include "iefs_map.h"
+#include "codec.h"
+#ifdef SHAKTI_HAVE_HDB
+#include "hdb.h"
+#endif
+#ifdef SHAKTI_HAVE_HLD
+#include "hld.h"
+#endif
 #endif
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
@@ -360,6 +367,11 @@ static const char *BUILTINS[] = {
     "midi_open","midi_close","midi_alive","midi_backend","midi_list","midi_connect","midi_disconnect",
     "midi_note_on","midi_note_off","midi_cc","midi_program","midi_raw","midi_poll",
     "iefs_save","iefs_load","iefs_map","iefs_direct_available",
+    "iefs_uring_available","iefs_libaio_available","iefs_dumps","iefs_loads",
+    "hdb_open","hdb_close","hdb_create","hdb_write","hdb_parts","hdb_map","hdb_load_part","hdb_load",
+    "hdb_scan","hdb_next","hdb_current",
+    "hld_encode","hld_decode",
+    "compress","decompress",
     "eval",
     NULL
 };
@@ -1899,6 +1911,43 @@ BI0(midi_cc) BI0(midi_program) BI0(midi_raw) BI0(midi_poll)
 #endif
 #ifdef SHAKTI_HAVE_IEFS
 BI0(iefs_save) BI0(iefs_load) BI0(iefs_map) BI0(iefs_direct_available)
+BI0(iefs_uring_available) BI0(iefs_libaio_available) BI0(iefs_dumps) BI0(iefs_loads)
+BI0(compress) BI0(decompress)
+#ifdef SHAKTI_HAVE_HDB
+BI0(hdb_open) BI0(hdb_close) BI0(hdb_create) BI0(hdb_write) BI0(hdb_parts) BI0(hdb_map)
+BI0(hdb_load_part) BI0(hdb_load) BI0(hdb_scan) BI0(hdb_next) BI0(hdb_current)
+#else
+#define SHAKTI_STUB0(name) static V *bi_##name(V **a, int n) { (void)a; (void)n; return v_err(#name ": not in this build"); }
+SHAKTI_STUB0(hdb_open) SHAKTI_STUB0(hdb_close) SHAKTI_STUB0(hdb_create) SHAKTI_STUB0(hdb_write)
+SHAKTI_STUB0(hdb_parts) SHAKTI_STUB0(hdb_map) SHAKTI_STUB0(hdb_load_part) SHAKTI_STUB0(hdb_load)
+SHAKTI_STUB0(hdb_scan) SHAKTI_STUB0(hdb_next) SHAKTI_STUB0(hdb_current)
+#undef SHAKTI_STUB0
+BI0(hdb_open) BI0(hdb_close) BI0(hdb_create) BI0(hdb_write) BI0(hdb_parts) BI0(hdb_map)
+BI0(hdb_load_part) BI0(hdb_load) BI0(hdb_scan) BI0(hdb_next) BI0(hdb_current)
+#endif
+#ifdef SHAKTI_HAVE_HLD
+BI0(hld_encode) BI0(hld_decode)
+#else
+#define SHAKTI_STUB0(name) static V *bi_##name(V **a, int n) { (void)a; (void)n; return v_err(#name ": not in this build"); }
+SHAKTI_STUB0(hld_encode) SHAKTI_STUB0(hld_decode)
+#undef SHAKTI_STUB0
+BI0(hld_encode) BI0(hld_decode)
+#endif
+#else
+#define SHAKTI_STUB0(name) static V *bi_##name(V **a, int n) { (void)a; (void)n; return v_err(#name ": not in this build"); }
+SHAKTI_STUB0(compress) SHAKTI_STUB0(decompress)
+SHAKTI_STUB0(iefs_dumps) SHAKTI_STUB0(iefs_loads)
+SHAKTI_STUB0(iefs_uring_available) SHAKTI_STUB0(iefs_libaio_available)
+SHAKTI_STUB0(hdb_open) SHAKTI_STUB0(hdb_close) SHAKTI_STUB0(hdb_create) SHAKTI_STUB0(hdb_write)
+SHAKTI_STUB0(hdb_parts) SHAKTI_STUB0(hdb_map) SHAKTI_STUB0(hdb_load_part) SHAKTI_STUB0(hdb_load)
+SHAKTI_STUB0(hdb_scan) SHAKTI_STUB0(hdb_next) SHAKTI_STUB0(hdb_current)
+SHAKTI_STUB0(hld_encode) SHAKTI_STUB0(hld_decode)
+#undef SHAKTI_STUB0
+BI0(compress) BI0(decompress)
+BI0(iefs_dumps) BI0(iefs_loads) BI0(iefs_uring_available) BI0(iefs_libaio_available)
+BI0(hdb_open) BI0(hdb_close) BI0(hdb_create) BI0(hdb_write) BI0(hdb_parts) BI0(hdb_map)
+BI0(hdb_load_part) BI0(hdb_load) BI0(hdb_scan) BI0(hdb_next) BI0(hdb_current)
+BI0(hld_encode) BI0(hld_decode)
 #endif
 BIE(eval)
 #ifdef SHAKTI_HAVE_IPC
@@ -1948,9 +1997,11 @@ static const BiEntry bi_tab[] = {
     {"char", bi_w_char},
     {"chr", bi_w_chr},
     {"columns", bi_w_columns},
+    {"compress", bi_w_compress},
     {"cos", bi_w_cos},
     {"date", bi_w_date},
     {"datetime", bi_w_datetime},
+    {"decompress", bi_w_decompress},
     {"dict", bi_w_dict},
     {"dot", bi_w_dot},
 #ifdef SHAKTI_HAVE_DSP
@@ -2007,13 +2058,35 @@ static const BiEntry bi_tab[] = {
     {"graph_to_table", bi_w_graph_to_table},
     {"group_sum", bi_w_group_sum},
     {"hasattr", bi_w_hasattr},
+    {"hdb_close", bi_w_hdb_close},
+    {"hdb_create", bi_w_hdb_create},
+    {"hdb_current", bi_w_hdb_current},
+    {"hdb_load", bi_w_hdb_load},
+    {"hdb_load_part", bi_w_hdb_load_part},
+    {"hdb_map", bi_w_hdb_map},
+    {"hdb_next", bi_w_hdb_next},
+    {"hdb_open", bi_w_hdb_open},
+    {"hdb_parts", bi_w_hdb_parts},
+    {"hdb_scan", bi_w_hdb_scan},
+    {"hdb_write", bi_w_hdb_write},
     {"head", bi_w_head},
     {"hex", bi_w_hex},
+    {"hld_decode", bi_w_hld_decode},
+    {"hld_encode", bi_w_hld_encode},
 #ifdef SHAKTI_HAVE_IEFS
     {"iefs_direct_available", bi_w_iefs_direct_available},
+    {"iefs_dumps", bi_w_iefs_dumps},
+    {"iefs_libaio_available", bi_w_iefs_libaio_available},
     {"iefs_load", bi_w_iefs_load},
+    {"iefs_loads", bi_w_iefs_loads},
     {"iefs_map", bi_w_iefs_map},
     {"iefs_save", bi_w_iefs_save},
+    {"iefs_uring_available", bi_w_iefs_uring_available},
+#else
+    {"iefs_dumps", bi_w_iefs_dumps},
+    {"iefs_libaio_available", bi_w_iefs_libaio_available},
+    {"iefs_loads", bi_w_iefs_loads},
+    {"iefs_uring_available", bi_w_iefs_uring_available},
 #endif
     {"input", bi_w_input},
     {"input_get_hz", bi_w_input_get_hz},

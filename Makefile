@@ -216,9 +216,17 @@ endif
 
 ifeq ($(SHAKTI_IEFS),1)
   CFLAGS += -DSHAKTI_HAVE_IEFS=1
-  # IEFS v3 zstd extents (STAC Basic day shards). Default on when zstd.h is present.
+  SHAKTI_HDB ?= 1
+  SHAKTI_HLD ?= 1
+  # Host codecs + optional batched reads. Default on when headers are present.
   SHAKTI_WITH_ZSTD ?= 1
+  SHAKTI_WITH_SNAPPY ?= 1
+  SHAKTI_WITH_LIBURING ?= 1
+  SHAKTI_WITH_LIBAIO ?= 1
   ZSTD_HEADER := $(firstword $(wildcard /usr/include/zstd.h /opt/homebrew/include/zstd.h /usr/local/include/zstd.h))
+  SNAPPY_HEADER := $(firstword $(wildcard /usr/include/snappy-c.h /opt/homebrew/include/snappy-c.h /usr/local/include/snappy-c.h))
+  LIBURING_HEADER := $(firstword $(wildcard /usr/include/liburing.h /usr/local/include/liburing.h /opt/homebrew/include/liburing.h))
+  LIBAIO_HEADER := $(firstword $(wildcard /usr/include/libaio.h /usr/local/include/libaio.h))
   ifeq ($(SHAKTI_WITH_ZSTD),1)
     ifneq ($(ZSTD_HEADER),)
       CFLAGS += -DSHAKTI_HAVE_ZSTD=1
@@ -229,6 +237,45 @@ ifeq ($(SHAKTI_IEFS),1)
         LDFLAGS += -lzstd
       endif
     endif
+  endif
+  ifeq ($(SHAKTI_WITH_SNAPPY),1)
+    ifneq ($(SNAPPY_HEADER),)
+      CFLAGS += -DSHAKTI_HAVE_SNAPPY=1
+      ifneq ($(filter /opt/homebrew/% /usr/local/%,$(SNAPPY_HEADER)),)
+        CFLAGS += -I$(dir $(SNAPPY_HEADER))
+        LDFLAGS += -L$(dir $(SNAPPY_HEADER))../lib -lsnappy
+      else
+        LDFLAGS += -lsnappy
+      endif
+    endif
+  endif
+  ifeq ($(SHAKTI_WITH_LIBURING),1)
+    ifneq ($(LIBURING_HEADER),)
+      CFLAGS += -DSHAKTI_HAVE_LIBURING=1
+      ifneq ($(filter /opt/homebrew/% /usr/local/%,$(LIBURING_HEADER)),)
+        CFLAGS += -I$(dir $(LIBURING_HEADER))
+        LDFLAGS += -L$(dir $(LIBURING_HEADER))../lib -luring
+      else
+        LDFLAGS += -luring
+      endif
+    endif
+  endif
+  ifeq ($(SHAKTI_WITH_LIBAIO),1)
+    ifneq ($(LIBAIO_HEADER),)
+      CFLAGS += -DSHAKTI_HAVE_LIBAIO=1
+      ifneq ($(filter /usr/local/%,$(LIBAIO_HEADER)),)
+        CFLAGS += -I$(dir $(LIBAIO_HEADER))
+        LDFLAGS += -L$(dir $(LIBAIO_HEADER))../lib -laio
+      else
+        LDFLAGS += -laio
+      endif
+    endif
+  endif
+  ifeq ($(SHAKTI_HDB),1)
+    CFLAGS += -DSHAKTI_HAVE_HDB=1
+  endif
+  ifeq ($(SHAKTI_HLD),1)
+    CFLAGS += -DSHAKTI_HAVE_HLD=1
   endif
 endif
 
@@ -322,14 +369,27 @@ $(BUILD)/midi.o: src/midi.c src/midi.h src/shakti.h src/a.h $(BUILD)/shakti_vers
 endif
 
 ifeq ($(SHAKTI_IEFS),1)
+$(BUILD)/codec.o: src/codec.c src/codec.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/codec.c
+
 $(BUILD)/iefs_io.o: src/iefs_io.c src/iefs_io.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ src/iefs_io.c
 
-$(BUILD)/iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/iefs_map.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+$(BUILD)/iefs_format.o: src/iefs_format.c src/iefs_format.h src/iefs_io.h src/iefs_map.h src/codec.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_format.c
 
 $(BUILD)/iefs_map.o: src/iefs_map.c src/iefs_map.h src/iefs_format.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/iefs_map.c
+
+ifeq ($(SHAKTI_HDB),1)
+$(BUILD)/hdb.o: src/hdb.c src/hdb.h src/iefs_format.h src/iefs_map.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/hdb.c
+endif
+
+ifeq ($(SHAKTI_HLD),1)
+$(BUILD)/hld.o: src/hld.c src/hld.h src/codec.h src/iefs_format.h src/iefs_io.h src/shakti.h src/a.h $(BUILD)/shakti_version.h | $(BUILD)
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -c -o $@ src/hld.c
+endif
 endif
 
 ifeq ($(UNAME_S),Darwin)
@@ -358,7 +418,9 @@ DSP_OBJ := $(if $(filter 1,$(SHAKTI_DSP)),$(BUILD)/dsp.o)
 STEM_OBJ := $(if $(filter 1,$(SHAKTI_STEM)),$(BUILD)/stem.o $(BUILD)/stem_stats.o)
 PDF_OBJ := $(if $(filter 1,$(SHAKTI_PDF)),$(BUILD)/pdf.o)
 MIDI_OBJ := $(if $(filter 1,$(SHAKTI_MIDI)),$(BUILD)/midi.o)
-IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),$(BUILD)/iefs_io.o $(BUILD)/iefs_format.o $(BUILD)/iefs_map.o)
+IEFS_OBJ := $(if $(filter 1,$(SHAKTI_IEFS)),$(BUILD)/codec.o $(BUILD)/iefs_io.o $(BUILD)/iefs_format.o $(BUILD)/iefs_map.o)
+HDB_OBJ := $(if $(and $(filter 1,$(SHAKTI_IEFS)),$(filter 1,$(SHAKTI_HDB))),$(BUILD)/hdb.o)
+HLD_OBJ := $(if $(and $(filter 1,$(SHAKTI_IEFS)),$(filter 1,$(SHAKTI_HLD))),$(BUILD)/hld.o)
 
 $(BUILD):
 	@mkdir -p $@
@@ -377,8 +439,8 @@ shakti: $(SHAKTI)
 	fi
 	ln -sfn $(SHAKTI) shakti
 
-$(SHAKTI): $(BUILD)/shakti_version.h src/a.h src/shakti.h src/shakti_internal.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
-	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(TLS_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
+$(SHAKTI): $(BUILD)/shakti_version.h src/a.h src/shakti.h src/shakti_internal.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(HDB_OBJ) $(HLD_OBJ) | $(BUILD)
+	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(HDB_OBJ) $(HLD_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(TLS_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 # Optional JNI object for Java/Android hosts (tests/build_guards.sh).
 # Lives under $(BUILD)/ so `make test` does not drop a .o in the repo root.

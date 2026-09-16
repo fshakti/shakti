@@ -1,0 +1,50 @@
+# hdb — partitioned historical store over IEFS v3
+#
+#   import hdb
+#   h : hdb.open("/data/quotes")
+#   hdb.create(h, "trade", schema:dict(sym:"", time:0, px:0.0), part:"date")
+#   hdb.write(h, "trade", "2026.07.31", t)
+#   ps : hdb.parts(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
+#   p  : hdb.map(h, "trade", "2026.07.31")
+#   t  : hdb.load(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
+#   c  : hdb.scan(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
+#   while hdb.next(c):
+#       part : hdb.current(c)
+#
+# Layout: <root>/meta.iefs + <root>/<table>/<part>/data.iefs
+# Range prune uses lo/hi (inclusive strcmp); eq selects a single partition.
+
+def open(root):
+    return hdb_open(root)
+
+def close(h):
+    return hdb_close(h)
+
+def create(h, name, schema, part:"date"):
+    return hdb_create(h, name, schema, part)
+
+def write(h, name, part, table, codecs:""):
+    if type(codecs) = "dict":
+        return hdb_write(h, name, part, table, codecs)
+    return hdb_write(h, name, part, table)
+
+def parts(h, name, lo:"", hi:"", eq:""):
+    return hdb_parts(h, name, lo, hi, eq)
+
+def map(h, name, part, pages:"thp", device:""):
+    return hdb_map(h, name, part, pages, device)
+
+def load_part(h, name, part):
+    return hdb_load_part(h, name, part)
+
+def load(h, name, lo:"", hi:"", eq:""):
+    return hdb_load(h, name, lo, hi, eq)
+
+def scan(h, name, lo:"", hi:"", eq:""):
+    return hdb_scan(h, name, lo, hi, eq)
+
+def next(c):
+    return hdb_next(c)
+
+def current(c):
+    return hdb_current(c)

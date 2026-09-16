@@ -579,9 +579,31 @@ static void handle_client(int cfd, Env *global) {
     char *body = http_body(buf);
 
     V *resp;
-    if (!strcmp(method, "POST") && is_rpc_path(path))
+    if (!strcmp(method, "POST") && is_rpc_path(path)) {
+        const char *ct = req_ctype;
+        int bin_ct = 0;
+        if (!strncasecmp(ct, "application/iefs", 16)) {
+            char c = ct[16];
+            bin_ct = (c == 0 || c == ';' || c == ' ' || c == '\t');
+        } else if (!strncasecmp(ct, "application/x-iefs", 18)) {
+            char c = ct[18];
+            bin_ct = (c == 0 || c == ';' || c == ' ' || c == '\t');
+        } else if (!strncasecmp(ct, "application/x-hld", 17)) {
+            char c = ct[17];
+            bin_ct = (c == 0 || c == ';' || c == ' ' || c == '\t');
+        } else if (!strncasecmp(ct, "application/hld", 15)) {
+            char c = ct[15];
+            bin_ct = (c == 0 || c == ';' || c == ' ' || c == '\t');
+        }
+        if (bin_ct) {
+            http_respond(cfd, 415, "Unsupported Media Type", "application/json",
+                         "{\"error\":\"unsupported media type\"}");
+            free(buf);
+            client_done(cfd);
+            return;
+        }
         resp = dispatch_rpc(global, body ? body : "");
-    else
+    } else
         resp = dispatch_request(global, method, path, body ? body : "", req_ctype);
 
     if (!resp || resp->t == T_ERR) {

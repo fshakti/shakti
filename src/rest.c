@@ -1,5 +1,11 @@
 #include "rest.h"
 #include "json_parse.h"
+#ifdef SHAKTI_HAVE_IEFS
+#include "iefs_format.h"
+#ifdef SHAKTI_HAVE_HLD
+#include "hld.h"
+#endif
+#endif
 #ifdef SHAKTI_HAVE_TLS
 #include "tls.h"
 #endif
@@ -7,6 +13,8 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <stdint.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <spawn.h>
@@ -126,7 +134,7 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         const struct sockaddr_in *sin4 = (const struct sockaddr_in *)sa;
         uint32_t a = ntohl(sin4->sin_addr.s_addr);
-        if ((a & 0xff000000u) == 0x7f000000u) return 1; /* 127/8 */
+        if ((a & 0xff000000u) == 0x7f000000u) return 0; /* 127/8 loopback (local mini-server) */
         if ((a & 0xff000000u) == 0x0a000000u) return 1; /* 10/8 */
         if ((a & 0xfff00000u) == 0xac100000u) return 1; /* 172.16/12 */
         if ((a & 0xffff0000u) == 0xc0a80000u) return 1; /* 192.168/16 */
@@ -145,7 +153,8 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
         const unsigned char *b = in6->sin6_addr.s6_addr;
         int zero = 1;
         for (int i = 0; i < 15; i++) if (b[i]) { zero = 0; break; }
-        if (zero && (b[15] == 0 || b[15] == 1)) return 1; /* :: / ::1 */
+        if (zero && b[15] == 0) return 1; /* :: */
+        if (zero && b[15] == 1) return 0; /* ::1 loopback */
         if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return 1; /* fe80::/10 */
         if ((b[0] & 0xfe) == 0xfc) return 1; /* fc00::/7 */
         /* IPv4-mapped ::ffff:a.b.c.d and IPv4-compatible ::a.b.c.d */
@@ -327,8 +336,86 @@ static char *read_all_file(const char *path, size_t *out_len, size_t max_len) {
     return buf;
 }
 
-static V *body_value(const char *raw, size_t len) {
-    if (!raw) return v_str("");
+
+/* Content-Type match: type/subtype, optional parameters after ';' / whitespace. */
+static int rest_ct_is(const char *ct, const char *want) {
+    if (!ct || !want || !want[0]) return 0;
+    size_t n = strlen(want);
+    if (strncasecmp(ct, want, n) != 0) return 0;
+    char c = ct[n];
+    return c == 0 || c == ';' || c == ' ' || c == '\t';
+}
+
+static int rest_ct_is_iefs(const char *ct) {
+    return rest_ct_is(ct, "application/iefs") || rest_ct_is(ct, "application/x-iefs");
+}
+
+static int rest_ct_is_hld(const char *ct) {
+    return rest_ct_is(ct, "application/x-hld") || rest_ct_is(ct, "application/hld");
+}
+
+static const char *rest_header_get(V *headers, const char *name) {
+    if (!headers || headers->t != T_DICT || !name) return NULL;
+    for (int64_t i = 0; i < headers->keys->n; i++) {
+        V *k = headers->keys->L[i];
+        if (k->t != T_STR || strcasecmp(k->s, name) != 0) continue;
+        V *v = headers->vals->L[i];
+        if (v->t == T_STR) return v->s;
+        return NULL;
+    }
+    return NULL;
+}
+
+static V *cvec_from_raw(const unsigned char *p, size_t n) {
+    if (n > (size_t)INT64_MAX) return v_err("rest: body too large");
+    V *v = v_cvec((int64_t)n);
+    if (n && p && v->B) memcpy(v->B, p, n);
+    return v;
+}
+
+static int rest_body_looks_binary(const unsigned char *raw, size_t len, const char *ct) {
+    if (rest_ct_is_hld(ct) || rest_ct_is_iefs(ct)) return 1;
+#ifdef SHAKTI_HAVE_IEFS
+    if (raw && len >= 4 && !memcmp(raw, IEFS_MAGIC, 4))
+        return 1;
+#ifdef SHAKTI_HAVE_HLD
+    if (raw && len >= 4 && !memcmp(raw, HLD_MAGIC, 4))
+        return 1;
+#endif
+#endif
+    return 0;
+}
+
+/* Extract HTTP body bytes from T_STR or list[char]. Returns 0 on success. */
+static int rest_body_bytes(V *v, const unsigned char **out, size_t *out_len) {
+    if (!out || !out_len) return -1;
+    *out = (const unsigned char *)"";
+    *out_len = 0;
+    if (!v) return 0;
+    if (v->t == T_STR) {
+        *out = (const unsigned char *)(v->s ? v->s : "");
+        *out_len = v->s ? strlen(v->s) : 0;
+        return 0;
+    }
+    if (v->t == T_CVEC) {
+        if (v->n < 0) return -1;
+        *out_len = (size_t)v->n;
+        *out = (*out_len && v->B) ? v->B : (const unsigned char *)"";
+        return 0;
+    }
+    return -1;
+}
+
+static V *body_value(const unsigned char *raw, size_t len, const char *content_type) {
+    if (!raw || len == 0) return v_str("");
+#ifdef SHAKTI_HAVE_HLD
+    if (rest_ct_is_hld(content_type) || (len >= 4 && !memcmp(raw, HLD_MAGIC, 4)))
+        return hld_decode(raw, len);
+#endif
+#ifdef SHAKTI_HAVE_IEFS
+    if (rest_ct_is_iefs(content_type) || (len >= 4 && !memcmp(raw, IEFS_MAGIC, 4)))
+        return iefs_decode(raw, len);
+#endif
     while (len > 0 && (raw[len - 1] == '\n' || raw[len - 1] == '\r')) len--;
     if (len == 0) return v_str("");
     char *tmp = malloc(len + 1);
@@ -347,27 +434,36 @@ static V *body_value(const char *raw, size_t len) {
     return out;
 }
 
-static V *make_response(int status, const char *raw_body, size_t body_len, V *headers) {
+static V *make_response(int status, const unsigned char *raw_body, size_t body_len, V *headers) {
     V *resp = v_dict_empty();
     v_dict_put(resp, "status", v_int(status));
-    V *body = body_value(raw_body, body_len);
+    const char *ct = rest_header_get(headers, "Content-Type");
+    size_t copy_len = raw_body ? body_len : 0;
+    const unsigned char *src = raw_body ? raw_body : (const unsigned char *)"";
+    V *body = body_value(src, copy_len, ct);
     if (body->t == T_ERR) {
         v_free(resp);
         return body;
     }
     v_dict_put(resp, "body", body);
-    /* Never copy from a NULL source: if raw_body is NULL, force length 0 so a
-     * nonzero body_len can't over-read the "" literal. */
-    size_t copy_len = raw_body ? body_len : 0;
-    char *raw_copy = malloc(copy_len + 1);
-    if (!raw_copy) {
-        v_free(resp);
-        return v_err("rest: out of memory");
+    V *raw;
+    if (rest_body_looks_binary(src, copy_len, ct)) {
+        raw = cvec_from_raw(src, copy_len);
+        if (raw->t == T_ERR) {
+            v_free(resp);
+            return raw;
+        }
+    } else {
+        char *raw_copy = malloc(copy_len + 1);
+        if (!raw_copy) {
+            v_free(resp);
+            return v_err("rest: out of memory");
+        }
+        memcpy(raw_copy, src, copy_len);
+        raw_copy[copy_len] = 0;
+        raw = v_str(raw_copy);
+        free(raw_copy);
     }
-    memcpy(raw_copy, raw_body ? raw_body : "", copy_len);
-    raw_copy[copy_len] = 0;
-    V *raw = v_str(raw_copy);
-    free(raw_copy);
     v_dict_put(resp, "raw", raw);
     if (!headers) headers = v_dict_empty();
     v_dict_put(resp, "headers", headers);
@@ -563,8 +659,8 @@ static int rest_run_curl(char *const argv[], const char *code_path) {
     return -1;
 }
 
-static V *rest_http_request(const char *method, const char *url, const char *body,
-                            const char *content_type, V *extra_hdrs) {
+static V *rest_http_request(const char *method, const char *url, const unsigned char *body,
+                            size_t body_len, const char *content_type, V *extra_hdrs) {
     rest_init();
     if (!method || !method[0] || !url || !url[0])
         return v_err("rest: empty method or url");
@@ -586,12 +682,13 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
     char data_at[sizeof g_rest_data_path + 1];
     ct_hdr[0] = 0;
     data_at[0] = 0;
-    if (body && body[0]) {
+    if (body_len > 0) {
+        if (!body)
+            return v_err("rest: null body");
         int data_fd = open(g_rest_data_path, O_WRONLY | O_TRUNC | O_NOFOLLOW);
         if (data_fd < 0)
             return v_err("rest: temp file failed");
-        size_t blen = strlen(body);
-        if (write(data_fd, body, blen) != (ssize_t)blen) {
+        if (write(data_fd, body, body_len) != (ssize_t)body_len) {
             close(data_fd);
             return v_err("rest: write failed");
         }
@@ -695,7 +792,7 @@ static V *rest_http_request(const char *method, const char *url, const char *bod
         v_free(hdrs);
         return v_err("rest: read body failed");
     }
-    V *out = make_response(status, raw_body, blen, hdrs);
+    V *out = make_response(status, (const unsigned char *)raw_body, blen, hdrs);
     free(raw_body);
     return out;
 }
@@ -937,19 +1034,40 @@ static V *rest_do_read(int conn_h) {
     }
     body[content_len] = 0;
 
+    const char *ct = rest_header_get(hdrs, "Content-Type");
     V *req = v_dict_empty();
     v_dict_put(req, "method", v_str(method));
     v_dict_put(req, "path", v_str(path));
-    v_dict_put(req, "body", v_str(body));
+    if (rest_body_looks_binary((const unsigned char *)body, content_len, ct)) {
+        V *decoded = body_value((const unsigned char *)body, content_len, ct);
+        if (decoded->t == T_ERR) {
+            free(body);
+            v_free(hdrs);
+            v_free(req);
+            return decoded;
+        }
+        v_dict_put(req, "body", decoded);
+        V *raw = cvec_from_raw((const unsigned char *)body, content_len);
+        if (raw->t == T_ERR) {
+            free(body);
+            v_free(hdrs);
+            v_free(req);
+            return raw;
+        }
+        v_dict_put(req, "raw", raw);
+    } else {
+        v_dict_put(req, "body", v_str(body));
+    }
     v_dict_put(req, "headers", hdrs);
     free(body);
     return req;
 }
 
-static V *rest_do_write(int conn_h, int status, const char *body, const char *content_type) {
+static V *rest_do_write(int conn_h, int status, const unsigned char *body, size_t body_len,
+                        const char *content_type) {
     RestHandle *conn = rest_slot(conn_h);
     if (!conn || conn->kind != REST_KIND_CONN) return v_err("rest_write: invalid connection handle");
-    if (!body) body = "";
+    if (!body) body = (const unsigned char *)"";
     if (!content_type || !content_type[0]) content_type = "text/plain";
     if (rest_has_ctl(content_type))
         return v_err("rest_write: content_type has control characters");
@@ -959,9 +1077,10 @@ static V *rest_do_write(int conn_h, int status, const char *body, const char *co
     else if (status == 204) reason = "No Content";
     else if (status == 400) reason = "Bad Request";
     else if (status == 404) reason = "Not Found";
+    else if (status == 415) reason = "Unsupported Media Type";
     else if (status >= 500) reason = "Internal Server Error";
 
-    size_t blen = strlen(body);
+    size_t blen = body_len;
     if (blen > REST_MAX_BODY)
         return v_err("rest_write: response too large");
 
@@ -1040,10 +1159,15 @@ V *bi_rest_request(V **a, int n) {
     return v_err("rest: not available in WASM");
 #else
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR, v_err("rest_request(method, url[, body, content_type, headers])"))
-    const char *body = (n > 2 && a[2]->t == T_STR) ? a[2]->s : "";
+    const unsigned char *body = (const unsigned char *)"";
+    size_t body_len = 0;
+    if (n > 2) {
+        if (rest_body_bytes(a[2], &body, &body_len) != 0)
+            return v_err("rest_request: body must be str or list[char]");
+    }
     const char *ctype = (n > 3 && a[3]->t == T_STR) ? a[3]->s : "";
     V *hdrs = (n > 4 && a[4]->t == T_DICT) ? a[4] : NULL;
-    return rest_http_request(a[0]->s, a[1]->s, body, ctype, hdrs);
+    return rest_http_request(a[0]->s, a[1]->s, body, body_len, ctype, hdrs);
 #endif
 }
 
@@ -1054,7 +1178,7 @@ V *bi_rest_get(V **a, int n) {
     return v_err("rest: not available in WASM");
 #else
     P(n < 1 || a[0]->t != T_STR, v_err("rest_get(url)"))
-    return rest_http_request("GET", a[0]->s, "", "", NULL);
+    return rest_http_request("GET", a[0]->s, (const unsigned char *)"", 0, "", NULL);
 #endif
 }
 
@@ -1065,9 +1189,14 @@ V *bi_rest_post(V **a, int n) {
     return v_err("rest: not available in WASM");
 #else
     P(n < 1 || a[0]->t != T_STR, v_err("rest_post(url[, body, content_type])"))
-    const char *body = (n > 1 && a[1]->t == T_STR) ? a[1]->s : "";
+    const unsigned char *body = (const unsigned char *)"";
+    size_t body_len = 0;
+    if (n > 1) {
+        if (rest_body_bytes(a[1], &body, &body_len) != 0)
+            return v_err("rest_post: body must be str or list[char]");
+    }
     const char *ctype = (n > 2 && a[2]->t == T_STR) ? a[2]->s : "";
-    return rest_http_request("POST", a[0]->s, body, ctype, NULL);
+    return rest_http_request("POST", a[0]->s, body, body_len, ctype, NULL);
 #endif
 }
 
@@ -1078,9 +1207,14 @@ V *bi_rest_put(V **a, int n) {
     return v_err("rest: not available in WASM");
 #else
     P(n < 1 || a[0]->t != T_STR, v_err("rest_put(url[, body, content_type])"))
-    const char *body = (n > 1 && a[1]->t == T_STR) ? a[1]->s : "";
+    const unsigned char *body = (const unsigned char *)"";
+    size_t body_len = 0;
+    if (n > 1) {
+        if (rest_body_bytes(a[1], &body, &body_len) != 0)
+            return v_err("rest_put: body must be str or list[char]");
+    }
     const char *ctype = (n > 2 && a[2]->t == T_STR) ? a[2]->s : "";
-    return rest_http_request("PUT", a[0]->s, body, ctype, NULL);
+    return rest_http_request("PUT", a[0]->s, body, body_len, ctype, NULL);
 #endif
 }
 
@@ -1091,7 +1225,7 @@ V *bi_rest_delete(V **a, int n) {
     return v_err("rest: not available in WASM");
 #else
     P(n < 1 || a[0]->t != T_STR, v_err("rest_delete(url)"))
-    return rest_http_request("DELETE", a[0]->s, "", "", NULL);
+    return rest_http_request("DELETE", a[0]->s, (const unsigned char *)"", 0, "", NULL);
 #endif
 }
 
@@ -1155,9 +1289,14 @@ V *bi_rest_write(V **a, int n) {
     return v_err("rest: not available in WASM");
 #else
     P(n < 2 || a[0]->t != T_INT || a[1]->t != T_INT, v_err("rest_write(conn, status[, body, content_type])"))
-    const char *body = (n > 2 && a[2]->t == T_STR) ? a[2]->s : "";
+    const unsigned char *body = (const unsigned char *)"";
+    size_t body_len = 0;
+    if (n > 2) {
+        if (rest_body_bytes(a[2], &body, &body_len) != 0)
+            return v_err("rest_write: body must be str or list[char]");
+    }
     const char *ctype = (n > 3 && a[3]->t == T_STR) ? a[3]->s : "";
-    return rest_do_write((int)a[0]->j, (int)a[1]->j, body, ctype);
+    return rest_do_write((int)a[0]->j, (int)a[1]->j, body, body_len, ctype);
 #endif
 }
 
