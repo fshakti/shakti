@@ -11,10 +11,10 @@ Linked system libraries (libexpat, X11, ALSA, Cocoa, Core Audio, OpenMP,
 optional RDMA stacks, etc.) are provided by the host OS or toolchain.
 See doc.md.
 
-## Isolde / vector kernels
+## Vector kernels
 
-`src/vec_kernels.c` contains SIMD/OpenMP vector reductions ported from Isolde
-(`k.c`) under the same Apache License 2.0 terms as this project.
+`src/vec_kernels.c` contains SIMD/OpenMP vector reductions under the same
+Apache License 2.0 terms as this project.
 
 ## Platform SDKs
 

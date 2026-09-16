@@ -37,19 +37,15 @@ V *do_import(const char *name, Env *e) {
     char open_err[256];
     FILE *f = NULL;
     open_err[0] = 0;
-    f = fopen_regular(name, open_err, sizeof open_err);
-    if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen_regular(path, open_err, sizeof open_err); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); f=fopen_regular(path, open_err, sizeof open_err); }
-    if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,name); f=fopen_regular(path, open_err, sizeof open_err); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); f=fopen_regular(path, open_err, sizeof open_err); }
-    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,name); f=fopen_regular(path, open_err, sizeof open_err); }
+    /* Prefer .ie before extensionless paths so import name does not open a
+     * same-named binary. */
+    if(g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_lib_path,name); f=fopen_regular(path, open_err, sizeof open_err); }
     if(!f) {
         const char *env = getenv("SHAKTI_LIB");
-        if(env) {
-            snprintf(path,sizeof(path),"%s/%s",env,name); f=fopen_regular(path, open_err, sizeof open_err);
-            if(!f) { snprintf(path,sizeof(path),"%s/%s.ie",env,name); f=fopen_regular(path, open_err, sizeof open_err); }
-        }
+        if(env) { snprintf(path,sizeof(path),"%s/%s.ie",env,name); f=fopen_regular(path, open_err, sizeof open_err); }
     }
+    if(!f) { snprintf(path,sizeof(path),"%s.ie",name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f && g_script_dir[0]) { snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,name); f=fopen_regular(path, open_err, sizeof open_err); }
     if(!f) {
         char dotpath[8192];
         const char *envlib;
@@ -66,6 +62,15 @@ V *do_import(const char *name, Env *e) {
         if(!f) { snprintf(path,sizeof(path),"%s.ie",dotpath); f=fopen_regular(path, open_err, sizeof open_err); }
         if(!f && g_script_dir[0]) {
             snprintf(path,sizeof(path),"%s/%s.ie",g_script_dir,dotpath); f=fopen_regular(path, open_err, sizeof open_err);
+        }
+    }
+    if(!f) f = fopen_regular(name, open_err, sizeof open_err);
+    if(!f && g_script_dir[0]) { snprintf(path,sizeof(path),"%s/%s",g_script_dir,name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f && g_lib_path[0]) { snprintf(path,sizeof(path),"%s/%s",g_lib_path,name); f=fopen_regular(path, open_err, sizeof open_err); }
+    if(!f) {
+        const char *env = getenv("SHAKTI_LIB");
+        if(env) {
+            snprintf(path,sizeof(path),"%s/%s",env,name); f=fopen_regular(path, open_err, sizeof open_err);
         }
     }
     P(!f,v_errf("cannot import '%s'", name))

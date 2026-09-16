@@ -498,7 +498,7 @@ void run_repl(Env *e) {
             repl_print_hl_doc("IE.txt");
             continue;
         }
-        /* \q / \q N — process exit (optional status), same as Isolde */
+        /* \q / \q N — process exit (optional status) */
         if (strncmp(line, "\\q", 2) == 0 &&
             (line[2] == 0 || line[2] == ' ' || line[2] == '\t')) {
             const char *p = line + 2;

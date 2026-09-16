@@ -172,7 +172,7 @@ def status_text(st):
 
 def draw_hud(gfx, st):
     hx : ORIGIN_X + 8 * CELL + 20
-    gfx.text(hx, 40, "ISOLDE CHESS", ACCENT, 2)
+    gfx.text(hx, 40, "SHAKTI CHESS", ACCENT, 2)
     gfx.text(hx, 80, status_text(st), HUD, 2)
     mode : "Human vs AI"
     if st["mode"] = chess_core.MODE_HUMAN:

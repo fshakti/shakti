@@ -7,8 +7,6 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
-extern int is_isolde_builtin(const char *name);
-extern V *isolde_builtin_call(const char *name, V **args, int nargs);
 extern V *bi_fread(V**,in);
 extern V *bi_fwrite(V**,in);
 extern V *bi_readlines(V**,in);
@@ -334,7 +332,7 @@ static const char *BUILTINS[] = {
     "eval",
     NULL
 };
-int is_builtin(const char *name){if(is_isolde_builtin(name))return 1;for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
+int is_builtin(const char *name){for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
 
 static V *kw_get(V**kwn,V**kwv,int nkw,const char*name){
     i(nkw,{P(kwn[i]->t==T_STR&&!strcmp(kwn[i]->s,name),kwv[i])})return NULL;}
@@ -630,8 +628,6 @@ static V *bi_sum(V **a, in) {
     P(n < 1,v_int(0))
     if (n == 1) {
         V *v = a[0];
-        if ((v->t >= T_IVEC && v->t <= T_LIST) && is_isolde_builtin("isolde_sum"))
-            return isolde_builtin_call("isolde_sum", a, n);
         P(v->t >= T_IVEC && v->t <= T_LIST,vec_reduce_sum(v))
         P(v->t >= T_IMAT && v->t <= T_FMAT,vec_reduce_sum(v))
         P(v->t == T_FLOAT,v_float(v->f))
@@ -661,8 +657,6 @@ static V *bi_sum(V **a, in) {
 }
 static V *bi_dot(V **a, in) {
     P(n < 2, v_err("dot(x, y)"))
-    if (is_isolde_builtin("isolde_dot"))
-        return isolde_builtin_call("isolde_dot", a, n);
     if (a[0]->n != a[1]->n) return v_err("dot: length mismatch");
     if (a[0]->t == T_FVEC && a[1]->t == T_FVEC)
         return v_float(shakti_dot_f64(a[0]->F, a[1]->F, a[0]->n));
@@ -693,8 +687,6 @@ static V *bi_avg(V **a, in) {
 }
 static V *bi_min(V **a, in) {
     P(n < 1,v_nil())
-    if (n == 1 && (a[0]->t >= T_IVEC && a[0]->t <= T_LIST) && is_isolde_builtin("isolde_min"))
-        return isolde_builtin_call("isolde_min", a, n);
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_min(a[0]))
     if (n == 2) {
         double x = a[0]->t == T_INT ? (double)a[0]->j : a[0]->f;
@@ -705,8 +697,6 @@ static V *bi_min(V **a, in) {
 }
 static V *bi_max(V **a, in) {
     P(n < 1,v_nil())
-    if (n == 1 && (a[0]->t >= T_IVEC && a[0]->t <= T_LIST) && is_isolde_builtin("isolde_max"))
-        return isolde_builtin_call("isolde_max", a, n);
     P((a[0]->t >= T_IVEC && a[0]->t <= T_LIST) || (a[0]->t >= T_IMAT && a[0]->t <= T_FMAT),vec_reduce_max(a[0]))
     if (n == 2) {
         double x = a[0]->t == T_INT ? (double)a[0]->j : a[0]->f;
@@ -2357,7 +2347,6 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
             return v_err("save failed");
         return v_nil();
     }
-    if(is_isolde_builtin(name)) return isolde_builtin_call(name, args, nargs);
     return v_errf("unknown builtin '%s'",name);
 }
 void builtin_register(Env *e){(void)e;}

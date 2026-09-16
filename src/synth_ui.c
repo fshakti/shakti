@@ -3,11 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef SHAKTI_HAVE_ISOLDE
-extern int isolde_device;
-extern void kd_synth_rasterize(const UiCmd *cmds, int n, uint32_t *fb, int w, int h);
-#endif
-
 typedef struct {
     uint32_t label, text, amber, led_on, led_off, hot, play;
     uint32_t panel, pad_face, pad_press, accent, slot, metal;
@@ -586,13 +581,6 @@ void synth_ui_flush_cpu(const UiCmd *cmds, int n, uint32_t *fb, int w, int h) {
 }
 
 void synth_ui_flush(const UiCmd *cmds, int n, uint32_t *fb, int w, int h) {
-#ifdef SHAKTI_HAVE_ISOLDE
-    extern int isolde_device;
-    if (isolde_device) {
-        kd_synth_rasterize(cmds, n, fb, w, h);
-        return;
-    }
-#endif
     synth_ui_flush_cpu(cmds, n, fb, w, h);
 }
 
