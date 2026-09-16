@@ -81,6 +81,8 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
 | `import ipc` | `ipc_echo_client.ie` | Client for `ipc_echo.ie` |
+| `import ipc` | `ipc_sync.ie` | UDS req/rep server (`recv_req` + `reply`) |
+| `import ipc` | `ipc_sync_client.ie` | Client for `ipc_sync.ie` (`send_sync`) |
 | `import ipc` | `ipc_rdma.ie` | RDMA/RoCE server (Linux + NIC) |
 | `import ipc` | `ipc_rdma_client.ie` | Client for `ipc_rdma.ie` |
 | `import rest` | `rest_demo.ie` | HTTP GET/POST client + local server |
@@ -940,7 +942,7 @@ Side-channel state on the module: `input.x`, `input.y`, `input.wheel`, `input.qw
 
 # IPC module
 
-Sync and poll-based async message passing between shakti processes (`import ipc`). Messages are length-prefixed strings (4-byte big-endian header + payload, max 1 MiB).
+Sync and poll-based async message passing between shakti processes (`import ipc`). The wire is a 4-byte big-endian length plus payload (max 1 MiB). `ipc.send` / `ipc.recv` stay envelope-free (string or `list[char]`). Envelope RPC APIs put an 8-byte header inside the payload: magic `0x49`, kind (`async` / `req` / `rep`), `corr_id` (u32 big-endian), two reserved zeros.
 
 ## Transport selection
 
@@ -994,16 +996,56 @@ if len(ready) > 0:
     msg : ipc.recv_nowait(c)
 ```
 
-`ipc.recv_nowait(h)` returns `""` when no full message is available.
+`ipc.recv_nowait(h)` returns `""` when no full message is available. `ipc.recv_nowait_bin(h)` returns an empty `list[char]`.
+
+## Envelope RPC
+
+```ie
+import ipc
+
+srv : ipc.listen(9001)
+conn : ipc.accept(srv)
+req : ipc.recv_req(conn)
+ipc.reply(conn, req[0], "pong")
+
+c : ipc.connect("127.0.0.1", 9001)
+rep : ipc.send_sync(c, "ping")
+```
+
+| Function | Role |
+|----------|------|
+| `ipc.send_async(h, msg)` | Fire-and-forget envelope |
+| `ipc.send_sync(h, msg[, timeout_ms])` | Request; wait for matching `rep` (default 5000 ms) |
+| `ipc.reply(h, corr_id, msg)` | Reply to a request |
+| `ipc.recv_msg(h)` | `dict(kind, corr_id, data)` |
+| `ipc.recv_req(h)` | `list[corr_id, data]` (skips async) |
+| `ipc.send_n(h, msg, n)` | Repeat raw send on a stream connection |
+
+`recv_*_nowait` variants return `None` (or empty payload types as above) when nothing is ready. `send_sync` is not supported on SHM broadcast rings.
 
 ## Shared memory (local bulk)
 
 ```ie
 tok : ipc.shm_open("buf", 1048576)
 ipc.shm_close(tok)
+
+a : ipc.shm_create("chan", 65536)
+b : ipc.shm_attach("chan")
+pub : ipc.shm_broadcast_create("news", 65536)
+r : ipc.shm_broadcast_attach("news")
+blob : ipc.shm_view(a, 256, 64)
 ```
 
-POSIX `shm_open` + `mmap`; use for large zero-copy regions between co-located processes.
+`shm_open` is a POSIX `mmap` token. `shm_create` / `shm_attach` are SPSC duplex rings (256-byte header, futex wait on Linux). `shm_broadcast_*` is SPMC and lossy for slow readers. `shm_view` copies ring bytes (`offset` must be ≥ 256).
+
+## Multicast
+
+```ie
+h : ipc.join("239.255.42.1", 19000)
+ipc.publish(h, "hello")
+```
+
+IPv4 join is required. IPv6 join may error if the host has no IPv6 multicast interface. `send_sync` is not supported on multicast handles (the reply cookie and correlation id would be visible on the group).
 
 ## RDMA
 
@@ -1023,14 +1065,29 @@ See `ipc_rdma.ie`.
 | `ipc_listen(port[, host, transport])` | Listen handle |
 | `ipc_accept(listen_h)` | Connection handle |
 | `ipc_connect(host, port[, transport])` | Connection handle |
-| `ipc_send(h, str)` | Send message |
-| `ipc_recv(h)` | Blocking receive |
+| `ipc_send(h, str\|list[char])` | Send message (no envelope) |
+| `ipc_recv(h)` | Blocking receive (`str`) |
 | `ipc_recv_nowait(h)` | Non-blocking receive |
+| `ipc_recv_bin(h)` | Blocking receive (`list[char]`) |
+| `ipc_recv_nowait_bin(h)` | Non-blocking binary receive |
+| `ipc_send_async(h, msg)` | Envelope async send |
+| `ipc_send_sync(h, msg[, timeout_ms])` | Envelope request/reply |
+| `ipc_reply(h, corr_id, msg)` | Envelope reply |
+| `ipc_recv_msg(h)` / `_nowait` | Envelope message dict |
+| `ipc_recv_req(h)` / `_nowait` | Next request `[corr_id, data]` |
+| `ipc_send_n(h, msg, n)` | Repeat raw send |
 | `ipc_set_nonblock(h, on)` | Toggle non-blocking mode |
 | `ipc_poll(handles, timeout_ms)` | Ready handle list |
 | `ipc_close(h)` | Close handle |
 | `ipc_shm_open(name, size)` | Shared memory token |
 | `ipc_shm_close(token)` | Unmap and unlink |
+| `ipc_shm_create(name, size)` | Duplex ring (side A) |
+| `ipc_shm_attach(name)` | Duplex ring (side B) |
+| `ipc_shm_broadcast_create(name, size[, max_readers])` | SPMC publisher |
+| `ipc_shm_broadcast_attach(name)` | SPMC reader |
+| `ipc_shm_view(h, offset, len)` | Copy ring bytes |
+| `ipc_join(group, port[, iface[, source]])` | UDP multicast membership |
+| `ipc_publish(h, msg)` | Multicast send |
 | `ipc_rdma_available()` | `1` if RDMA device present |
 
 ## Examples
@@ -1039,9 +1096,11 @@ See [examples index](#examples-index). IPC-specific:
 
 | File | Description |
 |------|-------------|
-| `ipc_echo.ie` | UDS echo server |
+| `ipc_echo.ie` | UDS echo server (raw send/recv) |
 | `ipc_echo_client.ie` | UDS client |
-| `ipc_rdma.ie` | RDMA server |
+| `ipc_sync.ie` | UDS req/rep server |
+| `ipc_sync_client.ie` | UDS `send_sync` client |
+| `ipc_rdma.ie` | RDMA server (raw send/recv) |
 | `ipc_rdma_client.ie` | RDMA client |
 
 ---

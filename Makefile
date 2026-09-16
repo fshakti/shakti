@@ -124,7 +124,7 @@ SHAKTI_RDMA ?= 1
 
 ifeq ($(SHAKTI_IPC),1)
   CFLAGS += -DSHAKTI_HAVE_IPC=1
-  LIBSRCS_STANDALONE += src/ipc.c
+  LIBSRCS_STANDALONE += src/ipc.c src/ipc_shm.c src/ipc_mcast.c
   ifeq ($(UNAME_S),Linux)
     ifeq ($(SHAKTI_RDMA),1)
       ifneq ($(wildcard /usr/include/infiniband/verbs.h),)
