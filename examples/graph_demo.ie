@@ -23,6 +23,9 @@ print("\npath Ada -> Dave:")
 path : graph.path("Ada", "Dave", 6)
 print(path)
 
+print("\nrelated to Ada:")
+print(graph.related("Ada"))
+
 people : table(
     name: ["Eve", "Frank"],
     friend: ["Frank", "Grace"]

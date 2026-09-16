@@ -37,3 +37,37 @@ def count():
 
 def clear():
     return graph_clear(_g)
+
+def add_many(triples):
+    n : 0
+    for t in triples:
+        r : graph_add(_g, t[0], t[1], t[2])
+        if type(r) = "error":
+            return r
+        n : n + 1
+    return n
+
+def related(node, max_depth:2):
+    seen : [node]
+    frontier : [node]
+    depth : 0
+    while depth < max_depth and len(frontier) > 0:
+        nxt : []
+        for cur in frontier:
+            out_t : neighbors(cur, "out")
+            if type(out_t) = "error":
+                return out_t
+            for nb in out_t["object"]:
+                if not (nb in seen):
+                    append(seen, nb)
+                    append(nxt, nb)
+            in_t : neighbors(cur, "in")
+            if type(in_t) = "error":
+                return in_t
+            for nb in in_t["subject"]:
+                if not (nb in seen):
+                    append(seen, nb)
+                    append(nxt, nb)
+        frontier : nxt
+        depth : depth + 1
+    return seen

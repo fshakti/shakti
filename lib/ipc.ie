@@ -38,6 +38,9 @@ def recv_bin(h):
 def recv_nowait_bin(h):
     return ipc_recv_nowait_bin(h)
 
+def recv_bin_nowait(h):
+    return ipc_recv_nowait_bin(h)
+
 def send_async(h, msg):
     return ipc_send_async(h, msg)
 

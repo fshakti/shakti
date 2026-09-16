@@ -306,6 +306,7 @@ Leading `@` decorates. `mmul(a, b)` multiplies matrices.
 | `pop()` | `list` |
 | `keys()`, `values()` | `dict`, `table` |
 | `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `list[char]`, `matrix[int]`, `matrix[float]`, `matrix[bool]`, `matrix[char]` |
+| `find(substr)` | `str` — byte index of first match, or `-1` |
 
 ## Vectors
 
@@ -654,6 +655,8 @@ Module `lib/graph.ie`:
 | `graph.to_table(s, p, o)` | Export query matches as table |
 | `graph.count()` | Number of triples |
 | `graph.clear()` | Remove all triples |
+| `graph.add_many(triples)` | Insert many `[s, p, o]` lists; returns count added |
+| `graph.related(node[, max_depth])` | Nodes within `max_depth` hops (default 2), including `node` |
 
 ## Builtins
 
@@ -993,7 +996,7 @@ if len(ready) > 0:
     msg : ipc.recv_nowait(c)
 ```
 
-`ipc.recv_nowait(h)` returns `""` when no full message is available. `ipc.recv_nowait_bin(h)` returns an empty `list[char]`.
+`ipc.recv_nowait(h)` returns `""` when no full message is available. `ipc.recv_nowait_bin(h)` / `ipc.recv_bin_nowait(h)` return an empty `list[char]`.
 
 ## Envelope RPC
 
@@ -1066,7 +1069,7 @@ See `ipc_rdma.ie`.
 | `ipc_recv(h)` | Blocking receive (`str`) |
 | `ipc_recv_nowait(h)` | Non-blocking receive |
 | `ipc_recv_bin(h)` | Blocking receive (`list[char]`) |
-| `ipc_recv_nowait_bin(h)` | Non-blocking binary receive |
+| `ipc_recv_nowait_bin(h)` | Non-blocking binary receive (`ipc.recv_nowait_bin` / `ipc.recv_bin_nowait`) |
 | `ipc_send_async(h, msg)` | Envelope async send |
 | `ipc_send_sync(h, msg[, timeout_ms])` | Envelope request/reply |
 | `ipc_reply(h, corr_id, msg)` | Envelope reply |
