@@ -71,6 +71,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
+| `import synth` | `lacrimosa.ie` | Mozart Lacrimosa (choir + cello/bass) |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
 | `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers (`degree_freq`, `ratio_cents`, `et_delta`) |
 | `import stem` | `stem_demo.ie` | Streaming 4-stem separator ([`examples/stem_demo.ie`](examples/stem_demo.ie)) |
@@ -1245,6 +1246,8 @@ for ev in input(2):
             synth.note_on(60 + idx, 0.88)
 ```
 
+Mozart Lacrimosa (choir + cello/bass): `examples/lacrimosa.ie`
+
 USB MIDI controller (iRig Keys 2): `examples/synth_midi.ie`
 
 ```bash
@@ -1302,6 +1305,7 @@ Load local `.wav` files with `load_sample(path)`.
 |------|-------------|
 | `synth_demo.ie` | Window + event loop |
 | `synth_song.ie` | Twinkle + drum sequencer |
+| `lacrimosa.ie` | Mozart Lacrimosa (choir + cello/bass) |
 | `synth_input.ie` | Keyboard jam with `input(2)` |
 
 Disable at build: `SHAKTI_SYNTH=0 make prod`.
