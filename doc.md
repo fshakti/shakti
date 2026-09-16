@@ -53,11 +53,18 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 |--------|---------|-------------|
 | *(core)* | `decorators.ie` | Function, class, stacked, factory, and assignment decorators |
 | *(core)* | `each.ie` | `f@ xs` / `xs f@ ys` each |
+| *(core)* | `lists.ie` | Typed `list[…]` / `matrix[…]` constructors ([`examples/lists.ie`](examples/lists.ie)) |
+| *(core)* | `oop.ie` | Classes / inheritance ([`examples/oop.ie`](examples/oop.ie)) |
 | *(core)* | `matrix.ie` | Matrices (`mmul`), `dot`, `sum` / `min` / `max` |
+| *(core)* | `table_csv.ie` | CSV/TSV `save` / `load` |
+| `import json` | `json_demo.ie` | JSON file load / table / save |
 | *(core)* | `sh_demo.ie` | `sh(cmd)` wait status (`true` / `false`) |
+| `import subprocess` | `subprocess_demo.ie` | `subprocess.Popen` ([`examples/subprocess_demo.ie`](examples/subprocess_demo.ie)) |
 | `import sql` | `sql_demo.ie` | Select, insert, update, delete, join |
 | `import graph` | `graph_demo.ie` | Knowledge graph triples, query, path |
 | `import gfx` | `gfx_demo.ie` | Pixel window + click drawing |
+| `import pong` | `pong_demo.ie` | Pong gfx launcher ([`examples/pong_demo.ie`](examples/pong_demo.ie)) |
+| `import chess` | `chess_demo.ie` | Chess gfx launcher ([`examples/chess_demo.ie`](examples/chess_demo.ie)) |
 | `import pyplot` | `pyplot_demo.ie` | Line / scatter / bar charts on gfx |
 | `import jupyter` | `jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
@@ -65,17 +72,20 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import synth` | `synth_demo.ie` | Synth window + event loop |
 | `import synth` | `synth_song.ie` | Twinkle + drum sequencer |
 | `import synth` | `synth_just_intonation.ie` | Just-intonation major chord |
-| `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers |
+| `import dsp` | `dsp_demo.ie` | Just-intonation ratio helpers (`degree_freq`, `ratio_cents`, `et_delta`) |
+| `import stem` | `stem_demo.ie` | Streaming 4-stem separator ([`examples/stem_demo.ie`](examples/stem_demo.ie)) |
 | `import sonicpi` | `sonicpi_demo.ie` | Drive Sonic Pi over OSC |
 | `import pdf` | `pdf_demo.ie` | PDF 1.4 write/read |
 | `import midi` | `midi_demo.ie` | ALSA / CoreMIDI I/O |
-| `import iefs` | `iefs_demo.ie` | Durable `.iefs` save/load |
+| `import iefs` | `iefs_demo.ie` | Durable `.iefs` save / load / map |
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
 | `import ipc` | `ipc_echo_client.ie` | Client for `ipc_echo.ie` |
 | `import ipc` | `ipc_rdma.ie` | RDMA/RoCE server (Linux + NIC) |
 | `import ipc` | `ipc_rdma_client.ie` | Client for `ipc_rdma.ie` |
 | `import rest` | `rest_demo.ie` | HTTP GET/POST client + local server |
+| `import discord` | `discord_demo.ie` | Discord REST (`guilds()`; skip unless token set) |
+| *(core)* | `core_demo.ie` | Defaults, decorators, slices, tables, f-strings |
 
 ## Module docs
 

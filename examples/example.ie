@@ -117,6 +117,73 @@ print("table each:")
 print(abs@ t)
 
 # =============================================================================
+# lists.ie
+# =============================================================================
+# Typed list / matrix constructors.
+#   ./shakti examples/lists.ie
+
+def e(x):
+    print(type(x), x)
+
+e(list())
+e(list[](10))
+e(list[bool](10))
+e(list[char](10))
+e(list[int](10))
+e(list[float](10))
+
+e(matrix[bool](3,3))
+e(matrix[char](3,3))
+e(matrix[int](3,3))
+e(matrix[float](3,3))
+
+# =============================================================================
+# oop.ie
+# =============================================================================
+# Classes / inheritance. Differences from Python: `self` is implicit, `__init__`
+# is optional, name base classes directly.
+#   ./shakti examples/oop.ie
+
+class base:
+	name:"base"
+	did_base_init:False
+	def __init__():
+		self.did_base_init:True
+		print(["base init"])
+	def doit():
+		print(["base doit"])
+
+class foo(base):
+	name: "foo"
+	def __init__(x):
+		base.__init__()
+		print(["foo init",x])
+
+print(base)
+b:base()
+print(b)
+b.doit()
+print(b.did_base_init)
+print([isinstance(b,foo),isinstance(b,base)])
+
+print(foo)
+a:foo(42)
+print(a)
+a.doit()
+print(a.did_base_init)
+print([isinstance(a,foo),isinstance(a,base)])
+
+class thing:
+	def __init__(*a,b:"hello"):
+		self.a:a
+		self.b:b
+	def __str__():
+		return "thing<"+str(self.a)+";"+str(self.b)+">"
+
+a:thing(*range(9),b:"cool")
+print(str(a))
+
+# =============================================================================
 # matrix.ie
 # =============================================================================
 # Native matrix types demo
@@ -186,22 +253,57 @@ print("tsv empty-edge load:")
 print(edge)
 
 # =============================================================================
+# json_demo.ie
+# =============================================================================
+# JSON file load / table / save via `import json`.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/example.ie  # section: json_demo.ie
+
+import json
+
+path : "/tmp/shakti_json_demo.json"
+rows0 : [{"id": 1, "name": "ada"}, {"id": 2, "name": "bob"}]
+json.save(rows0, path)
+rows : json.load(path)
+print("load:", rows)
+t : json.table(rows)
+print("table:")
+print(t)
+out : "/tmp/shakti_json_demo_out.json"
+json.save(rows, out)
+print("saved:", read(out))
+
+# =============================================================================
 # sh_demo.ie
 # =============================================================================
-# Native sh(cmd) via /bin/sh -c. Returns wait status (0 = success).
-# Same gate as subprocess: SHAKTI_SAFE=1 or SHAKTI_ALLOW_EXEC=0 disables it.
+# Native sh(cmd) — /bin/sh -c, Isolde-compatible wait status.
+# 0 = success; any non-zero value means failure (waitpid status, not bash 0–255).
+# Disabled when SHAKTI_SAFE=1 or SHAKTI_ALLOW_EXEC=0.
 #   ./shakti examples/sh_demo.ie
 
 ok : sh("true")
 bad : sh("false")
 print("true wait status:", ok)
 print("false failed:", bad != 0)
-print("cwd:", getcwd())
 
-write("/tmp/shakti_short.tsv", "id\tval\n1\t\n")
-tsv_short : load("/tmp/shakti_short.tsv")
-print("tsv short-row load:")
-print(tsv_short)
+home : getenv("HOME")
+print("cwd:", getcwd())
+if home != None:
+    print("HOME set")
+
+print("sh_demo ok")
+
+# =============================================================================
+# subprocess_demo.ie
+# =============================================================================
+# subprocess.Popen — same exec gate as sh() (SHAKTI_SAFE=1 / SHAKTI_ALLOW_EXEC=0).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/subprocess_demo.ie
+
+import subprocess
+
+p : subprocess.Popen("ls -al", shell:True)
+print(p.wait())
 
 # =============================================================================
 # sql_demo.ie
@@ -271,21 +373,42 @@ else:
     print("done")
 
 # =============================================================================
+# pong_demo.ie
+# =============================================================================
+# Pong gfx demo — copy this section into its own file (gfx loop until window close).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/pong_demo.ie
+
+import pong
+pong.run()
+
+# =============================================================================
+# chess_demo.ie
+# =============================================================================
+# Chess gfx demo — copy this section into its own file (gfx loop until window close).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/chess_demo.ie
+
+import chess
+chess.run()
+
+# =============================================================================
 # pyplot_demo.ie
 # =============================================================================
 # matplotlib.pyplot-shaped charts on gfx.
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti examples/example.ie  # section: pyplot_demo.ie
 # Also: examples/pyplot_demo.ie
+#   SHAKTI_GFX_SKIP=1 ./shakti examples/pyplot_demo.ie   # no window
 
 import pyplot
 import gfx
 
-if not gfx.available():
-    print("pyplot demo: gfx not available")
+if getenv("SHAKTI_GFX_SKIP") = "1":
+    print("pyplot demo: show skipped (SHAKTI_GFX_SKIP=1)")
 else:
-    if getenv("SHAKTI_GFX_SKIP") = "1":
-        print("pyplot demo: show skipped (SHAKTI_GFX_SKIP=1)")
+    if not gfx.available():
+        print("pyplot demo: gfx not available")
     else:
         pyplot.plot([0, 1, 2, 3, 4, 5], [0, 1, 4, 9, 16, 25], color:"C0", label:"sq")
         pyplot.scatter([0, 1, 2, 3, 4, 5], [0, 1.5, 3, 6, 12, 20], color:"C1", label:"pts")
@@ -327,23 +450,42 @@ def _fmt_in(xs):
 
 jupyter.new()
 jupyter.markdown("# jupyter demo")
+jupyter.markdown("Shakti cells via `eval` — not a Python kernel.")
 jupyter.code("a : [1, 2, 3, 4]")
 jupyter.code("b : 0\nfor x in a:\n    b : b + x\nb")
 jupyter.code("a")
+
 vals : jupyter.run_all()
-print("run_all:", vals)
+print("run_all results:", vals)
 print("In:", _fmt_in(jupyter.get_in()))
 print("Out:", jupyter.get_out())
+print("execution_count:", jupyter.execution_count(), "cells:", jupyter.ncells())
+
+# Persist a clean notebook BEFORE error / one-shot demos (round-trip should stay green).
 path : "/tmp/shakti_jupyter_demo.ipynb"
 nbytes : jupyter.save(path)
 print("wrote", path, nbytes, "bytes")
+
+# error cell becomes an error output (run continues); not part of saved round-trip
 err : jupyter.run("1 / 0")
-print("error cell:", type(err))
-print("run:", jupyter.run("10 * 10"))
+print("error cell:", err, "type:", type(err))
+print("last outputs:", jupyter.cell(jupyter.ncells() - 1)["outputs"])
+
+# IPython-shaped one-shot append+exec
+r : jupyter.run("10 * 10")
+print("run =>", r, "Out[last]:", jupyter.get_out()[jupyter.execution_count()])
+
+# round-trip: clear, load clean notebook, inspect (does not re-exec)
 jupyter.clear()
 jupyter.load(path)
-print("reloaded:", jupyter.ncells(), "cells; cell0:", jupyter.cell(0)["source"])
+print("reloaded cells:", jupyter.ncells())
+print("cell0:", jupyter.cell(0)["cell_type"], jupyter.cell(0)["source"])
+print("cell2 source:", jupyter.cell(2)["source"])
+print("dumps head:", jupyter.dumps()[0:80], "...")
+
+# re-run after load restores values in root eval env
 print("re-run_all:", jupyter.run_all())
+
 if getenv("SHAKTI_GFX_SKIP") = "1":
     print("jupyter demo: show skipped (SHAKTI_GFX_SKIP=1)")
 else:
@@ -588,9 +730,65 @@ import dsp
 
 root : 440.0
 print("degree 4 (3/2):", dsp.degree_freq(root, 4))
+print("ratio_cents(3, 2):", dsp.ratio_cents(3, 2))
+print("et_delta(3, 2):", dsp.et_delta(3, 2))
 for row in dsp.perfect7(root):
     print(row["degree"], row["num"], "/", row["den"], "→", row["hz"], "Hz")
 
+# =============================================================================
+# stem_demo.ie
+# =============================================================================
+# Streaming 4-stem separator — synthetic tone stream, energy + latency.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/stem_demo.ie
+
+import stem
+
+print("stem info:", stem.info())
+stem.open(44100, 256)
+print("algorithmic latency_ms:", stem.latency_ms())
+
+sr : 44100.0
+secs : 0.5
+n : int(sr * secs)
+block_sz : 256
+pos : 0
+energy : {"drums": 0.0, "bass": 0.0, "vocals": 0.0, "other": 0.0}
+
+t0 : clock()
+while pos < n:
+    take : block_sz
+    if pos + take > n:
+        take : n - pos
+    blk : []
+    i : 0
+    while i < take:
+        t : (pos + i) / sr
+        x : 0.2 * sin(6.283185307179586 * 110.0 * t)
+        x : x + 0.15 * sin(6.283185307179586 * 440.0 * t)
+        append(blk, x)
+        i : i + 1
+    out : stem.process(blk)
+    for name in ["drums", "bass", "vocals", "other"]:
+        s : out[name]
+        e : 0.0
+        j : 0
+        while j < len(s):
+            v : s[j]
+            e : e + v * v
+            j : j + 1
+        energy[name] : energy[name] + e
+    pos : pos + take
+dt : clock() - t0
+
+print("process wall_s:", dt)
+print("audio_s:", secs)
+print("xrt:", dt / secs)
+print("stem energy:", energy)
+stem.set_gains(1, 1, 0, 1)
+print("gains (vocals muted):", stem.gains())
+stem.close()
+print("stem demo done")
 
 # =============================================================================
 # sonicpi_demo.ie
@@ -598,13 +796,22 @@ for row in dsp.perfect7(root):
 # Drive Sonic Pi via OSC (UDP). Start Sonic Pi + examples/sonicpi_bridge.rb first.
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti examples/example.ie  # section: sonicpi_demo.ie
+# Also: examples/sonicpi_demo.ie
 
 import sonicpi
 
 sonicpi.configure("127.0.0.1", 4560)
 sonicpi.bpm(120)
-sonicpi.play(60, 0.8, 0.25)
-sonicpi.synth("prophet", 70, 0.9, 1.0)
+
+notes : 60 64 67 72
+for n in notes:
+    sonicpi.play(n, 0.85, 0.3)
+    wait(0.35)
+
+sonicpi.synth("prophet", 70, 0.9, 1.2)
+wait(0.5)
+sonicpi.synth("dsaw", 65, 0.75, 0.8)
+
 print("sonicpi demo sent — check Sonic Pi audio")
 
 
@@ -614,6 +821,7 @@ print("sonicpi demo sent — check Sonic Pi audio")
 # PDF 1.4 write/read round-trip (no third-party PDF libs).
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti examples/example.ie  # section: pdf_demo.ie
+# Also: examples/pdf_smoke.ie
 
 import pdf
 
@@ -631,17 +839,45 @@ pdf.close(d)
 # =============================================================================
 # midi_demo.ie
 # =============================================================================
-# MIDI I/O (ALSA / CoreMIDI). Override port with MIDI_PORT env.
+# MIDI I/O (ALSA / CoreMIDI). Lists ports by default. Set MIDI_PORT to a
+# port id or name substring to send a short test pattern.
 #   export SHAKTI_LIB=$PWD/lib
 #   ./shakti examples/example.ie  # section: midi_demo.ie
+# Also: examples/midi_demo.ie
 
 import midi
 
 print("backend:", midi.backend())
-if midi.backend() != "none":
+if midi.backend() = "none":
+    print("midi not available")
+else:
     midi.open()
-    print("ports:", len(midi.list()))
-    midi.close()
+    print("ports:")
+    for p in midi.list():
+        print(" ", p)
+
+    target : getenv("MIDI_PORT")
+    if not target:
+        print("set MIDI_PORT to a port id/name substring to send a test pattern")
+        midi.close()
+    else:
+        print("connect:", target)
+        midi.connect(target)
+        midi.note_on(60, 100)
+        wait(0.4)
+        midi.note_off(60)
+        midi.note_on(64, 90)
+        wait(0.3)
+        midi.note_off(64)
+        midi.cc(1, 64)
+        # Drain any inbound events briefly
+        t0 : clock()
+        while clock() - t0 < 0.2:
+            ev : midi.poll()
+            if ev:
+                print("in:", ev)
+        midi.close()
+        print("done")
 
 
 # =============================================================================
@@ -657,6 +893,7 @@ path : "/tmp/shakti_iefs_demo.iefs"
 x : [1, 2, 3, 4]
 iefs.save(x, path)
 print("roundtrip:", iefs.load(path))
+print("map:", iefs.map(path))
 print("direct_available:", iefs.direct_available())
 
 
@@ -792,6 +1029,25 @@ else:
     print("error status:", rest.status(resp2))
 
 print("rest demo done")
+
+# =============================================================================
+# discord_demo.ie
+# =============================================================================
+# Discord REST via `import discord`. Skips unless DISCORD_BOT_TOKEN (or DISCORD_TOKEN) is set.
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/example.ie  # section: discord_demo.ie
+
+import discord
+
+tok : getenv("DISCORD_BOT_TOKEN")
+if tok = None:
+    tok : getenv("DISCORD_TOKEN")
+if tok = None:
+    print("discord demo skipped — set DISCORD_BOT_TOKEN (or DISCORD_TOKEN)")
+elif tok = "":
+    print("discord demo skipped — set DISCORD_BOT_TOKEN (or DISCORD_TOKEN)")
+else:
+    print("guilds:", discord.guilds())
 
 # =============================================================================
 # core_demo.ie — defaults, decorators, slices, tables
