@@ -1,0 +1,48 @@
+# ws — WebSocket client and server (RFC6455)
+#
+#   import ws
+#   import rest
+#
+# Client:
+#   c : ws.connect("ws://127.0.0.1:9000/chat")
+#   c : ws.connect("wss://example.com/chat")
+#   c : ws.connect("wss://127.0.0.1:9443/", insecure:1)  # self-signed
+#   ws.send(c, "hello")
+#   ws.send_bin(c, blob)
+#   msg : ws.recv(c)   # dict(type: "text"|"bin"|"close", data: ...)
+#   ws.close(c)
+#
+# Server (upgrade after rest.read):
+#   srv : rest.listen(9000)
+#   conn : rest.accept(srv)
+#   req : rest.read(conn)
+#   w : ws.accept(conn)          # or ws.accept(conn, req)
+#
+# TLS server:
+#   srv : rest.listen_tls(9443, "server.crt", "server.key")
+
+def connect(url, insecure:0):
+    return ws_connect(url, insecure)
+
+def accept(conn, req:0):
+    if req:
+        return ws_accept(conn, req)
+    return ws_accept(conn)
+
+def send(h, text):
+    return ws_send(h, text)
+
+def send_bin(h, data):
+    return ws_send_bin(h, data)
+
+def recv(h):
+    return ws_recv(h)
+
+def poll(handles, timeout_ms:0):
+    return ws_poll(handles, timeout_ms)
+
+def close(h):
+    return ws_close(h)
+
+def set_nonblock(h, enabled):
+    return ws_set_nonblock(h, enabled)
