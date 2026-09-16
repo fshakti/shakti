@@ -45,7 +45,14 @@ static V *v_dvec(int64_t n, int bits) { (void)bits; return v_ivec(n); }
 static V *v_dmat(int64_t r, int64_t c, int bits) { (void)bits; return v_imat(r, c); }
 static V *v_gvec(int64_t n) { return v_cvec(n); }
 static V *v_bio_table(int t, int codec, V *k, V *vals) { (void)t;(void)codec;v_free(k);v_free(vals); return v_err("iefs: unsupported type"); }
-static int v_is_rel(V *v) { (void)v; return 0; }
+static int v_is_rel(V *v) { return v && v->t == T_TABLE; }
+/* Packed integer payloads (bits < 64) are widened to i64. */
+static V *widen_packed_ivec(const unsigned char *p, uint64_t n, int bits) {
+    V *v = v_ivec((int64_t)n);
+    for (uint64_t i = 0; i < n; i++)
+        v->J[i] = pack_get_i(p, (int64_t)i, bits);
+    return v;
+}
 static void v_free_payload(V *v) {
     if (!v || v->owner_kind == V_OWNER_MAP_ALIAS) return;
     free(v->J); v->J = NULL;
@@ -786,11 +793,12 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
             v_free_payload(v);
             if (bits < 64) v->B = (unsigned char *)(uintptr_t)p;
             else v->J = (int64_t *)(uintptr_t)p;
+        } else if (type == T_IVEC && bits < 64) {
+            return widen_packed_ivec(p, nelem, bits);
         } else {
-            v = bits < 64 ? v_ivec_bits((int64_t)nelem, bits) : v_ivec((int64_t)nelem);
+            v = v_ivec((int64_t)nelem);
             v_free_payload(v);
-            if (bits < 64) v->B = (unsigned char *)(uintptr_t)p;
-            else v->J = (int64_t *)(uintptr_t)p;
+            v->J = (int64_t *)(uintptr_t)p;
         }
         iefs_v_set_map_alias(v, reg);
         return v;
@@ -813,10 +821,11 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
         v = v_uvec((int64_t)nelem, bits);
         if (bits < 64) { if (nbytes) memcpy(v->B, p, nbytes); }
         else copy_i64_le(v->J, p, nelem);
+    } else if (type == T_IVEC && bits < 64) {
+        return widen_packed_ivec(p, nelem, bits);
     } else {
-        v = bits < 64 ? v_ivec_bits((int64_t)nelem, bits) : v_ivec((int64_t)nelem);
-        if (bits < 64) { if (nbytes) memcpy(v->B, p, nbytes); }
-        else copy_i64_le(v->J, p, nelem);
+        v = v_ivec((int64_t)nelem);
+        copy_i64_le(v->J, p, nelem);
     }
     return v;
 }
@@ -1476,12 +1485,9 @@ static V *decode_value_inner(IefsR *r) {
         }
         if (bits < 64) {
             size_t nbytes = pack_nbytes((int64_t)n, bits);
-            if (r->map_reg)
-                return alias_payload(r, T_IVEC, (int64_t)n, bits, -1, nbytes, 2);
             if (need(r, nbytes) != 0)
                 return v_err(r->err);
-            V *v = v_ivec_bits((int64_t)n, bits);
-            if (n) memcpy(v->B, r->p + r->off, nbytes);
+            V *v = widen_packed_ivec(r->p + r->off, n, bits);
             r->off += nbytes;
             return v;
         }
