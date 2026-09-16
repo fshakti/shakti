@@ -1,0 +1,18 @@
+# hld — HTTP length-delimited wrapper for Shakti values
+#
+#   import hld
+#   blob : hld.encode(x)
+#   blob : hld.encode(x, codec:"zstd", level:3)
+#   y : hld.decode(blob)
+#
+# Wire: HLD1 frame wrapping an IEFS payload; optional zstd/snappy.
+# HTTP Content-Type: application/x-hld (see import rest helpers).
+# Blobs are list[char].
+
+def encode(x, codec:"", level:3):
+    if codec = "":
+        return hld_encode(x)
+    return hld_encode(x, codec, level)
+
+def decode(blob):
+    return hld_decode(blob)

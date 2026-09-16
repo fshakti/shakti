@@ -30,6 +30,8 @@ Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]`
 - [`pdf` module](#pdf-module)
 - [`midi` module](#midi-module)
 - [`iefs` module](#iefs-module)
+- [`hdb` module](#hdb-module)
+- [`hld` module](#hld-module)
 - [`talk` module](#talk-module-macos)
 - [Third-party dependencies](#third-party-dependencies-and-optional-assets)
 
@@ -1147,10 +1149,16 @@ resp2 : rest.post_json("https://api.example.com/items", {"name": "alpha"})
 | `rest.delete(url)` | DELETE request |
 | `rest.post_json(url, obj)` | POST with `application/json` body |
 | `rest.put_json(url, obj)` | PUT with `application/json` body |
-| `rest.request(method, url[, body, content_type, headers])` | Generic request; `headers` is a dict |
+| `rest.post_iefs(url, obj[, codec, level])` | POST `application/iefs` (`list[char]` IEFS frame) |
+| `rest.put_iefs(url, obj[, codec, level])` | PUT `application/iefs` |
+| `rest.post_hld(url, obj[, codec, level])` | POST `application/x-hld` |
+| `rest.put_hld(url, obj[, codec, level])` | PUT `application/x-hld` |
+| `rest.request(method, url[, body, content_type, headers])` | Generic request; `headers` is a dict; body may be `str` or `list[char]` |
 | `rest.status(resp)` | HTTP status code |
 | `rest.ok(resp)` | `True` when status is 2xx |
 | `rest.json(resp)` | Parsed body (JSON object/list or string) |
+| `rest.iefs(resp)` | Decoded IEFS body |
+| `rest.hld(resp)` | Decoded HLD body |
 | `rest.text(resp)` | Raw response body string |
 
 Response dict shape:
@@ -1183,6 +1191,8 @@ rest.close(srv)
 | `rest.read(conn)` | Read request → `{method, path, body, headers}` |
 | `rest.write(conn, status[, body, content_type])` | Send HTTP/1.1 response |
 | `rest.respond_json(conn, status, obj)` | JSON response helper |
+| `rest.respond_iefs(conn, status, obj[, codec, level])` | IEFS binary response |
+| `rest.respond_hld(conn, status, obj[, codec, level])` | HLD binary response |
 | `rest.set_nonblock(h, enabled)` | Non-blocking fd |
 | `rest.close(h)` | Close listen or connection handle |
 
@@ -1201,6 +1211,7 @@ req : rest.read(conn)
 ## Limitations
 
 - Client shells out to `curl` per request (latency dominated by process spawn).
+- Client allows loopback (`127/8`, `::1`) so `post_iefs` / `post_hld` can reach the in-process mini-server; other private addresses stay blocked.
 - Server is not production-grade: no HTTP/2, no chunked encoding, no keep-alive.
 - TLS listen requires OpenSSL at build time (`SHAKTI_TLS=1`, default on native).
 - Not available in WASM builds.
@@ -1271,7 +1282,7 @@ Blocking HTTP daemon: `server_serve(port)` (default 8080). Loopback bind unless 
 
 Routes:
 
-- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0
+- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**)
   - `handle_rpc(method, params, id)` if defined in the calling environment
   - else built-in `ping` → `"pong"`
 - other methods/paths — `handle_request(method, path, body, content_type)` if defined (must return a dict with `status` / `content_type` / `body`)
@@ -1650,37 +1661,69 @@ Disable at build: `SHAKTI_MIDI=0 make prod`.
 
 # `iefs` module
 
-Portable durable save/load for Shakti values (`.iefs`). Built by default (`SHAKTI_IEFS=1`).
-
-```bash
-export SHAKTI_LIB=$PWD/lib
-# copy iefs_demo.ie section from examples/example.ie
-```
+Portable durable save/load for Shakti values (`.iefs`). Built by default (`SHAKTI_IEFS=1`). Default **write version is 2** (layout CRC over `hdr[0:16]+hdr[20:24]+payload`). Version 1 files still load (payload-only CRC). Version 3 is TOC + 2 MiB extents.
 
 ```ie
 import iefs
 iefs.save(x, "data.iefs")
-x2 : iefs.load("data.iefs")          # CRC-checked owned copy
-x3 : iefs.map("data.iefs")           # mmap; skip CRC; alias payloads
-x3 : iefs.map("data.iefs", pages:"thp")  # or "2m" / "1g" (HugePages must be reserved)
-iefs.save(x, "big.iefs", 1)          # force O_DIRECT when available (Linux);
-                                     # on Darwin large AUTO I/O uses F_NOCACHE
-print(iefs.direct_available())
+iefs.save(x, "data.iefs", codec:"zstd")
+iefs.save(x, "data.iefs", format:3)
+iefs.save(x, "data.iefs", sync:"none")   # "full" (default), "data", or "none"
+iefs.save(x, "data.iefs", format:3, codecs:{"t":"datetime+zstd", "px":"gorilla_f64"})
+x2 : iefs.load("data.iefs")
+x3 : iefs.map("data.iefs", pages:"thp")  # or "2m" / "1g"
+blob : iefs.dumps(x, codec:"snappy")    # list[char]
+y : iefs.loads(blob)
+print(iefs.direct_available(), iefs.uring_available(), iefs.libaio_available())
 ```
 
-- `iefs.load` / global `load("….iefs")` — full read + CRC + malloc copy (unchanged).
-- `iefs.map` — `mmap` the file, skip CRC, alias contiguous vector/matrix payloads. Mutating an aliased value materializes a private copy first.
-- SQL `select … from "….iefs"` opens via **map**. `update` / `delete` from a `.iefs` path string open via map and write the result back with `iefs.save` semantics.
-- CSV / XML / TSV `load` paths are unchanged.
+- `iefs.load` / global `load("….iefs")` — full read + CRC + malloc copy.
+- `iefs.map` — `mmap` the file, skip CRC, alias contiguous vector/matrix payloads. Compressed files require `load` / `loads`.
+- `iefs.dumps` / `iefs.loads` — in-memory frames as `list[char]`.
+- Host codecs: `zstd`, `snappy`, plus residual `delta_i64` / `fire_i64` / `gorilla_f64` / `date` / `time` / `datetime` (v3 extents; compounds like `fire_i64+zstd`). Also interned as `compress` / `decompress`.
+- SQL `select … from "….iefs"` opens via **map**.
+- Whole-file zstd/snappy on v1/v2; v3 per-extent codec + optional outer LZ.
 
-Global `save`/`load` also recognize the `.iefs` extension. Supported: scalars, vectors, matrices, lists, dicts, tables. Functions, errors, and input streams are rejected.
-
-Type layout 1 (`char`=4, `str`=5) is stored at header offset 20. Writers stamp layout 1 and version 1 (flags 0). Readers reject any other layout (`iefs: type layout predates char (tag 4 was str); re-save required`). v3 TOC+extents remain readable; v3 vector extents use tags 8/9/10 (`list[int]` / `list[float]` / `list[char]`).
-
-Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>`.
+Type layout 1 (`char`=4, `str`=5) is stored at header offset 20. Env: `SHAKTI_IEFS_DIRECT=0|1`, `SHAKTI_IEFS_DIRECT_MIN=<bytes>`, `SHAKTI_IEFS_VERSION=3`, `SHAKTI_IEFS_LIBAIO=0|1`.
 On Darwin, `direct_available()` is 0; large AUTO reads/writes still set `F_NOCACHE` above the same size threshold.
 
 Disable at build: `SHAKTI_IEFS=0 make prod`.
+
+---
+
+# `hdb` module
+
+Partitioned historical store over IEFS v3 (`SHAKTI_HDB=1`, requires IEFS). Layout: `<root>/meta.iefs` + `<root>/<table>/<part>/data.iefs`.
+
+```ie
+import hdb
+h : hdb.open("/data/quotes")
+hdb.create(h, "trade", schema:dict(sym:"", time:0, px:0.0), part:"date")
+hdb.write(h, "trade", "2026.07.31", t)
+ps : hdb.parts(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
+p  : hdb.map(h, "trade", "2026.07.31")
+t  : hdb.load(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
+c  : hdb.scan(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
+while hdb.next(c):
+    part : hdb.current(c)
+```
+
+Range prune uses inclusive `lo`/`hi` (`strcmp`); `eq` selects one partition. Vertical concat on `list[int]` / `list[float]` / `list[char]` / string lists / matrices.
+
+---
+
+# `hld` module
+
+HLD1 HTTP wrapper around an IEFS frame (`SHAKTI_HLD=1`, requires IEFS). Wire (little-endian): `HLD1` + `codec:u8` + `pad:u8` + `raw_len:u32` + `wire_len:u32` + payload. Codec 0/1/2 = none/zstd/snappy.
+
+```ie
+import hld
+blob : hld.encode(x)                          # list[char]
+blob : hld.encode(x, codec:"zstd", level:3)
+y : hld.decode(blob)
+```
+
+HTTP Content-Type: `application/x-hld` (see `import rest` helpers).
 
 ---
 
@@ -1740,6 +1783,10 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | Speech, AVFoundation | `import talk` | macOS |
 | librdmacm, libibverbs | Optional RDMA IPC | Linux (when dev headers present) |
 | libssl, libcrypto | TLS (`rest.listen_tls`, `wss://`, `server_serve` HTTPS) | Linux, macOS (`SHAKTI_TLS=1`) |
+| libzstd | IEFS/HLD zstd codec (`SHAKTI_WITH_ZSTD=1`) | Linux, macOS |
+| libsnappy | IEFS/HLD snappy codec (`SHAKTI_WITH_SNAPPY=1`) | Linux, macOS |
+| liburing | Optional IEFS batched reads | Linux |
+| libaio | Optional IEFS batched reads | Linux |
 | libgomp | OpenMP (matrix `mmul`, large `ivec` `+`/`-`/`*`, vector `dot` / large `sum`) | Linux (default with GCC) |
 | libomp | OpenMP (`brew install libomp`) | macOS |
 | libpthread, libm, librt, libdl | Runtime | Linux |

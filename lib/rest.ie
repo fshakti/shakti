@@ -8,6 +8,12 @@
 #   if rest.ok(resp):
 #       print(rest.json(resp))
 #
+# Binary Shakti values over HTTP:
+#   rest.post_iefs(url, obj)           # Content-Type: application/iefs
+#   rest.post_hld(url, obj, codec:"zstd")
+#   rest.respond_iefs(conn, 200, obj)
+#   rest.respond_hld(conn, 200, obj)
+#
 # Server:
 #   srv : rest.listen(8080)
 #   conn : rest.accept(srv)
@@ -39,6 +45,34 @@ def post_json(url, obj):
 def put_json(url, obj):
     return rest_put(url, json_dumps(obj), "application/json")
 
+def post_iefs(url, obj, codec:"", level:3):
+    if codec = "":
+        blob : iefs_dumps(obj)
+    else:
+        blob : iefs_dumps(obj, codec, level)
+    return rest_post(url, blob, "application/iefs")
+
+def put_iefs(url, obj, codec:"", level:3):
+    if codec = "":
+        blob : iefs_dumps(obj)
+    else:
+        blob : iefs_dumps(obj, codec, level)
+    return rest_put(url, blob, "application/iefs")
+
+def post_hld(url, obj, codec:"", level:3):
+    if codec = "":
+        blob : hld_encode(obj)
+    else:
+        blob : hld_encode(obj, codec, level)
+    return rest_post(url, blob, "application/x-hld")
+
+def put_hld(url, obj, codec:"", level:3):
+    if codec = "":
+        blob : hld_encode(obj)
+    else:
+        blob : hld_encode(obj, codec, level)
+    return rest_put(url, blob, "application/x-hld")
+
 def status(resp):
     return resp["status"]
 
@@ -52,6 +86,12 @@ def text(resp):
     return str(resp["body"])
 
 def json(resp):
+    return resp["body"]
+
+def iefs(resp):
+    return resp["body"]
+
+def hld(resp):
     return resp["body"]
 
 def listen(port, host:"127.0.0.1"):
@@ -71,6 +111,20 @@ def write(conn, status, body:"", content_type:"text/plain"):
 
 def respond_json(conn, status, obj):
     return rest_write(conn, status, json_dumps(obj), "application/json")
+
+def respond_iefs(conn, status, obj, codec:"", level:3):
+    if codec = "":
+        blob : iefs_dumps(obj)
+    else:
+        blob : iefs_dumps(obj, codec, level)
+    return rest_write(conn, status, blob, "application/iefs")
+
+def respond_hld(conn, status, obj, codec:"", level:3):
+    if codec = "":
+        blob : hld_encode(obj)
+    else:
+        blob : hld_encode(obj, codec, level)
+    return rest_write(conn, status, blob, "application/x-hld")
 
 def set_nonblock(h, enabled):
     return rest_set_nonblock(h, enabled)

@@ -1,29 +1,70 @@
-# iefs — IE file store (durable Shakti values on disk)
+# iefs — IE file store (durable Shakti values on disk + in RAM)
 # Requires shakti built with SHAKTI_IEFS=1 (default).
 #
 #   import iefs
 #   iefs.save(x, "data.iefs")
-#   y : iefs.load("data.iefs")          # full read + CRC + owned copy
-#   z : iefs.map("data.iefs")           # mmap, skip CRC, alias buffers
-#   z : iefs.map("data.iefs", pages:"thp")
-#   iefs.save(x, "big.iefs", 1)         # force O_DIRECT on Linux when available
-#   iefs.save(x, "small.iefs", 0)       # force buffered
-#   print(iefs.direct_available())
+#   iefs.save(x, "data.iefs", codec:"zstd")
+#   iefs.save(x, "data.iefs", format:3)     # TOC + 2MiB extents (v3); sparse pwrite
+#   iefs.save(x, "data.iefs", sync:"none")  # skip fsync (scratch); "data" = fdatasync
+#   iefs.save(x, "data.iefs", format:3, codecs:{"t":"datetime+zstd", "d":"date", "px":"gorilla_f64"})
+#   y : iefs.load("data.iefs")
+#   z : iefs.map("data.iefs")
+#   z : iefs.map("data.iefs", pages:"1g")
+#   blob : iefs.dumps(x, codec:"snappy")
+#   blob : iefs.dumps(x, format:3)
+#   y : iefs.loads(blob)
+#   iefs.direct_available() / iefs.uring_available() / iefs.libaio_available()
 #
-# Also reachable via global save/load when the path ends in .iefs.
-# SQL `select … from "….iefs"` opens via map (not CRC load).
-# Env: SHAKTI_IEFS_DIRECT=0|1, SHAKTI_IEFS_DIRECT_MIN=<bytes>
+# Env: SHAKTI_IEFS_DIRECT=0|1, SHAKTI_IEFS_DIRECT_MIN=<bytes>, SHAKTI_IEFS_VERSION=3,
+#      SHAKTI_IEFS_LIBAIO=0|1
+# save sync:"full"|"data"|"none" (default full)
+# dumps/loads blobs are list[char]. Default write version is 2.
 
-def save(x, path, direct:-1):
-    if direct = -1:
-        return iefs_save(x, path)
-    return iefs_save(x, path, direct)
+def save(x, path, direct:-1, codec:"", level:3, format:0, codecs:"", sync:"full"):
+    d : direct
+    if d = -1:
+        d : "auto"
+    c : codec
+    fmt : format
+    cs : codecs
+    if type(cs) = "dict":
+        if fmt = 0:
+            fmt : 3
+        return iefs_save(x, path, d, c, level, fmt, cs, sync)
+    return iefs_save(x, path, d, c, level, fmt, [], sync)
 
 def load(path):
     return iefs_load(path)
 
-def map(path, pages:"thp"):
-    return iefs_map(path, pages)
+def map(path, pages:"thp", device:"", columns:[]):
+    if device = "gpu":
+        return iefs_map(path, pages, device)
+    if type(columns) = "list" and len(columns) > 0:
+        return iefs_map(path, pages, device, columns)
+    return iefs_map(path, pages, device)
+
+def dumps(x, codec:"", level:3, format:0, codecs:""):
+    if type(codecs) = "dict":
+        fmt : format
+        if fmt = 0:
+            fmt : 3
+        return iefs_dumps(x, codec, level, fmt, codecs)
+    if format = 0:
+        if codec = "":
+            return iefs_dumps(x)
+        return iefs_dumps(x, codec, level)
+    return iefs_dumps(x, codec, level, format)
+
+def loads(blob, max_plain:-1):
+    if max_plain < 0:
+        return iefs_loads(blob)
+    return iefs_loads(blob, max_plain)
 
 def direct_available():
     return iefs_direct_available()
+
+def uring_available():
+    return iefs_uring_available()
+
+def libaio_available():
+    return iefs_libaio_available()
