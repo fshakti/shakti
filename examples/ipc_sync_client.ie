@@ -1,0 +1,9 @@
+# Client for ipc_sync.ie — send_sync waits for a matching reply.
+
+import ipc
+
+port : 19091
+c : ipc.connect("127.0.0.1", port)
+rep : ipc.send_sync(c, "ping", 5000)
+print("reply bytes", len(rep))
+ipc.close(c)

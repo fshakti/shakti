@@ -1,0 +1,19 @@
+# Req/rep over Unix domain socket (localhost default).
+# Run in one terminal:  ./shakti examples/ipc_sync.ie
+# Run in another:       ./shakti examples/ipc_sync_client.ie
+#
+# Envelope RPC: server recv_req + reply; client send_sync.
+
+import ipc
+
+port : 19091
+srv : ipc.listen(port)
+print("ipc sync listening on port", port, "(uds on localhost)")
+
+conn : ipc.accept(srv)
+req : ipc.recv_req(conn)
+print("req corr", req[0], "len", len(req[1]))
+ipc.reply(conn, req[0], "pong")
+ipc.close(conn)
+ipc.close(srv)
+print("done")

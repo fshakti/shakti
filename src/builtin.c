@@ -210,15 +210,32 @@ extern V *bi_midi_poll(V**,in);
 extern V *bi_ipc_accept(V**,in);
 extern V *bi_ipc_close(V**,in);
 extern V *bi_ipc_connect(V**,in);
+extern V *bi_ipc_join(V**,in);
 extern V *bi_ipc_listen(V**,in);
 extern V *bi_ipc_poll(V**,in);
+extern V *bi_ipc_publish(V**,in);
 extern V *bi_ipc_recv(V**,in);
+extern V *bi_ipc_recv_bin(V**,in);
+extern V *bi_ipc_recv_msg(V**,in);
+extern V *bi_ipc_recv_msg_nowait(V**,in);
 extern V *bi_ipc_recv_nowait(V**,in);
+extern V *bi_ipc_recv_nowait_bin(V**,in);
+extern V *bi_ipc_recv_req(V**,in);
+extern V *bi_ipc_recv_req_nowait(V**,in);
 extern V *bi_ipc_rdma_available(V**,in);
+extern V *bi_ipc_reply(V**,in);
 extern V *bi_ipc_send(V**,in);
+extern V *bi_ipc_send_async(V**,in);
+extern V *bi_ipc_send_n(V**,in);
+extern V *bi_ipc_send_sync(V**,in);
 extern V *bi_ipc_set_nonblock(V**,in);
+extern V *bi_ipc_shm_attach(V**,in);
+extern V *bi_ipc_shm_broadcast_attach(V**,in);
+extern V *bi_ipc_shm_broadcast_create(V**,in);
 extern V *bi_ipc_shm_close(V**,in);
+extern V *bi_ipc_shm_create(V**,in);
 extern V *bi_ipc_shm_open(V**,in);
+extern V *bi_ipc_shm_view(V**,in);
 extern V *bi_graph_create(V**,in);
 extern V *bi_graph_add(V**,in);
 extern V *bi_graph_query(V**,in);
@@ -254,8 +271,12 @@ static const char *BUILTINS[] = {
     "input_get_hz","input_set_hz","input_get_x","input_get_y","input_get_wheel",
     "input_key_down","input_keys_clear",
     "input_set_x","input_set_y","input_set_wheel","input_get_qwerty","input_set_own_gui","input_qwerty_reload",
-    "ipc_accept","ipc_close","ipc_connect","ipc_listen","ipc_poll","ipc_recv","ipc_recv_nowait",
-    "ipc_rdma_available","ipc_send","ipc_set_nonblock","ipc_shm_close","ipc_shm_open",
+    "ipc_accept","ipc_close","ipc_connect","ipc_join","ipc_listen","ipc_poll","ipc_publish",
+    "ipc_recv","ipc_recv_bin","ipc_recv_msg","ipc_recv_msg_nowait","ipc_recv_nowait",
+    "ipc_recv_nowait_bin","ipc_recv_req","ipc_recv_req_nowait","ipc_rdma_available",
+    "ipc_reply","ipc_send","ipc_send_async","ipc_send_n","ipc_send_sync","ipc_set_nonblock",
+    "ipc_shm_attach","ipc_shm_broadcast_attach","ipc_shm_broadcast_create","ipc_shm_close",
+    "ipc_shm_create","ipc_shm_open","ipc_shm_view",
     "graph_create","graph_add","graph_query","graph_neighbors","graph_path",
     "graph_from_table","graph_to_table","graph_count","graph_clear",
     "rest_request","rest_get","rest_post","rest_put","rest_delete",
@@ -1860,9 +1881,14 @@ BI0(iefs_save) BI0(iefs_load) BI0(iefs_map) BI0(iefs_direct_available)
 #endif
 BIE(eval)
 #ifdef SHAKTI_HAVE_IPC
-BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_listen) BI0(ipc_poll)
-BI0(ipc_recv) BI0(ipc_recv_nowait) BI0(ipc_rdma_available) BI0(ipc_send)
-BI0(ipc_set_nonblock) BI0(ipc_shm_close) BI0(ipc_shm_open)
+BI0(ipc_accept) BI0(ipc_close) BI0(ipc_connect) BI0(ipc_join) BI0(ipc_listen)
+BI0(ipc_poll) BI0(ipc_publish) BI0(ipc_recv) BI0(ipc_recv_bin) BI0(ipc_recv_msg)
+BI0(ipc_recv_msg_nowait) BI0(ipc_recv_nowait) BI0(ipc_recv_nowait_bin)
+BI0(ipc_recv_req) BI0(ipc_recv_req_nowait) BI0(ipc_rdma_available) BI0(ipc_reply)
+BI0(ipc_send) BI0(ipc_send_async) BI0(ipc_send_n) BI0(ipc_send_sync)
+BI0(ipc_set_nonblock) BI0(ipc_shm_attach) BI0(ipc_shm_broadcast_attach)
+BI0(ipc_shm_broadcast_create) BI0(ipc_shm_close) BI0(ipc_shm_create)
+BI0(ipc_shm_open) BI0(ipc_shm_view)
 #endif
 BI0(graph_create) BI0(graph_add) BI0(graph_query) BI0(graph_neighbors) BI0(graph_path)
 BI0(graph_from_table) BI0(graph_to_table) BI0(graph_count) BI0(graph_clear)
@@ -1983,15 +2009,32 @@ static const BiEntry bi_tab[] = {
     {"ipc_accept", bi_w_ipc_accept},
     {"ipc_close", bi_w_ipc_close},
     {"ipc_connect", bi_w_ipc_connect},
+    {"ipc_join", bi_w_ipc_join},
     {"ipc_listen", bi_w_ipc_listen},
     {"ipc_poll", bi_w_ipc_poll},
+    {"ipc_publish", bi_w_ipc_publish},
     {"ipc_rdma_available", bi_w_ipc_rdma_available},
     {"ipc_recv", bi_w_ipc_recv},
+    {"ipc_recv_bin", bi_w_ipc_recv_bin},
+    {"ipc_recv_msg", bi_w_ipc_recv_msg},
+    {"ipc_recv_msg_nowait", bi_w_ipc_recv_msg_nowait},
     {"ipc_recv_nowait", bi_w_ipc_recv_nowait},
+    {"ipc_recv_nowait_bin", bi_w_ipc_recv_nowait_bin},
+    {"ipc_recv_req", bi_w_ipc_recv_req},
+    {"ipc_recv_req_nowait", bi_w_ipc_recv_req_nowait},
+    {"ipc_reply", bi_w_ipc_reply},
     {"ipc_send", bi_w_ipc_send},
+    {"ipc_send_async", bi_w_ipc_send_async},
+    {"ipc_send_n", bi_w_ipc_send_n},
+    {"ipc_send_sync", bi_w_ipc_send_sync},
     {"ipc_set_nonblock", bi_w_ipc_set_nonblock},
+    {"ipc_shm_attach", bi_w_ipc_shm_attach},
+    {"ipc_shm_broadcast_attach", bi_w_ipc_shm_broadcast_attach},
+    {"ipc_shm_broadcast_create", bi_w_ipc_shm_broadcast_create},
     {"ipc_shm_close", bi_w_ipc_shm_close},
+    {"ipc_shm_create", bi_w_ipc_shm_create},
     {"ipc_shm_open", bi_w_ipc_shm_open},
+    {"ipc_shm_view", bi_w_ipc_shm_view},
 #endif
     {"isinstance", bi_w_isinstance},
     {"json_dump", bi_w_json_dump},
