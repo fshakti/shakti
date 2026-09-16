@@ -21,7 +21,7 @@ SRCS := \
 	$(SRC)/methods.c $(SRC)/stdlib.c $(SRC)/json_parse.c $(SRC)/table_io.c \
 	$(SRC)/table_xml.c $(SRC)/input.c $(SRC)/isolde_bridge.c \
 	$(SRC)/rest.c $(SRC)/graph.c $(SRC)/machine.c $(SRC)/pcm.c $(SRC)/subprocess.c \
-	$(SRC)/ipc.c \
+	$(SRC)/ipc.c $(SRC)/ipc_shm.c $(SRC)/ipc_mcast.c \
 	$(SRC)/gfx.c $(SRC)/gfx_wasm.c \
 	$(SRC)/synth.c $(SRC)/synth_ui.c $(SRC)/synth_audio_wasm.c \
 	$(SRC)/wasm_host.c

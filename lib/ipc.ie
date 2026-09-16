@@ -8,6 +8,11 @@
 #
 # Localhost defaults to Unix domain socket at $SHAKTI_IPC_DIR/shakti-<port>.sock
 # Remote hosts use RDMA (RoCE v2) when available, else TCP.
+#
+# Wire is 4-byte big-endian size + payload (max 1 MiB). ipc.send / ipc.recv are
+# envelope-free. Envelope RPC (send_async / send_sync / recv_req / reply) puts
+# an 8-byte header inside the payload: magic 0x49, kind, corr_id.
+# send_sync is not supported on multicast handles.
 
 def listen(port, host:"127.0.0.1", transport:"auto"):
     return ipc_listen(port, host, transport)
@@ -19,7 +24,7 @@ def connect(host, port, transport:"auto"):
     return ipc_connect(host, port, transport)
 
 def send(h, msg):
-    ipc_send(h, msg)
+    return ipc_send(h, msg)
 
 def recv(h):
     return ipc_recv(h)
@@ -27,23 +32,71 @@ def recv(h):
 def recv_nowait(h):
     return ipc_recv_nowait(h)
 
+def recv_bin(h):
+    return ipc_recv_bin(h)
+
+def recv_nowait_bin(h):
+    return ipc_recv_nowait_bin(h)
+
+def send_async(h, msg):
+    return ipc_send_async(h, msg)
+
+def send_sync(h, msg, timeout_ms:5000):
+    return ipc_send_sync(h, msg, timeout_ms)
+
+def reply(h, corr_id, msg):
+    return ipc_reply(h, corr_id, msg)
+
+def recv_msg(h):
+    return ipc_recv_msg(h)
+
+def recv_msg_nowait(h):
+    return ipc_recv_msg_nowait(h)
+
+def recv_req(h):
+    return ipc_recv_req(h)
+
+def recv_req_nowait(h):
+    return ipc_recv_req_nowait(h)
+
+def send_n(h, msg, n):
+    return ipc_send_n(h, msg, n)
+
 def set_nonblock(h, enabled):
-    ipc_set_nonblock(h, enabled)
+    return ipc_set_nonblock(h, enabled)
 
 def poll(handles, timeout_ms):
     return ipc_poll(handles, timeout_ms)
 
 def close(h):
-    ipc_close(h)
+    return ipc_close(h)
 
 def shm_open(name, size):
     return ipc_shm_open(name, size)
 
 def shm_close(token):
-    ipc_shm_close(token)
+    return ipc_shm_close(token)
+
+def shm_create(name, size):
+    return ipc_shm_create(name, size)
+
+def shm_attach(name):
+    return ipc_shm_attach(name)
+
+def shm_broadcast_create(name, size, max_readers:16):
+    return ipc_shm_broadcast_create(name, size, max_readers)
+
+def shm_broadcast_attach(name):
+    return ipc_shm_broadcast_attach(name)
+
+def shm_view(h, offset, len):
+    return ipc_shm_view(h, offset, len)
+
+def join(group, port, iface:"", source:""):
+    return ipc_join(group, port, iface, source)
+
+def publish(h, msg):
+    return ipc_publish(h, msg)
 
 def rdma_available():
     return ipc_rdma_available()
-
-def reply(conn, msg):
-    ipc_send(conn, msg)
