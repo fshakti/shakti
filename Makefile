@@ -103,21 +103,7 @@ else
 endif
 
 LANG_STANDALONE := src/alloc.c src/value.c src/env.c src/lex.c src/ast.c src/parse.c src/vec_ops.c src/eval.c src/import.c src/repl.c src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c src/fb_present.c
-LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/isolde_bridge.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c
-
-# Regenerated from src/converters/ when scripts/embed_text.py exists (scripts/ is
-# often local-only). src/shakti_lang.c includes embed/... via -Isrc.
-define make_embed_rule
-src/embed/shakti_$(1)_embed.h: src/converters/$(1).ie
-	@mkdir -p src/embed
-ifneq ($(wildcard scripts/embed_text.py),)
-	python3 scripts/embed_text.py src/converters/$(1).ie shakti_$(1)_source $$@
-else
-	@test -f $$@ || (echo "error: missing $$@ — restore scripts/embed_text.py to regenerate from src/converters/$(1).ie" >&2; exit 1)
-endif
-endef
-$(foreach stem,p2s c2s cs2s j2s,$(eval $(call make_embed_rule,$(stem))))
-SHAKTI_EMBED_HDRS = src/embed/shakti_p2s_embed.h src/embed/shakti_c2s_embed.h src/embed/shakti_cs2s_embed.h src/embed/shakti_j2s_embed.h
+LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1
@@ -345,7 +331,7 @@ $(BUILD):
 all: build
 build: shakti
 
-# PATH-friendly name at repo root (Isolde-style: workspace dir on PATH finds ./shakti).
+# PATH-friendly name at repo root (workspace dir on PATH finds ./shakti).
 # The real binary stays under $(BUILD)/; ./shakti is a relative symlink.
 shakti: $(SHAKTI)
 	@if [ -e shakti ] && [ ! -L shakti ]; then \
@@ -356,7 +342,7 @@ shakti: $(SHAKTI)
 	fi
 	ln -sfn $(SHAKTI) shakti
 
-$(SHAKTI): $(BUILD)/shakti_version.h src/a.h src/shakti.h src/shakti_internal.h $(SHAKTI_EMBED_HDRS) $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
+$(SHAKTI): $(BUILD)/shakti_version.h src/a.h src/shakti.h src/shakti_internal.h $(LANG_STANDALONE) $(LIBSRCS_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) | $(BUILD)
 	$(CC) $(CFLAGS) -DSHAKTI_STANDALONE=1 -o $@ $(LIBSRCS_STANDALONE) $(LANG_STANDALONE) $(if $(filter 1,$(SHAKTI_TALK)),$(BUILD)/talk.o) $(if $(filter 1,$(SHAKTI_SYNTH)),$(BUILD)/synth.o $(BUILD)/synth_ui.o) $(SYNTH_MAC_OBJ) $(if $(filter 1,$(SHAKTI_GFX)),$(BUILD)/gfx.o) $(GFX_MAC_OBJ) $(GFX_X11_OBJ) $(SONICPI_OBJ) $(DSP_OBJ) $(STEM_OBJ) $(PDF_OBJ) $(MIDI_OBJ) $(IEFS_OBJ) $(LDFLAGS) $(IPC_LDFLAGS) $(if $(filter 1,$(SHAKTI_TALK)),$(TALK_LDFLAGS)) $(if $(filter 1,$(SHAKTI_SYNTH)),$(SYNTH_LDFLAGS)) $(if $(filter 1,$(SHAKTI_GFX)),$(GFX_LDFLAGS)) $(if $(filter 1,$(SHAKTI_MIDI)),$(MIDI_LDFLAGS))
 
 # Optional JNI object for Java/Android hosts (tests/build_guards.sh).

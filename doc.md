@@ -139,7 +139,7 @@ shakti
 
 Unknown flags exit with status 2. A silent leading `run` argument is accepted for Android launchers only.
 
-A script whose path ends in `.py`, `.c`, `.cs`, or `.java` is transpiled with the matching converter (`p2s` / `c2s` / `cs2s` / `j2s` under `src/converters/`) and then evaluated. `.ie` is parsed as-is. Standalone: `./shakti src/converters/p2s.ie input.py [-o out.ie]` (needs `SHAKTI_LIB`).
+Script files must end in `.ie`.
 
 ### REPL
 
@@ -164,9 +164,6 @@ The standalone binary is a **tree-walk interpreter** (no bytecode VM). Source is
 tokenized in `src/lex.c`, parsed to an AST in `src/parse.c` / `src/ast.c`, and
 evaluated in `src/eval.c`. `src/shakti_lang.c` is the CLI/REPL driver. Cross-file
 inlining is recovered with LTO on the default link (see [README build](README.md#build)).
-
-Optional **`libisolde.so`** (set `ISOLDE_LIB`) may supply native `isolde_*`
-kernels for some vector reducers. Core builtins such as `sh` do not require it.
 
 ---
 
@@ -335,7 +332,6 @@ Large vector operations use OpenMP. `make prod-speed` enables `-O3` and
 native CPU tuning (`-mcpu=native` on arm64, including Apple Silicon M5;
 `-march=x86-64-v2` on x86-64). `SHAKTI_PORTABLE_CPU=1` uses `-mcpu=apple-m4` on
 arm64 (clang does not yet expose `-mcpu=apple-m5` on current Xcode).
-With `ISOLDE_LIB`, reducers may use `isolde_*` kernels.
 
 ## Matrices
 
@@ -425,16 +421,16 @@ k : ktable(a:1, b:2)
 - `parse_check(src)` — syntax-only check; returns `dict(ok, error)`
 - `eval(src)` — parse and evaluate a Shakti source string in the **root** environment (returns the value, or an error value). Bindings persist across calls, including when `eval` is invoked from nested functions.
 - `sh(cmd)` — run `cmd` via `/bin/sh -c` (POSIX). Returns the wait status
-  integer (`0` = success; any non-zero value means failure). Isolde-compatible:
-  this is the `waitpid` status, not a bash 0–255 exit code — test with
+  integer (`0` = success; any non-zero value means failure). This is the
+  `waitpid` status, not a bash 0–255 exit code — test with
   `rc = 0` / `rc != 0`. Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`.
-  Not available on Windows or WASM builds. Does **not** require Isolde.
+  Not available on Windows or WASM builds.
 - `subprocess()` / `load(dir_with_run, …)` — spawn a directory `run` helper (PTY). Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`. Untrusted `.ie` input is otherwise equivalent to an untrusted shell script; see README security notes.
 - Parser nesting is capped at 40; interpreter call depth defaults to 3000 (`SHAKTI_CALL_MAX_DEPTH`).
 
 ## Process / REPL
 
-- REPL: `\q` or `\q N` — terminate the process with integer status (default `0`), q-style (Isolde parity). Invalid `\q` args print `usage: \q [N]` and stay in the REPL.
+- REPL: `\q` or `\q N` — terminate the process with integer status (default `0`). Invalid `\q` args print `usage: \q [N]` and stay in the REPL.
 - Soft leave: type `quit` or `exit` to leave the REPL loop without forcing a non-zero status.
 - Other meta-commands: `\d` / `\help` / `help` (grammar card [`IE.txt`](IE.txt)), `\v` (vars), `\w` (names). See [REPL](#repl) under the CLI section.
 
@@ -1643,8 +1639,6 @@ The standalone `shakti` binary has **no vendored C libraries** in the published 
 | libpthread, libm, librt, libdl | Runtime | Linux |
 
 `import rest` uses `curl` on `PATH` for HTTP client requests (not linked at build time). The in-process HTTP server uses BSD sockets.
-
-Optional **`libisolde.so`** (set `ISOLDE_LIB` or place next to the isolde tree): when loaded, `dot` / `sum` / `min` / `max` on vectors may delegate to `isolde_*` builtins for native kernels. The standalone binary works without it — including `sh(cmd)`, which is a native builtin (not loaded from Isolde).
 
 Disable optional components at build time: `SHAKTI_GFX=0`, `SHAKTI_SYNTH=0`, `SHAKTI_DSP=0`, `SHAKTI_STEM=0`, `SHAKTI_SONICPI=0`, `SHAKTI_PDF=0`, `SHAKTI_MIDI=0`, `SHAKTI_IEFS=0`, `SHAKTI_TALK=0`, `SHAKTI_IPC=0`, `SHAKTI_RDMA=0`.
 

@@ -76,8 +76,7 @@ shakti
 | | `--parse-profile-iters <n>` | Iterations |
 | | `--` | End options |
 
-Unknown flags exit with status 2. A `.py` / `.c` / `.cs` / `.java` script is
-transpiled (p2s / c2s / cs2s / j2s) then evaluated. `.ie` is parsed as-is.
+Unknown flags exit with status 2. Script files must end in `.ie`.
 
 Bare REPL meta-commands (banner also lists them): `\d` grammar card, `\v` user vars, `\w` names,
 `\q` / `\q N` (process exit with optional status). Soft leave: `quit` or `exit`.
@@ -86,7 +85,6 @@ Line editing: `^D` deletes the character under the cursor (empty line: EOF) —
 
 ```bash
 ./shakti file.ie
-./shakti file.py          # Python subset via p2s
 ./shakti          # REPL
 printf '\\q\n' | ./shakti -q          # quit with status 0
 printf '\\q 7\n' | ./shakti -q        # quit with status 7

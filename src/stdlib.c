@@ -406,7 +406,7 @@ V *bi_getenv(V **a, in) {
 #include <spawn.h>
 #include <sys/wait.h>
 extern char **environ;
-/* Shell via posix_spawn of /bin/sh -c (Isolde-compatible wait status). */
+/* Shell via posix_spawn of /bin/sh -c (waitpid status). */
 static int shakti_run_shell(const char *cmd) {
     if (!cmd) return -1;
     pid_t pid = 0;

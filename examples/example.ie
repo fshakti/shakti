@@ -276,7 +276,7 @@ print("saved:", read(out))
 # =============================================================================
 # sh_demo.ie
 # =============================================================================
-# Native sh(cmd) — /bin/sh -c, Isolde-compatible wait status.
+# Native sh(cmd) — /bin/sh -c, waitpid status.
 # 0 = success; any non-zero value means failure (waitpid status, not bash 0–255).
 # Disabled when SHAKTI_SAFE=1 or SHAKTI_ALLOW_EXEC=0.
 #   ./shakti examples/sh_demo.ie
