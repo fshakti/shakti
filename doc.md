@@ -1,6 +1,6 @@
 # Shakti documentation
 
-Version **0.14.0**.
+Version **0.14.1**.
 
 Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]` … `list`), dict/table/function/datetime/time/input/subprocess, then matrices through `matrix[bool]`. IEFS writes that layout in header word 20 and rejects layout 0 (tag 4 was `str`); re-save those files.
 

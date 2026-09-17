@@ -25,7 +25,7 @@ static int is_sql_import(const char *name) {
 }
 static int shakti_sql_enabled(Env *e) {
     V *v = env_get(e, SHAKTI_SQL_FLAG);
-    return v && v->t == T_BOOL && v->b;
+    return v && v->t == T_BOOL && v->j;
 }
 V *require_sql(Env *e) {
     P(!shakti_sql_enabled(e),v_err("SQL requires: import sql"))

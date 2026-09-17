@@ -392,7 +392,7 @@ static V *each_pack_seq(V **items, int64_t n, int prefer_str) {
     }
     if (all_bool) {
         V *r = v_bvec(n);
-        for (int64_t i = 0; i < n; i++) { r->B[i] = items[i]->b ? 1 : 0; v_free(items[i]); }
+        for (int64_t i = 0; i < n; i++) { r->B[i] = items[i]->j ? 1 : 0; v_free(items[i]); }
         return r;
     }
     V *r = v_list(n);
@@ -452,7 +452,7 @@ static V *each_pack_mat(V **items, int64_t rows, int64_t cols) {
     }
     if (all_bool) {
         V *r = v_bmat(rows, cols);
-        for (int64_t i = 0; i < n; i++) { r->B[i] = items[i]->b ? 1 : 0; v_free(items[i]); }
+        for (int64_t i = 0; i < n; i++) { r->B[i] = items[i]->j ? 1 : 0; v_free(items[i]); }
         return r;
     }
     /* Heterogeneous matrix → list of row lists, preserving shape. */
@@ -472,7 +472,7 @@ static void each_free_items(V **items, int64_t n) {
 }
 static int each_dict_key_eq(V *a, V *b) {
     V *c = vec_cmp(a, b, OP_EQ);
-    int ok = c && c->t == T_BOOL && c->b;
+    int ok = c && c->t == T_BOOL && c->j;
     v_free(c);
     return ok;
 }
@@ -1339,7 +1339,7 @@ V *eval(Node *n, Env *e) {
         }
         if(nch > 0 && all_bool) {
             V *r = v_bvec(nch);
-            i(nch,{r->B[i]=elems[i]->b?1:0; v_free(elems[i]);})
+            i(nch,{r->B[i]=elems[i]->j?1:0; v_free(elems[i]);})
             free(elems); return r;
         }
         {
@@ -1485,7 +1485,7 @@ V *eval(Node *n, Env *e) {
             if(b->t==T_LIST) {
                 for(int64_t i=0;i<b->n;i++) {
                     V *c = vec_cmp(a, b->L[i], OP_EQ);
-                    if(c->t==T_BOOL && c->b) { found=1; v_free(c); break; }
+                    if(c->t==T_BOOL && c->j) { found=1; v_free(c); break; }
                     v_free(c);
                 }
             } else if(b->t==T_IVEC && a->t==T_INT) {
@@ -1497,7 +1497,7 @@ V *eval(Node *n, Env *e) {
             } else if(b->t==T_DICT) {
                 for(int64_t i=0;i<b->n;i++) {
                     V *c = vec_cmp(a, b->keys->L[i], OP_EQ);
-                    if(c->t==T_BOOL && c->b) { found=1; v_free(c); break; }
+                    if(c->t==T_BOOL && c->j) { found=1; v_free(c); break; }
                     v_free(c);
                 }
             }
@@ -1566,7 +1566,7 @@ V *eval(Node *n, Env *e) {
                         else if (obj->t == T_FMAT && (val->t == T_FLOAT || val->t == T_INT || val->t == T_CHAR))
                             obj->F[mat_idx(obj, r, c)] = to_float(val);
                         else if (obj->t == T_BMAT && val->t == T_BOOL)
-                            obj->B[mat_idx(obj, r, c)] = val->b ? 1 : 0;
+                            obj->B[mat_idx(obj, r, c)] = val->j ? 1 : 0;
                         else if (obj->t == T_CMAT && (val->t == T_CHAR || val->t == T_INT))
                             obj->B[mat_idx(obj, r, c)] = (unsigned char)val->j;
                     }
@@ -1605,7 +1605,7 @@ V *eval(Node *n, Env *e) {
                     } else if(obj->t==T_BVEC && val->t==T_BOOL) {
                         if (v_ensure_writable(obj) != 0)
                             return assign_map_oom(obj, idx, val, NULL);
-                        obj->B[i] = val->b ? 1 : 0;
+                        obj->B[i] = val->j ? 1 : 0;
                     } else if(obj->t==T_CVEC && (val->t==T_CHAR || val->t==T_INT)) {
                         if (v_ensure_writable(obj) != 0)
                             return assign_map_oom(obj, idx, val, NULL);
@@ -1758,7 +1758,7 @@ V *eval(Node *n, Env *e) {
                     next = v_nil();
                     for(int64_t j=0;j<obj->n;j++) {
                         V *c = vec_cmp(idx, obj->keys->L[j], OP_EQ);
-                        if(c->t==T_BOOL && c->b) { v_free(next); next = v_ref(obj->vals->L[j]); v_free(c); break; }
+                        if(c->t==T_BOOL && c->j) { v_free(next); next = v_ref(obj->vals->L[j]); v_free(c); break; }
                         v_free(c);
                     }
                 }

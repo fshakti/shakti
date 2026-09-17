@@ -221,7 +221,7 @@ static int json_encode(JsonBuf *b, V *v);
 
 static int json_encode(JsonBuf *b, V *v) {
     if (!v || v->t == T_NIL) return jb_cstr(b, "null");
-    if (v->t == T_BOOL) return jb_cstr(b, v->b ? "true" : "false");
+    if (v->t == T_BOOL) return jb_cstr(b, v->j ? "true" : "false");
     if (v->t == T_INT) {
         char tmp[32];
         snprintf(tmp, sizeof tmp, "%lld", (long long)v->j);

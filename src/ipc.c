@@ -1560,7 +1560,7 @@ V *bi_ipc_set_nonblock(V **a, int n) {
     P(n < 2 || a[0]->t != T_INT, v_err("ipc_set_nonblock(h, on)"))
     IpcHandle *s = ipc_slot((int)a[0]->j);
     P(!s, v_err("ipc_set_nonblock: bad handle"))
-    int on = (a[1]->t == T_BOOL) ? a[1]->b : (a[1]->t == T_INT && a[1]->j);
+    int on = (a[1]->t == T_BOOL) ? a[1]->j : (a[1]->t == T_INT && a[1]->j);
 #ifdef SHAKTI_HAVE_RDMA
     if (s->kind == IPC_KIND_RDMA_CONN || s->kind == IPC_KIND_RDMA_LISTEN) {
         if (s->rdma) ipc_rdma_set_nonblock(s->rdma, on);

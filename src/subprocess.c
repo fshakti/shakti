@@ -100,12 +100,12 @@ V *subprocess_status(V*p) {
     int status;
     if(waitpid(p->n, &status, WNOHANG)>0){
        p->n=WIFEXITED(status)?0:-1;
-       p->b=WIFEXITED(status)?WEXITSTATUS(status):WTERMSIG(status);
+       p->bits=WIFEXITED(status)?WEXITSTATUS(status):WTERMSIG(status);
     }
   }
   switch(p->n){
-  case 0: return v_int(p->b);
-  case -1: return v_int(-p->b);
+  case 0: return v_int(p->bits);
+  case -1: return v_int(-p->bits);
   default: return v_nil(); /* no status (running) */
   }
 }

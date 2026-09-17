@@ -19,7 +19,7 @@
 #ifndef SQL_OMP_GROUP_MIN
 #define SQL_OMP_GROUP_MIN 50000
 #endif
-static inline double sql_to_float(V*v){return !v?0.:v->t==T_INT?(double)v->j:v->t==T_FLOAT?v->f:v->t==T_BOOL?v->b?1.:0.:0.;}
+static inline double sql_to_float(V*v){return !v?0.:v->t==T_INT?(double)v->j:v->t==T_FLOAT?v->f:v->t==T_BOOL?v->j?1.:0.:0.;}
 enum {
     COL_NAME = 0,
     COL_COUNT = 1,
@@ -40,7 +40,7 @@ static inline double cell_float(V*col,int64_t row){
     if(!col) return 0.;
     if(col->t==T_INT) return (double)col->j;
     if(col->t==T_FLOAT) return col->f;
-    if(col->t==T_BOOL) return col->b?1.:0.;
+    if(col->t==T_BOOL) return col->j?1.:0.;
     if(col->t==T_IVEC) return row<col->n?(double)col->J[row]:0.;
     if(col->t==T_FVEC) return row<col->n?col->F[row]:0.;
     if(col->t==T_BVEC) return row<col->n?col->B[row]?1.:0.:0.;
@@ -64,11 +64,11 @@ static void cell_key(V*col,int64_t row,char*buf,size_t cap){
  else if(col->t==T_IMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
  else if(col->t==T_FMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
  else if(col->t==T_BMAT&&row<col->n){V*rw=v_mat_row(col,row);char*t=v_to_str(rw);snprintf(buf,cap,"%s",t?t:"");free(t);v_free(rw);}
- else if(col->t==T_BOOL)snprintf(buf,cap,"%s",col->b?"true":"false");}
+ else if(col->t==T_BOOL)snprintf(buf,cap,"%s",col->j?"true":"false");}
 static V*where_mask(V*tbl,V*where){
  if(!where||where->t==T_NIL){V*all=v_bvec(tbl->n);for(int64_t i=0;i<tbl->n;i++)all->B[i]=1;return all;}
  if(where->t==T_BVEC){P(where->n!=tbl->n,v_err("where: mask length mismatch"))return v_copy(where);}
- if(where->t==T_BOOL){V*all=v_bvec(tbl->n);for(int64_t i=0;i<tbl->n;i++)all->B[i]=where->b?1:0;return all;}
+ if(where->t==T_BOOL){V*all=v_bvec(tbl->n);for(int64_t i=0;i<tbl->n;i++)all->B[i]=where->j?1:0;return all;}
  if(where->t==T_INT){V*all=v_bvec(tbl->n);for(int64_t i=0;i<tbl->n;i++)all->B[i]=where->j?1:0;return all;}
  return v_err("where: need boolean mask");}
 static V*tbl_filter_mask(V*tbl,V*mask){
@@ -294,7 +294,7 @@ static int compare_v(const V *a, const V *b) {
         return (a->f > b->f) - (a->f < b->f);
     }
     if (a->t == T_BOOL && b->t == T_BOOL) {
-        return (a->b > b->b) - (a->b < b->b);
+        return (a->j > b->j) - (a->j < b->j);
     }
     if (a->t == T_STR && b->t == T_STR) {
         return strcmp(a->s ? a->s : "", b->s ? b->s : "");
@@ -1401,7 +1401,7 @@ static V *merge_update_col(V *old_col, V *new_col, V *mask) {
             for (int64_t i = 0; i < n && i < out->n; i++) {
                 if (mask->B[i]) {
                     out->J[i] = new_col->t == T_INT ? new_col->j :
-                                new_col->t == T_BOOL ? new_col->b :
+                                new_col->t == T_BOOL ? new_col->j :
                                 (int64_t)sql_to_float(new_col);
                 }
             }
@@ -1411,7 +1411,7 @@ static V *merge_update_col(V *old_col, V *new_col, V *mask) {
             V *out = v_copy(old_col);
             double x = new_col->t == T_FLOAT ? new_col->f :
                        new_col->t == T_INT ? (double)new_col->j :
-                       new_col->t == T_BOOL ? (double)new_col->b : 0.0;
+                       new_col->t == T_BOOL ? (double)new_col->j : 0.0;
             for (int64_t i = 0; i < n && i < out->n; i++) {
                 if (mask->B[i]) {
                     out->F[i] = x;
@@ -1607,7 +1607,7 @@ static int mat_append_row(V *out, V *col, V *cell) {
             return 1;
         }
         if (cell->t == T_LIST && cell->n == cols) {
-            for (int64_t j = 0; j < cols; j++) out->B[mat_idx(out, col->n, j)] = cell->L[j]->b ? 1 : 0;
+            for (int64_t j = 0; j < cols; j++) out->B[mat_idx(out, col->n, j)] = cell->L[j]->j ? 1 : 0;
             return 1;
         }
     } else if (col->t == T_CMAT) {
@@ -1620,7 +1620,7 @@ static int mat_append_row(V *out, V *col, V *cell) {
                 V *e = cell->L[j];
                 unsigned char b = 0;
                 if (e && (e->t == T_CHAR || e->t == T_INT)) b = (unsigned char)e->j;
-                else if (e && e->t == T_BOOL) b = e->b ? 1 : 0;
+                else if (e && e->t == T_BOOL) b = e->j ? 1 : 0;
                 out->B[mat_idx(out, col->n, j)] = b;
             }
             return 1;
@@ -1664,13 +1664,13 @@ static V *append_cell(V *col, V *cell) {
     if (col->t == T_BVEC) {
         V *out = v_bvec(col->n + 1);
         memcpy(out->B, col->B, (size_t)col->n);
-        out->B[col->n] = (cell->t == T_BOOL && cell->b) || (cell->t == T_INT && cell->j);
+        out->B[col->n] = (cell->t == T_BOOL && cell->j) || (cell->t == T_INT && cell->j);
         return out;
     }
     if (col->t == T_CVEC) {
         unsigned char val = 0;
         if (cell->t == T_CHAR || cell->t == T_INT) val = (unsigned char)cell->j;
-        else if (cell->t == T_BOOL) val = cell->b ? 1 : 0;
+        else if (cell->t == T_BOOL) val = cell->j ? 1 : 0;
         V *out = v_cvec(col->n + 1);
         if (col->n > 0) memcpy(out->B, col->B, (size_t)col->n);
         out->B[col->n] = val;

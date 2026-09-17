@@ -66,7 +66,7 @@ extern int g_returning;
 extern V *g_retval;
 static int v_truthy(V *v) {
     P(!v || v->t == T_NIL,0)
-    P(v->t == T_BOOL,v->b)
+    P(v->t == T_BOOL,v->j)
     P(v->t == T_INT,v->j != 0)
     P(v->t == T_FLOAT,v->f != 0.0)
     P(v->t == T_STR,v->s[0] != 0)
