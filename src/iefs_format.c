@@ -371,7 +371,7 @@ static int encode_value(IefsBuf *b, V *v) {
     case T_BOOL:
         if (buf_putc(b, (unsigned char)T_BOOL) != 0)
             return -1;
-        return buf_putc(b, (unsigned char)(v->b ? 1 : 0));
+        return buf_putc(b, (unsigned char)(v->j ? 1 : 0));
     case T_CHAR:
         if (buf_putc(b, (unsigned char)T_CHAR) != 0)
             return -1;
@@ -2337,7 +2337,7 @@ static int iefs_mode_from_arg(V *v, int *out_mode) {
         return 0;
     }
     if (v->t == T_BOOL) {
-        *out_mode = v->b ? IEFS_IO_DIRECT : IEFS_IO_BUF;
+        *out_mode = v->j ? IEFS_IO_DIRECT : IEFS_IO_BUF;
         return 0;
     }
     if (v->t == T_INT) {

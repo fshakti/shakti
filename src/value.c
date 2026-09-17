@@ -20,7 +20,12 @@ V *v_alloc(int t) {
 static V **isl_int_cache;
 
 V *v_nil(void)           { return v_alloc(T_NIL); }
-V *v_bool(int b)         { V *v=v_alloc(T_BOOL); v->b=b; return v; }
+V *v_bool(int b) {
+    V *v = v_alloc(T_BOOL);
+    v->bits = 1;
+    v->j = b ? 1 : 0;
+    return v;
+}
 V *v_int(int64_t j) {
     if (j >= 0 && j < ISL_INT_CACHE_MAX) {
         if (!isl_int_cache)
@@ -29,16 +34,23 @@ V *v_int(int64_t j) {
             V *c = isl_int_cache[j];
             if (c) return v_ref(c);
             c = v_alloc(T_INT);
+            c->bits = 64;
             c->j = j;
             isl_int_cache[j] = c;
             return v_ref(c);
         }
     }
     V *v = v_alloc(T_INT);
+    v->bits = 64;
     v->j = j;
     return v;
 }
-V *v_float(double f)     { V *v=v_alloc(T_FLOAT); v->f=f; return v; }
+V *v_float(double f) {
+    V *v = v_alloc(T_FLOAT);
+    v->bits = 64;
+    v->f = f;
+    return v;
+}
 V *v_str(const char *s)  { V *v=v_alloc(T_STR);  v->s=x_strdup(s, "v_str"); return v; }
 V *v_str_take(char *s)   { V *v=v_alloc(T_STR);  v->s=s; return v; }
 V *v_date(int64_t utc_midnight_ms) {
@@ -60,39 +72,41 @@ V *v_errf(const char *fmt, ...) {
     return v_err(buf);
 }
 V *v_ivec(int64_t n) {
-    V *v=v_alloc(T_IVEC); v->n=n;
+    V *v=v_alloc(T_IVEC); v->n=n; v->bits = 64;
     if (n > (int64_t)UINT32_MAX) shakti_oom("v_ivec");
     v->_ht_cap = n > 0 ? (uint32_t)n : 0;
     v->J = x_malloc(x_mul((size_t)(n > 0 ? n : 1), sizeof(int64_t), "v_ivec"), "v_ivec");
     return v;
 }
 V *v_fvec(int64_t n) {
-    V *v=v_alloc(T_FVEC); v->n=n;
+    V *v=v_alloc(T_FVEC); v->n=n; v->bits = 64;
     v->F = x_calloc(n?n:1, sizeof(double), "v_fvec");
     return v;
 }
 V *v_bvec(int64_t n) {
-    V *v=v_alloc(T_BVEC); v->n=n;
+    V *v=v_alloc(T_BVEC); v->n=n; v->bits = 1;
     v->B = x_calloc(n?n:1, 1, "v_bvec");
     return v;
 }
 V *v_cvec(int64_t n) {
-    V *v=v_alloc(T_CVEC); v->n=n;
+    V *v=v_alloc(T_CVEC); v->n=n; v->bits = 8;
     v->B = x_calloc(n?n:1, 1, "v_cvec");
     return v;
 }
 V *v_char(unsigned char b) {
-    V *v=v_alloc(T_CHAR); v->j=b; return v;
+    V *v=v_alloc(T_CHAR); v->bits = 8; v->j=b; return v;
 }
 V *v_subprocess(int fd, int64_t pid) {
     V *v = v_alloc(T_SUBPROCESS);
     v->j = fd;
     v->n = pid;
+    v->bits = 0;
     return v;
 }
 V *v_imat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_IMAT);
     v->n = rows;
+    v->bits = 64;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz;
     if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
@@ -103,6 +117,7 @@ V *v_imat(int64_t rows, int64_t cols) {
 V *v_fmat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_FMAT);
     v->n = rows;
+    v->bits = 64;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz;
     if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
@@ -113,6 +128,7 @@ V *v_fmat(int64_t rows, int64_t cols) {
 V *v_bmat(int64_t rows, int64_t cols) {
     V *v = v_alloc(T_BMAT);
     v->n = rows;
+    v->bits = 1;
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz;
     if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
@@ -123,6 +139,7 @@ V *v_bmat(int64_t rows, int64_t cols) {
 V *v_cmat(int64_t rows, int64_t cols) {
     V *v = v_bmat(rows, cols);
     v->t = T_CMAT;
+    v->bits = 8;
     return v;
 }
 static void mat_cell_format(V *v, int64_t r, int64_t c, char *buf, size_t cap) {
@@ -283,7 +300,7 @@ V *try_promote_matrix(V **elems, int nch) {
         for (int i = 0; i < nch; i++) {
             V *row = elems[i];
             if (row->t == T_BVEC) memcpy(r->B + mat_idx(r, i, 0), row->B, (size_t)cols);
-            else for (int64_t j = 0; j < cols; j++) r->B[mat_idx(r, i, j)] = row->L[j]->b ? 1 : 0;
+            else for (int64_t j = 0; j < cols; j++) r->B[mat_idx(r, i, j)] = row->L[j]->j ? 1 : 0;
         }
         return r;
     }
@@ -467,24 +484,27 @@ void v_free(V *v) {
         return;
     }
     int mapped = (v->owner_kind == V_OWNER_MAP_ALIAS);
+    int owned = (v->owner_kind == V_OWNER_MALLOC);
     switch(v->t) {
     case T_STR: case T_ERR: free(v->s); break;
-    case T_IVEC: if (!mapped) free(v->J); break;
-    case T_FVEC: if (!mapped) free(v->F); break;
-    case T_BVEC: case T_CVEC: if (!mapped) free(v->B); break;
-    case T_IMAT: if (!mapped) free(v->J); break;
-    case T_FMAT: if (!mapped) free(v->F); break;
-    case T_BMAT: case T_CMAT: if (!mapped) free(v->B); break;
+    case T_IVEC: if (owned) free(v->J); break;
+    case T_FVEC: if (owned) free(v->F); break;
+    case T_BVEC: case T_CVEC: if (owned) free(v->B); break;
+    case T_IMAT: if (owned) free(v->J); break;
+    case T_FMAT: if (owned) free(v->F); break;
+    case T_BMAT: case T_CMAT: if (owned) free(v->B); break;
     case T_LIST:
         for(int64_t i=0;i<v->n;i++) v_free(v->L[i]);
         free(v->L); break;
     case T_DICT: case T_TABLE:
         free(v->_ht); v_free(v->keys); v_free(v->vals); break;
     case T_FN:
-        free(v->s); /* builtin-name wrappers (N_NAME) store strdup'd name here */
-        v_free(v->params);
-        if(v->defaults) v_free(v->defaults);
-        if(v->closure) env_free(v->closure);
+        if (v->n == -1) free(v->s);
+        else {
+            v_free(v->params);
+            if(v->defaults) v_free(v->defaults);
+            if(v->closure) env_free(v->closure);
+        }
         break;
     case T_INPUT:
         free(v->s);
@@ -542,7 +562,7 @@ V *v_copy(V *v) {
     P(!v,v_nil())
     switch(v->t) {
     case T_NIL:   return v_nil();
-    case T_BOOL:  return v_bool(v->b);
+    case T_BOOL:  return v_bool(v->j);
     case T_INT:   return v_int(v->j);
     case T_CHAR:  return v_char((unsigned char)v->j);
     case T_FLOAT: return v_float(v->f);
@@ -655,7 +675,7 @@ void v_serialize(V *v, FILE *fp) {
     if(!v) { fputc(T_NIL, fp); return; }
     fputc(v->t, fp);
     switch(v->t) {
-    case T_BOOL:  fputc(v->b, fp); break;
+    case T_BOOL:  fputc(v->j, fp); break;
     case T_INT:   fwrite(&v->j, 8, 1, fp); break;
     case T_CHAR:  fputc((unsigned char)v->j, fp); break;
     case T_FLOAT: fwrite(&v->f, 8, 1, fp); break;
@@ -909,7 +929,7 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
     if(!v) { fprintf(fp, "None"); return; }
     switch(v->t) {
     case T_NIL:  fprintf(fp, "None"); break;
-    case T_BOOL: fprintf(fp, "%s", v->b ? "True" : "False"); break;
+    case T_BOOL: fprintf(fp, "%s", v->j ? "True" : "False"); break;
     case T_INT:  fprintf(fp, "%lld", (long long)v->j); break;
     case T_CHAR: fprintf(fp, "0x%02x", (int)(unsigned char)v->j); break;
     case T_DATETIME: {

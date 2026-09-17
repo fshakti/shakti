@@ -1,4 +1,4 @@
-shakti 0.14.0
+shakti 0.14.1
 run   ./shakti · ./shakti f.ie · ./shakti -c '…'
 \d    this manual (hl) · doc.md (prose)
 

@@ -6,7 +6,7 @@ int is_truthy(V *v) {
     P(!v,0)
     switch(v->t) {
     case T_NIL:  return 0;
-    case T_BOOL: return v->b;
+    case T_BOOL: return v->j;
     case T_INT:  return v->j != 0;
     case T_CHAR: return v->j != 0;
     case T_FLOAT:return v->f != 0.0;
@@ -54,7 +54,7 @@ double to_float(V *v) {
     P(v->t==T_INT,(double)v->j)
     P(v->t==T_CHAR,(double)v->j)
     P(v->t==T_FLOAT,v->f)
-    P(v->t==T_BOOL,(double)v->b)
+    P(v->t==T_BOOL,(double)v->j)
     return 0;
 }
 V *mat_binop(V *a, V *b, int op) {
@@ -437,8 +437,8 @@ V *vec_binop(V *a, V *b, int op) {
 }
 V *vec_cmp(V *a, V *b, int op) {
     if((a->t==T_INT||a->t==T_FLOAT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_BOOL||b->t==T_CHAR)) {
-        double x = a->t==T_BOOL?(double)a->b:to_float(a);
-        double y = b->t==T_BOOL?(double)b->b:to_float(b);
+        double x = a->t==T_BOOL?(double)a->j:to_float(a);
+        double y = b->t==T_BOOL?(double)b->j:to_float(b);
         int r;
         switch(op) {
         case OP_EQ: r=(x==y); break; case OP_NE: r=(x!=y); break;
@@ -606,7 +606,7 @@ V *vec_cmp(V *a, V *b, int op) {
             else if(b->t==T_CVEC) belem = v_char(b->B[i]);
             else belem = v_float(b->F[i]);
             V *c = vec_cmp(a->L[i], belem, OP_EQ);
-            int eq = c->t==T_BOOL && c->b;
+            int eq = c->t==T_BOOL && c->j;
             v_free(c); if(b->t != T_LIST) v_free(belem);
             P(!eq,v_bool(op==OP_NE))
         }
@@ -620,7 +620,7 @@ V *vec_cmp(V *a, V *b, int op) {
         V *r = v_bvec(n);
         for(int64_t i = 0; i < n; i++) {
             V *c = vec_cmp(a->L[i], b, op);
-            r->B[i] = (c->t == T_BOOL && c->b) ? 1 : 0;
+            r->B[i] = (c->t == T_BOOL && c->j) ? 1 : 0;
             v_free(c);
         }
         return r;
@@ -630,7 +630,7 @@ V *vec_cmp(V *a, V *b, int op) {
         V *r = v_bvec(n);
         for(int64_t i = 0; i < n; i++) {
             V *c = vec_cmp(a, b->L[i], op);
-            r->B[i] = (c->t == T_BOOL && c->b) ? 1 : 0;
+            r->B[i] = (c->t == T_BOOL && c->j) ? 1 : 0;
             v_free(c);
         }
         return r;
@@ -642,11 +642,11 @@ V *vec_cmp(V *a, V *b, int op) {
             int found = 0;
             for(int64_t j=0;j<b->n;j++) {
                 V *kc = vec_cmp(ak, b->keys->L[j], OP_EQ);
-                int keq = kc->t==T_BOOL && kc->b;
+                int keq = kc->t==T_BOOL && kc->j;
                 v_free(kc);
                 if(!keq) continue;
                 V *vc = vec_cmp(av, b->vals->L[j], OP_EQ);
-                int veq = vc->t==T_BOOL && vc->b;
+                int veq = vc->t==T_BOOL && vc->j;
                 v_free(vc);
                 P(!veq,v_bool(op==OP_NE))
                 found = 1;
@@ -659,7 +659,7 @@ V *vec_cmp(V *a, V *b, int op) {
     if (is_mat_t(a->t) && (b->t == T_INT || b->t == T_FLOAT || b->t == T_BOOL || b->t == T_CHAR)) {
         int64_t ne = a->n * mat_cols(a);
         V *r = v_bmat(a->n, mat_cols(a));
-        double y = b->t == T_BOOL ? (double)b->b : to_float(b);
+        double y = b->t == T_BOOL ? (double)b->j : to_float(b);
         if (a->t == T_FMAT)
             mat_fmat_cmp_bmat_scalar(r->B, a->F, y, ne, op);
         else if (a->t == T_IMAT)

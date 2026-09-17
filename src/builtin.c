@@ -421,12 +421,12 @@ static V *bi_type(V**a,in){
 static V *bi_int(V**a,in){
     P(n<1,v_int(0))V*v=a[0];
     P(v->t==T_INT,v_int(v->j))P(v->t==T_CHAR,v_int(v->j))P(v->t==T_FLOAT,v_int((int64_t)v->f))
-    P(v->t==T_BOOL,v_int(v->b))P(v->t==T_STR,v_int(strtoll(v->s,NULL,0)))
+    P(v->t==T_BOOL,v_int(v->j))P(v->t==T_STR,v_int(strtoll(v->s,NULL,0)))
     return v_err("cannot convert to int");}
 static V *bi_float(V**a,in){
     P(n<1,v_float(0))V*v=a[0];
     P(v->t==T_FLOAT,v_float(v->f))P(v->t==T_INT,v_float((double)v->j))P(v->t==T_CHAR,v_float((double)v->j))
-    P(v->t==T_BOOL,v_float(v->b))P(v->t==T_STR,v_float(strtod(v->s,NULL)))
+    P(v->t==T_BOOL,v_float(v->j))P(v->t==T_STR,v_float(strtod(v->s,NULL)))
     return v_err("cannot convert to float");}
 static V *bi_str(V**a,in){
     P(n<1,v_str(""))
@@ -476,7 +476,7 @@ static V *bi_list(V**a,in){
     return v_err("cannot convert to list");}
 static V *bi_bool(V**a,in){
     P(n<1,v_bool(0))V*v=a[0];
-    P(v->t==T_BOOL,v_bool(v->b))P(v->t==T_INT,v_bool(v->j!=0))P(v->t==T_CHAR,v_bool(v->j!=0))
+    P(v->t==T_BOOL,v_bool(v->j))P(v->t==T_INT,v_bool(v->j!=0))P(v->t==T_CHAR,v_bool(v->j!=0))
     P(v->t==T_FLOAT,v_bool(v->f!=0))P(v->t==T_STR,v_bool(v->s[0]!=0))
     P(v->t==T_NIL,v_bool(0))return v_bool(1);}
 static int bi_numvec(V *v) { return v->t == T_IVEC || v->t == T_FVEC || v->t == T_IMAT || v->t == T_FMAT; }
@@ -559,7 +559,7 @@ static V *vec_reduce_min(V *v) {
         V *m = v_ref(v->L[0]);
         for (int64_t i = 1; i < v->n; i++) {
             V *c = vec_cmp(m, v->L[i], OP_LT);
-            int lt = c->t == T_BOOL && c->b;
+            int lt = c->t == T_BOOL && c->j;
             v_free(c);
             if (lt) { v_free(m); m = v_ref(v->L[i]); }
         }
@@ -603,7 +603,7 @@ static V *vec_reduce_max(V *v) {
         V *m = v_ref(v->L[0]);
         for (int64_t i = 1; i < v->n; i++) {
             V *c = vec_cmp(m, v->L[i], OP_GT);
-            int gt = c->t == T_BOOL && c->b;
+            int gt = c->t == T_BOOL && c->j;
             v_free(c);
             if (gt) { v_free(m); m = v_ref(v->L[i]); }
         }
@@ -761,7 +761,7 @@ static V *bi_abs(V **a, in) {
 static int64_t bi_as_i64(V *v) {
     if (v->t == T_INT) return v->j;
     if (v->t == T_FLOAT) return (int64_t)v->f;
-    if (v->t == T_BOOL) return v->b ? 1 : 0;
+    if (v->t == T_BOOL) return v->j ? 1 : 0;
     return 0;
 }
 static V *bi_band(V **a, in) {
@@ -1132,7 +1132,7 @@ static V *join_equi_i64(V *left,V *right,int mode){
 static int join_vals_equal(V *a,V *b){
     V *c=vec_cmp(a,b,OP_EQ);
     if(!c||c->t==T_ERR){if(c)v_free(c);return 0;}
-    int ok=(c->t==T_BOOL&&c->b)||(c->t==T_INT&&c->j);
+    int ok=(c->t==T_BOOL&&c->j)||(c->t==T_INT&&c->j);
     v_free(c);
     return ok;
 }
@@ -1548,7 +1548,7 @@ static V *bi_filter(V**a,in,Env*e){
             else item=v_nil();
             V*rv=builtin_call(fn->s,&item,1,NULL,NULL,0,e);
             if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
-            int keep=rv&&((rv->t==T_BOOL&&rv->b)||(rv->t==T_INT&&rv->j)||(rv->t!=T_NIL&&rv->t!=T_BOOL&&rv->t!=T_INT));
+            int keep=rv&&((rv->t==T_BOOL&&rv->j)||(rv->t==T_INT&&rv->j)||(rv->t!=T_NIL&&rv->t!=T_BOOL&&rv->t!=T_INT));
             v_free(rv);
             if(keep)tmp[out++]=item;else v_free(item);
         }
@@ -1559,7 +1559,7 @@ static V *bi_filter(V**a,in,Env*e){
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
-            int keep=rv&&((rv->t==T_BOOL&&rv->b)||(rv->t==T_INT&&rv->j)||(rv->t!=T_NIL&&rv->t!=T_BOOL&&rv->t!=T_INT));
+            int keep=rv&&((rv->t==T_BOOL&&rv->j)||(rv->t==T_INT&&rv->j)||(rv->t!=T_NIL&&rv->t!=T_BOOL&&rv->t!=T_INT));
             v_free(rv);env_free(ce);if(keep)tmp[out++]=item;else v_free(item);
         }
     }
@@ -2363,7 +2363,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
     if(!strcmp(name,"assert")){
         P(nargs<1,v_err("assert(condition[, message])"))
         V*cond=args[0];int ok=0;
-        if(cond->t==T_BOOL)ok=cond->b;else if(cond->t==T_INT)ok=cond->j!=0;
+        if(cond->t==T_BOOL)ok=cond->j;else if(cond->t==T_INT)ok=cond->j!=0;
         else if(cond->t==T_FLOAT)ok=cond->f!=0;else if(cond->t==T_STR)ok=cond->s[0]!=0;
         else if(cond->t==T_NIL || cond->t==T_ERR)ok=0;else ok=1;
         if(!ok){
