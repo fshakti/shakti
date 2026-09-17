@@ -32,6 +32,7 @@ static void node_sprint_rec(Node *n, FILE *fp) {
     switch (n->type) {
     case N_INT: fprintf(fp, "%lld", (long long)n->ival); return;
     case N_CHARS: fprintf(fp, "0x%02llx", (unsigned long long)(n->ival & 255)); return;
+    case N_CVECS: fprintf(fp, "0x%s", n->sval ? n->sval : ""); return;
     case N_FLOAT: fprintf(fp, "%g", n->fval); return;
     case N_STR: fprintf(fp, "\"%s\"", n->sval ? n->sval : ""); return;
     case N_BOOL: fputs(n->ival ? "True" : "False", fp); return;

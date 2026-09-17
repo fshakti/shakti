@@ -198,6 +198,8 @@ static Node *parse_atom_body(Lexer *l) {
         n = node_new(N_INT); n->ival = t.ival; return n;
     case T_CHARZ_:
         n = node_new(N_CHARS); n->ival = t.ival; return n;
+    case T_CVECZ_:
+        n = node_new(N_CVECS); n->sval = strdup(t.sval); n->ival = t.ival; return n;
     case T_DATETIME_:
         n = node_new(N_DATETIME); n->ival = t.ival; return n;
     case T_FLOAT_:

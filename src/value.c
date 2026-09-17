@@ -982,9 +982,11 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
         for(int64_t i=0;i<v->n;i++) { if(i) fprintf(fp,", "); fprintf(fp,"%s",v->B[i]?"True":"False"); }
         fprintf(fp, "]"); break;
     case T_CVEC:
-        fprintf(fp, "[");
-        for(int64_t i=0;i<v->n;i++) { if(i) fprintf(fp,", "); fprintf(fp,"0x%02x",(int)v->B[i]); }
-        fprintf(fp, "]"); break;
+        if (v->n <= 0) { fprintf(fp, "list[char](0)"); break; }
+        if (v->n == 1) { fprintf(fp, "[0x%02x]", (int)v->B[0]); break; }
+        fprintf(fp, (v->n == 3 || v->n == 4) ? "0c" : "0x");
+        for (int64_t i = 0; i < v->n; i++) fprintf(fp, "%02x", (int)v->B[i]);
+        break;
     case T_IMAT:
     case T_FMAT:
     case T_BMAT:

@@ -36,6 +36,7 @@ static void lex_note_token(Lexer *l, Token t) {
     switch (t.type) {
     case T_INT_: case T_FLOAT_: case T_STR_: case T_FSTR_: case T_DATETIME_:
     case T_TRUE_: case T_FALSE_: case T_NONE_: case T_NAME_: case T_CHARZ_:
+    case T_CVECZ_:
     case T_RPAREN_: case T_RBRACKET_: case T_RBRACE_:
         l->noun_pos = 1;
         break;
@@ -267,6 +268,23 @@ static Token lex_raw(Lexer *l) {
         Token t = {.type = T_INT_};
         size_t start = p;
         int is_float = 0;
+        if (!neg_lit && c == '0' && p + 2 < l->len && (s[p + 1] == 'c' || s[p + 1] == 'C')
+            && isxdigit((unsigned char)s[p + 2])) {
+            p += 2;
+            size_t hex0 = p;
+            W(p < l->len && isxdigit((unsigned char)s[p]), p++)
+            size_t ndig = p - hex0;
+            if (ndig >= 2 && (ndig % 2) == 0 && ndig < sizeof(((Token *)0)->sval)) {
+                Token ct = {.type = T_CVECZ_};
+                memcpy(ct.sval, s + hex0, ndig);
+                ct.sval[ndig] = 0;
+                ct.ival = (int64_t)(ndig / 2);
+                ct.line = l->line;
+                l->pos = p;
+                return ct;
+            }
+            p = start;
+        }
         if(c=='0' && p+1<l->len && (s[p+1]=='x'||s[p+1]=='X')) {
             p += 2;
             size_t hex0 = p;
@@ -275,6 +293,16 @@ static Token lex_raw(Lexer *l) {
             if (!neg_lit && ndig == 2) {
                 Token ct = {.type = T_CHARZ_};
                 ct.ival = strtoll(s + start, NULL, 16);
+                ct.line = l->line;
+                l->pos = p;
+                return ct;
+            }
+            if (!neg_lit && ndig >= 4 && (ndig % 2) == 0 && ndig != 6 && ndig != 8
+                && ndig < sizeof(((Token *)0)->sval)) {
+                Token ct = {.type = T_CVECZ_};
+                memcpy(ct.sval, s + hex0, ndig);
+                ct.sval[ndig] = 0;
+                ct.ival = (int64_t)(ndig / 2);
                 ct.line = l->line;
                 l->pos = p;
                 return ct;

@@ -208,7 +208,7 @@ enum {
     T_UNION_ = 79,
     T_OUTER_ = 80,
     T_CHARZ_ = 81,
-    T_CVECZ_ = 82,  /* reserved */
+    T_CVECZ_ = 82,  /* 0x / 0c even hex → list[char] blob */
 };
 
 enum {
@@ -288,7 +288,7 @@ enum {
     N_UNION_JOIN = 44,
     N_OUTER_JOIN = 45,
     N_CHARS = 46,
-    N_CVECS = 47,  /* reserved */
+    N_CVECS = 47,  /* 0xHHHH… / 0cHHHH… even-length hex → list[char] */
 };
 
 enum {

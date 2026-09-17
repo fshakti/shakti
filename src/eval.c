@@ -996,6 +996,20 @@ V *eval(Node *n, Env *e) {
     switch(n->type) {
     case N_INT:  return v_int(n->ival);
     case N_CHARS: return v_char((unsigned char)n->ival);
+    case N_CVECS: {
+        const char *h = n->sval ? n->sval : "";
+        size_t nd = strlen(h);
+        if (nd < 2 || (nd % 2) != 0) return v_err("hex list[char]: need even digits");
+        int64_t nb = (int64_t)(nd / 2);
+        V *r = v_cvec(nb);
+        for (int64_t i = 0; i < nb; i++) {
+            unsigned char hi = (unsigned char)h[i * 2], lo = (unsigned char)h[i * 2 + 1];
+            int hn = isdigit(hi) ? hi - '0' : (hi >= 'a' ? hi - 'a' + 10 : hi - 'A' + 10);
+            int ln = isdigit(lo) ? lo - '0' : (lo >= 'a' ? lo - 'a' + 10 : lo - 'A' + 10);
+            r->B[i] = (unsigned char)((hn << 4) | ln);
+        }
+        return r;
+    }
     case N_FLOAT:return v_float(n->fval);
     case N_STR:  return v_str(n->sval);
     case N_BOOL: return v_bool(n->ival);

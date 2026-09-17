@@ -183,7 +183,7 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - Integer bitwise helpers: `band(a,b)`, `bor(a,b)`, `bxor(a,b)`, `bnot(a)`,
   `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical shifts on the low 64 bits;
   shift counts must be in `0..63`
-- `0xHH` (exactly two hex digits) is `char`; longer `0x…` is `int`
+- `0xHH` (exactly two hex digits) is `char`; `0x1234` (even length except 6/8) is `list[char]`; `0c…` is always `list[char]`; 6/8-digit or odd `0x` is `int`
 - `char(n)` builds a `char` from an int (distinct from `chr`, which returns a
   one-character `str`)
 - `parse_check(src)` returns `dict(ok, error)` — syntax only, no eval

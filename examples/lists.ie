@@ -5,6 +5,8 @@ e(list())
 e(list[](10))
 e(list[bool](10))
 e(list[char](10))
+e(0x1234)
+e(0c112233)
 e(list[int](10))
 e(list[float](10))
 

@@ -15,7 +15,7 @@ and IEFS modules.
 - **Compare** with `=` — `if x = 1:`
 - `==` is not supported
 - Leading `@` decorates; expression `@` is each; matrix multiply is `mmul(a, b)`
-- `0xHH` (exactly two hex digits) is `char`; longer `0x` is `int`
+- `0xHH` (exactly two hex digits) is `char`; `0x1234` (even hex except 6/8) is `list[char]`; `0c…` is always `list[char]`; 6/8-digit `0x` is `int`
 - Asof helpers: `asof_sort` / `asof_bin` — see
   [doc.md](doc.md#asof-join-helpers)
 
