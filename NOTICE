@@ -7,9 +7,76 @@ Licensed under the Apache License, Version 2.0. See LICENSE.
 
 Third-party notices
 
-Linked system libraries (libexpat, X11, ALSA, Cocoa, Core Audio, OpenMP,
-optional RDMA stacks, etc.) are provided by the host OS or toolchain.
-See doc.md.
+The published tree vendors no third-party C sources. Redistributable binaries
+(including the committed prebuilts under build/) dynamically link host
+libraries. Those libraries are not Apache-2.0; their copyrights remain with
+their authors. Optional components can be disabled at build time (see doc.md).
+
+This product dynamically links the following libraries when present. Dynamic
+linking keeps LGPL libraries replaceable; do not statically link LGPL objects
+into a redistributable `shakti` binary without offering relink materials.
+
+## libexpat (XML `load`)
+
+Copyright (c) 1998-2024 Thai Open Source Software Center Ltd and Clark Cooper
+Copyright (c) 2001-2024 Expat maintainers
+
+Licensed under the MIT License. https://github.com/libexpat/libexpat
+
+## libX11 (GFX, Linux)
+
+Copyright (c) The Open Group and X.Org contributors.
+
+MIT / X11 license. https://gitlab.freedesktop.org/xorg/lib/libx11
+
+## libasound (PCM / synth, Linux)
+
+ALSA library, GNU Lesser General Public License v2.1 or later.
+This build links libasound as a shared library. You may replace that library
+with a modified version. https://github.com/alsa-project/alsa-lib
+
+## OpenSSL 3 (TLS, WSS; `SHAKTI_TLS=1`)
+
+Copyright (c) 1998-2024 The OpenSSL Project Authors
+Copyright (c) 1995-1998 Eric A. Young, Tim J. Hudson
+
+Apache License 2.0. https://www.openssl.org/
+
+## zstd (IEFS / HLD codec; `SHAKTI_WITH_ZSTD=1`)
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+BSD-3-Clause (this project elects BSD rather than GPL-2). https://github.com/facebook/zstd
+
+## snappy (IEFS / HLD codec; `SHAKTI_WITH_SNAPPY=1`)
+
+Copyright 2011 Google Inc. All rights reserved.
+
+BSD-3-Clause. https://github.com/google/snappy
+
+## rdma-core (`librdmacm`, `libibverbs`; optional RDMA IPC)
+
+Dual GPL-2.0 or BSD/MIT. This project elects the BSD/MIT license for linking.
+https://github.com/linux-rdma/rdma-core
+
+## OpenMP (`libgomp` / `libomp`)
+
+GCC OpenMP runtime: GPL-3.0-or-later with GCC Runtime Library Exception 3.1.
+LLVM OpenMP (`libomp` on macOS): Apache-2.0 with LLVM exceptions.
+
+## liburing (optional IEFS batched reads, Linux)
+
+MIT or LGPL-2.1-or-later. https://github.com/axboe/liburing
+
+## libaio (optional IEFS batched reads, Linux)
+
+GNU Lesser General Public License v2.1. Linked only as a shared library when
+headers are present.
+
+## curl (not linked)
+
+`import rest` invokes `curl` from PATH for HTTP client requests. curl is
+copyright Daniel Stenberg and contributors (curl license). https://curl.se/
 
 ## Vector kernels
 
@@ -18,6 +85,6 @@ Apache License 2.0 terms as this project.
 
 ## Platform SDKs
 
-macOS builds use Apple system frameworks (Cocoa, Core Audio, Speech, etc.) under
-their respective platform licenses. Windows builds use the host toolchain under
-its terms.
+macOS builds use Apple system frameworks (Cocoa, Core Audio, Audio Toolbox,
+Accelerate, Speech, AVFoundation, etc.) under their respective platform
+licenses. Windows builds use the host toolchain under its terms.

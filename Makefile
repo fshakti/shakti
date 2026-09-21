@@ -633,4 +633,5 @@ uninstall:
 	rm -f "$(BINDIR)/shakti"
 
 wasm:
-	bash -lc 'source "$$HOME/emsdk/emsdk_env.sh" && $(MAKE) -C web'
+	@test -n "$(SITE)" || { echo 'SITE is required (tree containing site/main.ie): make wasm SITE=/path/to/tree' >&2; exit 1; }
+	bash -lc 'source "$$HOME/emsdk/emsdk_env.sh" && $(MAKE) -C web SITE="$(SITE)"'

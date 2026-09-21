@@ -1,9 +1,10 @@
-# Shakti → WASM (browser). Host: make wasm
+# Shakti → WASM (browser). Host: make wasm SITE=/path/to/tree
+# SITE must contain site/main.ie (preloaded as /site). There is no default path.
 ROOT := ..
 SRC := $(ROOT)/src
 BUILD := $(ROOT)/.build/wasm
 DIST := $(BUILD)
-SITE ?= /home/f/workspace/shakti.com
+SITE ?=
 CC := emcc
 
 CFLAGS := -O2 -std=gnu11 -Wall -Wno-unused-parameter -Wno-unused-function \
@@ -37,8 +38,11 @@ LDFLAGS := -s MODULARIZE=1 \
 	-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8','HEAPU32','HEAPF32','UTF8ToString','stringToUTF8'] \
 	-s EXPORTED_FUNCTIONS='[$(EXPORTS)]' \
 	--preload-file $(ROOT)/lib@/shakti/lib \
-	--preload-file $(ROOT)/IE.txt@/shakti/IE.txt \
-	--preload-file $(SITE)/site@/site
+	--preload-file $(ROOT)/IE.txt@/shakti/IE.txt
+
+ifneq ($(SITE),)
+  LDFLAGS += --preload-file $(SITE)/site@/site
+endif
 
 .PHONY: all clean
 
@@ -48,9 +52,15 @@ $(BUILD)/shakti_version.h: $(ROOT)/src/VERSION
 	@mkdir -p $(BUILD)
 	@sed 's/.*/#define SHAKTI_PKG_VERSION "&"/' $< > $@
 
+ifeq ($(SITE),)
+$(DIST)/shakti.js:
+	@echo 'SITE is required (directory containing site/main.ie). Example: make -C web SITE=/path/to/tree' >&2
+	@exit 1
+else
 $(DIST)/shakti.js: $(SRCS) $(BUILD)/shakti_version.h Makefile $(SITE)/site/main.ie $(ROOT)/IE.txt
 	@mkdir -p $(DIST)
 	$(CC) $(CFLAGS) $(SRCS) -o $@ $(LDFLAGS)
+endif
 
 clean:
 	rm -rf $(DIST)
