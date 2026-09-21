@@ -1,0 +1,216 @@
+# README as a gfx page (mark + 4x2 menu, like the site).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/README.ie
+#   SHAKTI_GFX_SKIP=1 ./shakti examples/README.ie
+import gfx
+
+W : 960
+H : 720
+UNITS : 42
+OUTER : 3
+INNER : 17
+ORANGE : 0xFF751F
+BLUE : 0x1F48FF
+WHITE : 0xFFFFFF
+BLACK : 0
+MARK : 588
+NWORD : 8
+RAW : "https://github.com/fshakti/shakti/raw/master/"
+
+labels : ["site", "runtime", "modules", "license", "tree-sitter", "discord", "try", "download"]
+urls : ["", "", "", "", "", "", "", ""]
+hit_x : [0, 0, 0, 0, 0, 0, 0, 0]
+hit_w : [0, 0, 0, 0, 0, 0, 0, 0]
+hit_y : [0, 0, 0, 0, 0, 0, 0, 0]
+hit_h : [24]
+picked : [-1]
+
+def dist_slot():
+    os : "linux"
+    arch : "x86_64"
+    m : machine()
+    if type(m) = "dict":
+        info : m["os"]
+        if type(info) = "dict":
+            n : info["name"]
+            a : info["arch"]
+            if "Darwin" in n:
+                os : "darwin"
+            if "arm64" in a:
+                arch : "arm64"
+            if "aarch64" in a:
+                arch : "aarch64"
+    return "build/" + os + "-" + arch + "/shakti"
+
+def dist_url():
+    slot : dist_slot()
+    if path_isfile(slot):
+        return slot
+    return RAW + slot
+
+def fill_urls():
+    urls[0] : "https://shakti.com"
+    urls[1] : "https://github.com/fshakti/shakti/tree/master/src"
+    urls[2] : "https://github.com/fshakti/shakti/tree/master/lib"
+    urls[3] : "https://www.apache.org/licenses/LICENSE-2.0.txt"
+    urls[4] : "https://github.com/avillega/tree-sitter-shakti"
+    urls[5] : "https://discord.gg/kf8hXkZSb"
+    urls[6] : "https://shakti.com/?try"
+    urls[7] : dist_url()
+    return 0
+
+def dump():
+    fill_urls()
+    print("site        " + urls[0])
+    print("runtime     " + urls[1])
+    print("modules     " + urls[2])
+    print("license     " + urls[3])
+    print("tree-sitter " + urls[4])
+    print("discord     " + urls[5])
+    print("try         " + urls[6])
+    print("download    " + urls[7])
+    return 0
+
+def fill_frame(x, y, side, thick, col):
+    if thick < 1:
+        return 0
+    if side < 1:
+        return 0
+    gfx.fill_rect(x, y, side, thick, col)
+    gfx.fill_rect(x, y + side - thick, side, thick, col)
+    gfx.fill_rect(x, y, thick, side, col)
+    gfx.fill_rect(x + side - thick, y, thick, side, col)
+    return 0
+
+def draw_mark(cx, cy, size, field):
+    n : UNITS
+    x0 : cx - size // 2
+    y0 : cy - size // 2
+    thick : (OUTER * size) // n
+    fill_frame(x0, y0, size, thick, field)
+    k : 0
+    while k < INNER:
+        two : k // 2
+        if k - two * 2 = 1:
+            if k >= INNER - 2:
+                k : k + 1
+                continue
+            inset : ((OUTER + k) * size) // n
+            side : size - 2 * inset
+            next_in : ((OUTER + k + 1) * size) // n
+            band : next_in - inset
+            fill_frame(x0 + inset, y0 + inset, side, band, field)
+        k : k + 1
+    return 0
+
+def col_max(a, b):
+    if b > a:
+        return b
+    return a
+
+def in_hit(k, x, y):
+    hx : hit_x[k]
+    hy : hit_y[k]
+    hw : hit_w[k]
+    hh : hit_h[0]
+    if x < hx:
+        return 0
+    if x > hx + hw:
+        return 0
+    if y < hy:
+        return 0
+    if y >= hy + hh:
+        return 0
+    return 1
+
+def place_word(k, widths, x, y, scale):
+    hit_x[k] : x - 10
+    hit_w[k] : widths[k] + 20
+    hit_y[k] : y - 10
+    gfx.text(x, y, labels[k], WHITE, scale)
+    return 0
+
+def layout_words(cx, y):
+    scale : 3
+    gap : 36
+    widths : [0, 0, 0, 0, 0, 0, 0, 0]
+    i : 0
+    while i < NWORD:
+        widths[i] : gfx.text_width(labels[i], scale)
+        i : i + 1
+    c0 : col_max(widths[0], widths[4])
+    c1 : col_max(widths[1], widths[5])
+    c2 : col_max(widths[2], widths[6])
+    c3 : col_max(widths[3], widths[7])
+    block : c0 + c1 + c2 + c3 + gap * 3
+    x : cx - block / 2
+    x1 : x + c0 + gap
+    x2 : x1 + c1 + gap
+    x3 : x2 + c2 + gap
+    lead : 8 * scale + 8
+    y1 : y + lead
+    place_word(0, widths, x, y, scale)
+    place_word(1, widths, x1, y, scale)
+    place_word(2, widths, x2, y, scale)
+    place_word(3, widths, x3, y, scale)
+    place_word(4, widths, x, y1, scale)
+    place_word(5, widths, x1, y1, scale)
+    place_word(6, widths, x2, y1, scale)
+    place_word(7, widths, x3, y1, scale)
+    hit_h[0] : lead
+    return y1 + lead
+
+def hit_nav(x, y):
+    i : 0
+    while i < NWORD:
+        if in_hit(i, x, y):
+            return i + 1
+        i : i + 1
+    return 0
+
+def draw_chip(cx, y, i):
+    u : urls[i]
+    scale : 2
+    tw : gfx.text_width(u, scale)
+    pad : 12
+    w : tw + pad * 2
+    h : 8 * scale + pad * 2
+    x : cx - w / 2
+    gfx.fill_rect(x, y, w, h, BLACK)
+    gfx.fill_rect(x, y, w, 1, WHITE)
+    gfx.fill_rect(x, y + h - 1, w, 1, WHITE)
+    gfx.fill_rect(x, y, 1, h, WHITE)
+    gfx.fill_rect(x + w - 1, y, 1, h, WHITE)
+    gfx.text(x + pad, y + pad, u, WHITE, scale)
+    return 0
+
+def frame():
+    cx : W / 2
+    cy : H / 2 - 24
+    gfx.clear(BLUE)
+    draw_mark(cx, cy, MARK, ORANGE)
+    chip_y : layout_words(cx, cy + MARK / 2 + 10)
+    if gfx.click_pending():
+        nav : hit_nav(gfx.click_x(), gfx.click_y())
+        gfx.consume_click()
+        if nav > 0:
+            picked[0] : nav - 1
+            print(urls[nav - 1])
+        else:
+            picked[0] : -1
+    if picked[0] >= 0:
+        draw_chip(cx, chip_y + 12, picked[0])
+    gfx.tick()
+    return 0
+
+fill_urls()
+if getenv("SHAKTI_GFX_SKIP") = "1":
+    dump()
+elif not gfx.available():
+    print("gfx not available")
+    dump()
+else:
+    gfx.open("shakti", W, H)
+    while gfx.alive():
+        frame()
+    gfx.close()

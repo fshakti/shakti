@@ -1,0 +1,34 @@
+shakti 0.14.1  vs  python3
+.ie looks like python; these tokens differ
+
+same
+- indent suites under def/if/elif/else/while/for/class
+- {k: v} · a[1:3] · lambda · leading @decorator · import
+- True False None · try/except/finally · f-strings
+
+diff
+          .ie                      python3
+- bind    x : 1                    x = 1
+- compare if x = 1:                if x == 1:  (== error)
+- default def f(n:2):              def f(n=2):
+- each    abs@ xs · xs add@ ys     map / listcomp / zip
+- matmul  mmul(a, b)               a @ b (numpy)
+          @ is each, not matmul
+- vector  a + b on ivec            numpy
+- table   table(a:[1], b:[2])      pandas
+- sql     select … by … from t     groupby / SQL string
+- method  self implicit            first arg
+          __init__ optional        ctor if needed
+- call    n(-1) after name         n(-1) or n=-1
+          n - 1 subtracts
+- hex     0xFF is char (two hex)   0xFF is int
+- bitwise band bor bxor bnot       & | ^ ~
+- type    list[int](10) ctor       list[int] type hint
+
+demo
+.ie                            python3
+i : 0                          i = 0
+while i < 3:                   while i < 3:
+    print(i)                       print(i)
+    i : i + 1                      i += 1
+print(abs@ [1, -2, 3])         print([abs(x) for x in [1, -2, 3]])

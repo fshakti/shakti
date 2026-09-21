@@ -984,6 +984,7 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
     case T_CVEC:
         if (v->n <= 0) { fprintf(fp, "list[char](0)"); break; }
         if (v->n == 1) { fprintf(fp, "[0x%02x]", (int)v->B[0]); break; }
+        /* 3/4-byte blobs would parse as 0x RGB/ARGB ints — print 0c… instead. */
         fprintf(fp, (v->n == 3 || v->n == 4) ? "0c" : "0x");
         for (int64_t i = 0; i < v->n; i++) fprintf(fp, "%02x", (int)v->B[i]);
         break;

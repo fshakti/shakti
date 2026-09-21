@@ -39,3 +39,4 @@ r : select amount by dept from t where amount > 15
 
 out of card
 modules · full builtin list → doc.md
+.ie vs python3 → IE-python.txt

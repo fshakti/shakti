@@ -132,7 +132,7 @@ static Node *parse_atom(Lexer *l);
 
 static int is_jux_arg_token(int tt) {
     return tt == T_NAME_ || tt == T_INT_ || tt == T_FLOAT_ || tt == T_DATETIME_
-        || tt == T_CHARZ_ || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_;
+        || tt == T_CHARZ_ || tt == T_CVECZ_ || tt == T_STR_ || tt == T_LPAREN_ || tt == T_LBRACKET_ || tt == T_MINUS_;
 }
 
 static int is_jux_arg_start(Lexer *l) {

@@ -461,6 +461,11 @@ void run_repl(Env *e) {
     enum { REPL_INPUT_CAP = 262144 };
     char input[REPL_INPUT_CAP];
     atexit(input_hub_shutdown);
+    /* -c errors must not swallow the first interactive line. */
+    if (g_error) {
+        g_error = 0;
+        if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
+    }
     for (;;) {
 #if SHAKTI_HL
         char *line = hl_readline("> ", 0);

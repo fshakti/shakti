@@ -18,6 +18,7 @@ and IEFS modules.
 - `0xHH` (exactly two hex digits) is `char`; `0x1234` (even hex except 6/8) is `list[char]`; `0c…` is always `list[char]`; 6/8-digit `0x` is `int`
 - Asof helpers: `asof_sort` / `asof_bin` — see
   [doc.md](doc.md#asof-join-helpers)
+- `.ie` vs python3 (one page): [IE-python.txt](IE-python.txt)
 
 ```ie
 values : [1, -2, 3]

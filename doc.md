@@ -154,7 +154,7 @@ Start with `./.build/shakti` (or `-i` after `--command`). Banner line:
 
 | Input | Effect |
 |-------|--------|
-| `\d` / `\help` / `help` | Print the fixed-width grammar card from [`IE.txt`](IE.txt); full prose remains in this doc |
+| `\d` / `\help` / `help` | Print the fixed-width grammar card from [`IE.txt`](IE.txt); full prose remains in this doc. `.ie` vs python3: [`IE-python.txt`](IE-python.txt) (not loaded by `\d`) |
 | `\v` | User-defined names and values (not imports, `argv`, or `__` internals) |
 | `\w` | User-defined names only |
 | `\q` | Process exit status `0` |

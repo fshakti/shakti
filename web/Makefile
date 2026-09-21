@@ -3,7 +3,7 @@ ROOT := ..
 SRC := $(ROOT)/src
 BUILD := $(ROOT)/.build/wasm
 DIST := $(BUILD)
-SITE := /home/f/workspace/shakti.com
+SITE ?= /home/f/workspace/shakti.com
 CC := emcc
 
 CFLAGS := -O2 -std=gnu11 -Wall -Wno-unused-parameter -Wno-unused-function \

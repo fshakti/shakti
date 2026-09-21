@@ -532,6 +532,7 @@ ifneq ($(SHAKTI_TESTS),)
 	@if [ -x tests/build_guards.sh ]; then bash tests/build_guards.sh || exit 1; fi
 	@if [ -x tests/repl_q.sh ]; then bash tests/repl_q.sh || exit 1; fi
 	@if [ -x tests/repl_d.sh ]; then bash tests/repl_d.sh || exit 1; fi
+	@if [ -x tests/repl_lang.sh ]; then bash tests/repl_lang.sh || exit 1; fi
 else
 	@echo "test: no tests/*.ie present (ok)"
 endif
