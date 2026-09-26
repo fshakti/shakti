@@ -69,6 +69,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import gfx` | `gfx_demo.ie` | Pixel window + click drawing |
 | `import pong` | `pong_demo.ie` | Pong gfx launcher ([`examples/pong_demo.ie`](examples/pong_demo.ie)) |
 | `import chess` | `chess_demo.ie` | Chess gfx launcher ([`examples/chess_demo.ie`](examples/chess_demo.ie)) |
+| `import draughts` | `draughts_demo.ie` | Draughts gfx launcher ([`examples/draughts_demo.ie`](examples/draughts_demo.ie)) |
 | `import pyplot` | `pyplot_demo.ie` | Line / scatter / bar charts on gfx |
 | `import jupyter` | `jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
@@ -761,7 +762,7 @@ Module `lib/gfx.ie`.
 
 Colors are packed as `0xRRGGBB`. Clicks and mouse positions are reported in design-buffer coordinates (not raw window pixels). `gfx.text` covers digits, A–Z, a–z (distinct lowercase), and common punctuation; unknown glyphs draw as a hollow box.
 
-Demo games: [`import pong`](lib/pong.ie) / `pong.run()`, [`import chess`](lib/chess.ie) / `chess.run()` (needs `SHAKTI_GFX=1`).
+Demo games: [`import pong`](lib/pong.ie) / `pong.run()`, [`import chess`](lib/chess.ie) / `chess.run()`, [`import draughts`](lib/draughts.ie) / `draughts.run()` (needs `SHAKTI_GFX=1`).
 
 ---
 

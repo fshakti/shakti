@@ -1,0 +1,418 @@
+# draughts_core — English draughts board, jumps, promotion, win/loss
+#
+# Light is positive and moves first (toward row 0). Dark is negative.
+# Men are ±1, kings are ±2. Play is on squares where row+col is odd.
+
+EMPTY : 0
+MAN : 1
+KING : 2
+
+STATUS_PLAY : 0
+STATUS_DONE : 1
+
+MODE_HUMAN : 0
+MODE_AI : 1
+
+def piece_type(p):
+    if p < 0:
+        return 0 - p
+    return p
+
+def piece_color(p):
+    if p > 0:
+        return 1
+    if p < 0:
+        return -1
+    return 0
+
+def on_board(r, c):
+    if r < 0 or r > 7:
+        return 0
+    if c < 0 or c > 7:
+        return 0
+    return 1
+
+def playable(r, c):
+    n : r + c
+    half : int(n / 2)
+    if half + half = n:
+        return 0
+    return 1
+
+def copy_board(b):
+    out : []
+    r : 0
+    while r < 8:
+        row : []
+        c : 0
+        while c < 8:
+            row.append(b[r, c])
+            c : c + 1
+        out.append(row)
+        r : r + 1
+    return out
+
+def empty_board():
+    return [
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0]
+    ]
+
+def starting_board():
+    b : empty_board()
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            if playable(r, c) = 1:
+                if r < 3:
+                    b[r, c] : 0 - MAN
+                if r > 4:
+                    b[r, c] : MAN
+            c : c + 1
+        r : r + 1
+    return b
+
+def new_state(mode:1):
+    return dict(
+        board: starting_board(),
+        turn: 1,
+        selected_r: -1,
+        selected_c: -1,
+        legal: [],
+        status: STATUS_PLAY,
+        winner: 0,
+        mode: mode,
+        ai_pending: 0,
+        ai_cancel: 0,
+        drag: 0,
+        drag_piece: 0,
+        drag_x: 0,
+        drag_y: 0,
+        paths: [],
+        path_i: 0,
+        path_r: -1,
+        path_c: -1
+    )
+
+def step_dirs(piece):
+    out : []
+    if piece = KING or piece = 0 - KING:
+        out.append(dict(dr: -1, dc: -1))
+        out.append(dict(dr: -1, dc: 1))
+        out.append(dict(dr: 1, dc: -1))
+        out.append(dict(dr: 1, dc: 1))
+        return out
+    dr : -1
+    if piece < 0:
+        dr : 1
+    out.append(dict(dr: dr, dc: -1))
+    out.append(dict(dr: dr, dc: 1))
+    return out
+
+def promo_rank(piece, r):
+    if piece = MAN and r = 0:
+        return 1
+    if piece = 0 - MAN and r = 7:
+        return 1
+    return 0
+
+def copy_steps(steps):
+    out : []
+    i : 0
+    while i < len(steps):
+        s : steps[i]
+        out.append(dict(tr: s["tr"], tc: s["tc"], cr: s["cr"], cc: s["cc"]))
+        i : i + 1
+    return out
+
+def emit(out, fr, fc, steps, promo):
+    last : steps[len(steps) - 1]
+    out.append(dict(
+        fr: fr,
+        fc: fc,
+        steps: steps,
+        promo: promo,
+        tr: last["tr"],
+        tc: last["tc"]
+    ))
+
+def collect_jumps(board, r, c, piece, fr, fc, steps, out):
+    dirs : step_dirs(piece)
+    nfound : 0
+    i : 0
+    col : piece_color(piece)
+    while i < len(dirs):
+        d : dirs[i]
+        mr : r + d["dr"]
+        mc : c + d["dc"]
+        nr : mr + d["dr"]
+        nc : mc + d["dc"]
+        if on_board(nr, nc) = 1:
+            mid : board[mr, mc]
+            if board[nr, nc] = 0 and piece_color(mid) = 0 - col:
+                nfound : 1
+                nb : copy_board(board)
+                nb[r, c] : 0
+                nb[mr, mc] : 0
+                nb[nr, nc] : piece
+                ns : copy_steps(steps)
+                ns.append(dict(tr: nr, tc: nc, cr: mr, cc: mc))
+                if promo_rank(piece, nr) = 1:
+                    emit(out, fr, fc, ns, 1)
+                else:
+                    collect_jumps(nb, nr, nc, piece, fr, fc, ns, out)
+        i : i + 1
+    if nfound = 0 and len(steps) > 0:
+        emit(out, fr, fc, steps, 0)
+
+def add_quiet(board, r, c, piece, out):
+    dirs : step_dirs(piece)
+    i : 0
+    while i < len(dirs):
+        d : dirs[i]
+        nr : r + d["dr"]
+        nc : c + d["dc"]
+        if on_board(nr, nc) = 1:
+            if board[nr, nc] = 0:
+                steps : [dict(tr: nr, tc: nc, cr: -1, cc: -1)]
+                emit(out, r, c, steps, promo_rank(piece, nr))
+        i : i + 1
+
+def legal_moves(st):
+    board : st["board"]
+    color : st["turn"]
+    jumps : []
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            p : board[r, c]
+            if piece_color(p) = color:
+                collect_jumps(board, r, c, p, r, c, [], jumps)
+            c : c + 1
+        r : r + 1
+    if len(jumps) > 0:
+        return jumps
+    quiet : []
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            p : board[r, c]
+            if piece_color(p) = color:
+                add_quiet(board, r, c, p, quiet)
+            c : c + 1
+        r : r + 1
+    return quiet
+
+def legal_moves_from(st, r, c):
+    allm : legal_moves(st)
+    out : []
+    i : 0
+    while i < len(allm):
+        mv : allm[i]
+        if mv["fr"] = r and mv["fc"] = c:
+            out.append(mv)
+        i : i + 1
+    return out
+
+def make_move(st, mv):
+    board : st["board"]
+    fr : mv["fr"]
+    fc : mv["fc"]
+    piece : board[fr, fc]
+    prev : st["turn"]
+    caps : []
+    steps : mv["steps"]
+    board[fr, fc] : 0
+    i : 0
+    while i < len(steps):
+        s : steps[i]
+        if s["cr"] >= 0:
+            caps.append(dict(r: s["cr"], c: s["cc"], p: board[s["cr"], s["cc"]]))
+            board[s["cr"], s["cc"]] : 0
+        i : i + 1
+    last : steps[len(steps) - 1]
+    placed : piece
+    if mv["promo"] = 1:
+        if piece > 0:
+            placed : KING
+        else:
+            placed : 0 - KING
+    board[last["tr"], last["tc"]] : placed
+    st["turn"] : 0 - prev
+    return dict(
+        fr: fr,
+        fc: fc,
+        piece: piece,
+        steps: steps,
+        caps: caps,
+        tr: last["tr"],
+        tc: last["tc"],
+        turn: prev
+    )
+
+def unmake_move(st, undo):
+    board : st["board"]
+    board[undo["tr"], undo["tc"]] : 0
+    caps : undo["caps"]
+    i : 0
+    while i < len(caps):
+        cap : caps[i]
+        board[cap["r"], cap["c"]] : cap["p"]
+        i : i + 1
+    board[undo["fr"], undo["fc"]] : undo["piece"]
+    st["turn"] : undo["turn"]
+
+def update_status(st):
+    moves : legal_moves(st)
+    if len(moves) = 0:
+        st["status"] : STATUS_DONE
+        st["winner"] : 0 - st["turn"]
+    else:
+        st["status"] : STATUS_PLAY
+        st["winner"] : 0
+    return moves
+
+def clear_paths(st):
+    st["paths"] : []
+    st["path_i"] : 0
+    st["path_r"] : -1
+    st["path_c"] : -1
+
+def clear_selection(st):
+    st["selected_r"] : -1
+    st["selected_c"] : -1
+    st["legal"] : []
+    st["drag"] : 0
+    st["drag_piece"] : 0
+    clear_paths(st)
+
+def find_move(legals, tr, tc):
+    i : 0
+    while i < len(legals):
+        mv : legals[i]
+        if mv["tr"] = tr and mv["tc"] = tc:
+            return mv
+        i : i + 1
+    return 0
+
+def apply_and_finish(st, mv):
+    make_move(st, mv)
+    clear_selection(st)
+    update_status(st)
+    if st["mode"] = MODE_AI and st["turn"] = -1 and st["status"] = STATUS_PLAY:
+        st["ai_pending"] : 1
+
+def begin_drag(st, r, c, mx, my):
+    board : st["board"]
+    p : board[r, c]
+    if piece_color(p) != st["turn"]:
+        return 0
+    if st["status"] = STATUS_DONE:
+        return 0
+    if st["mode"] = MODE_AI and st["turn"] = -1:
+        return 0
+    st["selected_r"] : r
+    st["selected_c"] : c
+    st["legal"] : legal_moves_from(st, r, c)
+    st["drag"] : 1
+    st["drag_piece"] : p
+    st["drag_x"] : mx
+    st["drag_y"] : my
+    return 1
+
+def update_drag(st, mx, my):
+    if st["drag"] = 0:
+        return
+    st["drag_x"] : mx
+    st["drag_y"] : my
+
+def moves_to(legals, tr, tc):
+    out : []
+    i : 0
+    while i < len(legals):
+        mv : legals[i]
+        if mv["tr"] = tr and mv["tc"] = tc:
+            out.append(mv)
+        i : i + 1
+    return out
+
+def choose_dest(st, r, c):
+    matches : moves_to(st["legal"], r, c)
+    n : len(matches)
+    if n = 0:
+        return 0
+    if n = 1:
+        apply_and_finish(st, matches[0])
+        return 1
+    path_i : 0
+    if st["path_r"] = r and st["path_c"] = c and len(st["paths"]) = n:
+        path_i : st["path_i"] + 1
+        if path_i >= n:
+            path_i : 0
+    st["paths"] : matches
+    st["path_i"] : path_i
+    st["path_r"] : r
+    st["path_c"] : c
+    return 2
+
+def end_drag(st, r, c):
+    if st["drag"] = 0:
+        return
+    st["drag"] : 0
+    st["drag_piece"] : 0
+    if on_board(r, c) = 0:
+        clear_selection(st)
+        return
+    if r = st["selected_r"] and c = st["selected_c"]:
+        return
+    how : choose_dest(st, r, c)
+    if how = 0:
+        clear_selection(st)
+
+def click_cell(st, r, c):
+    if st["status"] = STATUS_DONE:
+        return
+    if st["mode"] = MODE_AI and st["turn"] = -1:
+        return
+    if on_board(r, c) = 0:
+        return
+    board : st["board"]
+    if st["selected_r"] >= 0:
+        if r = st["selected_r"] and c = st["selected_c"] and len(st["paths"]) > 1:
+            mv : st["paths"][st["path_i"]]
+            apply_and_finish(st, mv)
+            return
+        how : choose_dest(st, r, c)
+        if how != 0:
+            return
+        p : board[r, c]
+        if piece_color(p) = st["turn"]:
+            st["selected_r"] : r
+            st["selected_c"] : c
+            st["legal"] : legal_moves_from(st, r, c)
+            clear_paths(st)
+            return
+        clear_selection(st)
+        return
+    p : board[r, c]
+    if piece_color(p) = st["turn"]:
+        st["selected_r"] : r
+        st["selected_c"] : c
+        st["legal"] : legal_moves_from(st, r, c)
+        clear_paths(st)
+
+def set_board(st, board, turn):
+    st["board"] : board
+    st["turn"] : turn
+    clear_selection(st)
+    st["ai_pending"] : 0
+    update_status(st)

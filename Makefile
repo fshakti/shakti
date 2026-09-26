@@ -474,9 +474,7 @@ endif
 .PHONY: all build test clean prod prod-size prod-speed dist clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase wasm
 
 test: shakti
-	@if [ -f qa/tests/assert_prec.sh ]; then \
-	  SHAKTI=$(SHAKTI) bash qa/tests/assert_prec.sh || exit 1; \
-	elif [ -f tests/assert_prec.sh ]; then \
+	@if [ -f tests/assert_prec.sh ]; then \
 	  SHAKTI=$(SHAKTI) bash tests/assert_prec.sh || exit 1; \
 	else \
 	  export SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR); \
@@ -499,9 +497,7 @@ test: shakti
 	  esac; \
 	  [ $$fail -eq 0 ] || exit 1; \
 	fi
-	@if [ -f qa/tests/stem_wav.sh ]; then \
-	  SHAKTI=$(SHAKTI) bash qa/tests/stem_wav.sh || exit 1; \
-	elif [ -f tests/stem_wav.sh ]; then \
+	@if [ -f tests/stem_wav.sh ]; then \
 	  SHAKTI=$(SHAKTI) bash tests/stem_wav.sh || exit 1; \
 	else \
 	  export SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR); \

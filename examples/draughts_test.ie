@@ -1,0 +1,128 @@
+# draughts_test — headless rules + AI smoke tests
+
+import draughts_core
+import draughts_ai
+
+res : dict(passed: 0, failed: 0)
+
+def check(res, name, cond):
+    if cond:
+        res["passed"] : res["passed"] + 1
+        print("  PASS  " + name)
+    else:
+        res["failed"] : res["failed"] + 1
+        print("  FAIL  " + name)
+
+def count_pieces(board, piece):
+    n : 0
+    r : 0
+    while r < 8:
+        c : 0
+        while c < 8:
+            if board[r, c] = piece:
+                n : n + 1
+            c : c + 1
+        r : r + 1
+    return n
+
+def find_step(moves, fr, fc, tr, tc):
+    i : 0
+    while i < len(moves):
+        m : moves[i]
+        if m["fr"] = fr and m["fc"] = fc and m["tr"] = tr and m["tc"] = tc:
+            return m
+        i : i + 1
+    return 0
+
+print("== starting position ==")
+st : draughts_core.new_state(1)
+ms : draughts_core.legal_moves(st)
+check(res, "twelve light men", count_pieces(st["board"], draughts_core.MAN) = 12)
+check(res, "twelve dark men", count_pieces(st["board"], 0 - draughts_core.MAN) = 12)
+check(res, "light has 7 opening moves", len(ms) = 7)
+check(res, "status playing", st["status"] = draughts_core.STATUS_PLAY)
+
+print("== make / unmake ==")
+mv : ms[0]
+undo : draughts_core.make_move(st, mv)
+check(res, "origin empty", st["board"][mv["fr"], mv["fc"]] = 0)
+check(res, "piece landed", st["board"][mv["tr"], mv["tc"]] = draughts_core.MAN)
+check(res, "turn flipped", st["turn"] = -1)
+draughts_core.unmake_move(st, undo)
+check(res, "unmake restores origin", st["board"][mv["fr"], mv["fc"]] = draughts_core.MAN)
+check(res, "unmake clears landing", st["board"][mv["tr"], mv["tc"]] = 0)
+check(res, "unmake restores turn", st["turn"] = 1)
+
+print("== forced jump ==")
+b : draughts_core.empty_board()
+b[4, 1] : draughts_core.MAN
+b[3, 2] : 0 - draughts_core.MAN
+b[5, 4] : draughts_core.MAN
+stj : draughts_core.new_state(1)
+draughts_core.set_board(stj, b, 1)
+msj : draughts_core.legal_moves(stj)
+check(res, "only the jump is legal", len(msj) = 1)
+jmp : find_step(msj, 4, 1, 2, 3)
+check(res, "jump lands past the man", type(jmp) = "dict")
+if type(jmp) = "dict":
+    draughts_core.make_move(stj, jmp)
+    check(res, "captured man is gone", stj["board"][3, 2] = 0)
+    check(res, "jumper arrived", stj["board"][2, 3] = draughts_core.MAN)
+
+print("== multi-jump ==")
+bm : draughts_core.empty_board()
+bm[5, 2] : draughts_core.MAN
+bm[4, 3] : 0 - draughts_core.MAN
+bm[2, 5] : 0 - draughts_core.MAN
+stm : draughts_core.new_state(1)
+draughts_core.set_board(stm, bm, 1)
+msm : draughts_core.legal_moves(stm)
+check(res, "one continued chain", len(msm) = 1)
+chain : msm[0]
+check(res, "chain has two jumps", len(chain["steps"]) = 2)
+check(res, "chain ends on the far square", chain["tr"] = 1 and chain["tc"] = 6)
+draughts_core.make_move(stm, chain)
+check(res, "both men captured", stm["board"][4, 3] = 0 and stm["board"][2, 5] = 0)
+check(res, "piece sits at the end", stm["board"][1, 6] = draughts_core.MAN)
+check(res, "start square cleared", stm["board"][5, 2] = 0)
+
+print("== promotion ==")
+bp : draughts_core.empty_board()
+bp[1, 2] : draughts_core.MAN
+stp : draughts_core.new_state(1)
+draughts_core.set_board(stp, bp, 1)
+msp : draughts_core.legal_moves(stp)
+pm : find_step(msp, 1, 2, 0, 1)
+check(res, "quiet step promotes", type(pm) = "dict" and pm["promo"] = 1)
+if type(pm) = "dict":
+    draughts_core.make_move(stp, pm)
+    check(res, "man became a king", stp["board"][0, 1] = draughts_core.KING)
+
+print("== no moves loses ==")
+bl : draughts_core.empty_board()
+bl[0, 1] : draughts_core.MAN
+stl : draughts_core.new_state(1)
+draughts_core.set_board(stl, bl, -1)
+check(res, "dark has no move", stl["status"] = draughts_core.STATUS_DONE)
+check(res, "light wins", stl["winner"] = 1)
+
+print("== AI smoke ==")
+sta : draughts_core.new_state(1)
+t0 : clock()
+am : draughts_ai.choose_move(sta, 2)
+check(res, "AI returns a move dict", type(am) = "dict")
+ok : 0
+msa : draughts_core.legal_moves(sta)
+i : 0
+while i < len(msa):
+    m : msa[i]
+    if m["fr"] = am["fr"] and m["fc"] = am["fc"] and m["tr"] = am["tr"] and m["tc"] = am["tc"] and m["promo"] = am["promo"]:
+        ok : 1
+    i : i + 1
+check(res, "AI move is legal", ok = 1)
+print("  AI depth-2 time " + str(clock() - t0))
+
+print("")
+print(str(res["passed"]) + " passed, " + str(res["failed"]) + " failed")
+if res["failed"] > 0:
+    raise "draughts tests failed"

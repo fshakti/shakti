@@ -142,13 +142,14 @@ For automation, set `SHAKTI_GFX_SKIP=1` where demos support it.
 | `iefs` | Durable `.iefs` | [doc](doc.md#iefs-module) |
 | `input` / `ipc` / `rest` / `talk` | IO / network / STT | see [doc.md](doc.md) |
 
-Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie). Timed gfx tour (movie / stem / pyplot / pong; auto-exits): [`examples/showcase.ie`](examples/showcase.ie). Record and index in `.iefs` with `make record-showcase` (artifacts under `.build/`).
+Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.run()` (terminal: `pong.run_terminal()`); [`import chess`](lib/chess.ie) then `chess.run()`; [`import draughts`](lib/draughts.ie) then `draughts.run()`. Launchers: [`examples/pong_demo.ie`](examples/pong_demo.ie), [`examples/chess_demo.ie`](examples/chess_demo.ie), [`examples/draughts_demo.ie`](examples/draughts_demo.ie). Timed gfx tour (movie / stem / pyplot / pong; auto-exits): [`examples/showcase.ie`](examples/showcase.ie). Record and index in `.iefs` with `make record-showcase` (artifacts under `.build/`).
 
 ```bash
 ./shakti examples/pong_test.ie
 ./shakti examples/pong_spell_test.ie
 ./shakti examples/pong_bench.ie
 ./shakti examples/chess_test.ie
+./shakti examples/draughts_test.ie
 ```
 
 Merged copy-paste sections also live in [`examples/example.ie`](examples/example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
