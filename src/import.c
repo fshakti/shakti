@@ -33,6 +33,11 @@ V *require_sql(Env *e) {
 }
 V *do_import(const char *name, Env *e) {
     P(!name || !name[0],v_err("import requires a module name"))
+    {
+        const char *dot = strchr(name, '.');
+        if (dot && (dot - name) >= 256)
+            return v_err("import: parent name too long");
+    }
     char path[8192];
     char open_err[256];
     FILE *f = NULL;
@@ -98,7 +103,12 @@ V *do_import(const char *name, Env *e) {
     if(dot) {
         char parent[256];
         int plen = dot - name;
-        memcpy(parent, name, plen); parent[plen] = 0;
+        if (plen < 0 || (size_t)plen >= sizeof parent) {
+            v_free(mod_dict);
+            env_free(mod_env);
+            return v_err("import: parent name too long");
+        }
+        memcpy(parent, name, (size_t)plen); parent[plen] = 0;
         const char *child = dot + 1;
         V *existing = env_get(e, parent);
         if(existing && existing->t == T_DICT) {

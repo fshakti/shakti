@@ -671,6 +671,13 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
         return -1;
     }
     size_t n = (size_t)st.st_size;
+    /* Same cap as iefs_format.h IEFS_MAX_PAYLOAD + IEFS_HEADER_SIZE (do not
+     * include that header here: it pulls a.h, which macros `st`). */
+    if ((uint64_t)st.st_size > (64ull << 30) + 24ull) {
+        set_err(err, err_cap, "iefs: file too large");
+        close(fd);
+        return -1;
+    }
     int rc;
     if (use_direct) {
         rc = read_all_direct(fd, n, out, out_len, err, err_cap);

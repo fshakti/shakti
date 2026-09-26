@@ -24,7 +24,7 @@ extern "C" {
 #define IEFS_TYPE_LAYOUT 1u      /* 0 = pre-char (tag 4 was str); 1 = char=4, str=5 */
 #define IEFS_HEADER_SIZE 24u
 #define IEFS_MAX_PAYLOAD (64ull << 30) /* 64 GiB hard cap (was 16; Basic one-day quotes ~25 GiB) */
-#define IEFS_MAX_ELEMS (1ull << 32)
+#define IEFS_MAX_ELEMS UINT32_MAX
 #define IEFS_MAX_NESTING 256 /* max decode_value recursion (list/dict/table) */
 #define IEFS_V3_ALIGN (2u << 20) /* 2 MiB extent alignment */
 #define IEFS_V3_EXTENT_SIZE 48u

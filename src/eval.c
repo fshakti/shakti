@@ -1565,9 +1565,18 @@ V *eval(Node *n, Env *e) {
         }
         if(target->type == N_INDEX) {
             V *obj = eval(target->ch[0], e);
+            if (!obj || obj->t == T_ERR) { v_free(val); return obj ? obj : v_err("bad assignment target"); }
             if (is_mat_t(obj->t) && target->nch >= 3) {
                 V *idx0 = eval(target->ch[1], e);
                 V *idx1 = eval(target->ch[2], e);
+                if (!idx0 || idx0->t == T_ERR) {
+                    v_free(obj); v_free(idx1); v_free(val);
+                    return idx0 ? idx0 : v_err("bad assignment index");
+                }
+                if (!idx1 || idx1->t == T_ERR) {
+                    v_free(obj); v_free(idx0); v_free(val);
+                    return idx1 ? idx1 : v_err("bad assignment index");
+                }
                 if ((idx0->t == T_INT || idx0->t == T_CHAR) && (idx1->t == T_INT || idx1->t == T_CHAR)) {
                     int64_t r = idx0->j, c = idx1->j;
                     if (r < 0) r += obj->n;
@@ -1589,6 +1598,7 @@ V *eval(Node *n, Env *e) {
                 return v_nil();
             }
             V *idx = eval(target->ch[1], e);
+            if (!idx || idx->t == T_ERR) { v_free(obj); v_free(val); return idx ? idx : v_err("bad assignment index"); }
             if(obj->t==T_DICT) {
                 if(idx->t==T_STR) {
                     v_dict_set(obj, idx->s, val);
@@ -1644,6 +1654,7 @@ V *eval(Node *n, Env *e) {
         }
         if(target->type == N_DOT) {
             V *obj = eval(target->ch[0], e);
+            if (!obj || obj->t == T_ERR) { v_free(val); return obj ? obj : v_err("bad assignment target"); }
             if(obj->t == T_DICT) {
                 v_dict_set(obj, target->sval, val);
             } else if(obj->t == T_TABLE) {
