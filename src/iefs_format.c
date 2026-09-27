@@ -669,10 +669,16 @@ static int col_raw_export(V *v, unsigned char **out, size_t *out_len, uint64_t *
 #endif
 }
 
+static int iefs_bits_not_64(int type, int bits) {
+    if (bits == 0 || bits == 64) return 0;
+    return type == T_FVEC || type == T_IMAT || type == T_FMAT;
+}
 static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
                          const unsigned char *p, size_t nbytes, IefsMapRegion *reg, int alias_ok) {
     if (nelem > IEFS_MAX_ELEMS || ncols > IEFS_MAX_ELEMS || ncols >= (1ull << 32))
         return v_err("iefs: extent too large");
+    if (iefs_bits_not_64(type, bits))
+        return v_err("iefs: bits must be 64");
     int aligned8 = (((uintptr_t)p) & 7u) == 0;
     if (type == T_CVEC) {
         if (nbytes != (size_t)nelem) return v_err("iefs: extent length mismatch");
@@ -1330,6 +1336,8 @@ static V *decode_value(IefsR *r);
 
 /* which: 0=J, 1=F, 2=B; cols < 0 means vector. */
 static V *alias_payload(IefsR *r, int t, int64_t n, int bits, int64_t cols, size_t nbytes, int which) {
+    if (iefs_bits_not_64(t, bits))
+        return v_err("iefs: bits must be 64");
     if (need(r, nbytes) != 0)
         return v_err(r->err);
     V *v;
@@ -1521,17 +1529,8 @@ static V *decode_value_inner(IefsR *r) {
             bits = r->p[r->off++];
             if (bits <= 0) bits = 64;
         }
-        if (bits < 64) {
-            size_t nbytes = pack_nbytes((int64_t)n, bits);
-            if (r->map_reg)
-                return alias_payload(r, T_FVEC, (int64_t)n, bits, -1, nbytes, 2);
-            if (need(r, nbytes) != 0)
-                return v_err(r->err);
-            V *v = v_fvec_bits((int64_t)n, bits);
-            if (n) memcpy(v->B, r->p + r->off, nbytes);
-            r->off += nbytes;
-            return v;
-        }
+        if (bits != 64)
+            return v_err("iefs: fvec bits must be 64");
         size_t nbytes = (size_t)n * 8;
         if (r->map_reg)
             return alias_payload(r, T_FVEC, (int64_t)n, 64, -1, nbytes, 1);

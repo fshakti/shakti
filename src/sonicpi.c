@@ -46,9 +46,11 @@ static void sp_write_be_float(char *p, float f) {
     sp_write_be32(p, u);
 }
 
+static int g_user_configured = 0;
+
 static int sp_env_defaults(void) {
     static int applied = 0;
-    if (applied) return 0;
+    if (g_user_configured || applied) return 0;
     applied = 1;
     const char *h = getenv("SONICPI_HOST");
     const char *p = getenv("SONICPI_PORT");
@@ -235,6 +237,7 @@ V *bi_sonicpi_configure(V **a, int n) {
         g_host[sizeof g_host - 1] = 0;
     }
     g_port = port;
+    g_user_configured = 1;
     sp_close_socket();
     char err[256];
     err[0] = 0;

@@ -373,50 +373,63 @@ static void emit_key(int code, const char *utf8, int down) {
     q_push(&ev);
 }
 
+static int vt_nav_code(unsigned char final) {
+    switch (final) {
+    case 'A': return 0xff52;
+    case 'B': return 0xff54;
+    case 'C': return 0xff53;
+    case 'D': return 0xff51;
+    case 'H': return 0xff50;
+    case 'F': return 0xff57;
+    default: return 0;
+    }
+}
+
 static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
-    enum { PENDING_MAX = 8 };
+    enum { PENDING_MAX = 16 };
     if (*pn == 0 && c == 27) {
-        pending[(*pn)++] = c;
+        pending[0] = c;
+        *pn = 1;
         return 2; /* consumed; sequence still open */
     }
     if (*pn > 0) {
-        if (*pn >= PENDING_MAX) {
+        if (*pn == 1 && pending[0] == 27) {
+            if (c == '[' || c == 'O') {
+                pending[1] = c;
+                *pn = 2;
+                return 2;
+            }
             *pn = 0;
-            return 0;
+            return decode_vt_byte(c, pending, pn);
         }
-        pending[(*pn)++] = c;
-        if (*pn >= 3 && pending[0] == 27 && pending[1] == '[') {
-            int code = 0;
-            switch (pending[2]) {
-            case 'A': code = 0xff52; break;
-            case 'B': code = 0xff54; break;
-            case 'C': code = 0xff53; break;
-            case 'D': code = 0xff51; break;
-            case 'H': code = 0xff50; break;
-            case 'F': code = 0xff57; break;
-            case '3':
-                if (*pn >= 4 && pending[3] == '~') {
-                    code = 0xffff;
+        if (pending[0] == 27 && pending[1] == 'O') {
+            int code = vt_nav_code(c);
+            *pn = 0;
+            if (!code) return decode_vt_byte(c, pending, pn);
+            emit_key(code, "", 1);
+            emit_key(code, "", 0);
+            return 1;
+        }
+        if (pending[0] == 27 && pending[1] == '[') {
+            if (c >= 0x40 && c <= 0x7e) {
+                int code = vt_nav_code(c);
+                if (!code && c == '~' && *pn >= 3 && pending[2] == '3') code = 0xffff;
+                *pn = 0;
+                if (code) {
                     emit_key(code, "", 1);
                     emit_key(code, "", 0);
-                    *pn = 0;
-                    return 1;
                 }
-                if (*pn >= 4) { *pn = 0; return 0; }
-                return 2;
-            default:
-                if (*pn >= 8) { *pn = 0; return 0; }
-                return 2;
-            }
-            if (code) {
-                emit_key(code, "", 1);
-                emit_key(code, "", 0);
-                *pn = 0;
                 return 1;
             }
+            if (c >= 0x20 && c <= 0x3f && *pn < PENDING_MAX - 1) {
+                pending[(*pn)++] = c;
+                return 2;
+            }
+            *pn = 0;
+            return decode_vt_byte(c, pending, pn);
         }
-        if (*pn >= 8) { *pn = 0; return 0; }
-        return 2;
+        *pn = 0;
+        return decode_vt_byte(c, pending, pn);
     }
     if (c == '\r' || c == '\n') {
         char u[2] = {(char)c, 0};

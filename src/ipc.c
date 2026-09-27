@@ -1060,7 +1060,7 @@ V *bi_ipc_join(V **a, int n) {
     int fd = ipc_mcast_open(group, port, iface, source, &af, &grp, &grp_len, err, sizeof err);
     if (fd < 0) return v_err(err[0] ? err : "ipc_join failed");
     uint16_t rport = 0;
-    int rfd = ipc_mcast_make_reply_sock(af, &rport, err, sizeof err);
+    int rfd = ipc_mcast_make_reply_sock(af, iface, &rport, err, sizeof err);
     if (rfd < 0) {
         close(fd);
         return v_err(err[0] ? err : "ipc_join: reply sock failed");
@@ -1166,8 +1166,9 @@ V *bi_ipc_send_sync(V **a, int n) {
         else if (a[2]->t == T_FLOAT) timeout_ms = (int)a[2]->f;
         else return v_err("ipc_send_sync: bad timeout");
     }
-    uint32_t corr = s->next_corr++;
-    if (corr == 0) corr = s->next_corr++;
+    uint32_t corr = ipc_rand_corr_seed();
+    if (corr == 0) corr = 1;
+    s->next_corr = corr;
     char err[512];
     err[0] = 0;
 
@@ -1426,12 +1427,13 @@ static V *ipc_do_recv(IpcHandle *s, int block) {
     char *msg = NULL;
     size_t msg_len = 0;
 
-    if (s->inbox.n > 0) {
+    if (s->async_q.n > 0 || s->inbox.n > 0) {
         uint8_t kind;
         uint32_t corr;
         unsigned char *data = NULL;
         size_t len = 0;
-        if (ipc_inbox_take(&s->inbox, 0, 0, &kind, &corr, &data, &len) == 0)
+        IpcInbox *box = s->async_q.n > 0 ? &s->async_q : &s->inbox;
+        if (ipc_inbox_take(box, 0, 0, &kind, &corr, &data, &len) == 0)
             return ipc_v_str((char *)data, len);
     }
 
@@ -1506,12 +1508,13 @@ static V *ipc_do_recv_bin(IpcHandle *s, int block) {
     char *msg = NULL;
     size_t msg_len = 0;
 
-    if (s->inbox.n > 0) {
+    if (s->async_q.n > 0 || s->inbox.n > 0) {
         uint8_t kind;
         uint32_t corr;
         unsigned char *data = NULL;
         size_t len = 0;
-        if (ipc_inbox_take(&s->inbox, 0, 0, &kind, &corr, &data, &len) == 0)
+        IpcInbox *box = s->async_q.n > 0 ? &s->async_q : &s->inbox;
+        if (ipc_inbox_take(box, 0, 0, &kind, &corr, &data, &len) == 0)
             return ipc_u8vec_take(data, len);
     }
 
@@ -1529,7 +1532,10 @@ static V *ipc_do_recv_bin(IpcHandle *s, int block) {
             if (kind == IPC_ENV_REQ && plen >= IPC_REPLY_INFO) {
                 uint8_t cookie[IPC_REPLY_COOKIE];
                 memcpy(cookie, pay + 3, IPC_REPLY_COOKIE);
-                (void)ipc_reply_to_store_peer(s, corr, &peer, cookie);
+                if (ipc_reply_to_store_peer(s, corr, &peer, cookie) != 0) {
+                    free(msg);
+                    return v_err("ipc_recv_bin: reply-to table full");
+                }
                 pay += IPC_REPLY_INFO;
                 plen -= IPC_REPLY_INFO;
             }
@@ -1900,6 +1906,7 @@ V *bi_ipc_shm_broadcast_create(V **a, int n) {
     size_t want = (size_t)a[1]->j;
     if (want < IPC_SHM_HDR + 256) return v_err("ipc_shm_broadcast_create: size too small");
     size_t ring_cap = want - IPC_SHM_HDR - sizeof(atomic_uint) * max_r * 2;
+    ring_cap &= ~(size_t)7;
     if (ring_cap < 64) return v_err("ipc_shm_broadcast_create: size too small for readers");
     size_t map_size = ipc_bcast_total_size(ring_cap, max_r);
     char err[512];
@@ -1988,7 +1995,7 @@ V *bi_ipc_shm_broadcast_attach(V **a, int n) {
     {
         size_t need = IPC_SHM_HDR + (size_t)bh->capacity +
                       sizeof(atomic_uint) * (size_t)bh->max_readers * 2;
-        if (!(need <= map_size && bh->capacity > 0 &&
+        if (!(need <= map_size && bh->capacity > 0 && (bh->capacity & 7u) == 0 &&
               bh->max_readers > 0 && bh->max_readers <= IPC_BCAST_MAX_READERS &&
               bh->version == IPC_SHM_VERSION)) {
             munmap(ptr, map_size);

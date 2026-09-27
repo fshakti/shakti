@@ -2,8 +2,8 @@
 
 #if defined(SHAKTI_WASM) || defined(_WIN32)
 
-int ipc_mcast_make_reply_sock(int af, uint16_t *port_out, char *err, size_t err_cap) {
-    (void)af; (void)port_out;
+int ipc_mcast_make_reply_sock(int af, const char *iface, uint16_t *port_out, char *err, size_t err_cap) {
+    (void)af; (void)iface; (void)port_out;
     snprintf(err, err_cap, "ipc: mcast not supported on this platform");
     return -1;
 }
@@ -63,7 +63,20 @@ static int ipc_mcast_detect_af(const char *group) {
     return -1;
 }
 
-int ipc_mcast_make_reply_sock(int af, uint16_t *port_out, char *err, size_t err_cap) {
+static int ipv6_wants_any(const char *iface) {
+    return iface && iface[0] == '*' && iface[1] == 0;
+}
+
+static void ipv6_bind_addr(const char *iface, struct in6_addr *out) {
+    if (ipv6_wants_any(iface)) {
+        *out = in6addr_any;
+        return;
+    }
+    if (iface && inet_pton(AF_INET6, iface, out) == 1) return;
+    *out = in6addr_loopback;
+}
+
+int ipc_mcast_make_reply_sock(int af, const char *iface, uint16_t *port_out, char *err, size_t err_cap) {
     int fd = socket(af, SOCK_DGRAM, 0);
     if (fd < 0) {
         snprintf(err, err_cap, "ipc: reply socket: %s", strerror(errno));
@@ -73,7 +86,7 @@ int ipc_mcast_make_reply_sock(int af, uint16_t *port_out, char *err, size_t err_
         struct sockaddr_in6 a;
         memset(&a, 0, sizeof a);
         a.sin6_family = AF_INET6;
-        a.sin6_addr = in6addr_any;
+        ipv6_bind_addr(iface, &a.sin6_addr);
         a.sin6_port = 0;
         if (bind(fd, (struct sockaddr *)&a, sizeof a) < 0) {
             snprintf(err, err_cap, "ipc: reply bind6: %s", strerror(errno));
@@ -145,7 +158,13 @@ int ipc_mcast_open(const char *group, int port, const char *iface, const char *s
         memset(&bind_addr, 0, sizeof bind_addr);
         bind_addr.sin6_family = AF_INET6;
         bind_addr.sin6_port = htons((uint16_t)port);
-        bind_addr.sin6_addr = in6addr_any;
+        if (ipv6_wants_any(iface))
+            bind_addr.sin6_addr = in6addr_any;
+        else if (inet_pton(AF_INET6, group, &bind_addr.sin6_addr) != 1) {
+            snprintf(err, err_cap, "ipc: bad mcast group '%s'", group);
+            close(fd);
+            return -1;
+        }
         if (bind(fd, (struct sockaddr *)&bind_addr, sizeof bind_addr) < 0) {
             snprintf(err, err_cap, "ipc: mcast bind6: %s", strerror(errno));
             close(fd);
@@ -362,29 +381,23 @@ int ipc_reply_to_store(IpcHandle *s, uint32_t corr, int af, uint16_t port,
     memset(zcookie, 0, sizeof zcookie);
     const uint8_t *ck = cookie ? cookie : zcookie;
     ipc_reply_expire(s);
-    int free_i = -1, oldest = -1;
-    time_t oldest_at = 0;
+    int free_i = -1;
     for (int i = 0; i < IPC_REPLY_TO_MAX; i++) {
         IpcReplyTo *r = &s->reply_to[i];
         if (!r->in_use) {
             if (free_i < 0) free_i = i;
             continue;
         }
-        if (r->corr == corr) {
-            if (r->af == af && r->port == port &&
-                memcmp(r->addr, addr, 16) == 0 && memcmp(r->cookie, ck, IPC_REPLY_COOKIE) == 0) {
+        if (r->corr == corr && memcmp(r->cookie, ck, IPC_REPLY_COOKIE) == 0) {
+            if (r->af == af && r->port == port && memcmp(r->addr, addr, 16) == 0) {
                 r->at = time(NULL);
                 return 0;
             }
             return -1;
         }
-        if (oldest < 0 || r->at < oldest_at) {
-            oldest = i;
-            oldest_at = r->at;
-        }
     }
-    int i = free_i >= 0 ? free_i : oldest;
-    if (i < 0) return -1;
+    if (free_i < 0) return -1;
+    int i = free_i;
     s->reply_to[i].in_use = 1;
     s->reply_to[i].corr = corr;
     s->reply_to[i].af = af;

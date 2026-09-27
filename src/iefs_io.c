@@ -290,10 +290,11 @@ static int uring_pread_regions(int fd, unsigned char *base, size_t n, const uint
     }
     uint32_t next = 0;
     uint32_t in_flight = 0;
+    uint32_t pending = 0;
     uint32_t done = 0;
     int fail = 0;
     while (done < todo && !fail) {
-        while (next < n_ext && in_flight < qd) {
+        while (next < n_ext && in_flight + pending < qd) {
             if (lens[next] == 0) {
                 next++;
                 continue;
@@ -305,15 +306,22 @@ static int uring_pread_regions(int fd, unsigned char *base, size_t n, const uint
                                (off_t)offs[next]);
             io_uring_sqe_set_data64(sqe, next);
             next++;
-            in_flight++;
+            pending++;
         }
-        if (in_flight == 0)
+        if (in_flight == 0 && pending == 0)
             break;
         int ret = io_uring_submit_and_wait(&ring, 1);
         if (ret < 0) {
             set_errf(err, err_cap, "iefs io_uring submit", -ret);
+            pending = 0;
             fail = 1;
             break;
+        }
+        if (ret > 0) {
+            uint32_t sub = (uint32_t)ret;
+            if (sub > pending) sub = pending;
+            in_flight += sub;
+            pending -= sub;
         }
         struct io_uring_cqe *cqe;
         unsigned head;
@@ -337,7 +345,7 @@ static int uring_pread_regions(int fd, unsigned char *base, size_t n, const uint
                                            (unsigned)(lens[idx] - have),
                                            (off_t)offs[idx] + (off_t)have);
                         io_uring_sqe_set_data64(retry, idx);
-                        in_flight++;
+                        pending++;
                     }
                 } else {
                     got[idx] = have;
@@ -351,8 +359,26 @@ static int uring_pread_regions(int fd, unsigned char *base, size_t n, const uint
     }
     while (in_flight) {
         struct io_uring_cqe *cqe;
-        if (io_uring_wait_cqe(&ring, &cqe) < 0)
+        struct __kernel_timespec ts;
+        ts.tv_sec = 2;
+        ts.tv_nsec = 0;
+        if (io_uring_wait_cqe_timeout(&ring, &cqe, &ts) < 0) {
+            fail = 1;
+#ifdef IORING_ASYNC_CANCEL_ALL
+            {
+                struct io_uring_sqe *cs = io_uring_get_sqe(&ring);
+                if (cs) {
+                    io_uring_prep_cancel(cs, NULL, IORING_ASYNC_CANCEL_ALL);
+                    io_uring_submit(&ring);
+                }
+            }
+            while (in_flight && io_uring_wait_cqe_timeout(&ring, &cqe, &ts) == 0) {
+                io_uring_cqe_seen(&ring, cqe);
+                in_flight--;
+            }
+#endif
             break;
+        }
         io_uring_cqe_seen(&ring, cqe);
         in_flight--;
     }
@@ -480,6 +506,35 @@ static int pread_extents_serial(int fd, unsigned char *buf, size_t n, const uint
     return 0;
 }
 
+/* Allocate the header plus the declared payload, not a larger st_size. */
+static int iefs_declared_span(int fd, size_t file_len, size_t *span, char *err, size_t err_cap) {
+    unsigned char hdr[24];
+    uint64_t plen = 0;
+    int i;
+    if (file_len < 24) {
+        set_err(err, err_cap, "iefs: truncated file");
+        return -1;
+    }
+    if (iefs_io_pread(fd, hdr, 24, 0, err, err_cap) != 0)
+        return -1;
+    if (memcmp(hdr, "IEF1", 4) != 0) {
+        set_err(err, err_cap, "iefs: bad magic");
+        return -1;
+    }
+    for (i = 0; i < 8; i++)
+        plen |= (uint64_t)hdr[8 + i] << (8 * i);
+    if (plen > (64ull << 30)) {
+        set_err(err, err_cap, "iefs: payload too large");
+        return -1;
+    }
+    if (24ull + plen > file_len) {
+        set_err(err, err_cap, "iefs: truncated file");
+        return -1;
+    }
+    *span = (size_t)(24ull + plen);
+    return 0;
+}
+
 int iefs_io_read_v3_assembled_fd(int fd, size_t file_len, unsigned char **out, size_t *out_len,
                                  const uint64_t *offs, const uint64_t *lens, uint32_t n_ext,
                                  char *err, size_t err_cap) {
@@ -493,7 +548,9 @@ int iefs_io_read_v3_assembled_fd(int fd, size_t file_len, unsigned char **out, s
         set_err(err, err_cap, "iefs: file too large");
         return -1;
     }
-    size_t n = file_len;
+    size_t n = 0;
+    if (iefs_declared_span(fd, file_len, &n, err, err_cap) != 0)
+        return -1;
     if (validate_extents(offs, lens, n_ext, n, err, err_cap) != 0)
         return -1;
 
@@ -706,11 +763,15 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
         close(fd);
         return -1;
     }
-    size_t n = (size_t)st.st_size;
     /* Same cap as iefs_format.h IEFS_MAX_PAYLOAD + IEFS_HEADER_SIZE (do not
      * include that header here: it pulls a.h, which macros `st`). */
     if ((uint64_t)st.st_size > (64ull << 30) + 24ull) {
         set_err(err, err_cap, "iefs: file too large");
+        close(fd);
+        return -1;
+    }
+    size_t n = 0;
+    if (iefs_declared_span(fd, (size_t)st.st_size, &n, err, err_cap) != 0) {
         close(fd);
         return -1;
     }

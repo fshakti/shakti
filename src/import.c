@@ -100,7 +100,17 @@ V *do_import(const char *name, Env *e) {
     Env *mod_env = env_new(e);
     Node *prog = parse(buf);
     V *r = eval(prog, mod_env);
-    v_free(r);
+    {
+        int stray = g_breaking || g_continuing || g_returning;
+        shakti_clear_flow();
+        v_free(r);
+        if (stray) {
+            node_free(prog);
+            free(buf);
+            env_free(mod_env);
+            return v_err("import: break or return at module top level");
+        }
+    }
     node_free(prog);
     free(buf);
     V *mk = v_list(mod_env->len), *mv = v_list(mod_env->len);

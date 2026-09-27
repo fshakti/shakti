@@ -114,6 +114,12 @@ static Token lex_fstring(Lexer *l) {
             }
         } else if(s[p]=='\\' && p+1<l->len) {
             p++;
+            if (s[p] == '{' || s[p] == '}') {
+                if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
+                if(!lex_append(l, &t, &qi, s[p])) return make_tok(T_EOF_);
+                p++;
+                continue;
+            }
             char escaped;
             switch(s[p]) {
             case 'n': escaped='\n'; break;

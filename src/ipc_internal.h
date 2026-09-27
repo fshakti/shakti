@@ -198,7 +198,7 @@ int ipc_sock_send_parts(IpcHandle *s,
                         char *err, size_t err_cap);
 int ipc_sock_recv_msg(IpcHandle *s, int block, char **out, size_t *out_len, char *err, size_t err_cap);
 
-int ipc_mcast_make_reply_sock(int af, uint16_t *port_out, char *err, size_t err_cap);
+int ipc_mcast_make_reply_sock(int af, const char *iface, uint16_t *port_out, char *err, size_t err_cap);
 int ipc_mcast_open(const char *group, int port, const char *iface, const char *source,
                    int *af_out, struct sockaddr_storage *grp_out, socklen_t *grp_len_out,
                    char *err, size_t err_cap);

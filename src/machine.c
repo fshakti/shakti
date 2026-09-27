@@ -244,6 +244,33 @@ static void linux_cpu_model(char *model, size_t modelsz) {
     fclose(f);
 }
 
+static int linux_count_distinct_cpuinfo_key(const char *key) {
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (!f)
+        return 0;
+    char line[256];
+    int ids[256];
+    int n = 0;
+    size_t klen = strlen(key);
+    while (fgets(line, sizeof line, f)) {
+        if (strncmp(line, key, klen)) continue;
+        const char *p = line + klen;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != ':') continue;
+        p++;
+        char *end = NULL;
+        long v = strtol(p, &end, 10);
+        if (end == p) continue;
+        int seen = 0;
+        for (int i = 0; i < n; i++) {
+            if (ids[i] == (int)v) { seen = 1; break; }
+        }
+        if (!seen && n < 256) ids[n++] = (int)v;
+    }
+    fclose(f);
+    return n;
+}
+
 static int linux_count_cpuinfo_key(const char *key) {
     FILE *f = fopen("/proc/cpuinfo", "r");
     if (!f)
@@ -407,7 +434,7 @@ static void fill_cpu(V *root) {
         mput_out(cpu, "model", "Model", model);
     int threads = linux_count_cpuinfo_key("processor");
     int cores = linux_count_cpuinfo_key("cpu cores");
-    int sockets = linux_count_cpuinfo_key("physical id");
+    int sockets = linux_count_distinct_cpuinfo_key("physical id");
     if (threads <= 0)
         threads = (int)sysconf(_SC_NPROCESSORS_ONLN);
     if (cores <= 0)

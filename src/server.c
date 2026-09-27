@@ -16,6 +16,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define SERVE_MAX_REQ (256 * 1024)
@@ -441,33 +442,43 @@ static const char *dict_str(V *d, const char *key, const char *def) {
 
 static int http_content_length(const char *buf) {
     const char *p = buf;
+    int seen = 0;
+    int val = -1;
     while (p && *p) {
         const char *eol = strstr(p, "\r\n");
         if (!eol) break;
         if (eol == p) break;
-        if ((eol - p) >= 15 && !strncasecmp(p, "Content-Length:", 15)) {
-            const char *num = p + 15;
+        const char *colon = NULL;
+        for (const char *q = p; q < eol; q++) {
+            if (*q == ':') { colon = q; break; }
+        }
+        if (colon && (size_t)(colon - p) == 14 && !strncasecmp(p, "Content-Length", 14)) {
+            if (seen) return -2;
+            const char *num = colon + 1;
             while (num < eol && (*num == ' ' || *num == '\t')) num++;
-            if (num >= eol) return -2;
+            if (num >= eol || *num == '+' || *num == '-' || *num < '0' || *num > '9') return -2;
             char *end = NULL;
             long v = strtol(num, &end, 10);
             if (end == num || v < 0 || v > (long)SERVE_MAX_REQ) return -2;
             while (end < eol && (*end == ' ' || *end == '\t')) end++;
             if (end != eol) return -2;
-            return (int)v;
+            seen = 1;
+            val = (int)v;
         }
         p = eol + 2;
     }
-    return -1;
+    return seen ? val : -1;
 }
 
-static ssize_t http_read_request(int fd, char *buf, size_t cap) {
+static ssize_t http_read_request(int fd, char *buf, size_t cap, time_t deadline) {
     size_t nread = 0;
     while (nread + 1 < cap) {
+        if (time(NULL) >= deadline) return -1;
         ssize_t r = conn_read(fd, buf + nread, cap - 1 - nread);
         if (r < 0) {
             if (errno == EINTR) continue;
-            return nread ? (ssize_t)nread : -1;
+            if ((errno == EAGAIN || errno == EWOULDBLOCK) && time(NULL) < deadline) continue;
+            return -1;
         }
         if (r == 0) break;
         nread += (size_t)r;
@@ -515,7 +526,7 @@ static void handle_client(int cfd, Env *global) {
         client_done(cfd);
         return;
     }
-    ssize_t nread = http_read_request(cfd, buf, SERVE_MAX_REQ);
+    ssize_t nread = http_read_request(cfd, buf, SERVE_MAX_REQ, time(NULL) + 30);
     if (nread <= 0) {
         free(buf);
         client_done(cfd);
@@ -755,9 +766,10 @@ void server_serve(int port, Env *global_env) {
         }
         {
             struct timeval tv;
-            tv.tv_sec = 30;
+            tv.tv_sec = 1;
             tv.tv_usec = 0;
             setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+            tv.tv_sec = 30;
             setsockopt(cfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
         }
         handle_client(cfd, global_env);

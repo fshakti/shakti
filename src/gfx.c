@@ -194,20 +194,26 @@ void gfx_clear(uint32_t color) {
 }
 
 void gfx_fill_rect(int x, int y, int w, int h, uint32_t color) {
-    int j, x0, x1;
+    int64_t x0, x1, y0, hh;
+    int j, ix, iy, dw, dh;
     if (!g.fb || w <= 0 || h <= 0) return;
-    x0 = x < 0 ? 0 : x;
-    if (y < 0) { h += y; y = 0; }
-    if (h <= 0) return;
-    x1 = x + w;
+    x0 = x < 0 ? 0 : (int64_t)x;
+    y0 = y;
+    hh = h;
+    if (y0 < 0) { hh += y0; y0 = 0; }
+    if (hh <= 0) return;
+    x1 = (int64_t)x + (int64_t)w;
     if (x1 > g.design_w) x1 = g.design_w;
-    w = x1 - x0;
-    if (w <= 0 || y >= g.design_h) return;
-    if (h > g.design_h - y) h = g.design_h - y;
-    for (j = 0; j < h; j++) {
-        uint32_t *row = g.fb + (size_t)(y + j) * (size_t)g.design_w + (size_t)x0;
+    if (x0 >= x1 || y0 >= g.design_h) return;
+    ix = (int)x0;
+    iy = (int)y0;
+    dw = (int)(x1 - x0);
+    dh = (int)hh;
+    if (dh > g.design_h - iy) dh = g.design_h - iy;
+    for (j = 0; j < dh; j++) {
+        uint32_t *row = g.fb + (size_t)(iy + j) * (size_t)g.design_w + (size_t)ix;
         int i;
-        for (i = 0; i < w; i++) row[i] = color;
+        for (i = 0; i < dw; i++) row[i] = color;
     }
     g.dirty = 1;
 }
@@ -248,7 +254,13 @@ void gfx_fill_circle(int cx, int cy, int r, uint32_t color) {
     for (y = -r; y <= r; y++) {
         int64_t dy2 = (int64_t)r * (int64_t)r - (int64_t)y * (int64_t)y;
         int dx = dy2 > 0 ? (int)sqrt((double)dy2) : 0;
-        gfx_fill_rect(cx - dx, cy + y, dx * 2 + 1, 1, color);
+        int64_t left = (int64_t)cx - (int64_t)dx;
+        int64_t right = left + (int64_t)dx * 2 + 1;
+        int64_t rowy = (int64_t)cy + (int64_t)y;
+        if (rowy < 0 || rowy >= g.design_h || right <= 0 || left >= g.design_w) continue;
+        if (left < 0) left = 0;
+        if (right > g.design_w) right = g.design_w;
+        gfx_fill_rect((int)left, (int)rowy, (int)(right - left), 1, color);
     }
     g.dirty = 1;
 }

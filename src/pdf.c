@@ -22,6 +22,7 @@
 #define PDF_MAX_PARSE_DEPTH 64
 #define PDF_MAX_PAGE_DEPTH 256
 #define PDF_MAX_FILE_BYTES (256u * 1024u * 1024u)
+#define PDF_MAX_TEXT_BYTES (32u * 1024u * 1024u)
 
 typedef struct {
     char *data;
@@ -1375,6 +1376,11 @@ V *bi_pdf_text(V **a, int n) {
             return v_err("pdf_text: extract failed");
         }
         buf_free(&content);
+        if (text.len > PDF_MAX_TEXT_BYTES) {
+            buf_free(&text);
+            free(pages);
+            return v_err("pdf_text: text too large");
+        }
         if (i + 1 < to && text.len && buf_append(&text, "\n", 1) < 0) {
             buf_free(&text);
             free(pages);

@@ -121,14 +121,10 @@ static int ipc_rdma_setup_conn(IpcRdmaConn *c, char *err, size_t err_cap) {
         snprintf(err, err_cap, "ipc rdma: reg recv: %s", strerror(errno));
         return -1;
     }
-    if (c->send_flags & IBV_SEND_INLINE)
-        c->send_mr = c->recv_mr;
-    else {
-        c->send_mr = rdma_reg_msgs(c->id, c->send_buf, IPC_RDMA_BUF);
-        if (!c->send_mr) {
-            snprintf(err, err_cap, "ipc rdma: reg send: %s", strerror(errno));
-            return -1;
-        }
+    c->send_mr = rdma_reg_msgs(c->id, c->send_buf, IPC_RDMA_BUF);
+    if (!c->send_mr) {
+        snprintf(err, err_cap, "ipc rdma: reg send: %s", strerror(errno));
+        return -1;
     }
     if (rdma_post_recv(c->id, NULL, c->recv_buf, IPC_RDMA_BUF, c->recv_mr) != 0) {
         snprintf(err, err_cap, "ipc rdma: post_recv: %s", strerror(errno));
@@ -153,7 +149,8 @@ static void ipc_rdma_wait_cq(struct ibv_cq *cq) {
 static int ipc_rdma_wait_send(IpcRdmaConn *c, int block, char *err, size_t err_cap) {
     struct ibv_wc wc;
     for (;;) {
-        int rc = rdma_get_send_comp(c->id, &wc);
+        int rc = block ? rdma_get_send_comp(c->id, &wc)
+                       : (c->id && c->id->send_cq ? ibv_poll_cq(c->id->send_cq, 1, &wc) : -1);
         if (rc < 0) {
             snprintf(err, err_cap, "ipc rdma: send comp: %s", strerror(errno));
             return -1;
@@ -178,7 +175,8 @@ static int ipc_rdma_drain_recv(IpcRdmaConn *c, int block, char *err, size_t err_
     if (c->recv_ready) return 0;
     struct ibv_wc wc;
     for (;;) {
-        int rc = rdma_get_recv_comp(c->id, &wc);
+        int rc = block ? rdma_get_recv_comp(c->id, &wc)
+                       : (c->id && c->id->recv_cq ? ibv_poll_cq(c->id->recv_cq, 1, &wc) : -1);
         if (rc < 0) {
             snprintf(err, err_cap, "ipc rdma: recv comp: %s", strerror(errno));
             return -1;

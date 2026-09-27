@@ -454,20 +454,24 @@ V *bi_hdb_create(V **a, int n) {
     V *entry = v_dict_empty();
     v_dict_put(entry, "part_key", v_str(part_key));
     v_dict_put(entry, "schema", v_ref(a[2]));
-    v_dict_put(tables, a[1]->s, entry);
+    V *saved = v_ref(tables);
+    V *copy = v_copy(tables);
+    if (!copy || copy->t == T_ERR) {
+        v_free(entry);
+        v_free(saved);
+        if (copy) v_free(copy);
+        return v_err("hdb_create: out of memory");
+    }
+    v_dict_put(copy, a[1]->s, entry);
+    v_dict_set(meta, "tables", copy);
+    v_free(copy);
 
     if (hdb_save_meta(a[0]) != 0) {
-        if (tables->n > 0 && tables->keys && tables->keys->L[tables->n - 1] &&
-            tables->keys->L[tables->n - 1]->t == T_STR &&
-            !strcmp(tables->keys->L[tables->n - 1]->s, a[1]->s)) {
-            v_free(tables->keys->L[tables->n - 1]);
-            v_free(tables->vals->L[tables->n - 1]);
-            tables->n--;
-            tables->keys->n--;
-            tables->vals->n--;
-        }
+        v_dict_set(meta, "tables", saved);
+        v_free(saved);
         return v_err("hdb_create: save meta failed");
     }
+    v_free(saved);
     return v_nil();
 }
 
@@ -666,6 +670,10 @@ V *bi_hdb_next(V **a, int n) {
         root_v->t != T_STR || !table_v || table_v->t != T_STR)
         return v_err("hdb_next: bad cursor");
 
+    if (idx_v->j == INT64_MAX)
+        return v_err("hdb_next: index overflow");
+    if (!hdb_safe_name(root_v->s) || !hdb_safe_name(table_v->s))
+        return v_err("hdb_next: bad root or table");
     int64_t idx = idx_v->j + 1;
     if (idx < 0 || idx >= parts->n) {
         v_dict_put(c, "idx", v_int(idx));

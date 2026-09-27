@@ -1484,7 +1484,7 @@ static V *bi_reverse(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_CVEC){V*r=v_cvec(v->n);for(int64_t i=0;i<v->n;i++)r->B[i]=v->B[v->n-1-i];return r;}
     if(v->t==T_BVEC){V*r=v_bvec(v->n);for(int64_t i=0;i<v->n;i++)r->B[i]=v->B[v->n-1-i];return r;}
     if(v->t==T_LIST){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_ref(v->L[v->n-1-i]);return r;}
-    if(v->t==T_STR){int64_t sl=strlen(v->s);char*b=malloc(sl+1);for(int64_t i=0;i<sl;i++)b[i]=v->s[sl-1-i];b[sl]=0;V*r=v_str(b);free(b);return r;}
+    if(v->t==T_STR){int64_t sl=strlen(v->s);char*b=malloc(sl+1);if(!b)return v_err("reverse: out of memory");for(int64_t i=0;i<sl;i++)b[i]=v->s[sl-1-i];b[sl]=0;V*r=v_str(b);free(b);return r;}
     return v_copy(v);}
 static V *bi_zip(V**a,in){
     P(n<2,v_list(0))int64_t ml=a[0]->n;for(int i=1;i<n;i++)if(a[i]->n<ml)ml=a[i]->n;
@@ -1561,6 +1561,7 @@ static V *bi_filter(V**a,in,Env*e){
     P(n<2||a[0]->t!=T_FN,v_err("filter(fn,iter)"))
     V*fn=a[0],*iter=a[1];int64_t cnt=iter->t==T_STR?(int64_t)strlen(iter->s):iter->n;
     V**tmp=calloc(cnt?cnt:1,sizeof(V*));int64_t out=0;
+    if(!tmp)return v_err("filter: out of memory");
     if(fn->n==-1) {
         for(int64_t i=0;i<cnt;++i){
             V*item;if(iter->t==T_IVEC)item=v_int(iter->J[i]);else if(iter->t==T_FVEC)item=v_float(iter->F[i]);
@@ -1592,8 +1593,17 @@ static V *bi_pop(V**a,in){P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
     return a[0]->L[--a[0]->n];}
 static V *bi_keys(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->keys):v_list(0);}
 static V *bi_values(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->vals):v_list(0);}
+static V *list_ref_elems(V *src) {
+    V *c = v_list(src ? src->n : 0);
+    int64_t i;
+    if (!src) return c;
+    for (i = 0; i < src->n; i++) c->L[i] = src->L[i] ? v_ref(src->L[i]) : v_nil();
+    return c;
+}
 static V *bi_table(V**a,in,V**kwn,V**kwv,int nkw){
-    P(n==1&&a[0]->t==T_DICT,v_table(a[0]->keys,a[0]->vals))
+    if(n==1&&a[0]->t==T_DICT){
+        V*k=list_ref_elems(a[0]->keys),*v=list_ref_elems(a[0]->vals);
+        V*r=v_table(k,v);v_free(k);v_free(v);return r;}
     if(nkw>0){V*p=v_list(nkw),*d=v_list(nkw);
         for(int i=0;i<nkw;i++){p->L[i]=v_ref(kwn[i]);d->L[i]=v_ref(kwv[i]);}
         V*r=v_table(p,d);v_free(p);v_free(d);return r;}
@@ -1872,6 +1882,11 @@ static V *bi_eval(V **a, int n, Env *e) {
     if (!prog) return v_err("eval: parse failed");
     r = eval(prog, root);
     node_free(prog);
+    if (g_breaking || g_continuing || g_returning) {
+        shakti_clear_flow();
+        v_free(r);
+        return v_err("eval: break or return outside loop");
+    }
     if (g_error) {
         V *er = g_error_val ? g_error_val : v_err("eval: runtime error");
         g_error_val = NULL;

@@ -128,6 +128,10 @@ static int rest_has_ctl(const char *s) {
     return 0;
 }
 
+static int rest_loopback_allowed(void) {
+    const char *e = getenv("SHAKTI_REST_ALLOW_LOOPBACK");
+    return e && e[0] == '1' && e[1] == 0;
+}
 /* Only allow real HTTP(S) URLs. This also prevents a leading '-' from being
  * interpreted by curl as an option, and blocks file://, etc. */
 static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
@@ -135,7 +139,7 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         const struct sockaddr_in *sin4 = (const struct sockaddr_in *)sa;
         uint32_t a = ntohl(sin4->sin_addr.s_addr);
-        if ((a & 0xff000000u) == 0x7f000000u && !getenv("SHAKTI_REST_ALLOW_LOOPBACK")) return 1; /* 127/8 */
+        if ((a & 0xff000000u) == 0x7f000000u && !rest_loopback_allowed()) return 1; /* 127/8 */
         if ((a & 0xff000000u) == 0x0a000000u) return 1; /* 10/8 */
         if ((a & 0xfff00000u) == 0xac100000u) return 1; /* 172.16/12 */
         if ((a & 0xffff0000u) == 0xc0a80000u) return 1; /* 192.168/16 */
@@ -155,9 +159,10 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
         int zero = 1;
         for (int i = 0; i < 15; i++) if (b[i]) { zero = 0; break; }
         if (zero && b[15] == 0) return 1; /* :: */
-        if (zero && b[15] == 1 && !getenv("SHAKTI_REST_ALLOW_LOOPBACK")) return 1; /* ::1 */
+        if (zero && b[15] == 1 && !rest_loopback_allowed()) return 1; /* ::1 */
         if (b[0] == 0xff) return 1; /* ff00::/8 */
         if (b[0] == 0x20 && b[1] == 0x02) return 1; /* 2002::/16 6to4 */
+        if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00) return 1; /* 2001:0000::/32 Teredo */
         if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) return 1; /* 64:ff9b::/96 */
         if (b[0] == 0xfe && (b[1] & 0xc0) == 0xc0) return 1; /* fec0::/10 */
         if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return 1; /* fe80::/10 */
@@ -201,6 +206,17 @@ static int rest_extract_host(const char *url, char *host, size_t host_cap) {
             q++;
         }
     }
+    if (*p == '[') {
+        size_t i = 0;
+        p++;
+        while (p[i] && p[i] != ']' && i + 1 < host_cap) {
+            host[i] = p[i];
+            i++;
+        }
+        if (p[i] != ']') return 0;
+        host[i] = 0;
+        return i > 0;
+    }
     size_t i = 0;
     while (p[i] && p[i] != '/' && p[i] != ':' && p[i] != '?' && p[i] != '#' && i + 1 < host_cap) {
         host[i] = p[i];
@@ -218,6 +234,11 @@ static int rest_extract_port(const char *url) {
     if (!strncmp(p, "https://", 8)) { p += 8; https = 1; }
     else if (!strncmp(p, "http://", 7)) p += 7;
     else return 0;
+    if (*p == '[') {
+        const char *rb = strchr(p, ']');
+        if (!rb) return 0;
+        p = rb + 1;
+    }
     while (*p && *p != '/' && *p != ':' && *p != '?' && *p != '#') p++;
     if (*p == ':') {
         p++;
@@ -973,6 +994,7 @@ static V *rest_do_read(int conn_h) {
         return v_err("rest_read: bad request line");
 
     V *hdrs = v_dict_empty();
+    int nhdr = 0;
     size_t hdr_len = 0;
     char hdr_block[REST_MAX_HDR];
     hdr_block[0] = 0;
@@ -984,11 +1006,23 @@ static V *rest_do_read(int conn_h) {
         }
         size_t ll = strlen(line);
         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == '\n')) line[--ll] = 0;
-        if (!strcasecmp(line, "Transfer-Encoding") || !strncasecmp(line, "Transfer-Encoding:", 18)) {
-            v_free(hdrs);
-            return v_err("rest_read: Transfer-Encoding is not supported");
+        {
+            const char *hn = line;
+            while (*hn == ' ' || *hn == '\t') hn++;
+            if (!strncasecmp(hn, "Transfer-Encoding", 17)) {
+                const char *c = hn + 17;
+                while (*c == ' ' || *c == '\t') c++;
+                if (*c == ':' || *c == 0) {
+                    v_free(hdrs);
+                    return v_err("rest_read: Transfer-Encoding is not supported");
+                }
+            }
         }
         if (line[0] == 0) break;
+        if (++nhdr > 128) {
+            v_free(hdrs);
+            return v_err("rest_read: too many headers");
+        }
         if (hdr_len + ll + 2 >= REST_MAX_HDR) {
             v_free(hdrs);
             return v_err("rest_read: headers too large");
@@ -1001,7 +1035,13 @@ static V *rest_do_read(int conn_h) {
         hdr_block[hdr_len] = 0;
         char *colon = strchr(line, ':');
         if (colon) {
-            *colon = 0;
+            char *name_end = colon;
+            while (name_end > line && (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
+            *name_end = 0;
+            if (!strcasecmp(line, "Content-Length") && v_dict_get(hdrs, "Content-Length")) {
+                v_free(hdrs);
+                return v_err("rest_read: duplicate Content-Length");
+            }
             char *val = colon + 1;
             while (*val == ' ' || *val == '\t') val++;
             v_dict_put(hdrs, line, v_str(val));
@@ -1057,7 +1097,7 @@ static V *rest_do_read(int conn_h) {
             if (v->t == T_STR) {
                 char *end = NULL;
                 unsigned long long cl = strtoull(v->s, &end, 10);
-                if (!v->s[0] || (end && *end) || cl > SIZE_MAX) {
+                if (!v->s[0] || v->s[0] == '+' || v->s[0] == '-' || (end && *end) || cl > SIZE_MAX) {
                     v_free(hdrs);
                     return v_err("rest_read: bad Content-Length");
                 }

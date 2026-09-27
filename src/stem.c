@@ -466,7 +466,8 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
         long cpos;
         long skip;
         if (fread(chdr, 1, 8, fp) != 8) break;
-        csz = (unsigned int)(chdr[4] | (chdr[5] << 8) | (chdr[6] << 16) | (chdr[7] << 24));
+        csz = (unsigned int)chdr[4] | ((unsigned int)chdr[5] << 8) |
+              ((unsigned int)chdr[6] << 16) | ((unsigned int)chdr[7] << 24);
         cpos = ftell(fp);
         if (cpos < 0 || cpos > file_end) { fclose(fp); return -1; }
         skip = cpos + (long)((csz + 1u) & ~1u);
@@ -480,7 +481,8 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
             if (fread(fbuf, 1, need, fp) != need) { fclose(fp); return -1; }
             fmt = (unsigned short)(fbuf[0] | (fbuf[1] << 8));
             ch = (unsigned short)(fbuf[2] | (fbuf[3] << 8));
-            sr = (unsigned int)(fbuf[4] | (fbuf[5] << 8) | (fbuf[6] << 16) | (fbuf[7] << 24));
+            sr = (unsigned int)fbuf[4] | ((unsigned int)fbuf[5] << 8) |
+                 ((unsigned int)fbuf[6] << 16) | ((unsigned int)fbuf[7] << 24);
             if (sr < 8000u || sr > 192000u) { fclose(fp); return -1; }
             bps = (unsigned short)(fbuf[14] | (fbuf[15] << 8));
             have_fmt = 1;

@@ -244,6 +244,12 @@ char *shakti_eval(const char *src) {
     }
     if (!prog) return strdup("");
     result = eval(prog, g_env);
+    if (g_breaking || g_continuing || g_returning) {
+        shakti_clear_flow();
+        v_free(result);
+        node_free(prog);
+        return strdup("break or return outside loop");
+    }
     if (g_error) {
         const char *msg = (g_error_val && g_error_val->s) ? g_error_val->s : "error";
         out = strdup(msg);
@@ -259,6 +265,7 @@ char *shakti_eval(const char *src) {
     }
     v_free(result);
     node_free(prog);
+    shakti_clear_flow();
     return out ? out : strdup("");
 }
 

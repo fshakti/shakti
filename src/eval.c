@@ -48,22 +48,22 @@ static int fstr_fmt_valid(const char *spec) {
     return *p == '\0';
 }
 static int slice_span_count(int64_t start, int64_t stop, int64_t step, int64_t *count) {
-    int64_t span, adj, n, nstep;
+    int64_t span, sm1, q, nstep;
     if (step > 0) {
         if (start >= stop) { *count = 0; return 0; }
         if (__builtin_sub_overflow(stop, start, &span)) return -1;
-        if (__builtin_sub_overflow(step, 1, &adj)) return -1;
-        if (__builtin_add_overflow(span, adj, &n)) return -1;
-        *count = n / step;
+        if (__builtin_sub_overflow(span, 1, &sm1)) return -1;
+        q = sm1 / step;
+        if (__builtin_add_overflow(q, 1, count)) return -1;
         return 0;
     }
     if (start <= stop) { *count = 0; return 0; }
     if (step == INT64_MIN) return -1;
     nstep = -step;
     if (__builtin_sub_overflow(start, stop, &span)) return -1;
-    if (__builtin_sub_overflow(nstep, 1, &adj)) return -1;
-    if (__builtin_add_overflow(span, adj, &n)) return -1;
-    *count = n / nstep;
+    if (__builtin_sub_overflow(span, 1, &sm1)) return -1;
+    q = sm1 / nstep;
+    if (__builtin_add_overflow(q, 1, count)) return -1;
     return 0;
 }
 static int slice_at(int64_t start, int64_t k, int64_t step, int64_t len, int64_t *idx) {
@@ -422,6 +422,68 @@ static V *try_fast_counting_while(Node *n, Env *e) {
     return v_nil();
 }
 
+static V *list_shallow(V *src) {
+    V *c = v_list(src->n);
+    int64_t i;
+    for (i = 0; i < src->n; i++)
+        c->L[i] = src->L[i] ? v_ref(src->L[i]) : v_nil();
+    return c;
+}
+/* Copy a shared list into the name or index that owns it. 0 ok, -1 no slot. */
+static int cow_list_arg(Env *e, Node *slot, V **objp) {
+    V *obj = *objp;
+    V *copy;
+    if (!obj || obj->t != T_LIST || obj->rc <= 2) return 0;
+    copy = list_shallow(obj);
+    if (slot && slot->type == N_NAME && slot->sval) {
+        if (!env_update(e, slot->sval, copy))
+            env_set(e, slot->sval, copy);
+    } else if (slot && slot->type == N_INDEX && slot->nch >= 2) {
+        V *box = eval(slot->ch[0], e);
+        V *idx = eval(slot->ch[1], e);
+        int placed = 0;
+        if (box && box->t == T_LIST && idx && (idx->t == T_INT || idx->t == T_CHAR)) {
+            int64_t i = idx->j;
+            if (i < 0) i += box->n;
+            if (i >= 0 && i < box->n && box->L[i] == obj) {
+                v_free(box->L[i]);
+                box->L[i] = v_ref(copy);
+                placed = 1;
+            }
+        } else if (box && box->t == T_DICT && idx && idx->t == T_INT && box->vals) {
+            int64_t i = idx->j;
+            if (i < 0) i += box->n;
+            v_list_unshare(&box->vals);
+            if (i >= 0 && i < box->n && box->vals->L[i] == obj) {
+                v_free(box->vals->L[i]);
+                box->vals->L[i] = v_ref(copy);
+                placed = 1;
+            }
+        } else if (box && box->t == T_TABLE && idx && idx->t == T_STR && box->vals && box->keys) {
+            int64_t j;
+            v_list_unshare(&box->vals);
+            for (j = 0; j < box->keys->n; j++) {
+                if (box->keys->L[j] && box->keys->L[j]->t == T_STR && box->vals->L[j] == obj &&
+                    !strcmp(box->keys->L[j]->s, idx->s)) {
+                    v_free(box->vals->L[j]);
+                    box->vals->L[j] = v_ref(copy);
+                    placed = 1;
+                    break;
+                }
+            }
+        }
+        if (box) v_free(box);
+        if (idx) v_free(idx);
+        if (!placed) { v_free(copy); return -1; }
+    } else {
+        v_free(copy);
+        return -1;
+    }
+    v_free(obj);
+    *objp = v_ref(copy);
+    v_free(copy);
+    return 0;
+}
 static int shakti_call_depth_limit(void) {
     if (g_call_depth_limit < 0) {
         const char *e = getenv("SHAKTI_CALL_MAX_DEPTH");
@@ -609,7 +671,13 @@ V *eval(Node *n, Env *e) {
         V *vals = eval_insert_values(n->ch[1], e);
         P(vals->t == T_ERR,(v_free(cols),vals))
         V *r = table_sql_insert(existing, cols, vals);
-        if (r && r->t != T_ERR && r != existing) env_update(e, n->sval, r);
+        if (r && r->t == T_ERR) {
+            g_error = 1;
+            if (g_error_val) v_free(g_error_val);
+            g_error_val = v_ref(r);
+        } else if (r && r != existing) {
+            env_update(e, n->sval, r);
+        }
         v_free(cols); v_free(vals);
         return r;
     }
@@ -1065,9 +1133,12 @@ V *eval(Node *n, Env *e) {
                 } else if(idx->t==T_INT) {
                     int64_t i = idx->j;
                     if(i<0) i+=obj->n;
-                    if(i>=0 && i<obj->n) {
-                        v_free(obj->vals->L[i]);
-                        obj->vals->L[i] = v_ref(val);
+                    if(i>=0 && i<obj->n && obj->vals) {
+                        v_list_unshare(&obj->vals);
+                        if (i < obj->vals->n) {
+                            v_free(obj->vals->L[i]);
+                            obj->vals->L[i] = v_ref(val);
+                        }
                     }
                 }
                 v_free(obj); v_free(idx); v_free(val);
@@ -1443,6 +1514,13 @@ V *eval(Node *n, Env *e) {
                 free(args);
                 return r;
             }
+            if ((!strcmp(method, "pop") || !strcmp(method, "append")) &&
+                cow_list_arg(e, fn_node->ch[0], &obj) < 0) {
+                v_free(obj);
+                for(int i=0;i<nargs;i++) v_free(args[i]);
+                free(args);
+                return v_err("shared list");
+            }
             V *r = method_call(obj, method, args, nargs, e);
             v_free(obj);
             for(int i=0;i<nargs;i++) v_free(args[i]);
@@ -1477,6 +1555,14 @@ V *eval(Node *n, Env *e) {
             }
         }
         if(fn_node->type == N_NAME && is_builtin(fn_node->sval)) {
+            if ((!strcmp(fn_node->sval, "pop") || !strcmp(fn_node->sval, "append")) &&
+                nargs >= 1 && n->nch > 1 && n->ch[1]->type != N_KWARG &&
+                cow_list_arg(e, n->ch[1], &args[0]) < 0) {
+                for(int i=0;i<nargs;i++) v_free(args[i]);
+                for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+                free(args); free(kwnames); free(kwvals);
+                return v_err("shared list");
+            }
             V *r = builtin_call(fn_node->sval, args, nargs, kwnames, kwvals, nkw, e);
             for(int i=0;i<nargs;i++) v_free(args[i]);
             for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
@@ -1732,6 +1818,7 @@ V *eval(Node *n, Env *e) {
         V *rv;
         if(n->nch > 0) rv = eval(n->ch[0], e);
         else rv = v_nil();
+        if (g_retval) v_free(g_retval);
         g_retval = rv;
         g_returning = 1;
         return v_nil();
@@ -1754,35 +1841,79 @@ V *eval(Node *n, Env *e) {
     case N_TRY: {
         /* Slots: 0 try, 1 except, 2 else, 3 finally. Missing clauses are N_PASS. */
         int prev_error = g_error;
+        int has_except = n->nch > 1 && n->ch[1]->type != N_PASS;
+        int pending_error = 0;
+        V *pending_err = NULL;
         g_error = 0;
         V *r = n->nch > 0 ? eval(n->ch[0], e) : v_nil();
         int flow = g_returning || g_breaking || g_continuing;
         int failed = g_error || (r && r->t == T_ERR);
-        if (failed && !flow) {
+        if (failed && !flow && has_except) {
             g_error = 0;
             if (n->sval && g_error_val) env_set(e, n->sval, g_error_val);
             else if (n->sval && r && r->t == T_ERR) env_set(e, n->sval, r);
             if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
             v_free(r);
-            r = (n->nch > 1 && n->ch[1]->type != N_PASS) ? eval(n->ch[1], e) : v_nil();
+            r = eval(n->ch[1], e);
+        } else if (failed && !flow) {
+            pending_error = 1;
+            if (g_error_val) {
+                pending_err = g_error_val;
+                g_error_val = NULL;
+            } else if (r && r->t == T_ERR) {
+                pending_err = v_ref(r);
+            } else {
+                pending_err = v_err("Exception");
+            }
+            g_error = 0;
+            v_free(r);
+            r = v_nil();
         } else if (!failed && !flow && n->nch > 2 && n->ch[2]->type != N_PASS) {
             v_free(r);
             r = eval(n->ch[2], e);
         }
         int handler_error = g_error;
+        V *handler_val = g_error_val;
+        int sb = g_breaking, sc = g_continuing, sr = g_returning;
+        V *try_ret = g_retval;
+        g_error = 0;
+        g_error_val = NULL;
+        g_retval = NULL;
+        g_breaking = g_continuing = g_returning = 0;
         if (n->nch > 3 && n->ch[3]->type != N_PASS) {
-            int sb = g_breaking, sc = g_continuing, sr = g_returning;
-            g_breaking = g_continuing = g_returning = 0;
             V *f = eval(n->ch[3], e);
             v_free(f);
-            if (!(g_breaking || g_continuing || g_returning)) {
-                g_breaking = sb;
-                g_continuing = sc;
-                g_returning = sr;
-            }
         }
-        if (!handler_error && !g_error)
+        if (g_error) {
+            if (try_ret) v_free(try_ret);
+            if (pending_err) v_free(pending_err);
+            if (handler_val) v_free(handler_val);
+            v_free(r);
+            return v_nil();
+        }
+        if (g_returning || g_breaking || g_continuing) {
+            if (try_ret && try_ret != g_retval) v_free(try_ret);
+            if (pending_err) v_free(pending_err);
+            if (handler_val) v_free(handler_val);
+            v_free(r);
+            return v_nil();
+        }
+        g_breaking = sb;
+        g_continuing = sc;
+        g_returning = sr;
+        if (sr) g_retval = try_ret;
+        else if (try_ret) v_free(try_ret);
+        if (pending_error) {
+            g_error = 1;
+            g_error_val = pending_err;
+            if (handler_val) v_free(handler_val);
+        } else if (handler_error) {
+            g_error = 1;
+            g_error_val = handler_val;
+        } else {
+            if (handler_val) v_free(handler_val);
             g_error = prev_error;
+        }
         return r;
     }
     case N_WITH: {

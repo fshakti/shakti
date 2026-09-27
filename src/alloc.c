@@ -19,9 +19,14 @@ static uint32_t hash_seed(void) {
     return seed;
 }
 uint32_t fnv1a(const char *s) {
-    uint32_t h = 2166136261u ^ hash_seed();
+    uint32_t seed = hash_seed();
+    uint32_t h = 2166136261u ^ seed;
     if (!s) return h ? h : 1;
-    for (; *s; s++) h = (h ^ (unsigned char)*s) * 16777619u;
+    for (; *s; s++) {
+        h ^= (unsigned char)*s;
+        h *= 16777619u;
+        h ^= seed;
+    }
     return h ? h : 1;
 }
 void shakti_oom(const char *where) {

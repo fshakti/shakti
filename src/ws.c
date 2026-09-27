@@ -272,7 +272,8 @@ static int ws_frame_send(WsIo *io, int is_client, int opcode, const void *data, 
     return 0;
 }
 
-/* True when rx already holds one complete frame header and payload. */
+/* True when rx already holds one complete frame header and payload.
+ * Returns -1 when a buffered header declares a payload above WS_MAX_PAYLOAD. */
 static int ws_rx_has_frame(const WsHandle *h) {
     if (!h || h->rx_len < 2) return 0;
     unsigned char h1 = h->rx[1];
@@ -289,7 +290,7 @@ static int ws_rx_has_frame(const WsHandle *h) {
         for (int i = 0; i < 8; i++) n = (n << 8) | h->rx[off + (size_t)i];
         off += 8;
     }
-    if (n > WS_MAX_PAYLOAD) return 0;
+    if (n > WS_MAX_PAYLOAD) return -1;
     if (masked) off += 4;
     return h->rx_len >= off + (size_t)n;
 }
@@ -334,7 +335,10 @@ static int ws_frame_recv_buffered(WsIo *io, int is_client, int *out_opcode, char
             for (int i = 0; i < 8; i++) n = (n << 8) | h->rx[off + (size_t)i];
             off += 8;
         }
-        if (n > WS_MAX_PAYLOAD) return -1;
+        if (n > WS_MAX_PAYLOAD) {
+            ws_rx_drop(h, h->rx_len);
+            return -1;
+        }
         if (masked) {
             er = ws_rx_need(io, off + 4);
             if (er == -2) return -3;
@@ -1057,7 +1061,7 @@ V *bi_ws_poll(V **a, int n) {
             v_list_append_own(ready, v_int(h));
             continue;
         }
-        if (ws_rx_has_frame(s)) {
+        if (ws_rx_has_frame(s) != 0) {
             v_list_append_own(ready, v_int(h));
             continue;
         }

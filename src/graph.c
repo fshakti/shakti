@@ -527,6 +527,7 @@ done:;
                 chain[i] = at;
                 at = parent[at];
             }
+            v_free(r);
             r = v_list(path_len);
             for (int i = 0; i < path_len; i++)
                 r->L[i] = v_str(pool.names[chain[i]]);

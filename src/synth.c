@@ -575,12 +575,12 @@ void synth_core_handle_key(int key, int down) {
 
     } else if (!down) {
 
-    } else if((q=strchr(shift_knob,key))) {
+    } else if(key > 0 && key < 128 && (q=strchr(shift_knob,key))) {
         int i = q - shift_knob;
         g.knobs[i] += 0.05f;
         if (g.knobs[i] > 1.f) g.knobs[i] = 1.f;
         synth_recalc_timing();
-    } else if ((q=strchr(shift_idx,key))) {
+    } else if (key > 0 && key < 128 && (q=strchr(shift_idx,key))) {
         int idx = q - shift_idx;
         g.knobs[idx] -= 0.05f;
         if (g.knobs[idx] < 0.f) g.knobs[idx] = 0.f;
@@ -1456,7 +1456,7 @@ void synth_platform_shutdown(void) {
         g.img = NULL;
     }
     if (g.gc) { XFreeGC(g.dpy, g.gc); g.gc = NULL; }
-    if (g.win) { XDestroyWindow(g.dpy, g.win); g.win = NULL; }
+    if (g.win) { XDestroyWindow(g.dpy, g.win); g.win = 0; }
     if (g.dpy) {
         XCloseDisplay(g.dpy);
         g.dpy = NULL;
@@ -1824,8 +1824,10 @@ int synth_set_mod(float mod, char *err, size_t err_cap) {
     }
     if (mod < 0.f) mod = 0.f;
     if (mod > 1.f) mod = 1.f;
+    pthread_mutex_lock(&g.mu);
     g.mod = mod;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 float synth_get_mod(void) {
@@ -1842,16 +1844,20 @@ int synth_set_seq_row(int row, uint64_t mask, char *err, size_t err_cap) {
         if (err && err_cap) snprintf(err, err_cap, "synth_set_seq_row: row must be 0..%d", SYNTH_ROWS - 1);
         return -1;
     }
+    pthread_mutex_lock(&g.mu);
     limit = (g.step_len >= 64) ? ~0ULL : ((1ULL << g.step_len) - 1ULL);
     g.seq[row] = mask & limit;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_play(int on, char *err, size_t err_cap) {
     (void)err;
     (void)err_cap;
     P(!g.open || !g.alive,-1)
+    pthread_mutex_lock(&g.mu);
     g.playing = on ? 1 : 0;
     if (g.playing) g.step_pos = 0;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_playing(void) { return g.playing; }
@@ -2019,7 +2025,9 @@ int synth_looper_clear(char *err, size_t err_cap) {
 int synth_looper_overdub(int on, char *err, size_t err_cap) {
     (void)err;
     (void)err_cap;
+    pthread_mutex_lock(&g.mu);
     g.loop_overdub = on ? 1 : 0;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_looper_rec_on(void) { return g.loop_recording || g.loop_arm; }

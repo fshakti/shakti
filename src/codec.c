@@ -345,7 +345,7 @@ static int compress_i64_residual(int codec, const unsigned char *src, size_t src
                     resid = d;
                     prev_delta = d;
                 } else {
-                    resid = d - prev_delta;
+                    resid = i64_wrapping_sub(d, prev_delta);
                     prev_delta = d;
                 }
             }
@@ -1135,13 +1135,15 @@ static int decompress_datetime(const unsigned char *src, size_t src_len, unsigne
             set_err(err, err_cap, "codec: bad datetime time-of-day");
             return -1;
         }
-        if (days[i] > lim || days[i] < -lim) {
+        int64_t ms = 0;
+        if (days[i] > lim || days[i] < -lim ||
+            __builtin_mul_overflow(days[i], MS_PER_DAY, &ms) ||
+            __builtin_add_overflow(ms, (int64_t)tod, &x[i])) {
             free(days);
             free(buf);
             set_err(err, err_cap, "codec: datetime overflow");
             return -1;
         }
-        x[i] = days[i] * MS_PER_DAY + (int64_t)tod;
     }
     free(days);
     *out = buf;
