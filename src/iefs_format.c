@@ -360,9 +360,11 @@ static void copy_f64_le(double *dst, const unsigned char *src, uint64_t n) {
 #endif
 }
 
-static int encode_value(IefsBuf *b, V *v);
+static int encode_value(IefsBuf *b, V *v, int depth);
 
-static int encode_value(IefsBuf *b, V *v) {
+static int encode_value(IefsBuf *b, V *v, int depth) {
+    if (depth >= IEFS_MAX_NESTING)
+        return -1;
     if (!v)
         return buf_putc(b, (unsigned char)T_NIL);
     switch (v->t) {
@@ -379,13 +381,13 @@ static int encode_value(IefsBuf *b, V *v) {
     case T_INT:
         if (buf_putc(b, (unsigned char)T_INT) != 0)
             return -1;
-        if (buf_putc(b, (unsigned char)(64 > 0 ? 64 : 64)) != 0)
+        if (buf_putc(b, (unsigned char)(64)) != 0)
             return -1;
         return buf_put_i64(b, v->j);
     case T_FLOAT:
         if (buf_putc(b, (unsigned char)T_FLOAT) != 0)
             return -1;
-        if (buf_putc(b, (unsigned char)(64 > 0 ? 64 : 64)) != 0)
+        if (buf_putc(b, (unsigned char)(64)) != 0)
             return -1;
         return buf_put_f64(b, v->f);
     case T_STR: {
@@ -415,7 +417,7 @@ static int encode_value(IefsBuf *b, V *v) {
     case T_IVEC: {
         if ((uint64_t)v->n > IEFS_MAX_ELEMS)
             return -1;
-        int bits = 64 > 0 ? 64 : 64;
+        int bits = 64;
         if (buf_putc(b, (unsigned char)T_IVEC) != 0)
             return -1;
         if (buf_put_u64(b, (uint64_t)v->n) != 0)
@@ -435,7 +437,7 @@ static int encode_value(IefsBuf *b, V *v) {
     case T_FVEC: {
         if ((uint64_t)v->n > IEFS_MAX_ELEMS)
             return -1;
-        int bits = 64 > 0 ? 64 : 64;
+        int bits = 64;
         if (buf_putc(b, (unsigned char)T_FVEC) != 0)
             return -1;
         if (buf_put_u64(b, (uint64_t)v->n) != 0)
@@ -512,7 +514,7 @@ static int encode_value(IefsBuf *b, V *v) {
         if (buf_put_u64(b, (uint64_t)v->n) != 0)
             return -1;
         for (int64_t i = 0; i < v->n; i++)
-            if (encode_value(b, v->L[i]) != 0)
+            if (encode_value(b, v->L[i], depth + 1) != 0)
                 return -1;
         return 0;
     }
@@ -520,9 +522,9 @@ static int encode_value(IefsBuf *b, V *v) {
     case T_TABLE:
         if (buf_putc(b, (unsigned char)v->t) != 0)
             return -1;
-        if (encode_value(b, v->keys) != 0)
+        if (encode_value(b, v->keys, depth + 1) != 0)
             return -1;
-        return encode_value(b, v->vals);
+        return encode_value(b, v->vals, depth + 1);
     case T_ERR:
         set_err(NULL, 0, "iefs: cannot serialize error values");
         return -1;
@@ -669,8 +671,9 @@ static int col_raw_export(V *v, unsigned char **out, size_t *out_len, uint64_t *
 
 static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
                          const unsigned char *p, size_t nbytes, IefsMapRegion *reg, int alias_ok) {
-    if (nelem > IEFS_MAX_ELEMS || ncols > IEFS_MAX_ELEMS)
+    if (nelem > IEFS_MAX_ELEMS || ncols > IEFS_MAX_ELEMS || ncols >= (1ull << 32))
         return v_err("iefs: extent too large");
+    int aligned8 = (((uintptr_t)p) & 7u) == 0;
     if (type == T_CVEC) {
         if (nbytes != (size_t)nelem) return v_err("iefs: extent length mismatch");
         if (alias_ok && reg) {
@@ -716,7 +719,7 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
         else if (bits < 64) needb = pack_nbytes((int64_t)cells, bits);
         else needb = (size_t)cells * 8;
         if (needb != nbytes) return v_err("iefs: extent length mismatch");
-        if (alias_ok && reg && bits >= 64 && type != T_BMAT && type != T_DMAT) {
+        if (alias_ok && reg && bits >= 64 && type != T_BMAT && type != T_DMAT && aligned8) {
             V *v = (type == T_FMAT) ? v_fmat((int64_t)nelem, (int64_t)ncols)
                  : (type == T_UMAT) ? v_umat((int64_t)nelem, (int64_t)ncols, bits)
                                    : v_imat((int64_t)nelem, (int64_t)ncols);
@@ -769,7 +772,10 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
     else if (bits < 64) needb = pack_nbytes((int64_t)nelem, bits);
     else needb = (size_t)nelem * 8;
     if (needb != nbytes) return v_err("iefs: extent length mismatch");
-    if (alias_ok && reg && type != T_BVEC) {
+    if (type != T_IVEC && type != T_FVEC && type != T_BVEC && type != T_DVEC &&
+        type != T_GVEC && type != T_UVEC)
+        return v_err("iefs: unknown extent type");
+    if (alias_ok && reg && type != T_BVEC && (bits < 64 || aligned8 || type == T_DVEC || type == T_GVEC)) {
         V *v;
         if (type == T_FVEC) {
             v = bits < 64 ? v_fvec_bits((int64_t)nelem, bits) : v_fvec((int64_t)nelem);
@@ -965,7 +971,7 @@ static int iefs_v3_prepare(V *v, int codec, int outer, int level, V *codecs, Ief
         ext = calloc(1, sizeof(*ext));
         if (!ext) { set_err(err, err_cap, "iefs: out of memory"); return -1; }
         IefsBuf payload = {0};
-        if (encode_value(&payload, v) != 0) {
+        if (encode_value(&payload, v, 0) != 0) {
             buf_free(&payload);
             set_err(err, err_cap, g_iefs_err[0] ? g_iefs_err : "iefs_encode: encode failed");
             goto fail;
@@ -1227,7 +1233,7 @@ int iefs_encode_ex(V *v, int codec, int level, unsigned ver, unsigned char **out
 static int iefs_encode_v2(V *v, int codec, int level, unsigned char **out, size_t *out_len,
                           char *err, size_t err_cap) {
     IefsBuf payload = {0};
-    if (encode_value(&payload, v) != 0) {
+    if (encode_value(&payload, v, 0) != 0) {
         buf_free(&payload);
         if (!g_iefs_err[0])
             set_err(err, err_cap, "iefs_encode: encode failed");
@@ -1629,7 +1635,7 @@ static V *decode_value_inner(IefsR *r) {
             return v_err(r->err);
         uint64_t n = get_u64(r->p + r->off);
         r->off += 8;
-        if (n > IEFS_MAX_ELEMS)
+        if (n > IEFS_MAX_ELEMS || n > r->n - r->off)
             return v_err("iefs: list too large");
         V *v = v_list((int64_t)n);
         for (uint64_t i = 0; i < n; i++) {
@@ -1694,11 +1700,8 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     const unsigned char *body = buf + IEFS_HEADER_SIZE;
     if (verify_crc) {
         uint32_t got = crc32_iefs_layout(buf, body, (size_t)payload_len);
-        if (got != expect_crc) {
-            uint32_t pay_crc = crc32_buf(body, (size_t)payload_len);
-            if (pay_crc != expect_crc)
-                return v_err("iefs: checksum mismatch");
-        }
+        if (got != expect_crc)
+            return v_err("iefs: checksum mismatch");
     }
     if (payload_len < 8)
         return v_err("iefs: truncated v3 TOC");
@@ -1718,6 +1721,7 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     }
     int named = 0;
     uint32_t n_keep = 0;
+    uint64_t inflated = 0;
     for (uint32_t i = 0; i < n_ext; i++) {
         const unsigned char *er = body + 8 + (size_t)i * IEFS_V3_EXTENT_SIZE;
         int type = er[0];
@@ -1767,7 +1771,12 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
             const unsigned char *cur = ep;
             size_t cur_len = (size_t)elen;
             if (outer != SHAKTI_CODEC_NONE) {
-                if (shakti_decompress(outer, ep, (size_t)elen, &mid, &mid_len, err, sizeof err) != 0) {
+                if (inflated >= IEFS_MAX_PAYLOAD) {
+                    for (uint32_t j=0;j<n_keep;j++){v_free(cols[j]); if(keys[j]) v_free(keys[j]);} free(cols); free(keys);
+                    return v_err("iefs: decompressed payload too large");
+                }
+                if (shakti_decompress_max(outer, ep, (size_t)elen, &mid, &mid_len,
+                                          (size_t)(IEFS_MAX_PAYLOAD - inflated), err, sizeof err) != 0) {
                     for (uint32_t j=0;j<n_keep;j++){v_free(cols[j]); if(keys[j]) v_free(keys[j]);} free(cols); free(keys);
                     return v_err(err[0] ? err : "iefs: extent outer decompress failed");
                 }
@@ -1775,7 +1784,9 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
                 cur_len = mid_len;
             }
             if (codec != SHAKTI_CODEC_NONE) {
-                if (shakti_decompress(codec, cur, cur_len, &plain, &plain_len, err, sizeof err) != 0) {
+                if (inflated >= IEFS_MAX_PAYLOAD ||
+                    shakti_decompress_max(codec, cur, cur_len, &plain, &plain_len,
+                                          (size_t)(IEFS_MAX_PAYLOAD - inflated), err, sizeof err) != 0) {
                     free(mid);
                     for (uint32_t j=0;j<n_keep;j++){v_free(cols[j]); if(keys[j]) v_free(keys[j]);} free(cols); free(keys);
                     return v_err(err[0] ? err : "iefs: extent decompress failed");
@@ -1789,6 +1800,12 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
             }
             pay = plain;
             pay_len = plain_len;
+            if (pay_len > IEFS_MAX_PAYLOAD - inflated) {
+                free(plain);
+                for (uint32_t j=0;j<n_keep;j++){v_free(cols[j]); if(keys[j]) v_free(keys[j]);} free(cols); free(keys);
+                return v_err("iefs: decompressed payload too large");
+            }
+            inflated += pay_len;
             alias_ok = 0;
         }
         V *col;
@@ -1914,11 +1931,8 @@ V *iefs_decode_max(const unsigned char *buf, size_t len, size_t max_plain) {
         return v_err("iefs: truncated file");
     const unsigned char *payload = buf + IEFS_HEADER_SIZE;
     uint32_t got_crc = crc32_iefs_layout(buf, payload, (size_t)payload_len);
-    if (got_crc != expect_crc) {
-        uint32_t pay_crc = crc32_buf(payload, (size_t)payload_len);
-        if (pay_crc != expect_crc)
-            return v_err("iefs: checksum mismatch");
-    }
+    if (got_crc != expect_crc)
+        return v_err("iefs: checksum mismatch");
 
     unsigned char *plain = NULL;
     size_t plain_len = 0;

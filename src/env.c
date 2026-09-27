@@ -3,6 +3,9 @@
 
 Node *fn_ast[MAX_FN];
 int   fn_ast_n = 0;
+static int fn_ast_refs[MAX_FN];
+static int fn_ast_free_stack[MAX_FN];
+static int fn_ast_free_n;
 int   g_returning  = 0;
 int   g_breaking   = 0;
 int   g_continuing = 0;
@@ -12,11 +15,40 @@ V    *g_error_val  = NULL;
 char  g_lib_path[4096] = "";
 char  g_script_dir[4096] = ".";
 int fn_ast_store(Node *n) {
-    if(n->fn_ast_i>-1)return n->fn_ast_i;
-    if(fn_ast_n >= MAX_FN) return -1;
-    fn_ast[fn_ast_n] = n;
-    n->fn_ast_i = fn_ast_n;
-    return fn_ast_n++;
+    if (!n) return -1;
+    if (n->fn_ast_i > -1) {
+        if (n->fn_ast_i < fn_ast_n) fn_ast_refs[n->fn_ast_i]++;
+        return n->fn_ast_i;
+    }
+    int idx;
+    if (fn_ast_free_n > 0)
+        idx = fn_ast_free_stack[--fn_ast_free_n];
+    else {
+        if (fn_ast_n >= MAX_FN) return -1;
+        idx = fn_ast_n++;
+    }
+    fn_ast[idx] = n;
+    fn_ast_refs[idx] = 1;
+    n->fn_ast_i = idx;
+    n->fn_detached = 0;
+    return idx;
+}
+void fn_ast_release(int idx) {
+    Node *n;
+    if (idx < 0 || idx >= fn_ast_n) return;
+    if (fn_ast_refs[idx] <= 0) return;
+    if (--fn_ast_refs[idx] > 0) return;
+    n = fn_ast[idx];
+    fn_ast[idx] = NULL;
+    if (fn_ast_free_n < MAX_FN)
+        fn_ast_free_stack[fn_ast_free_n++] = idx;
+    if (!n) return;
+    if (n->fn_detached) {
+        n->fn_ast_i = -1;
+        node_free(n);
+    } else {
+        n->fn_ast_i = -2;
+    }
 }
 Env *env_new(Env *parent) {
     Env *e = x_calloc(1, sizeof(Env), "env_new");
@@ -140,6 +172,16 @@ int env_update(Env *e, const char *name, V *val) {
                 return 1;
             }
     return 0;
+}
+V *env_get_here(Env *e, const char *name) {
+    uint32_t h;
+    int i;
+    if (!e || !name) return NULL;
+    h = fnv1a(name);
+    for (i = 0; i < e->len; i++)
+        if (e->hashes[i] == h && strcmp(e->names[i], name) == 0)
+            return e->vals[i];
+    return NULL;
 }
 V *env_get(Env *e, const char *name) {
     uint32_t h = fnv1a(name);

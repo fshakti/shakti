@@ -1,8 +1,26 @@
 /* shakti/src/alloc.c — checked allocators */
 #include "shakti_internal.h"
+#include <fcntl.h>
+#include <unistd.h>
 
+static uint32_t hash_seed(void) {
+    static uint32_t seed;
+    static int ready;
+    if (!ready) {
+        int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+        seed = 0;
+        if (fd >= 0) {
+            if (read(fd, &seed, sizeof seed) != (ssize_t)sizeof seed) seed = 0;
+            close(fd);
+        }
+        if (!seed) seed = 0x9E3779B9u ^ (uint32_t)getpid();
+        ready = 1;
+    }
+    return seed;
+}
 uint32_t fnv1a(const char *s) {
-    uint32_t h = 2166136261u;
+    uint32_t h = 2166136261u ^ hash_seed();
+    if (!s) return h ? h : 1;
     for (; *s; s++) h = (h ^ (unsigned char)*s) * 16777619u;
     return h ? h : 1;
 }

@@ -8,13 +8,23 @@ Node *node_new(int type) {
     return n;
 }
 void node_add(Node *n, Node *child) {
-    n->ch = x_realloc(n->ch, (size_t)(n->nch + 1) * sizeof(Node *), "node_add");
+    if (n->nch >= n->ch_cap) {
+        int cap = n->ch_cap ? n->ch_cap * 2 : 4;
+        n->ch = x_realloc(n->ch, (size_t)cap * sizeof(Node *), "node_add");
+        n->ch_cap = cap;
+    }
     n->ch[n->nch++] = child;
 }
 void node_free(Node *n) {
-    Pv(!n||n->fn_ast_i>-1)
+    if (!n) return;
+    if (n->fn_ast_i >= 0) {
+        n->fn_detached = 1;
+        return;
+    }
+    if (n->fn_ast_i == -2)
+        n->fn_ast_i = -1;
     free(n->sval);
-    i(n->nch,node_free(n->ch[i]))
+    for (int i = 0; i < n->nch; i++) node_free(n->ch[i]);
     free(n->ch);
     free(n);
 }

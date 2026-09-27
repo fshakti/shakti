@@ -10,7 +10,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.14.1"
+#define SHAKTI_PKG_VERSION "0.14.3"
 #endif
 
 static int shakti_stmt_silent(Node *s) {
@@ -565,6 +565,7 @@ void run_repl(Env *e) {
             fprintf(stderr, "Error: %s\n", result->s);
         }
         v_free(result);
+        shakti_clear_flow();
         node_free(prog);
     }
 }

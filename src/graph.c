@@ -469,6 +469,7 @@ V *bi_graph_path(V **a, int n) {
     int qh = 0, qt = 0;
     q[qt++] = from_id;
     int found = -1;
+    int oom = 0;
 
     while (qh < qt) {
         int cur = q[qh++];
@@ -484,11 +485,11 @@ V *bi_graph_path(V **a, int n) {
             if (nid < 0) {
                 nid = pool_add(&pool, next);
                 if (nid < 0) continue;
-                if (pool_ensure_aux(&pool, &parent, &depth, &visited, &q, &aux_cap) < 0) break;
+                if (pool_ensure_aux(&pool, &parent, &depth, &visited, &q, &aux_cap) < 0) { oom = 1; goto done; }
                 parent[nid] = cur;
                 depth[nid] = depth[cur] + 1;
                 visited[nid] = 1;
-                if (qt >= (int)aux_cap && pool_ensure_aux(&pool, &parent, &depth, &visited, &q, &aux_cap) < 0) break;
+                if (qt >= (int)aux_cap && pool_ensure_aux(&pool, &parent, &depth, &visited, &q, &aux_cap) < 0) { oom = 1; goto done; }
                 q[qt++] = nid;
                 if (!strcmp(next, to)) {
                     found = nid;
@@ -498,7 +499,7 @@ V *bi_graph_path(V **a, int n) {
                 visited[nid] = 1;
                 parent[nid] = cur;
                 depth[nid] = depth[cur] + 1;
-                if (qt >= (int)aux_cap && pool_ensure_aux(&pool, &parent, &depth, &visited, &q, &aux_cap) < 0) break;
+                if (qt >= (int)aux_cap && pool_ensure_aux(&pool, &parent, &depth, &visited, &q, &aux_cap) < 0) { oom = 1; goto done; }
                 q[qt++] = nid;
                 if (!strcmp(next, to)) {
                     found = nid;
@@ -508,6 +509,14 @@ V *bi_graph_path(V **a, int n) {
         }
     }
 done:;
+    if (oom) {
+        free(q);
+        free(parent);
+        free(depth);
+        free(visited);
+        pool_free(&pool);
+        return v_err("graph_path: out of memory");
+    }
     V *r = v_list(0);
     if (found >= 0) {
         int path_len = depth[found] + 1;

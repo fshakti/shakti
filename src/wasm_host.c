@@ -238,6 +238,8 @@ char *shakti_eval(const char *src) {
     prog = parse(src);
     if (shakti_parse_errors() > 0) {
         node_free(prog);
+        g_error = 0;
+        if (g_error_val) { v_free(g_error_val); g_error_val = NULL; }
         return strdup("parse error");
     }
     if (!prog) return strdup("");

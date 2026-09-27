@@ -272,6 +272,28 @@ static int ws_frame_send(WsIo *io, int is_client, int opcode, const void *data, 
     return 0;
 }
 
+/* True when rx already holds one complete frame header and payload. */
+static int ws_rx_has_frame(const WsHandle *h) {
+    if (!h || h->rx_len < 2) return 0;
+    unsigned char h1 = h->rx[1];
+    uint64_t n = h1 & 0x7f;
+    int masked = (h1 & 0x80) != 0;
+    size_t off = 2;
+    if (n == 126) {
+        if (h->rx_len < off + 2) return 0;
+        n = ((uint64_t)h->rx[off] << 8) | h->rx[off + 1];
+        off += 2;
+    } else if (n == 127) {
+        if (h->rx_len < off + 8) return 0;
+        n = 0;
+        for (int i = 0; i < 8; i++) n = (n << 8) | h->rx[off + (size_t)i];
+        off += 8;
+    }
+    if (n > WS_MAX_PAYLOAD) return 0;
+    if (masked) off += 4;
+    return h->rx_len >= off + (size_t)n;
+}
+
 /* Exact read helper: 0 ok, -3 wouldblock, -1 error. Consumes on success (unbuffered ok;
  * handle path should use ws_frame_recv_buffered instead). */
 static int ws_read_exact(WsIo *io, void *buf, size_t n) {
@@ -647,6 +669,7 @@ static int ws_client_handshake(WsIo *io, const char *host, int port, const char 
     if (ws_io_write(io, req, (size_t)n) != n) return -1;
     char resp[4096];
     size_t got = 0;
+    resp[0] = 0;
     while (got + 1 < sizeof resp) {
         ssize_t r = ws_io_read(io, resp + got, 1);
         if (r <= 0) break;
@@ -654,7 +677,7 @@ static int ws_client_handshake(WsIo *io, const char *host, int port, const char 
         resp[got] = 0;
         if (got >= 4 && strstr(resp, "\r\n\r\n")) break;
     }
-    if (!strstr(resp, "101")) return -1;
+    if (got == 0 || !strstr(resp, "101")) return -1;
     char accept[64];
     if (ws_extract_header(resp, "Sec-WebSocket-Accept", accept, sizeof accept) != 0) return -1;
     if (strcmp(accept, expect) != 0) return -1;
@@ -1031,6 +1054,10 @@ V *bi_ws_poll(V **a, int n) {
         WsHandle *s = ws_slot(h);
         if (!s) continue;
         if (s->ssl && tls_pending(s->ssl) > 0) {
+            v_list_append_own(ready, v_int(h));
+            continue;
+        }
+        if (ws_rx_has_frame(s)) {
             v_list_append_own(ready, v_int(h));
             continue;
         }

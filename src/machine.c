@@ -252,8 +252,11 @@ static int linux_count_cpuinfo_key(const char *key) {
     int n = 0;
     size_t klen = strlen(key);
     while (fgets(line, sizeof line, f)) {
-        if (!strncmp(line, key, klen) && line[klen] == ':')
-            n++;
+        if (!strncmp(line, key, klen)) {
+            const char *p = line + klen;
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == ':') n++;
+        }
     }
     fclose(f);
     return n;
@@ -555,10 +558,14 @@ static void linux_gpu_one(const char *card, V *gpus) {
     char path[384];
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/vendor", card);
     char vendor[32];
-    read_text(path, vendor, sizeof vendor);
-    snprintf(path, sizeof path, "/sys/class/drm/%s/device/device", card);
     char device[32];
-    read_text(path, device, sizeof device);
+    memset(vendor, 0, sizeof vendor);
+    memset(device, 0, sizeof device);
+    if (read_text(path, vendor, sizeof vendor) != 0)
+        vendor[0] = 0;
+    snprintf(path, sizeof path, "/sys/class/drm/%s/device/device", card);
+    if (read_text(path, device, sizeof device) != 0)
+        device[0] = 0;
 
     snprintf(path, sizeof path, "/sys/class/drm/%s/device/product_name", card);
     char product[128];

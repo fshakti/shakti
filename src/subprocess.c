@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <errno.h>
@@ -27,21 +27,28 @@ V*subprocess(V**a,in){
     }
   }
   struct stat sb;
-  if(n>9||stat("run",&sb))return NULL;
+  if(n>9)return NULL;
+  int runfd = open("run", O_RDONLY|O_NOFOLLOW);
+  if(runfd<0 || fstat(runfd,&sb)!=0 || !S_ISREG(sb.st_mode)){
+    if(runfd>=0) close(runfd);
+    return NULL;
+  }
+  char runpath[64];
+  snprintf(runpath, sizeof runpath, "/proc/self/fd/%d", runfd);
 
 #if defined(__linux__)
   int t;
-  do t=open("/dev/ptmx", O_RDWR|O_NOCTTY); while (t<0&&(errno==ENOSPC||errno==EAGAIN));
-  if(t<0)return v_err("/dev/ptmx");
+  do t=open("/dev/ptmx", O_RDWR|O_NOCTTY|O_CLOEXEC); while (t<0&&(errno==ENOSPC||errno==EAGAIN));
+  if(t<0){ close(runfd); return v_err("/dev/ptmx"); }
 
-  int p = 0; ioctl(t,TIOCSPTLCK,&p); if(ioctl(t,TIOCGPTN,&p)) return close(t),v_err("TIOCGPTN");
+  int p = 0; ioctl(t,TIOCSPTLCK,&p); if(ioctl(t,TIOCGPTN,&p)) { close(runfd); return close(t),v_err("TIOCGPTN"); }
   char pts[20]; snprintf(pts,sizeof(pts)-1,"/dev/pts/%d",p);
 #else // apple, etc
-  int t = posix_openpt(O_RDWR|O_NOCTTY);
-  if(t<0)return v_err("posix_openpt");
+  int t = posix_openpt(O_RDWR|O_NOCTTY|O_CLOEXEC);
+  if(t<0){ close(runfd); return v_err("posix_openpt"); }
   grantpt(t);unlockpt(t);
   char pts[1024];
-  if(ptsname_r(t,pts,sizeof(pts)-1)!=0)return close(t),v_err("ptsname_r");
+  if(ptsname_r(t,pts,sizeof(pts)-1)!=0){ close(runfd); return close(t),v_err("ptsname_r"); }
 #endif
 
  // todo cgroups etc
@@ -52,25 +59,42 @@ V*subprocess(V**a,in){
   posix_spawn_file_actions_addopen(&file_actions, 1, pts, O_WRONLY, 0666);
   posix_spawn_file_actions_adddup2(&file_actions, 2, 2);
   const char *argv[n+2]; argv[0] = "./run"; i(n,argv[i+1]=(!a[i]||a[i]->t!=T_STR)?0:a[i]->s); argv[n+1] = 0;
-  int r = posix_spawn(&pid, *argv, &file_actions, NULL, (char*const*)argv, environ);
+  char **envp = NULL;
+  int envn = 0;
+  for(char **e = environ; e && *e; e++) envn++;
+  envp = malloc((size_t)(envn + 1) * sizeof(char *));
+  if(!envp){ close(runfd); close(t); posix_spawn_file_actions_destroy(&file_actions); return v_err("subprocess: oom"); }
+  int ek = 0;
+  for(char **e = environ; e && *e; e++){
+    if(!strncmp(*e, "SHAKTI_SERVE_TOKEN=", 19) ||
+       !strncmp(*e, "SHAKTI_REST_TOKEN=", 18) ||
+       !strncmp(*e, "SHAKTI_REST_TOKEN_HOSTS=", 24) ||
+       !strncmp(*e, "SHAKTI_TLS_KEY=", 15) ||
+       !strncmp(*e, "SHAKTI_TLS_CERT=", 16))
+      continue;
+    envp[ek++] = *e;
+  }
+  envp[ek] = NULL;
+  int r = posix_spawn(&pid, runpath, &file_actions, NULL, (char*const*)argv, envp);
+  free(envp);
+  close(runfd);
   posix_spawn_file_actions_destroy(&file_actions);
   if(r) return close(t),v_err("subprocess");
   return v_subprocess(t, pid);
 }
 V *subprocess_next(V*p, double to) {
   unsigned char buffer[16536];
-  fd_set rfds;
   int r,t=p->j;
   if(to>=0) {
-    FD_ZERO(&rfds);
-    FD_SET(t,&rfds);
     long ms = (long)to;
     if(ms < 0) ms = 0;
-    struct timeval tv;
-    tv.tv_sec = ms / 1000;
-    tv.tv_usec = (ms % 1000) * 1000;
+    if(ms > 600000) ms = 600000;
+    struct pollfd pfd;
+    pfd.fd = t;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
     int sel;
-    while((sel=select(t+1, &rfds,NULL,NULL,&tv))==-1&&errno==EINTR);
+    while((sel=poll(&pfd, 1, (int)ms))==-1&&errno==EINTR);
     if(sel <= 0) r = -1;
     else {
       fcntl(t, F_SETFL, fcntl(t, F_GETFL, 0) | O_NONBLOCK);
@@ -113,7 +137,7 @@ int64_t subprocess_send(V*p,V**a,in) {
   struct iovec iov[n],*iovp=iov;int t=p->j;
   for(int i=0;i<n;++i) {
     switch(a[i]->t) {
-    case T_NIL: case T_FLOAT: __builtin_abort();
+    case T_NIL: case T_FLOAT: return -1;
     case T_STR: iov[i].iov_len = strlen(iov[i].iov_base = a[i]->s);  break;
     case T_BVEC: case T_CVEC: iov[i].iov_base = a[i]->B; iov[i].iov_len = a[i]->n; break;
     default: iov[i].iov_base = ""; iov[i].iov_len = 0; break;

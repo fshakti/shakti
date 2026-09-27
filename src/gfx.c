@@ -197,7 +197,8 @@ void gfx_fill_rect(int x, int y, int w, int h, uint32_t color) {
     int j, x0, x1;
     if (!g.fb || w <= 0 || h <= 0) return;
     x0 = x < 0 ? 0 : x;
-    y = y < 0 ? 0 : y;
+    if (y < 0) { h += y; y = 0; }
+    if (h <= 0) return;
     x1 = x + w;
     if (x1 > g.design_w) x1 = g.design_w;
     w = x1 - x0;

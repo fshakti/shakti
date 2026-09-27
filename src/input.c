@@ -377,7 +377,7 @@ static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
     enum { PENDING_MAX = 8 };
     if (*pn == 0 && c == 27) {
         pending[(*pn)++] = c;
-        return 0;
+        return 2; /* consumed; sequence still open */
     }
     if (*pn > 0) {
         if (*pn >= PENDING_MAX) {
@@ -403,10 +403,10 @@ static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
                     return 1;
                 }
                 if (*pn >= 4) { *pn = 0; return 0; }
-                return 0;
+                return 2;
             default:
-                if (*pn >= 8) *pn = 0;
-                return 0;
+                if (*pn >= 8) { *pn = 0; return 0; }
+                return 2;
             }
             if (code) {
                 emit_key(code, "", 1);
@@ -415,8 +415,8 @@ static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
                 return 1;
             }
         }
-        if (*pn >= 8) *pn = 0;
-        return 0;
+        if (*pn >= 8) { *pn = 0; return 0; }
+        return 2;
     }
     if (c == '\r' || c == '\n') {
         char u[2] = {(char)c, 0};

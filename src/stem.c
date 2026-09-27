@@ -16,6 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
@@ -478,6 +481,7 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
             fmt = (unsigned short)(fbuf[0] | (fbuf[1] << 8));
             ch = (unsigned short)(fbuf[2] | (fbuf[3] << 8));
             sr = (unsigned int)(fbuf[4] | (fbuf[5] << 8) | (fbuf[6] << 16) | (fbuf[7] << 24));
+            if (sr < 8000u || sr > 192000u) { fclose(fp); return -1; }
             bps = (unsigned short)(fbuf[14] | (fbuf[15] << 8));
             have_fmt = 1;
         } else if (!memcmp(chdr, "data", 4)) {
@@ -1127,7 +1131,7 @@ static void stem_ml_free(void) {
 static void stem_mvm(double *y, const double *W, const double *x, int r, int c) {
     int i, j;
 #ifdef _OPENMP
-#pragma omp parallel for private(j)
+#pragma omp parallel for private(j) if(!omp_in_parallel())
 #endif
     for (i = 0; i < r; i++) {
         const double *row = W + (size_t)i * (size_t)c;

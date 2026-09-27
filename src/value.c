@@ -242,11 +242,11 @@ V *try_promote_matrix(V **elems, int nch) {
         V *row = elems[i];
         int64_t row_len = 0;
         if (row->t == T_IVEC) {
-            row_len = row->n; all_u8 = 0;
+            row_len = row->n; all_u8 = 0; all_bool = 0;
         } else if (row->t == T_CVEC) {
-            row_len = row->n;
+            row_len = row->n; all_bool = 0;
         } else if (row->t == T_FVEC) {
-            row_len = row->n; all_int = 0; all_u8 = 0;
+            row_len = row->n; all_int = 0; all_u8 = 0; all_bool = 0;
         } else if (row->t == T_BVEC) {
             row_len = row->n; all_int = 0; all_u8 = 0; all_num = 0;
         } else if (row->t == T_LIST) {
@@ -317,7 +317,11 @@ V *mat_matmul(V *a, V *b) {
     if (out_t == T_FMAT && a->t == T_FMAT && b->t == T_FMAT) {
         mat_fmat_mul(r->F, a->F, b->F, m, k, n);
     } else if (out_t == T_IMAT && a->t == T_IMAT && b->t == T_IMAT) {
-        mat_imat_mul(r->J, a->J, b->J, m, k, n);
+        if (mat_imat_mul(r->J, a->J, b->J, m, k, n) != 0) {
+            v_free(r);
+            r = v_fmat(m, n);
+            mat_mul_mixed(r->F, NULL, a->J, NULL, b->J, NULL, m, k, n, 1, 1, 1);
+        }
     } else {
         mat_mul_mixed(r->F, r->J, a->J, a->F, b->J, b->F, m, k, n,
                       a->t == T_IMAT, b->t == T_IMAT, out_t == T_FMAT);
@@ -325,10 +329,22 @@ V *mat_matmul(V *a, V *b) {
     return r;
 }
 V *v_list(int64_t n) {
+    if (n < 0 || n > (int64_t)UINT32_MAX) shakti_oom("v_list");
     V *v = x_calloc(1, sizeof(V), "v_list"); v->t = T_LIST; v->rc = 1; v->n = n;
-    v->_ht_cap = n > 0 ? (int)n : 0;
+    v->_ht_cap = n > 0 ? (uint32_t)n : 0;
     v->L = x_calloc(n > 0 ? (size_t)n : 1, sizeof(V*), "v_list");
     return v;
+}
+void v_list_unshare(V **p) {
+    V *v;
+    V *c;
+    int64_t i;
+    if (!p || !*p || (*p)->t != T_LIST || (*p)->rc <= 1) return;
+    v = *p;
+    c = v_list(v->n);
+    for (i = 0; i < v->n; i++) c->L[i] = v_ref(v->L[i]);
+    *p = c;
+    v_free(v);
 }
 void v_list_append(V *v, V *item) {
     Pv(v->t != T_LIST)
@@ -342,7 +358,11 @@ void v_list_append(V *v, V *item) {
     }
     v->L[v->n++] = v_ref(item);
 }
+static int lists_paired(V *keys, V *vals) {
+    return keys && vals && keys->t == T_LIST && vals->t == T_LIST && keys->n == vals->n;
+}
 V *v_dict(V *keys, V *vals) {
+    if (!lists_paired(keys, vals)) return v_err("dict: bad shape");
     V *v=v_alloc(T_DICT); v->n=keys->n;
     v->keys=v_ref(keys); v->vals=v_ref(vals);
     return v;
@@ -362,7 +382,11 @@ V *v_dict_own(V *keys, V *vals) {
 }
 V *v_table(V *cols, V *data) {
     int64_t n = 0;
-    if (!data || data->t != T_LIST) return v_err("table: bad columns");
+    if (!lists_paired(cols, data)) return v_err("table: bad columns");
+    for (int64_t i = 0; i < cols->n; i++) {
+        if (!cols->L[i] || cols->L[i]->t != T_STR)
+            return v_err("table: column names must be strings");
+    }
     if (data->n > 0) {
         if (!data->L || !data->L[0]) return v_err("table: ragged columns");
         n = data->L[0]->n;
@@ -390,6 +414,24 @@ void v_list_append_own(V *v, V *item) {
 void v_dict_put(V *d, const char *key, V *val) {
     v_dict_set(d, key, val);
     v_free(val);
+}
+V *col_get(V *col, int64_t row) {
+    if (!col || row < 0) return v_nil();
+    switch (col->t) {
+    case T_IVEC: return row < col->n ? v_int(col->J[row]) : v_nil();
+    case T_FVEC: return row < col->n ? v_float(col->F[row]) : v_nil();
+    case T_BVEC: return row < col->n ? v_bool(col->B[row] ? 1 : 0) : v_nil();
+    case T_CVEC: return row < col->n ? v_char(col->B[row]) : v_nil();
+    case T_LIST: return (row < col->n && col->L && col->L[row]) ? v_ref(col->L[row]) : v_nil();
+    case T_IMAT: case T_FMAT: case T_BMAT: case T_CMAT:
+        return row < col->n ? v_mat_row(col, row) : v_nil();
+    case T_STR: return v_str(col->s ? col->s : "");
+    case T_INT: return v_int(col->j);
+    case T_FLOAT: return v_float(col->f);
+    case T_BOOL: return v_bool(col->j ? 1 : 0);
+    case T_CHAR: return v_char((unsigned char)col->j);
+    default: return v_nil();
+    }
 }
 V *v_fn(V *params, V *defaults, Node *body_ast, Env *closure) {
     int idx = fn_ast_store(body_ast);
@@ -504,6 +546,7 @@ void v_free(V *v) {
             v_free(v->params);
             if(v->defaults) v_free(v->defaults);
             if(v->closure) env_free(v->closure);
+            fn_ast_release((int)v->j);
         }
         break;
     case T_INPUT:
@@ -613,8 +656,21 @@ static void dict_ht_rebuild(V *d) {
         d->_ht[slot] = (uint32_t)i;
     }
 }
+static void dict_side_reserve(V *lst) {
+    if (lst->n < (int64_t)lst->_ht_cap) return;
+    if (lst->_ht_cap > (1u << 30)) shakti_oom("v_dict_set");
+    uint32_t cap = lst->_ht_cap ? lst->_ht_cap * 2u : 8u;
+    if ((int64_t)cap <= lst->n) {
+        if (lst->n >= (1ll << 30)) shakti_oom("v_dict_set");
+        cap = (uint32_t)lst->n + 1u;
+    }
+    lst->L = x_realloc(lst->L, (size_t)cap * sizeof(V*), "v_dict_set");
+    lst->_ht_cap = cap;
+}
 void v_dict_set(V *d, const char *key, V *val) {
     Pv(d->t != T_DICT)
+    v_list_unshare(&d->keys);
+    v_list_unshare(&d->vals);
     uint32_t h = fnv1a(key);
     if (d->_ht) {
         uint32_t mask = d->_ht_cap - 1, slot = h & mask;
@@ -627,8 +683,8 @@ void v_dict_set(V *d, const char *key, V *val) {
             }
             slot = (slot + 1) & mask;
         })
-        d->keys->L = x_realloc(d->keys->L, (d->n + 1) * sizeof(V*), "v_dict_set");
-        d->vals->L = x_realloc(d->vals->L, (d->n + 1) * sizeof(V*), "v_dict_set");
+        dict_side_reserve(d->keys);
+        dict_side_reserve(d->vals);
         d->keys->L[d->n] = v_str(key);
         d->vals->L[d->n] = v_ref(val);
         uint32_t new_idx = (uint32_t)d->n;
@@ -647,8 +703,8 @@ void v_dict_set(V *d, const char *key, V *val) {
             return;
         }
     }
-    d->keys->L = x_realloc(d->keys->L, (d->n + 1) * sizeof(V*), "v_dict_set");
-    d->vals->L = x_realloc(d->vals->L, (d->n + 1) * sizeof(V*), "v_dict_set");
+    dict_side_reserve(d->keys);
+    dict_side_reserve(d->vals);
     d->keys->L[d->n] = v_str(key);
     d->vals->L[d->n] = v_ref(val);
     d->n++; d->keys->n++; d->vals->n++;
@@ -875,7 +931,13 @@ static V *v_deserialize_depth(FILE *fp, int depth) {
         V *r = v_list(n);
         for (int64_t i = 0; i < n; i++) {
             r->L[i] = v_deserialize_depth(fp, depth + 1);
-            if (r->L[i]->t == T_ERR) { V *err = r->L[i]; v_free(r); return err; }
+            if (r->L[i]->t == T_ERR) {
+                V *err = r->L[i];
+                r->L[i] = NULL;
+                r->n = i;
+                v_free(r);
+                return err;
+            }
         }
         return r;
     }

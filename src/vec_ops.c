@@ -1,6 +1,7 @@
 /* shakti/src/vec_ops.c — vector/matrix binops, compare, table filter */
 #include "shakti_internal.h"
 #include "mat_simd.h"
+#include "i64bin.h"
 
 int is_truthy(V *v) {
     P(!v,0)
@@ -57,6 +58,20 @@ double to_float(V *v) {
     P(v->t==T_BOOL,(double)v->j)
     return 0;
 }
+static double i64_floordiv_f(int64_t x, int64_t y) {
+    if (!y) return 0;
+    if (i64_pair_promotes(x, y)) return -(double)INT64_MIN;
+    return (double)(x / y);
+}
+static int i64_span_promotes(const int64_t *xs, const int64_t *ys, int64_t n,
+                             int xsc, int64_t x, int ysc, int64_t y) {
+    for (int64_t i = 0; i < n; i++) {
+        int64_t a = xsc ? x : xs[i];
+        int64_t b = ysc ? y : ys[i];
+        if (i64_pair_promotes(a, b)) return 1;
+    }
+    return 0;
+}
 V *mat_binop(V *a, V *b, int op) {
     if (!is_mat_t(a->t) && !is_mat_t(b->t)) return NULL;
     if (a->t == T_BMAT || b->t == T_BMAT)
@@ -66,6 +81,9 @@ V *mat_binop(V *a, V *b, int op) {
     if (is_mat_t(a->t) && (b->t == T_INT || b->t == T_FLOAT || b->t == T_CHAR)) {
         int64_t rows = a->n, cols = mat_cols(a), ne = rows * cols;
         int out_t = (a->t == T_FMAT || b->t == T_FLOAT) ? T_FMAT : T_IMAT;
+        if (out_t == T_IMAT && op == OP_FLOORDIV && a->t == T_IMAT &&
+            i64_span_promotes(a->J, NULL, ne, 0, 0, 1, b->j))
+            out_t = T_FMAT;
         V *r = out_t == T_FMAT ? (V *)v_fmat(rows, cols) : (V *)v_imat(rows, cols);
         double y = to_float(b);
         if (out_t == T_FMAT && a->t == T_FMAT)
@@ -95,10 +113,27 @@ V *mat_binop(V *a, V *b, int op) {
         if (!r || r->t == T_ERR) return r;
         if (op == OP_SUB || op == OP_DIV || op == OP_FLOORDIV || op == OP_MOD) {
             int64_t rows = b->n, cols = mat_cols(b), ne = rows * cols;
-            if (b->t == T_FMAT) {
+            if (b->t == T_FMAT || a->t == T_FLOAT) {
                 V *out = v_fmat(rows, cols);
                 double x = to_float(a);
-                mat_fmat_binop_scalar_rev(out->F, x, b->F, ne, op);
+                if (b->t == T_FMAT) {
+                    mat_fmat_binop_scalar_rev(out->F, x, b->F, ne, op);
+                } else {
+                    for (int64_t i = 0; i < ne; i++) {
+                        double yv = (double)b->J[i];
+                        if (op == OP_SUB) out->F[i] = x - yv;
+                        else if (op == OP_DIV) out->F[i] = yv != 0 ? x / yv : 0;
+                        else if (op == OP_FLOORDIV) out->F[i] = yv != 0 ? floor(x / yv) : 0;
+                        else if (op == OP_MOD) out->F[i] = yv != 0 ? fmod(x, yv) : 0;
+                    }
+                }
+                v_free(r);
+                return out;
+            }
+            if (op == OP_FLOORDIV && a->t != T_FLOAT &&
+                i64_span_promotes(NULL, b->J, ne, 1, a->j, 0, 0)) {
+                V *out = v_fmat(rows, cols);
+                for (int64_t i = 0; i < ne; i++) out->F[i] = i64_floordiv_f(a->j, b->J[i]);
                 v_free(r);
                 return out;
             }
@@ -117,6 +152,9 @@ V *mat_binop(V *a, V *b, int op) {
     int64_t ne = a->n * mat_cols(a);
     int out_t = (a->t == T_FMAT || b->t == T_FMAT) ? T_FMAT : T_IMAT;
     if (op == OP_DIV || op == OP_POW) out_t = T_FMAT;
+    if (out_t == T_IMAT && op == OP_FLOORDIV &&
+        i64_span_promotes(a->J, b->J, ne, 0, 0, 0, 0))
+        out_t = T_FMAT;
     V *r = out_t == T_FMAT ? (V *)v_fmat(a->n, mat_cols(a)) : (V *)v_imat(a->n, mat_cols(a));
     if (out_t == T_FMAT && a->t == T_FMAT && b->t == T_FMAT)
         mat_fmat_binop_mm(r->F, a->F, b->F, ne, op);
@@ -143,8 +181,8 @@ V *mat_binop(V *a, V *b, int op) {
                 case OP_ADD: r->J[i] = x + y; break;
                 case OP_SUB: r->J[i] = x - y; break;
                 case OP_MUL: r->J[i] = x * y; break;
-                case OP_FLOORDIV: r->J[i] = y ? x / y : 0; break;
-                case OP_MOD: r->J[i] = y ? x % y : 0; break;
+                case OP_FLOORDIV: r->J[i] = i64_floordiv(x, y); break;
+                case OP_MOD: r->J[i] = i64_mod(x, y); break;
                 default: break;
                 }
             }
@@ -168,10 +206,16 @@ V *vec_binop(V *a, V *b, int op) {
         int64_t *rj = r->J;
         switch (op) {
         case OP_FLOORDIV:
-            for (int64_t i = 0; i < n; i++) rj[i] = bj[i] ? aj[i] / bj[i] : 0;
+            if (i64_span_promotes(aj, bj, n, 0, 0, 0, 0)) {
+                V *fr = v_fvec(n);
+                for (int64_t i = 0; i < n; i++) fr->F[i] = i64_floordiv_f(aj[i], bj[i]);
+                v_free(r);
+                return fr;
+            }
+            for (int64_t i = 0; i < n; i++) rj[i] = i64_floordiv(aj[i], bj[i]);
             break;
         case OP_MOD:
-            for (int64_t i = 0; i < n; i++) rj[i] = bj[i] ? aj[i] % bj[i] : 0;
+            for (int64_t i = 0; i < n; i++) rj[i] = i64_mod(aj[i], bj[i]);
             break;
         default: break;
         }
@@ -203,10 +247,16 @@ V *vec_binop(V *a, V *b, int op) {
         int64_t *rj = r->J;
         switch (op) {
         case OP_FLOORDIV:
-            for (int64_t i = 0; i < n; i++) rj[i] = y ? aj[i] / y : 0;
+            if (i64_span_promotes(aj, NULL, n, 0, 0, 1, y)) {
+                V *fr = v_fvec(n);
+                for (int64_t i = 0; i < n; i++) fr->F[i] = i64_floordiv_f(aj[i], y);
+                v_free(r);
+                return fr;
+            }
+            for (int64_t i = 0; i < n; i++) rj[i] = i64_floordiv(aj[i], y);
             break;
         case OP_MOD:
-            for (int64_t i = 0; i < n; i++) rj[i] = y ? aj[i] % y : 0;
+            for (int64_t i = 0; i < n; i++) rj[i] = i64_mod(aj[i], y);
             break;
         default: break;
         }
@@ -238,10 +288,16 @@ V *vec_binop(V *a, V *b, int op) {
         int64_t *rj = r->J;
         switch (op) {
         case OP_FLOORDIV:
-            for (int64_t i = 0; i < n; i++) rj[i] = bj[i] ? x / bj[i] : 0;
+            if (i64_span_promotes(NULL, bj, n, 1, x, 0, 0)) {
+                V *fr = v_fvec(n);
+                for (int64_t i = 0; i < n; i++) fr->F[i] = i64_floordiv_f(x, bj[i]);
+                v_free(r);
+                return fr;
+            }
+            for (int64_t i = 0; i < n; i++) rj[i] = i64_floordiv(x, bj[i]);
             break;
         case OP_MOD:
-            for (int64_t i = 0; i < n; i++) rj[i] = bj[i] ? x % bj[i] : 0;
+            for (int64_t i = 0; i < n; i++) rj[i] = i64_mod(x, bj[i]);
             break;
         default: break;
         }
@@ -384,8 +440,8 @@ V *vec_binop(V *a, V *b, int op) {
         int ui=(AT==T_IVEC&&BT==T_IVEC&&op!=OP_DIV&&op!=OP_POW); \
         if(ui){ V*r=v_ivec(n); for(int64_t i=0;i<n;i++){int64_t x=AJ[i],y=BJ[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
-            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break; \
-            case OP_MOD:r->J[i]=y?x%y:0;break;default:break;}} return r; } \
+            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=i64_floordiv(x,y);break; \
+            case OP_MOD:r->J[i]=i64_mod(x,y);break;default:break;}} return r; } \
         V*r=v_fvec(n); for(int64_t i=0;i<n;i++){double x=AT==T_IVEC?(double)a->J[i]:a->F[i], \
             y=BT==T_IVEC?(double)b->J[i]:b->F[i]; \
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break; \
@@ -400,8 +456,8 @@ V *vec_binop(V *a, V *b, int op) {
         int ui=(a->t==T_INT&&b->t==T_IVEC&&op!=OP_DIV&&op!=OP_POW);
         if(ui){ V*r=v_ivec(n); int64_t x=a->j; for(int64_t i=0;i<n;i++){int64_t y=b->J[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
-            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break; \
-            case OP_MOD:r->J[i]=y?x%y:0;break;default:break;}} return r; }
+            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=i64_floordiv(x,y);break; \
+            case OP_MOD:r->J[i]=i64_mod(x,y);break;default:break;}} return r; }
         V*r=v_fvec(n); double x=to_float(a);
         for(int64_t i=0;i<n;i++){double y=b->t==T_IVEC?(double)b->J[i]:b->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
@@ -414,8 +470,8 @@ V *vec_binop(V *a, V *b, int op) {
         int ui=(a->t==T_IVEC&&b->t==T_INT&&op!=OP_DIV&&op!=OP_POW);
         if(ui){ V*r=v_ivec(n); int64_t y=b->j; for(int64_t i=0;i<n;i++){int64_t x=a->J[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
-            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=y?x/y:0;break; \
-            case OP_MOD:r->J[i]=y?x%y:0;break;default:break;}} return r; }
+            case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=i64_floordiv(x,y);break; \
+            case OP_MOD:r->J[i]=i64_mod(x,y);break;default:break;}} return r; }
         V*r=v_fvec(n); double y=to_float(b);
         for(int64_t i=0;i<n;i++){double x=a->t==T_IVEC?(double)a->J[i]:a->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
@@ -725,7 +781,8 @@ V *vec_cmp(V *a, V *b, int op) {
 V *table_filter(V *tbl, V *mask) {
     P(tbl->t != T_TABLE || mask->t != T_BVEC,v_err("bad filter"))
     int64_t nr = tbl->n, count=0;
-    for(int64_t i=0;i<nr && i<mask->n;i++) if(mask->B[i]) count++;
+    int64_t rows = nr < mask->n ? nr : mask->n;
+    for(int64_t i=0;i<rows;i++) if(mask->B[i]) count++;
     int nc = tbl->keys->n;
     V *new_data = v_list(nc);
     for(int c=0;c<nc;c++) {
@@ -742,6 +799,10 @@ V *table_filter(V *tbl, V *mask) {
             V *nc2 = v_fvec(count); int64_t j=0;
             for(int64_t i=0;i<nr&&i<mask->n;i++) if(mask->B[i]) nc2->F[j++]=col->F[i];
             new_data->L[c] = nc2;
+        } else if(col->t == T_BVEC) {
+            V *nc2 = v_bvec(count); int64_t j=0;
+            for(int64_t i=0;i<rows;i++) if(mask->B[i]) nc2->B[j++]=col->B[i];
+            new_data->L[c] = nc2;
         } else if(col->t == T_LIST) {
             V *nc2 = v_list(count); int64_t j=0;
             for(int64_t i=0;i<nr&&i<mask->n;i++) if(mask->B[i]) nc2->L[j++]=v_ref(col->L[i]);
@@ -750,23 +811,24 @@ V *table_filter(V *tbl, V *mask) {
             int64_t cols = mat_cols(col);
             if(col->t == T_IMAT) {
                 V *nc2 = v_imat(count, cols);
-                mat_filter_imat_rows(nc2->J, col->J, mask->B, nr, cols);
+                mat_filter_imat_rows(nc2->J, col->J, mask->B, rows, cols);
                 new_data->L[c] = nc2;
             } else if(col->t == T_FMAT) {
                 V *nc2 = v_fmat(count, cols);
-                mat_filter_fmat_rows(nc2->F, col->F, mask->B, nr, cols);
+                mat_filter_fmat_rows(nc2->F, col->F, mask->B, rows, cols);
                 new_data->L[c] = nc2;
             } else if(col->t == T_CMAT) {
                 V *nc2 = v_cmat(count, cols);
-                mat_filter_bmat_rows(nc2->B, col->B, mask->B, nr, cols);
+                mat_filter_bmat_rows(nc2->B, col->B, mask->B, rows, cols);
                 new_data->L[c] = nc2;
             } else {
                 V *nc2 = v_bmat(count, cols);
-                mat_filter_bmat_rows(nc2->B, col->B, mask->B, nr, cols);
+                mat_filter_bmat_rows(nc2->B, col->B, mask->B, rows, cols);
                 new_data->L[c] = nc2;
             }
         } else {
-            new_data->L[c] = v_ref(col);
+            v_free(new_data);
+            return v_err("table_filter: unsupported column type");
         }
     }
     {

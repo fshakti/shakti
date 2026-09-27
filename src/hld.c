@@ -91,6 +91,14 @@ int hld_encode(V *v, int codec, int level, unsigned char **out, size_t *out_len,
         iefs = NULL;
     }
 
+    if (iefs_len > UINT32_MAX || wire_len > UINT32_MAX) {
+        if (wire_arena)
+            iefs_io_free_buf(wire);
+        else
+            free(wire);
+        set_err(err, err_cap, "hld_encode: length does not fit u32");
+        return -1;
+    }
     if (wire_len > HLD_MAX_PAYLOAD) {
         if (wire_arena)
             iefs_io_free_buf(wire);
@@ -157,8 +165,8 @@ V *hld_decode(const unsigned char *buf, size_t len) {
         return iefs_decode(payload, wire_len);
     }
 
-    if (shakti_decompress(codec, payload, wire_len, &plain, &plain_len, err, sizeof err) !=
-        0)
+    if (shakti_decompress_max(codec, payload, wire_len, &plain, &plain_len, (size_t)raw_len,
+                              err, sizeof err) != 0)
         return v_err(err[0] ? err : "hld_decode: decompress failed");
     if (plain_len != (size_t)raw_len) {
         free(plain);

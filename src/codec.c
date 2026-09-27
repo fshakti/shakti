@@ -246,9 +246,15 @@ static uint64_t get_u64_le(const unsigned char *p) {
 
 /* ---- delta_i64 / fire_i64 ---- */
 
+static int64_t i64_wrapping_add(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a + (uint64_t)b);
+}
+static int64_t i64_wrapping_sub(int64_t a, int64_t b) {
+    return (int64_t)((uint64_t)a - (uint64_t)b);
+}
 static int64_t fire_predict(int64_t prev, int32_t alpha_fp) {
     /* alpha_fp: Q8 fixed-point in [0, 512) ≈ [0, 2) */
-    return (int64_t)(((int64_t)alpha_fp * prev) >> 8);
+    return (int64_t)((((uint64_t)(int64_t)alpha_fp) * (uint64_t)prev) >> 8);
 }
 
 static void fire_adapt(int32_t *alpha_fp, int64_t err, int64_t prev_err) {
@@ -329,12 +335,12 @@ static int compress_i64_residual(int codec, const unsigned char *src, size_t src
             int64_t resid;
             if (codec == SHAKTI_CODEC_FIRE_I64) {
                 int64_t pred = fire_predict(x[idx - 1], alpha);
-                resid = x[idx] - pred;
+                resid = i64_wrapping_sub(x[idx], pred);
                 fire_adapt(&alpha, resid, prev_err);
                 prev_err = resid;
             } else {
                 /* δδ: first sample in stream uses simple delta; rest δδ */
-                int64_t d = x[idx] - x[idx - 1];
+                int64_t d = i64_wrapping_sub(x[idx], x[idx - 1]);
                 if (idx == 1) {
                     resid = d;
                     prev_delta = d;
@@ -460,12 +466,12 @@ static int decompress_i64_residual(int codec, const unsigned char *src, size_t s
                 int64_t resid = 0;
                 if (codec == SHAKTI_CODEC_FIRE_I64) {
                     int64_t pred = fire_predict(x[idx - 1], alpha);
-                    x[idx] = pred + resid;
+                    x[idx] = i64_wrapping_add(pred, resid);
                     fire_adapt(&alpha, resid, prev_err);
                     prev_err = resid;
                 } else {
-                    int64_t d = (idx == 1) ? resid : (prev_delta + resid);
-                    x[idx] = x[idx - 1] + d;
+                    int64_t d = (idx == 1) ? resid : i64_wrapping_add(prev_delta, resid);
+                    x[idx] = i64_wrapping_add(x[idx - 1], d);
                     prev_delta = d;
                 }
             }
@@ -487,12 +493,12 @@ static int decompress_i64_residual(int codec, const unsigned char *src, size_t s
                 size_t idx = i + k;
                 if (codec == SHAKTI_CODEC_FIRE_I64) {
                     int64_t pred = fire_predict(x[idx - 1], alpha);
-                    x[idx] = pred + resid;
+                    x[idx] = i64_wrapping_add(pred, resid);
                     fire_adapt(&alpha, resid, prev_err);
                     prev_err = resid;
                 } else {
-                    int64_t d = (idx == 1) ? resid : (prev_delta + resid);
-                    x[idx] = x[idx - 1] + d;
+                    int64_t d = (idx == 1) ? resid : i64_wrapping_add(prev_delta, resid);
+                    x[idx] = i64_wrapping_add(x[idx - 1], d);
                     prev_delta = d;
                 }
             }
@@ -840,8 +846,8 @@ static int read_delta_body(BitR *r, int64_t *x, size_t n, uint16_t block_n, char
             for (size_t k = 0; k < bn; k++) {
                 size_t idx = i + k;
                 int64_t resid = 0;
-                int64_t d = (idx == 1) ? resid : (prev_delta + resid);
-                x[idx] = x[idx - 1] + d;
+                int64_t d = (idx == 1) ? resid : i64_wrapping_add(prev_delta, resid);
+                x[idx] = i64_wrapping_add(x[idx - 1], d);
                 prev_delta = d;
             }
         } else {
@@ -858,8 +864,8 @@ static int read_delta_body(BitR *r, int64_t *x, size_t n, uint16_t block_n, char
                 }
                 int64_t resid = zigzag_decode(zz);
                 size_t idx = i + k;
-                int64_t d = (idx == 1) ? resid : (prev_delta + resid);
-                x[idx] = x[idx - 1] + d;
+                int64_t d = (idx == 1) ? resid : i64_wrapping_add(prev_delta, resid);
+                x[idx] = i64_wrapping_add(x[idx - 1], d);
                 prev_delta = d;
             }
         }
@@ -1246,6 +1252,13 @@ int shakti_decompress(int codec, const unsigned char *src, size_t src_len,
                                  err, err_cap);
 }
 
+static int residual_count_over_cap(const unsigned char *src, size_t src_len, size_t hdr,
+                                   size_t max_plain) {
+    uint64_t n64;
+    if (!src || src_len < hdr || hdr < 16) return 0;
+    n64 = get_u64_le(src + 8);
+    return n64 > max_plain / 8u;
+}
 int shakti_decompress_max(int codec, const unsigned char *src, size_t src_len,
                           unsigned char **out, size_t *out_len, size_t max_plain,
                           char *err, size_t err_cap) {
@@ -1281,9 +1294,26 @@ int shakti_decompress_max(int codec, const unsigned char *src, size_t src_len,
         *out_len = src_len;
         return 0;
     }
-    if (codec == SHAKTI_CODEC_DELTA_I64 || codec == SHAKTI_CODEC_FIRE_I64)
+    if (codec == SHAKTI_CODEC_DELTA_I64 || codec == SHAKTI_CODEC_FIRE_I64) {
+        if (residual_count_over_cap(src, src_len, 24, max_plain)) {
+            set_err(err, err_cap, "decompress: payload too large");
+            return -1;
+        }
         return decompress_i64_residual(codec, src ? src : (const unsigned char *)"", src_len, out,
                                        out_len, err, err_cap);
+    }
+    if (codec == SHAKTI_CODEC_DATE || codec == SHAKTI_CODEC_DATETIME) {
+        if (residual_count_over_cap(src, src_len, 24, max_plain)) {
+            set_err(err, err_cap, "decompress: payload too large");
+            return -1;
+        }
+    }
+    if (codec == SHAKTI_CODEC_TIME || codec == SHAKTI_CODEC_GORILLA_F64) {
+        if (residual_count_over_cap(src, src_len, 16, max_plain)) {
+            set_err(err, err_cap, "decompress: payload too large");
+            return -1;
+        }
+    }
     if (codec == SHAKTI_CODEC_DATE)
         return decompress_date(src ? src : (const unsigned char *)"", src_len, out, out_len, err,
                                err_cap);

@@ -282,6 +282,12 @@ static int uring_pread_regions(int fd, unsigned char *base, size_t n, const uint
         set_errf(err, err_cap, "iefs io_uring init", errno);
         return -2;
     }
+    size_t *got = calloc(n_ext ? n_ext : 1, sizeof(size_t));
+    if (!got) {
+        io_uring_queue_exit(&ring);
+        set_err(err, err_cap, "iefs: oom");
+        return -1;
+    }
     uint32_t next = 0;
     uint32_t in_flight = 0;
     uint32_t done = 0;
@@ -315,17 +321,43 @@ static int uring_pread_regions(int fd, unsigned char *base, size_t n, const uint
         io_uring_for_each_cqe(&ring, head, cqe) {
             nready++;
             uint32_t idx = (uint32_t)io_uring_cqe_get_data64(cqe);
-            if (cqe->res < 0 || (size_t)cqe->res != (size_t)lens[idx]) {
+            if (cqe->res <= 0) {
                 set_err(err, err_cap, "iefs io_uring: short or failed read");
                 fail = 1;
+            } else {
+                size_t have = got[idx] + (size_t)cqe->res;
+                if (have < (size_t)lens[idx]) {
+                    struct io_uring_sqe *retry = io_uring_get_sqe(&ring);
+                    if (!retry) {
+                        set_err(err, err_cap, "iefs io_uring: short or failed read");
+                        fail = 1;
+                    } else {
+                        got[idx] = have;
+                        io_uring_prep_read(retry, fd, base + (size_t)offs[idx] + have,
+                                           (unsigned)(lens[idx] - have),
+                                           (off_t)offs[idx] + (off_t)have);
+                        io_uring_sqe_set_data64(retry, idx);
+                        in_flight++;
+                    }
+                } else {
+                    got[idx] = have;
+                    done++;
+                }
             }
             if (in_flight)
                 in_flight--;
-            done++;
         }
         io_uring_cq_advance(&ring, nready);
     }
+    while (in_flight) {
+        struct io_uring_cqe *cqe;
+        if (io_uring_wait_cqe(&ring, &cqe) < 0)
+            break;
+        io_uring_cqe_seen(&ring, cqe);
+        in_flight--;
+    }
     io_uring_queue_exit(&ring);
+    free(got);
     return fail ? -1 : 0;
 }
 #endif
@@ -457,6 +489,10 @@ int iefs_io_read_v3_assembled_fd(int fd, size_t file_len, unsigned char **out, s
     }
     *out = NULL;
     *out_len = 0;
+    if ((uint64_t)file_len > (64ull << 30) + 24ull) {
+        set_err(err, err_cap, "iefs: file too large");
+        return -1;
+    }
     size_t n = file_len;
     if (validate_extents(offs, lens, n_ext, n, err, err_cap) != 0)
         return -1;
@@ -773,7 +809,16 @@ static int write_direct_fd(int fd, const unsigned char *buf, size_t len) {
 }
 
 static int make_temp_path(const char *path, char *tmp, size_t tmp_cap) {
-    if (snprintf(tmp, tmp_cap, "%s.iefs.tmp.%d", path, (int)getpid()) >= (int)tmp_cap)
+    unsigned r = 0;
+    int ufd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (ufd >= 0) {
+        if (read(ufd, &r, sizeof r) != (ssize_t)sizeof r)
+            r = 0;
+        close(ufd);
+    }
+    if (!r)
+        r = (unsigned)getpid();
+    if (snprintf(tmp, tmp_cap, "%s.iefs.tmp.%08x", path, r) >= (int)tmp_cap)
         return -1;
     return 0;
 }
@@ -842,7 +887,7 @@ int iefs_io_write_atomic_ex(const char *path, const unsigned char *buf, size_t l
     int fd = -1;
 #if defined(__linux__) && defined(O_DIRECT)
     if (use_direct) {
-        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, 0600);
+        fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_TRUNC | O_DIRECT, 0600);
         if (fd < 0) {
             /* Fall back to buffered if filesystem rejects O_DIRECT. */
             use_direct = 0;
@@ -850,7 +895,7 @@ int iefs_io_write_atomic_ex(const char *path, const unsigned char *buf, size_t l
     }
 #endif
     if (fd < 0) {
-        fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC, 0600);
+        fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_TRUNC, 0600);
         if (fd < 0) {
             set_errf(err, err_cap, "iefs open temp", errno);
             return -1;
@@ -920,7 +965,7 @@ int iefs_io_write_atomic_regions(const char *path, uint64_t file_len, const Iefs
         return -1;
     }
 
-    int fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_TRUNC, 0600);
     if (fd < 0) {
         set_errf(err, err_cap, "iefs open temp", errno);
         return -1;

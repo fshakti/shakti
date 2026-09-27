@@ -2,14 +2,14 @@
 
 #if defined(SHAKTI_WASM) || (!defined(__linux__) && !defined(__APPLE__))
 
-int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, char *err, size_t err_cap) {
-    (void)hdr; (void)which; (void)data; (void)len;
+int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, uint32_t cap, char *err, size_t err_cap) {
+    (void)hdr; (void)which; (void)data; (void)len; (void)cap;
     snprintf(err, err_cap, "ipc: shm not supported on this platform");
     return -1;
 }
-int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms,
+int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms, uint32_t cap,
                 char **out, size_t *out_len, char *err, size_t err_cap) {
-    (void)hdr; (void)which; (void)block; (void)timeout_ms; (void)out; (void)out_len;
+    (void)hdr; (void)which; (void)block; (void)timeout_ms; (void)cap; (void)out; (void)out_len;
     snprintf(err, err_cap, "ipc: shm not supported on this platform");
     return -1;
 }
@@ -40,11 +40,6 @@ size_t ipc_bcast_total_size(size_t ring_cap, uint32_t max_readers) {
 
 #else
 
-static uint8_t *ipc_shm_ring(IpcShmHdr *hdr, int which) {
-    uint8_t *base = (uint8_t *)hdr + IPC_SHM_HDR;
-    return base + (size_t)which * (size_t)hdr->capacity;
-}
-
 static void ipc_shm_ring_copy_out(uint8_t *ring, uint32_t cap, uint32_t pos, void *dst, uint32_t n) {
     uint32_t off = pos % cap;
     uint32_t first = cap - off;
@@ -67,21 +62,20 @@ static void ipc_shm_ring_copy_in(uint8_t *ring, uint32_t cap, uint32_t pos, cons
     }
 }
 
-int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, char *err, size_t err_cap) {
-    if (len > IPC_MAX_MSG || len + 4 > hdr->capacity) {
+int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, uint32_t cap, char *err, size_t err_cap) {
+    if (cap == 0 || len > IPC_MAX_MSG || len + 4 > cap) {
         snprintf(err, err_cap, "ipc: shm message too large (%u)", len);
         return -1;
     }
     atomic_uint *headp = which ? &hdr->head1 : &hdr->head0;
     atomic_uint *tailp = which ? &hdr->tail1 : &hdr->tail0;
     atomic_uint *genp = which ? &hdr->gen1 : &hdr->gen0;
-    uint32_t cap = hdr->capacity;
-    uint8_t *ring = ipc_shm_ring(hdr, which);
+    uint8_t *ring = (uint8_t *)hdr + IPC_SHM_HDR + (size_t)which * (size_t)cap;
     uint32_t head = atomic_load_explicit(headp, memory_order_relaxed);
     uint32_t tail = atomic_load_explicit(tailp, memory_order_acquire);
     uint32_t used = head - tail;
     uint32_t need = len + 4;
-    if (used + need > cap) {
+    if (used > cap || used + need > cap) {
         snprintf(err, err_cap, "ipc: shm ring full");
         return -1;
     }
@@ -96,13 +90,16 @@ int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, char
     return 0;
 }
 
-int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms,
+int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms, uint32_t cap,
                 char **out, size_t *out_len, char *err, size_t err_cap) {
+    if (cap == 0) {
+        snprintf(err, err_cap, "ipc: shm bad capacity");
+        return -1;
+    }
     atomic_uint *headp = which ? &hdr->head1 : &hdr->head0;
     atomic_uint *tailp = which ? &hdr->tail1 : &hdr->tail0;
     atomic_uint *genp = which ? &hdr->gen1 : &hdr->gen0;
-    uint32_t cap = hdr->capacity;
-    uint8_t *ring = ipc_shm_ring(hdr, which);
+    uint8_t *ring = (uint8_t *)hdr + IPC_SHM_HDR + (size_t)which * (size_t)cap;
 
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -112,14 +109,15 @@ int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms,
         uint32_t head = atomic_load_explicit(headp, memory_order_acquire);
         uint32_t tail = atomic_load_explicit(tailp, memory_order_relaxed);
         if (head != tail) {
-            if (head - tail < 4) {
+            uint32_t used = head - tail;
+            if (used < 4 || used > cap) {
                 snprintf(err, err_cap, "ipc: shm ring corrupt");
                 return -1;
             }
             uint32_t be;
             ipc_shm_ring_copy_out(ring, cap, tail, &be, 4);
             uint32_t len = ntohl(be);
-            if (len > IPC_MAX_MSG || 4 + len > head - tail) {
+            if (len > IPC_MAX_MSG || 4u + len > used || 4u + len > cap) {
                 snprintf(err, err_cap, "ipc: shm bad frame len");
                 return -1;
             }
@@ -182,13 +180,30 @@ int ipc_shm_send_side(IpcHandle *s, const void *data, size_t len, char *err, siz
             snprintf(err, err_cap, "ipc: shm broadcast: readers cannot publish");
             return -1;
         }
-        if (len > IPC_MAX_MSG || len + 4 > bh->capacity) {
+        uint32_t cap = s->shm_cap ? s->shm_cap : bh->capacity;
+        if (cap == 0 || len > IPC_MAX_MSG || len + 4 > cap) {
             snprintf(err, err_cap, "ipc: shm message too large (%zu)", len);
             return -1;
         }
-        uint32_t cap = bh->capacity;
         uint8_t *ring = (uint8_t *)bh + IPC_SHM_HDR;
         uint32_t head = atomic_load_explicit(&bh->head, memory_order_relaxed);
+        uint32_t max_r = s->shm_max_readers ? s->shm_max_readers : bh->max_readers;
+        atomic_uint *actives = (atomic_uint *)((uint8_t *)bh + IPC_SHM_HDR + cap);
+        atomic_uint *tails = actives + max_r;
+        uint32_t oldest = head;
+        int any = 0;
+        for (uint32_t r = 0; r < max_r; r++) {
+            if (!atomic_load_explicit(&actives[r], memory_order_acquire)) continue;
+            uint32_t t = atomic_load_explicit(&tails[r], memory_order_acquire);
+            if (!any || (int32_t)(t - oldest) < 0) oldest = t;
+            any = 1;
+        }
+        uint32_t used = any ? head - oldest : 0;
+        uint32_t need = (uint32_t)len + 4;
+        if (used > cap || used + need > cap) {
+            snprintf(err, err_cap, "ipc: shm ring full");
+            return -1;
+        }
         uint32_t be = htonl((uint32_t)len);
         ipc_shm_ring_copy_in(ring, cap, head, &be, 4);
         ipc_shm_ring_copy_in(ring, cap, head + 4, data, (uint32_t)len);
@@ -204,7 +219,7 @@ int ipc_shm_send_side(IpcHandle *s, const void *data, size_t len, char *err, siz
         snprintf(err, err_cap, "ipc: shm bad magic");
         return -1;
     }
-    return ipc_shm_push(hdr, s->shm_side, data, (uint32_t)len, err, err_cap);
+    return ipc_shm_push(hdr, s->shm_side, data, (uint32_t)len, s->shm_cap, err, err_cap);
 }
 
 int ipc_shm_recv_side(IpcHandle *s, int block, int timeout_ms,
@@ -219,13 +234,14 @@ int ipc_shm_recv_side(IpcHandle *s, int block, int timeout_ms,
             snprintf(err, err_cap, "ipc: shm bad bcast magic");
             return -1;
         }
-        if (s->shm_side < 0 || (uint32_t)s->shm_side >= bh->max_readers) {
+        uint32_t max_r = s->shm_max_readers ? s->shm_max_readers : bh->max_readers;
+        uint32_t cap = s->shm_cap ? s->shm_cap : bh->capacity;
+        if (cap == 0 || s->shm_side < 0 || (uint32_t)s->shm_side >= max_r) {
             snprintf(err, err_cap, "ipc: shm broadcast: not a reader");
             return -1;
         }
-        atomic_uint *actives = (atomic_uint *)((uint8_t *)bh + IPC_SHM_HDR + bh->capacity);
-        atomic_uint *tails = actives + bh->max_readers;
-        uint32_t cap = bh->capacity;
+        atomic_uint *actives = (atomic_uint *)((uint8_t *)bh + IPC_SHM_HDR + cap);
+        atomic_uint *tails = actives + max_r;
         uint8_t *ring = (uint8_t *)bh + IPC_SHM_HDR;
         struct timespec start;
         clock_gettime(CLOCK_MONOTONIC, &start);
@@ -234,7 +250,8 @@ int ipc_shm_recv_side(IpcHandle *s, int block, int timeout_ms,
             uint32_t head = atomic_load_explicit(&bh->head, memory_order_acquire);
             uint32_t tail = atomic_load_explicit(&tails[s->shm_side], memory_order_relaxed);
             if (head != tail) {
-                if (head - tail < 4) {
+                uint32_t used = head - tail;
+                if (used < 4 || used > cap) {
                     atomic_store_explicit(&tails[s->shm_side], head, memory_order_release);
                     snprintf(err, err_cap, "ipc: shm broadcast: reader overrun");
                     return -1;
@@ -242,7 +259,7 @@ int ipc_shm_recv_side(IpcHandle *s, int block, int timeout_ms,
                 uint32_t be;
                 ipc_shm_ring_copy_out(ring, cap, tail, &be, 4);
                 uint32_t len = ntohl(be);
-                if (len > IPC_MAX_MSG || 4 + len > head - tail) {
+                if (len > IPC_MAX_MSG || 4u + len > used || 4u + len > cap) {
                     atomic_store_explicit(&tails[s->shm_side], head, memory_order_release);
                     snprintf(err, err_cap, "ipc: shm broadcast: bad frame");
                     return -1;
@@ -279,7 +296,7 @@ int ipc_shm_recv_side(IpcHandle *s, int block, int timeout_ms,
         return -1;
     }
     int which = s->shm_side ? 0 : 1;
-    return ipc_shm_pop(hdr, which, block, timeout_ms, out, out_len, err, err_cap);
+    return ipc_shm_pop(hdr, which, block, timeout_ms, s->shm_cap, out, out_len, err, err_cap);
 }
 
 int ipc_shm_chan_open(const char *user_name, size_t size, int create,
@@ -294,8 +311,8 @@ int ipc_shm_chan_open(const char *user_name, size_t size, int create,
                  ipc_posix_shm_name_max());
         return -1;
     }
-    if (create && size < IPC_SHM_HDR + 128) {
-        snprintf(err, err_cap, "ipc: shm size too small");
+    if (create && (size < IPC_SHM_HDR + 128 || size > IPC_MAX_SHM)) {
+        snprintf(err, err_cap, "ipc: shm size out of range");
         return -1;
     }
     int fd;
@@ -324,6 +341,11 @@ int ipc_shm_chan_open(const char *user_name, size_t size, int create,
         struct stat sb;
         if (fstat(fd, &sb) != 0) {
             snprintf(err, err_cap, "ipc: shm fstat: %s", strerror(errno));
+            close(fd);
+            return -1;
+        }
+        if (sb.st_size < 0 || (uint64_t)sb.st_size > IPC_MAX_SHM) {
+            snprintf(err, err_cap, "ipc: shm size too large");
             close(fd);
             return -1;
         }
@@ -374,9 +396,11 @@ int ipc_shm_readable(IpcHandle *s) {
     if (s->shm_bcast) {
         IpcShmBcastHdr *bh = (IpcShmBcastHdr *)s->shm_ptr;
         if (bh->magic != IPC_SHM_MAGIC_BCAST) return 0;
-        if (s->shm_side < 0 || (uint32_t)s->shm_side >= bh->max_readers) return 0;
-        atomic_uint *actives = (atomic_uint *)((uint8_t *)bh + IPC_SHM_HDR + bh->capacity);
-        atomic_uint *tails = actives + bh->max_readers;
+        uint32_t max_r = s->shm_max_readers ? s->shm_max_readers : bh->max_readers;
+        uint32_t cap = s->shm_cap ? s->shm_cap : bh->capacity;
+        if (cap == 0 || s->shm_side < 0 || (uint32_t)s->shm_side >= max_r) return 0;
+        atomic_uint *actives = (atomic_uint *)((uint8_t *)bh + IPC_SHM_HDR + cap);
+        atomic_uint *tails = actives + max_r;
         uint32_t head = atomic_load_explicit(&bh->head, memory_order_acquire);
         uint32_t tail = atomic_load_explicit(&tails[s->shm_side], memory_order_relaxed);
         return head != tail;

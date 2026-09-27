@@ -89,6 +89,12 @@ int ipc_rdma_poll_fd(void) {
     return g_ec_fd;
 }
 
+int ipc_rdma_cq_fd(IpcRdmaConn *c) {
+    if (!c || !c->id || !c->id->recv_cq || !c->id->recv_cq->channel)
+        return -1;
+    return c->id->recv_cq->channel->fd;
+}
+
 static int ipc_rdma_setup_conn(IpcRdmaConn *c, char *err, size_t err_cap) {
     struct ibv_qp_init_attr attr;
     memset(&attr, 0, sizeof attr);
@@ -131,19 +137,40 @@ static int ipc_rdma_setup_conn(IpcRdmaConn *c, char *err, size_t err_cap) {
     return 0;
 }
 
+static void ipc_rdma_wait_cq(struct ibv_cq *cq) {
+    int fd = (cq && cq->channel) ? cq->channel->fd : -1;
+    if (fd >= 0) {
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        poll(&pfd, 1, 50);
+    } else {
+        usleep(200);
+    }
+}
+
 static int ipc_rdma_wait_send(IpcRdmaConn *c, int block, char *err, size_t err_cap) {
     struct ibv_wc wc;
     for (;;) {
         int rc = rdma_get_send_comp(c->id, &wc);
-        if (rc == 0) return 0;
         if (rc < 0) {
             snprintf(err, err_cap, "ipc rdma: send comp: %s", strerror(errno));
             return -1;
         }
-        if (!block) {
-            snprintf(err, err_cap, "ipc rdma: send pending");
-            return -2;
+        if (rc == 0) {
+            if (!block) {
+                snprintf(err, err_cap, "ipc rdma: send pending");
+                return -2;
+            }
+            ipc_rdma_wait_cq(c->id ? c->id->send_cq : NULL);
+            continue;
         }
+        if (wc.status != IBV_WC_SUCCESS) {
+            snprintf(err, err_cap, "ipc rdma: send wc status %d", wc.status);
+            return -1;
+        }
+        return 0;
     }
 }
 
@@ -152,20 +179,22 @@ static int ipc_rdma_drain_recv(IpcRdmaConn *c, int block, char *err, size_t err_
     struct ibv_wc wc;
     for (;;) {
         int rc = rdma_get_recv_comp(c->id, &wc);
-        if (rc == 0) {
-            if (wc.status != IBV_WC_SUCCESS) {
-                snprintf(err, err_cap, "ipc rdma: recv wc status %d", wc.status);
-                return -1;
-            }
-            c->recv_len = wc.byte_len;
-            c->recv_ready = 1;
-            return 0;
-        }
         if (rc < 0) {
             snprintf(err, err_cap, "ipc rdma: recv comp: %s", strerror(errno));
             return -1;
         }
-        if (!block) return -2;
+        if (rc == 0) {
+            if (!block) return -2;
+            ipc_rdma_wait_cq(c->id ? c->id->recv_cq : NULL);
+            continue;
+        }
+        if (wc.status != IBV_WC_SUCCESS) {
+            snprintf(err, err_cap, "ipc rdma: recv wc status %d", wc.status);
+            return -1;
+        }
+        c->recv_len = wc.byte_len;
+        c->recv_ready = 1;
+        return 0;
     }
 }
 
@@ -188,7 +217,8 @@ int ipc_rdma_listen(const char *host, int port, IpcRdmaConn **out, char *err, si
     hints.ai_flags = RAI_PASSIVE;
     hints.ai_port_space = RDMA_PS_TCP;
     hints.ai_family = AF_INET;
-    int ret = rdma_getaddrinfo(host && host[0] ? host : NULL, port_s, &hints, &res);
+    if (!host || !host[0]) host = "127.0.0.1";
+    int ret = rdma_getaddrinfo(host, port_s, &hints, &res);
     if (ret) {
         snprintf(err, err_cap, "ipc rdma: getaddrinfo: %s", gai_strerror(ret));
         return -1;
@@ -257,6 +287,7 @@ int ipc_rdma_accept(IpcRdmaConn *listen, IpcRdmaConn **out, char *err, size_t er
 }
 
 int ipc_rdma_connect(const char *host, int port, IpcRdmaConn **out, char *err, size_t err_cap) {
+    if (!host || !host[0]) host = "127.0.0.1";
     char port_s[16];
     if (ipc_rdma_port_str(port, port_s, sizeof port_s) != 0) {
         snprintf(err, err_cap, "ipc rdma: bad port");
@@ -317,7 +348,10 @@ int ipc_rdma_send(IpcRdmaConn *c, const void *data, size_t len, char *err, size_
     uint32_t be = htonl((uint32_t)len);
     memcpy(c->send_buf, &be, 4);
     memcpy(c->send_buf + 4, data, len);
-    if (rdma_post_send(c->id, NULL, c->send_buf, len + 4, c->send_mr, c->send_flags) != 0) {
+    int flags = 0;
+    if ((c->send_flags & IBV_SEND_INLINE) && (len + 4) <= 64)
+        flags = IBV_SEND_INLINE;
+    if (rdma_post_send(c->id, NULL, c->send_buf, len + 4, c->send_mr, flags) != 0) {
         snprintf(err, err_cap, "ipc rdma: post_send: %s", strerror(errno));
         return -1;
     }

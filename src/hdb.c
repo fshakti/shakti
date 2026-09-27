@@ -445,18 +445,29 @@ V *bi_hdb_create(V **a, int n) {
     V *tables = v_dict_get(meta, "tables");
     if (!tables || tables->t != T_DICT) return v_err("hdb_create: bad meta");
 
-    V *entry = v_dict_empty();
-    v_dict_put(entry, "part_key", v_str(part_key));
-    v_dict_put(entry, "schema", v_ref(a[2]));
-    v_dict_put(tables, a[1]->s, entry);
-
     char tdir[HDB_PATH_MAX];
     if (snprintf(tdir, sizeof tdir, "%s/%s", hdb_handle_root(a[0]), a[1]->s) >= (int)sizeof tdir)
         return v_err("hdb_create: path too long");
     if (hdb_mkdir_p(tdir) != 0)
         return v_errf("hdb_create: mkdir: %s", strerror(errno));
 
-    if (hdb_save_meta(a[0]) != 0) return v_err("hdb_create: save meta failed");
+    V *entry = v_dict_empty();
+    v_dict_put(entry, "part_key", v_str(part_key));
+    v_dict_put(entry, "schema", v_ref(a[2]));
+    v_dict_put(tables, a[1]->s, entry);
+
+    if (hdb_save_meta(a[0]) != 0) {
+        if (tables->n > 0 && tables->keys && tables->keys->L[tables->n - 1] &&
+            tables->keys->L[tables->n - 1]->t == T_STR &&
+            !strcmp(tables->keys->L[tables->n - 1]->s, a[1]->s)) {
+            v_free(tables->keys->L[tables->n - 1]);
+            v_free(tables->vals->L[tables->n - 1]);
+            tables->n--;
+            tables->keys->n--;
+            tables->vals->n--;
+        }
+        return v_err("hdb_create: save meta failed");
+    }
     return v_nil();
 }
 
@@ -662,6 +673,8 @@ V *bi_hdb_next(V **a, int n) {
         return v_bool(0);
     }
 
+    if (!parts->L[idx] || parts->L[idx]->t != T_STR || !hdb_safe_name(parts->L[idx]->s))
+        return v_err("hdb_next: bad partition name");
     char pfile[HDB_PATH_MAX];
     if (hdb_part_path(pfile, sizeof pfile, root_v->s, table_v->s, parts->L[idx]->s) != 0)
         return v_err("hdb_next: path too long");

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 void mat_fmat_mul(double *C, const double *A, const double *B, int64_t m, int64_t k, int64_t n);
-void mat_imat_mul(int64_t *C, const int64_t *A, const int64_t *B, int64_t m, int64_t k, int64_t n);
+int mat_imat_mul(int64_t *C, const int64_t *A, const int64_t *B, int64_t m, int64_t k, int64_t n);
 void mat_mul_mixed(double *Cf, int64_t *Ci, const int64_t *Aj, const double *Af,
                    const int64_t *Bj, const double *Bf, int64_t m, int64_t k, int64_t n,
                    int a_imat, int b_imat, int out_fmat);

@@ -1,4 +1,5 @@
 #include "rest.h"
+#include "http_line.h"
 #include "json_parse.h"
 #ifdef SHAKTI_HAVE_IEFS
 #include "iefs_format.h"
@@ -134,7 +135,7 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
         const struct sockaddr_in *sin4 = (const struct sockaddr_in *)sa;
         uint32_t a = ntohl(sin4->sin_addr.s_addr);
-        if ((a & 0xff000000u) == 0x7f000000u) return 0; /* 127/8 loopback (local mini-server) */
+        if ((a & 0xff000000u) == 0x7f000000u && !getenv("SHAKTI_REST_ALLOW_LOOPBACK")) return 1; /* 127/8 */
         if ((a & 0xff000000u) == 0x0a000000u) return 1; /* 10/8 */
         if ((a & 0xfff00000u) == 0xac100000u) return 1; /* 172.16/12 */
         if ((a & 0xffff0000u) == 0xc0a80000u) return 1; /* 192.168/16 */
@@ -154,7 +155,11 @@ static int rest_host_is_blocked_ip(const struct sockaddr *sa) {
         int zero = 1;
         for (int i = 0; i < 15; i++) if (b[i]) { zero = 0; break; }
         if (zero && b[15] == 0) return 1; /* :: */
-        if (zero && b[15] == 1) return 0; /* ::1 loopback */
+        if (zero && b[15] == 1 && !getenv("SHAKTI_REST_ALLOW_LOOPBACK")) return 1; /* ::1 */
+        if (b[0] == 0xff) return 1; /* ff00::/8 */
+        if (b[0] == 0x20 && b[1] == 0x02) return 1; /* 2002::/16 6to4 */
+        if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) return 1; /* 64:ff9b::/96 */
+        if (b[0] == 0xfe && (b[1] & 0xc0) == 0xc0) return 1; /* fec0::/10 */
         if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return 1; /* fe80::/10 */
         if ((b[0] & 0xfe) == 0xfc) return 1; /* fc00::/7 */
         /* IPv4-mapped ::ffff:a.b.c.d and IPv4-compatible ::a.b.c.d */
@@ -285,6 +290,7 @@ static int rest_url_resolve_pin(const char *url, char *resolve_out, size_t resol
 static int rest_token_host_ok(const char *url) {
     const char *hosts = getenv("SHAKTI_REST_TOKEN_HOSTS");
     if (!hosts || !hosts[0]) return 0; /* no allowlist → never auto-attach */
+    if (!url || strncmp(url, "https://", 8) != 0) return 0;
     char host[256];
     if (!rest_extract_host(url, host, sizeof host)) return 0;
     char buf[1024];
@@ -816,6 +822,8 @@ static V *rest_do_listen(int port, const char *host) {
         const char *allow = getenv("SHAKTI_REST_ALLOW_PUBLIC");
         if (!loopback && !(allow && allow[0] == '1' && allow[1] == '\0'))
             return v_err("rest_listen: non-loopback bind requires SHAKTI_REST_ALLOW_PUBLIC=1");
+        if (!loopback && !g_rest_token[0])
+            return v_err("rest_listen: non-loopback bind requires SHAKTI_REST_TOKEN");
     }
 
 #if defined(AF_INET6)
@@ -893,6 +901,13 @@ static V *rest_do_accept(int listen_h) {
     struct sockaddr_storage peer;
     socklen_t plen = sizeof peer;
     int cfd = accept(srv->fd, (struct sockaddr *)&peer, &plen);
+    if (cfd >= 0) {
+        struct timeval tv;
+        tv.tv_sec = 30;
+        tv.tv_usec = 0;
+        setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        setsockopt(cfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    }
     if (cfd < 0) return v_err("rest_accept: accept failed");
     rest_set_cloexec(cfd);
 
@@ -953,7 +968,8 @@ static V *rest_do_read(int conn_h) {
         return v_err("rest_read: read failed");
 
     char method[32], path[4096], version[32];
-    if (sscanf(line, "%31s %4095s %31s", method, path, version) < 2)
+    if (http_split_request_line(line, method, sizeof method, path, sizeof path,
+                                version, sizeof version) != 0)
         return v_err("rest_read: bad request line");
 
     V *hdrs = v_dict_empty();
@@ -968,6 +984,10 @@ static V *rest_do_read(int conn_h) {
         }
         size_t ll = strlen(line);
         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == '\n')) line[--ll] = 0;
+        if (!strcasecmp(line, "Transfer-Encoding") || !strncasecmp(line, "Transfer-Encoding:", 18)) {
+            v_free(hdrs);
+            return v_err("rest_read: Transfer-Encoding is not supported");
+        }
         if (line[0] == 0) break;
         if (hdr_len + ll + 2 >= REST_MAX_HDR) {
             v_free(hdrs);
@@ -986,6 +1006,10 @@ static V *rest_do_read(int conn_h) {
             while (*val == ' ' || *val == '\t') val++;
             v_dict_put(hdrs, line, v_str(val));
             if (!strcasecmp(line, "Sec-WebSocket-Key")) {
+                if (strlen(val) > 128) {
+                    v_free(hdrs);
+                    return v_err("rest_read: websocket key too long");
+                }
                 free(conn->ws_key);
                 conn->ws_key = strdup(val);
             } else if (!strcasecmp(line, "Sec-WebSocket-Protocol")) {
@@ -1006,12 +1030,39 @@ static V *rest_do_read(int conn_h) {
         }
     }
 
+    if (g_rest_token[0]) {
+        const char *auth = NULL;
+        for (int64_t i = 0; i < hdrs->keys->n; i++) {
+            V *k = hdrs->keys->L[i];
+            if (k && k->t == T_STR && !strcasecmp(k->s, "Authorization")) {
+                V *v = hdrs->vals->L[i];
+                if (v && v->t == T_STR) auth = v->s;
+            }
+        }
+        const char *bearer = auth;
+        if (bearer && !strncasecmp(bearer, "Bearer ", 7)) bearer += 7;
+        else bearer = NULL;
+        if (!bearer || strlen(bearer) != strlen(g_rest_token) ||
+            memcmp(bearer, g_rest_token, strlen(g_rest_token)) != 0) {
+            v_free(hdrs);
+            return v_err("rest_read: unauthorized");
+        }
+    }
+
     size_t content_len = 0;
     for (int64_t i = 0; i < hdrs->keys->n; i++) {
         V *k = hdrs->keys->L[i];
         if (k->t == T_STR && !strcasecmp(k->s, "Content-Length")) {
             V *v = hdrs->vals->L[i];
-            if (v->t == T_STR) content_len = (size_t)strtoull(v->s, NULL, 10);
+            if (v->t == T_STR) {
+                char *end = NULL;
+                unsigned long long cl = strtoull(v->s, &end, 10);
+                if (!v->s[0] || (end && *end) || cl > SIZE_MAX) {
+                    v_free(hdrs);
+                    return v_err("rest_read: bad Content-Length");
+                }
+                content_len = (size_t)cl;
+            }
             break;
         }
     }

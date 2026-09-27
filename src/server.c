@@ -1,5 +1,6 @@
 /* HTTP JSON-RPC daemon (POST /rpc). Loopback by default. */
 #include "server.h"
+#include "http_line.h"
 #include "json_parse.h"
 #ifdef SHAKTI_HAVE_TLS
 #include "tls.h"
@@ -130,10 +131,13 @@ static void http_respond(int fd, int code, const char *status,
             "\r\n", code, status, ctype ? ctype : "text/plain", blen);
     }
     if (hlen < 0 || (size_t)hlen >= sizeof(hdr)) {
-        const char *fb =
+        const char *fb_body = "header too large\n";
+        char fb[192];
+        int n = snprintf(fb, sizeof fb,
             "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n"
-            "Content-Length: 21\r\nConnection: close\r\n\r\nheader too large\n";
-        conn_write(fd, fb, strlen(fb));
+            "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(fb_body), fb_body);
+        if (n > 0) conn_write(fd, fb, (size_t)n);
         return;
     }
     conn_write(fd, hdr, (size_t)hlen);
@@ -419,10 +423,8 @@ static char *http_body(char *buf) {
     return p ? p + 4 : NULL;
 }
 
-static void http_parse_method(const char *buf, char *method, char *path) {
-    method[0] = 0;
-    path[0] = 0;
-    sscanf(buf, "%15s %255s", method, path);
+static int http_parse_method(const char *buf, char *method, size_t mcap, char *path, size_t pcap) {
+    return http_split_request_line(buf, method, mcap, path, pcap, NULL, 0);
 }
 
 static int dict_int(V *d, const char *key, int def) {
@@ -520,7 +522,24 @@ static void handle_client(int cfd, Env *global) {
         return;
     }
     char method[16] = {0}, path[256] = {0};
-    http_parse_method(buf, method, path);
+    int hdr_n = 0;
+    for (char *hp = buf; *hp; hp++) {
+        if (*hp == '\n') hdr_n++;
+        if (*hp == '\n' && hp[1] == '\n') break;
+        if (*hp == '\n' && hp[1] == '\r' && hp[2] == '\n') break;
+    }
+    if (hdr_n > 128) {
+        http_respond(cfd, 431, "Request Header Fields Too Large", "text/plain", "too many headers\n");
+        free(buf);
+        client_done(cfd);
+        return;
+    }
+    if (http_parse_method(buf, method, sizeof method, path, sizeof path) != 0) {
+        http_respond(cfd, 400, "Bad Request", "text/plain", "bad request line\n");
+        free(buf);
+        client_done(cfd);
+        return;
+    }
     char *q = strchr(path, '?');
     if (q) *q = 0;
 
@@ -556,8 +575,17 @@ static void handle_client(int cfd, Env *global) {
         }
     }
     {
+        char site[64] = {0};
+        http_header_value(buf, "Sec-Fetch-Site", site, sizeof site);
         int mutating = !strcmp(method, "POST") || !strcmp(method, "PUT")
             || !strcmp(method, "PATCH") || !strcmp(method, "DELETE");
+        if (!g_serve_token[0] && site[0] && !strcasecmp(site, "cross-site")) {
+            http_respond(cfd, 403, "Forbidden", "application/json",
+                         "{\"error\":\"cross-site request blocked\"}");
+            free(buf);
+            client_done(cfd);
+            return;
+        }
         if (mutating && origin[0] && !origin_is_localhost(origin)) {
             http_respond(cfd, 403, "Forbidden", "application/json",
                          "{\"error\":\"cross-origin request blocked\"}");
@@ -608,8 +636,16 @@ static void handle_client(int cfd, Env *global) {
 
     if (!resp || resp->t == T_ERR) {
         const char *msg = (resp && resp->t == T_ERR && resp->s) ? resp->s : "internal error";
-        char jbuf[512];
-        snprintf(jbuf, sizeof jbuf, "{\"error\":\"%s\"}", msg);
+        char esc[256], jbuf[512];
+        size_t o = 0;
+        for (const char *p = msg; *p && o + 8 < sizeof esc; p++) {
+            unsigned char c = (unsigned char)*p;
+            if (c == '"' || c == '\\') { esc[o++] = '\\'; esc[o++] = (char)c; }
+            else if (c < 0x20) o += (size_t)snprintf(esc + o, sizeof esc - o, "\\u%04x", c);
+            else esc[o++] = (char)c;
+        }
+        esc[o] = 0;
+        snprintf(jbuf, sizeof jbuf, "{\"error\":\"%s\"}", esc);
         http_respond(cfd, 500, "Internal Server Error", "application/json", jbuf);
         v_free(resp);
         free(buf);
@@ -716,6 +752,13 @@ void server_serve(int port, Env *global_env) {
         if (cfd < 0) {
             if (errno == EINTR) continue;
             break;
+        }
+        {
+            struct timeval tv;
+            tv.tv_sec = 30;
+            tv.tv_usec = 0;
+            setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+            setsockopt(cfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
         }
         handle_client(cfd, global_env);
     }

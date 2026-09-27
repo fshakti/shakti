@@ -1,4 +1,5 @@
 #include "mat_simd.h"
+#include "i64bin.h"
 #include "a.h"
 #include <limits.h>
 #include <math.h>
@@ -168,13 +169,16 @@ static void copy_row_imat_neon(int64_t *dst, const int64_t *src, int64_t cols) {
 
 #endif /* SIMD backend */
 
-static void dot_row_col_imat_scalar(int64_t *cr, const int64_t *ar, const int64_t *B, int64_t k, int64_t n) {
+static int dot_row_col_imat_scalar(int64_t *cr, const int64_t *ar, const int64_t *B, int64_t k, int64_t n) {
+    int overflow = 0;
     for (int64_t j = 0; j < n; j++) {
-        double sum = 0;
+        __int128 sum = 0;
         for (int64_t t = 0; t < k; t++)
-            sum += (double)ar[t] * (double)B[t * n + j];
+            sum += (__int128)ar[t] * (__int128)B[t * n + j];
+        if (sum > INT64_MAX || sum < INT64_MIN) overflow = 1;
         cr[j] = (int64_t)sum;
     }
+    return overflow;
 }
 
 static void dot_row_col_fmat_scalar(double *cr, const double *ar, const double *B, int64_t k, int64_t n) {
@@ -212,19 +216,13 @@ void mat_fmat_mul(double *C, const double *A, const double *B, int64_t m, int64_
         dot_row_col_fmat_scalar(C + i * n, A + i * k, B, k, n);
 }
 
-void mat_imat_mul(int64_t *C, const int64_t *A, const int64_t *B, int64_t m, int64_t k, int64_t n) {
-#if defined(__aarch64__)
-    if (use_simd_mul(m, k, n)) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) if (m >= ISL_MAT_OMP_ROWS_MIN)
-#endif
-        for (int64_t i = 0; i < m; i++)
-            dot_row_col_imat_neon(C + i * n, A + i * k, B, k, n);
-        return;
+int mat_imat_mul(int64_t *C, const int64_t *A, const int64_t *B, int64_t m, int64_t k, int64_t n) {
+    int overflow = 0;
+    for (int64_t i = 0; i < m; i++) {
+        if (dot_row_col_imat_scalar(C + i * n, A + i * k, B, k, n))
+            overflow = 1;
     }
-#endif
-    for (int64_t i = 0; i < m; i++)
-        dot_row_col_imat_scalar(C + i * n, A + i * k, B, k, n);
+    return overflow ? -1 : 0;
 }
 
 void mat_mul_mixed(double *Cf, int64_t *Ci, const int64_t *Aj, const double *Af,
@@ -381,10 +379,13 @@ void mat_fmat_binop_scalar_rev(double *r, double x, const double *b, int64_t ne,
     for (int64_t i = 0; i < ne; i++) {
         double y = b[i];
         switch (op) {
+        case 0: r[i] = x + y; break;
         case 18: r[i] = x - y; break;
+        case 11: r[i] = x * y; break;
         case 2: r[i] = y != 0 ? x / y : 0; break;
         case 4: r[i] = y != 0 ? floor(x / y) : 0; break;
         case 10: r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 17: r[i] = pow(x, y); break;
         default: break;
         }
     }
@@ -397,8 +398,8 @@ static void imat_binop_mm_scalar(int64_t *r, const int64_t *a, const int64_t *b,
         case 0: r[i] = x + y; break;
         case 18: r[i] = x - y; break;
         case 11: r[i] = x * y; break;
-        case 4: r[i] = y ? x / y : 0; break;
-        case 10: r[i] = y ? x % y : 0; break;
+        case 4: r[i] = i64_floordiv(x, y); break;
+        case 10: r[i] = i64_mod(x, y); break;
         default: r[i] = x; break;
         }
     }
@@ -490,8 +491,8 @@ void mat_imat_binop_scalar(int64_t *r, const int64_t *a, int64_t y, int64_t ne, 
     for (int64_t i = 0; i < ne; i++) {
         int64_t x = a[i];
         switch (op) {
-        case 4: r[i] = y ? x / y : 0; break;
-        case 10: r[i] = y ? x % y : 0; break;
+        case 4: r[i] = i64_floordiv(x, y); break;
+        case 10: r[i] = i64_mod(x, y); break;
         default: break;
         }
     }
@@ -540,8 +541,8 @@ void mat_imat_binop_scalar_rev(int64_t *r, int64_t x, const int64_t *b, int64_t 
     for (int64_t i = 0; i < ne; i++) {
         int64_t y = b[i];
         switch (op) {
-        case 4: r[i] = y ? x / y : 0; break;
-        case 10: r[i] = y ? x % y : 0; break;
+        case 4: r[i] = i64_floordiv(x, y); break;
+        case 10: r[i] = i64_mod(x, y); break;
         default: break;
         }
     }

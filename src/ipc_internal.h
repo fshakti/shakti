@@ -96,6 +96,7 @@ typedef struct {
     uint16_t port;
     uint8_t addr[16];
     uint8_t cookie[8];
+    time_t at;
 } IpcReplyTo;
 
 typedef struct {
@@ -136,6 +137,7 @@ typedef struct {
     char uds_path[108];
     IpcRxBuf rx;
     IpcInbox inbox;
+    IpcInbox async_q;
     uint32_t next_corr;
     int mcast_af;
     struct sockaddr_storage mcast_addr;
@@ -150,6 +152,8 @@ typedef struct {
     char ssm_source[64];
     void *shm_ptr;
     size_t shm_size;
+    uint32_t shm_cap;         /* cached at create/attach; not re-read from the mapping */
+    uint32_t shm_max_readers;
     char shm_name[256];
     int shm_owner;
     int shm_side;
@@ -213,8 +217,8 @@ int ipc_reply_to_take(IpcHandle *s, uint32_t corr, int *af, uint16_t *port, uint
 void ipc_pack_reply_info(unsigned char *dst, int af, uint16_t port, const void *addr);
 int ipc_parse_reply_info(const unsigned char *src, int *af, uint16_t *port, uint8_t addr[16]);
 
-int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, char *err, size_t err_cap);
-int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms,
+int ipc_shm_push(IpcShmHdr *hdr, int which, const void *data, uint32_t len, uint32_t cap, char *err, size_t err_cap);
+int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms, uint32_t cap,
                 char **out, size_t *out_len, char *err, size_t err_cap);
 int ipc_shm_send_side(IpcHandle *s, const void *data, size_t len, char *err, size_t err_cap);
 int ipc_shm_recv_side(IpcHandle *s, int block, int timeout_ms,

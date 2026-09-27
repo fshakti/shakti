@@ -47,6 +47,9 @@ static void sp_write_be_float(char *p, float f) {
 }
 
 static int sp_env_defaults(void) {
+    static int applied = 0;
+    if (applied) return 0;
+    applied = 1;
     const char *h = getenv("SONICPI_HOST");
     const char *p = getenv("SONICPI_PORT");
     if (h && h[0]) {
@@ -227,8 +230,10 @@ V *bi_sonicpi_configure(V **a, int n) {
     P(n >= 1 && a[0]->t != T_STR && (n < 2 || a[1]->t != T_INT),
       v_err("sonicpi_configure([host, port])"))
     P(port <= 0 || port >= 65536, v_err("sonicpi_configure: bad port"))
-    strncpy(g_host, host, sizeof g_host - 1);
-    g_host[sizeof g_host - 1] = 0;
+    if (host != g_host) {
+        strncpy(g_host, host, sizeof g_host - 1);
+        g_host[sizeof g_host - 1] = 0;
+    }
     g_port = port;
     sp_close_socket();
     char err[256];

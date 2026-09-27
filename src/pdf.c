@@ -9,6 +9,8 @@
 #include "pdf.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -407,8 +409,18 @@ static PdfObj *pp_parse_number_or_ref(PdfParse *p) {
             gtmp[gn] = 0;
             PdfObj *o = po_new(PO_REF);
             if (!o) return NULL;
-            o->ref_n = (int)atoi(tmp);
-            o->ref_g = (int)atoi(gtmp);
+            errno = 0;
+            char *rend = NULL, *gend = NULL;
+            long ref_n = strtol(tmp, &rend, 10);
+            long ref_g = strtol(gtmp, &gend, 10);
+            if (rend == tmp || *rend || gend == gtmp || *gend || errno == ERANGE ||
+                ref_n < 0 || ref_g < 0 || ref_n > INT_MAX || ref_g > INT_MAX) {
+                po_free(o);
+                p->pos = save;
+                return NULL;
+            }
+            o->ref_n = (int)ref_n;
+            o->ref_g = (int)ref_g;
             p->pos++; /* R */
             return o;
         }
@@ -545,6 +557,11 @@ static PdfObj *pdf_load_indirect(PdfDoc *d, int objn, char *err, size_t errcap, 
         snprintf(err, errcap, "pdf: bad object header %d", objn);
         return NULL;
     }
+    if (num->i != (int64_t)objn) {
+        po_free(num);
+        snprintf(err, errcap, "pdf: object number mismatch %d", objn);
+        return NULL;
+    }
     po_free(num);
     pp_skip_ws(&p);
     PdfObj *gen = pp_parse_number_or_ref(&p);
@@ -632,119 +649,171 @@ static int pdf_parse_xref(PdfDoc *d, char *err, size_t errcap) {
     }
     const char *p = found + 9;
     while (*p == ' ' || *p == '\r' || *p == '\n' || *p == '\t') p++;
-    long xref_off = atol(p);
-    if (xref_off < 0 || (size_t)xref_off >= d->file_len) {
+    errno = 0;
+    char *xref_end = NULL;
+    long xref_off = strtol(p, &xref_end, 10);
+    if (xref_end == p || errno == ERANGE || xref_off < 0 || (size_t)xref_off >= d->file_len) {
         snprintf(err, errcap, "pdf: bad startxref offset");
-        return -1;
-    }
-
-    PdfParse xp = {.data = d->file, .len = d->file_len, .pos = (size_t)xref_off};
-    pp_skip_ws(&xp);
-    if (!pp_consume(&xp, "xref")) {
-        snprintf(err, errcap, "pdf: xref streams not supported");
         return -1;
     }
 
     int max_obj = 0;
     long *tmp_xref = NULL;
     int tmp_n = 0;
+    long seen_off[8];
+    int nseen = 0;
+    long cur = xref_off;
+    int fill_empty = 0;
+    int have_root = 0;
 
-    for (;;) {
-        pp_skip_ws(&xp);
-        if (pp_startswith(&xp, "trailer")) break;
-        /* subsection: start count */
-        PdfObj *start_o = pp_parse_number_or_ref(&xp);
-        if (!start_o || start_o->t != PO_INT) {
-            po_free(start_o);
-            snprintf(err, errcap, "pdf: bad xref subsection");
-            free(tmp_xref);
-            return -1;
-        }
-        int start = (int)start_o->i;
-        po_free(start_o);
-        pp_skip_ws(&xp);
-        PdfObj *count_o = pp_parse_number_or_ref(&xp);
-        if (!count_o || count_o->t != PO_INT) {
-            po_free(count_o);
-            snprintf(err, errcap, "pdf: bad xref count");
-            free(tmp_xref);
-            return -1;
-        }
-        int count = (int)count_o->i;
-        po_free(count_o);
-        int64_t end = (int64_t)start + (int64_t)count;
-        if (start < 0 || count < 0 || end > 1000000) {
-            snprintf(err, errcap, "pdf: xref subsection out of range");
-            free(tmp_xref);
-            return -1;
-        }
-        if (end > tmp_n) {
-            long *nx = realloc(tmp_xref, (size_t)end * sizeof(long));
-            if (!nx) { free(tmp_xref); return -1; }
-            for (int64_t i = tmp_n; i < end; i++) nx[i] = 0;
-            tmp_xref = nx;
-            tmp_n = (int)end;
-        }
-        if (end > max_obj) max_obj = (int)end;
-
-        for (int i = 0; i < count; i++) {
-            pp_skip_ws(&xp);
-            if (xp.pos + 20 > xp.len) {
-                snprintf(err, errcap, "pdf: truncated xref");
+    while (nseen < 8) {
+        int dup = 0;
+        for (int si = 0; si < nseen; si++)
+            if (seen_off[si] == cur) dup = 1;
+        if (dup || cur < 0 || (size_t)cur >= d->file_len) {
+            if (!fill_empty) {
+                snprintf(err, errcap, "pdf: bad startxref offset");
                 free(tmp_xref);
                 return -1;
             }
-            char line[22];
-            memcpy(line, xp.data + xp.pos, 20);
-            line[20] = 0;
-            long off = 0;
-            int gen = 0;
-            char use = 'n';
-            if (sscanf(line, "%ld %d %c", &off, &gen, &use) < 3) {
-                /* try looser: read 10-digit offset */
-                off = atol(line);
-                use = line[17];
-            }
-            xp.pos += 20;
-            if (xp.pos < xp.len && (xp.data[xp.pos] == '\r' || xp.data[xp.pos] == '\n')) {
-                if (xp.data[xp.pos] == '\r') xp.pos++;
-                if (xp.pos < xp.len && xp.data[xp.pos] == '\n') xp.pos++;
-            }
-            if (use == 'n') tmp_xref[(int64_t)start + i] = off;
-            else tmp_xref[(int64_t)start + i] = 0;
-            (void)gen;
+            break;
         }
-    }
+        seen_off[nseen++] = cur;
 
-    if (!pp_consume(&xp, "trailer")) {
-        snprintf(err, errcap, "pdf: trailer not found");
-        free(tmp_xref);
-        return -1;
-    }
-    PdfObj *trailer = pp_parse_dict(&xp);
-    if (!trailer) {
-        snprintf(err, errcap, "pdf: cannot parse trailer");
-        free(tmp_xref);
-        return -1;
-    }
-    if (dict_get(trailer, "Encrypt")) {
+        PdfParse xp = {.data = d->file, .len = d->file_len, .pos = (size_t)cur};
+        pp_skip_ws(&xp);
+        if (!pp_consume(&xp, "xref")) {
+            if (fill_empty) break;
+            snprintf(err, errcap, "pdf: xref streams not supported");
+            free(tmp_xref);
+            return -1;
+        }
+
+        int section_bad = 0;
+        for (;;) {
+            pp_skip_ws(&xp);
+            if (pp_startswith(&xp, "trailer")) break;
+            PdfObj *start_o = pp_parse_number_or_ref(&xp);
+            if (!start_o || start_o->t != PO_INT) {
+                po_free(start_o);
+                if (fill_empty) { section_bad = 1; break; }
+                snprintf(err, errcap, "pdf: bad xref subsection");
+                free(tmp_xref);
+                return -1;
+            }
+            int start = (int)start_o->i;
+            po_free(start_o);
+            pp_skip_ws(&xp);
+            PdfObj *count_o = pp_parse_number_or_ref(&xp);
+            if (!count_o || count_o->t != PO_INT) {
+                po_free(count_o);
+                if (fill_empty) { section_bad = 1; break; }
+                snprintf(err, errcap, "pdf: bad xref count");
+                free(tmp_xref);
+                return -1;
+            }
+            int count = (int)count_o->i;
+            po_free(count_o);
+            int64_t end = (int64_t)start + (int64_t)count;
+            if (start < 0 || count < 0 || end > 1000000) {
+                if (fill_empty) { section_bad = 1; break; }
+                snprintf(err, errcap, "pdf: xref subsection out of range");
+                free(tmp_xref);
+                return -1;
+            }
+            if (end > tmp_n) {
+                long *nx = realloc(tmp_xref, (size_t)end * sizeof(long));
+                if (!nx) { free(tmp_xref); return -1; }
+                for (int64_t i = tmp_n; i < end; i++) nx[i] = 0;
+                tmp_xref = nx;
+                tmp_n = (int)end;
+            }
+            if (end > max_obj) max_obj = (int)end;
+
+            for (int i = 0; i < count; i++) {
+                pp_skip_ws(&xp);
+                if (xp.pos + 20 > xp.len) {
+                    if (fill_empty) { section_bad = 1; break; }
+                    snprintf(err, errcap, "pdf: truncated xref");
+                    free(tmp_xref);
+                    return -1;
+                }
+                char line[22];
+                memcpy(line, xp.data + xp.pos, 20);
+                line[20] = 0;
+                long off = 0;
+                int gen = 0;
+                char use = 'n';
+                if (sscanf(line, "%ld %d %c", &off, &gen, &use) < 3) {
+                    off = atol(line);
+                    use = line[17];
+                }
+                xp.pos += 20;
+                if (xp.pos < xp.len && (xp.data[xp.pos] == '\r' || xp.data[xp.pos] == '\n')) {
+                    if (xp.data[xp.pos] == '\r') xp.pos++;
+                    if (xp.pos < xp.len && xp.data[xp.pos] == '\n') xp.pos++;
+                }
+                int64_t idx = (int64_t)start + i;
+                if (use == 'n') {
+                    if (!fill_empty || tmp_xref[idx] == 0)
+                        tmp_xref[idx] = off;
+                } else if (!fill_empty) {
+                    tmp_xref[idx] = 0;
+                }
+                (void)gen;
+            }
+            if (section_bad) break;
+        }
+        if (section_bad) break;
+
+        if (!pp_consume(&xp, "trailer")) {
+            if (fill_empty) break;
+            snprintf(err, errcap, "pdf: trailer not found");
+            free(tmp_xref);
+            return -1;
+        }
+        PdfObj *trailer = pp_parse_dict(&xp);
+        if (!trailer) {
+            if (fill_empty) break;
+            snprintf(err, errcap, "pdf: cannot parse trailer");
+            free(tmp_xref);
+            return -1;
+        }
+        if (dict_get(trailer, "Encrypt")) {
+            po_free(trailer);
+            free(tmp_xref);
+            snprintf(err, errcap, "pdf: encrypted documents not supported");
+            return -1;
+        }
+        if (!fill_empty) {
+            PdfObj *root = dict_get(trailer, "Root");
+            if (!root || root->t != PO_REF) {
+                po_free(trailer);
+                free(tmp_xref);
+                snprintf(err, errcap, "pdf: trailer missing /Root");
+                return -1;
+            }
+            d->root_obj = root->ref_n;
+            PdfObj *info = dict_get(trailer, "Info");
+            d->info_obj = (info && info->t == PO_REF) ? info->ref_n : 0;
+            have_root = 1;
+        }
+        long next = -1;
+        PdfObj *prev = dict_get(trailer, "Prev");
+        if (prev && prev->t == PO_INT && prev->i >= 0 &&
+            (uint64_t)prev->i < (uint64_t)d->file_len)
+            next = (long)prev->i;
         po_free(trailer);
-        free(tmp_xref);
-        snprintf(err, errcap, "pdf: encrypted documents not supported");
-        return -1;
+        if (next < 0) break;
+        cur = next;
+        fill_empty = 1;
     }
-    PdfObj *root = dict_get(trailer, "Root");
-    if (!root || root->t != PO_REF) {
-        po_free(trailer);
+    (void)max_obj;
+    if (!have_root) {
         free(tmp_xref);
         snprintf(err, errcap, "pdf: trailer missing /Root");
         return -1;
     }
-    d->root_obj = root->ref_n;
-    PdfObj *info = dict_get(trailer, "Info");
-    d->info_obj = (info && info->t == PO_REF) ? info->ref_n : 0;
-    po_free(trailer);
-
     d->xref = tmp_xref;
     d->xref_n = tmp_n;
     return 0;
@@ -848,10 +917,24 @@ static int pdf_get_page_nums(PdfDoc *d, int **out, int *nout, char *err, size_t 
 }
 
 static int pdf_append_content_bytes(PdfDoc *d, PdfObj *contents, PdfBuf *out,
-                                    char *err, size_t errcap, int depth) {
+                                    char *err, size_t errcap, int depth, unsigned char *seen) {
     if (depth >= PDF_MAX_PARSE_DEPTH) {
         po_free(contents);
         snprintf(err, errcap, "pdf: Contents nesting too deep");
+        return -1;
+    }
+    if (contents && contents->t == PO_REF && seen && contents->ref_n > 0 &&
+        contents->ref_n < d->xref_n) {
+        if (seen[contents->ref_n]) {
+            po_free(contents);
+            snprintf(err, errcap, "pdf: Contents cycle");
+            return -1;
+        }
+        seen[contents->ref_n] = 1;
+    }
+    if (out->len > PDF_MAX_FILE_BYTES) {
+        po_free(contents);
+        snprintf(err, errcap, "pdf: Contents too large");
         return -1;
     }
     contents = pdf_resolve(d, contents, err, errcap);
@@ -870,7 +953,7 @@ static int pdf_append_content_bytes(PdfDoc *d, PdfObj *contents, PdfBuf *out,
                 snprintf(err, errcap, "pdf: Contents array entry not a ref");
                 return -1;
             }
-            if (pdf_append_content_bytes(d, copy, out, err, errcap, depth + 1) < 0) {
+            if (pdf_append_content_bytes(d, copy, out, err, errcap, depth + 1, seen) < 0) {
                 po_free(contents);
                 return -1;
             }
@@ -935,7 +1018,16 @@ static int pdf_page_content(PdfDoc *d, int page_obj, PdfBuf *out, char *err, siz
         return -1;
     }
     po_free(page);
-    return pdf_append_content_bytes(d, copy, out, err, errcap, 0);
+    int nseen = d->xref_n > 0 ? d->xref_n : 1;
+    unsigned char *seen = calloc((size_t)nseen, 1);
+    if (!seen) {
+        po_free(copy);
+        snprintf(err, errcap, "pdf: out of memory");
+        return -1;
+    }
+    int rc = pdf_append_content_bytes(d, copy, out, err, errcap, 0, seen);
+    free(seen);
+    return rc;
 }
 
 static int extract_append_str(PdfBuf *out, const char *s, size_t n) {
@@ -1007,7 +1099,9 @@ static int pdf_extract_text_from_content(const unsigned char *data, size_t len, 
             continue;
         }
         if (c == '+' || c == '-' || isdigit(c) || c == '.') {
+            size_t before = p.pos;
             PdfObj *n = pp_parse_number_or_ref(&p);
+            if (!n && p.pos == before) p.pos++;
             po_free(n);
             continue;
         }

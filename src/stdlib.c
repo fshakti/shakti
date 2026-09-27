@@ -57,6 +57,8 @@ static int cmp_i64(const void *a, const void *b) {
 }
 static int cmp_f64(const void *a, const void *b) {
     double x = *(const double *)a, y = *(const double *)b;
+    int xn = x != x, yn = y != y;
+    if (xn || yn) return xn - yn; /* NaN sorts after numbers */
     return (x > y) - (x < y);
 }
 extern const char *type_name(int t);
@@ -599,10 +601,24 @@ V *bi_json_dump(V **a, in) {
 }
 static int v_cmp_repr(V *a, V *b) {
     char *ra = v_repr(a), *rb = v_repr(b);
-    int c = strcmp(ra, rb);
+    int c = strcmp(ra ? ra : "", rb ? rb : "");
     free(ra);
     free(rb);
     return c;
+}
+static int cmp_vptr(const void *a, const void *b) {
+    V *x = *(V *const *)a, *y = *(V *const *)b;
+    if (!x || !y) return (x != NULL) - (y != NULL);
+    if ((x->t == T_INT || x->t == T_FLOAT) && (y->t == T_INT || y->t == T_FLOAT)) {
+        double dx = x->t == T_INT ? (double)x->j : x->f;
+        double dy = y->t == T_INT ? (double)y->j : y->f;
+        int xn = dx != dx, yn = dy != dy;
+        if (xn || yn) return xn - yn;
+        return (dx > dy) - (dx < dy);
+    }
+    if (x->t == T_STR && y->t == T_STR) return strcmp(x->s ? x->s : "", y->s ? y->s : "");
+    if (x->t != y->t) return (x->t > y->t) - (x->t < y->t);
+    return v_cmp_repr(x, y);
 }
 V *bi_sorted(V **a, in, V **kwn, V **kwv, int nkw, Env *e) {
     (void)kwn;
@@ -620,13 +636,7 @@ V *bi_sorted(V **a, in, V **kwn, V **kwv, int nkw, Env *e) {
     }
     P(a[0]->t != T_LIST,v_err("sorted(list)"))
     V *r = v_copy(a[0]);
-    for (int64_t i = 0; i + 1 < r->n; i++)
-        for (int64_t j = 0; j + 1 < r->n; j++)
-            if (v_cmp_repr(r->L[j], r->L[j + 1]) > 0) {
-                V *tmp = r->L[j];
-                r->L[j] = r->L[j + 1];
-                r->L[j + 1] = tmp;
-            }
+    qsort(r->L, (size_t)r->n, sizeof(V *), cmp_vptr);
     return r;
 }
 V *bi_any(V **a, in) {

@@ -568,7 +568,7 @@ void synth_core_handle_key(int key, int down) {
     static const char *shift_idx  = "QWERTYUI";
     static const char *keyjam = "zsxdcvgbhnjmq2w3er5t6y7ui9o0p";
     const char *q;
-    if((q=strchr(keyjam,key))) {
+    if(key > 0 && key < 128 && (q=strchr(keyjam,(int)key))) {
         int note = 64 + (q - keyjam);
         unsigned char midi[] = { 0x90, note, down * 64 };
         midi_decode_bytes(midi, 3);
@@ -698,6 +698,16 @@ static void synth_sample_basename(const char *path, char *out, size_t cap) {
     const char *base = slash ? slash + 1 : path;
     snprintf(out, cap, "%s", base);
 }
+static int synth_wav_skip(FILE *f, uint32_t n) {
+    off_t before = ftello(f);
+    off_t after;
+    if (before < 0) return -1;
+    if (n == 0) return 0;
+    if (fseeko(f, (off_t)n, SEEK_CUR) != 0) return -1;
+    after = ftello(f);
+    if (after < before || after != before + (off_t)n) return -1;
+    return 0;
+}
 static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n) {
     FILE *f;
     unsigned char hdr[12], chunk[8];
@@ -727,16 +737,27 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
             fmt_ch = synth_r16le(fmt + 2);
             fmt_rate = synth_r32le(fmt + 4);
             fmt_bits = synth_r16le(fmt + 14);
-            if (chunk_sz > 16) fseek(f, (long)(chunk_sz - 16), SEEK_CUR);
+            if (chunk_sz > 16 && synth_wav_skip(f, chunk_sz - 16) != 0) {
+                fclose(f);
+                return -1;
+            }
         } else if (!memcmp(chunk, "data", 4)) {
             data_bytes = chunk_sz;
             data_pos = ftell(f);
-            fseek(f, (long)chunk_sz, SEEK_CUR);
+            if (synth_wav_skip(f, chunk_sz) != 0) {
+                fclose(f);
+                return -1;
+            }
         } else {
-            fseek(f, (long)chunk_sz + (chunk_sz & 1u), SEEK_CUR);
+            uint32_t skip = chunk_sz + (chunk_sz & 1u);
+            if (synth_wav_skip(f, skip) != 0) {
+                fclose(f);
+                return -1;
+            }
         }
     }
-    if (fmt_tag != 1 || (fmt_bits != 16 && fmt_bits != 24) || fmt_ch < 1 || fmt_ch > 2 || !data_bytes || !fmt_rate) {
+    if (fmt_tag != 1 || (fmt_bits != 16 && fmt_bits != 24) || fmt_ch < 1 || fmt_ch > 2 || !data_bytes ||
+        fmt_rate < 4000 || fmt_rate > 384000) {
         fclose(f);
         return -1;
     }
@@ -782,7 +803,9 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     fclose(f);
     n = i;
     if (fmt_rate != SYNTH_SR) {
-        int out_frames = (int)((int64_t)n * SYNTH_SR / (int64_t)fmt_rate);
+        int64_t out64 = (int64_t)n * (int64_t)SYNTH_SR / (int64_t)fmt_rate;
+        if (out64 < 0 || out64 > SYNTH_SAMPLE_MAX) { free(pcm); return -1; }
+        int out_frames = (int)out64;
         float *rs = (float *)malloc((size_t)out_frames * sizeof(float));
         if (!rs) {
             free(pcm);
@@ -1432,8 +1455,8 @@ void synth_platform_shutdown(void) {
         XDestroyImage(g.img);
         g.img = NULL;
     }
-    if (g.gc) XFreeGC(g.dpy, g.gc);
-    if (g.win) XDestroyWindow(g.dpy, g.win);
+    if (g.gc) { XFreeGC(g.dpy, g.gc); g.gc = NULL; }
+    if (g.win) { XDestroyWindow(g.dpy, g.win); g.win = NULL; }
     if (g.dpy) {
         XCloseDisplay(g.dpy);
         g.dpy = NULL;
@@ -1574,8 +1597,10 @@ int synth_set_steps(int n, char *err, size_t err_cap) {
         snprintf(err, err_cap, "synth_set_steps: length must be 1..%d", SYNTH_MAX_STEPS);
         return -1;
     }
+    pthread_mutex_lock(&g.mu);
     g.step_len = n;
     if (g.step_pos >= g.step_len) g.step_pos = 0;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_steps(void) { return g.step_len; }
@@ -1591,14 +1616,18 @@ int synth_set_metro_sound(int sound, char *err, size_t err_cap) {
         snprintf(err, err_cap, "synth_set_metro_sound: sound must be 0 (click) or 1 (drum)");
         return -1;
     }
+    pthread_mutex_lock(&g.mu);
     g.metro_sound = sound;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_metro_sound(void) { return g.metro_sound; }
 int synth_set_mute(int mute, char *err, size_t err_cap) {
     (void)err;
     (void)err_cap;
+    pthread_mutex_lock(&g.mu);
     g.mute = mute ? 1 : 0;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_mute_on(void) { return g.mute; }
@@ -1637,8 +1666,10 @@ int synth_set_bpm(float bpm, char *err, size_t err_cap) {
     }
     if (bpm < 40.f) bpm = 40.f;
     if (bpm > 240.f) bpm = 240.f;
+    pthread_mutex_lock(&g.mu);
     g.knobs[0] = (bpm - 40.f) / 200.f;
     synth_recalc_timing();
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 float synth_get_bpm(void) {
@@ -1652,11 +1683,15 @@ int synth_set_tuning(const char *mode, char *err, size_t err_cap) {
     }
     if (!mode || !mode[0]) mode = "12tet";
     if (!strcmp(mode, "12tet") || !strcmp(mode, "equal")) {
+        pthread_mutex_lock(&g.mu);
         g.tuning = SYNTH_TUNING_12TET;
+        pthread_mutex_unlock(&g.mu);
         return 0;
     }
     if (!strcmp(mode, "just") || !strcmp(mode, "ji")) {
+        pthread_mutex_lock(&g.mu);
         g.tuning = SYNTH_TUNING_JUST;
+        pthread_mutex_unlock(&g.mu);
         return 0;
     }
     if (err && err_cap) snprintf(err, err_cap, "synth_set_tuning: mode must be 12tet or just");
@@ -1673,8 +1708,10 @@ int synth_set_level(float level, char *err, size_t err_cap) {
     }
     if (level < 0.f) level = 0.f;
     if (level > 1.f) level = 1.f;
+    pthread_mutex_lock(&g.mu);
     g.knobs[1] = level;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 float synth_get_level(void) {
@@ -1688,8 +1725,10 @@ int synth_set_cutoff(float cutoff, char *err, size_t err_cap) {
     }
     if (cutoff < 0.f) cutoff = 0.f;
     if (cutoff > 1.f) cutoff = 1.f;
+    pthread_mutex_lock(&g.mu);
     g.knobs[2] = cutoff;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 float synth_get_cutoff(void) {
@@ -1703,8 +1742,10 @@ int synth_set_reso(float reso, char *err, size_t err_cap) {
     }
     if (reso < 0.f) reso = 0.f;
     if (reso > 1.f) reso = 1.f;
+    pthread_mutex_lock(&g.mu);
     g.knobs[3] = reso;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 float synth_get_reso(void) {
@@ -1718,8 +1759,10 @@ static int synth_set_knob01(int idx, float v, char *err, size_t err_cap, const c
     }
     if (v < 0.f) v = 0.f;
     if (v > 1.f) v = 1.f;
+    pthread_mutex_lock(&g.mu);
     g.knobs[idx] = v;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_set_attack(float attack, char *err, size_t err_cap) {
@@ -1764,8 +1807,10 @@ int synth_set_pitch_bend(float bend, char *err, size_t err_cap) {
     }
     if (bend < -1.f) bend = -1.f;
     if (bend > 1.f) bend = 1.f;
+    pthread_mutex_lock(&g.mu);
     g.pitch_bend = bend;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 float synth_get_pitch_bend(void) {
@@ -1857,9 +1902,11 @@ int synth_set_preset(int idx, char *err, size_t err_cap) {
             snprintf(err, err_cap, "synth_set_preset: index must be 0..%d", SYNTH_PRESETS - 1);
         return -1;
     }
+    pthread_mutex_lock(&g.mu);
     g.preset = idx;
     g.preset_menu_open = 0;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_preset(void) { return g.preset; }
@@ -1874,18 +1921,25 @@ int synth_load_sample(const char *path, char *err, size_t err_cap) {
         if (err && err_cap) snprintf(err, err_cap, "synth_load_sample: path required");
         return -1;
     }
-    synth_core_audio_lock();
-    if (synth_wav_load(path, g.sample_buf, SYNTH_SAMPLE_MAX, &n) != 0) {
-        synth_core_audio_unlock();
+    float *tmp = malloc((size_t)SYNTH_SAMPLE_MAX * sizeof(float));
+    if (!tmp) {
+        if (err && err_cap) snprintf(err, err_cap, "synth_load_sample: out of memory");
+        return -1;
+    }
+    if (synth_wav_load(path, tmp, SYNTH_SAMPLE_MAX, &n) != 0) {
+        free(tmp);
         if (err && err_cap) snprintf(err, err_cap, "synth_load_sample: failed to read %s", path);
         return -1;
     }
+    synth_core_audio_lock();
+    if (n > 0) memcpy(g.sample_buf, tmp, (size_t)n * sizeof(float));
     g.sample_n = n;
     g.sample_pos = 0;
     g.sample_playing = 0;
     synth_sample_basename(path, g.sample_name, sizeof g.sample_name);
     g.dirty = 1;
     synth_core_audio_unlock();
+    free(tmp);
     return 0;
 }
 int synth_sample_loaded(void) { return g.sample_n > 0; }
@@ -1905,8 +1959,10 @@ int synth_set_row_note(int row, int midi, char *err, size_t err_cap) {
         if (err && err_cap) snprintf(err, err_cap, "synth_set_row_note: midi must be 24..96");
         return -1;
     }
+    pthread_mutex_lock(&g.mu);
     g.row_midi[row] = midi;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_row_note_get(int row) {
@@ -1939,8 +1995,10 @@ int synth_looper_play(int on, char *err, size_t err_cap) {
         if (err && err_cap) snprintf(err, err_cap, "synth_looper_play: no loop recorded");
         return -1;
     }
+    pthread_mutex_lock(&g.mu);
     g.loop_playing = on ? 1 : 0;
     g.dirty = 1;
+    pthread_mutex_unlock(&g.mu);
     return 0;
 }
 int synth_looper_clear(char *err, size_t err_cap) {

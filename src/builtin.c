@@ -394,12 +394,25 @@ static V *bi_len(V**a,in){
     return v_err("no len()");}
 static V *bi_range(V**a,in){
     int64_t start=0,stop=0,step=1;
+    int ri;
+    for(ri=0; ri<n && ri<3; ri++) if(a[ri]->t!=T_INT) return v_err("range: need int");
     if(n==1)stop=a[0]->j;else if(n==2){start=a[0]->j;stop=a[1]->j;}
     else if(n>=3){start=a[0]->j;stop=a[1]->j;step=a[2]->j;}
     P(!step,v_err("step=0"))
     int64_t cnt=0;
-    if(step>0&&start<stop)cnt=(stop-start+step-1)/step;
-    else if(step<0&&start>stop)cnt=(start-stop-step-1)/(-step);
+    if(step>0&&start<stop){
+        int64_t span,adj,num;
+        if(__builtin_sub_overflow(stop,start,&span)||__builtin_sub_overflow(step,1,&adj)||
+           __builtin_add_overflow(span,adj,&num)) return v_err("range: overflow");
+        cnt=num/step;
+    } else if(step<0&&start>stop){
+        int64_t span,adj,num,nstep;
+        if(step==INT64_MIN) return v_err("range: overflow");
+        nstep=-step;
+        if(__builtin_sub_overflow(start,stop,&span)||__builtin_sub_overflow(nstep,1,&adj)||
+           __builtin_add_overflow(span,adj,&num)) return v_err("range: overflow");
+        cnt=num/nstep;
+    }
     if(cnt<0)cnt=0;
     V*r=v_ivec(cnt);
     if(step==1 && cnt>0){
@@ -822,13 +835,26 @@ V_MAP_FUNC(tan, tan)
 #undef V_MAP_FUNC
 #undef V_SCALAR_FLOAT
 static int cmp_i64(const void*a,const void*b){int64_t x=*(int64_t*)a,y=*(int64_t*)b;return(x>y)-(x<y);}
-static int cmp_f64(const void*a,const void*b){double x=*(double*)a,y=*(double*)b;return(x>y)-(x<y);}
+static int cmp_f64(const void*a,const void*b){double x=*(double*)a,y=*(double*)b;int xn=x!=x,yn=y!=y;if(xn||yn)return xn-yn;return(x>y)-(x<y);}
 static int cmp_u8(const void*a,const void*b){unsigned char x=*(unsigned char*)a,y=*(unsigned char*)b;return(x>y)-(x<y);}
+static int cmp_list_v(const void*a,const void*b){
+    V*x=*(V**)a,*y=*(V**)b;
+    if(!x||!y) return (x!=0)-(y!=0);
+    if((x->t==T_INT||x->t==T_FLOAT)&&(y->t==T_INT||y->t==T_FLOAT)){
+        double dx=x->t==T_INT?(double)x->j:x->f, dy=y->t==T_INT?(double)y->j:y->f;
+        int xn=dx!=dx, yn=dy!=dy;
+        if(xn||yn) return xn-yn;
+        return (dx>dy)-(dx<dy);
+    }
+    if(x->t==T_STR&&y->t==T_STR) return strcmp(x->s?x->s:"", y->s?y->s:"");
+    return (x->t>y->t)-(x->t<y->t);
+}
 static V *bi_sort(V**a,in){P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_IVEC){V*r=v_copy(v);qsort(r->J,r->n,8,cmp_i64);return r;}
     if(v->t==T_FVEC){V*r=v_copy(v);qsort(r->F,r->n,8,cmp_f64);return r;}
     if(v->t==T_CVEC){V*r=v_copy(v);qsort(r->B,r->n,1,cmp_u8);return r;}
-    return v_copy(v);}
+    if(v->t==T_LIST){V*r=v_copy(v);if(r->n>1&&r->L)qsort(r->L,(size_t)r->n,sizeof(V*),cmp_list_v);return r;}
+    return v_err("sort: unsupported type");}
 /* q-compatible bin(keys, query): last i with keys[i] <= query; -1 below range. */
 static V *bi_bin(V**a,in){
     P(n<2,v_err("bin(keys, query)"))
@@ -876,14 +902,7 @@ static int asof_ascending_i64(V *v){
     return 1;
 }
 static V *asof_cell(V *col,int64_t row){
-    if(row<0)return v_nil();
-    if(!col || row >= col->n) return v_nil();
-    if(col->t==T_IVEC)return v_int(col->J[row]);
-    if(col->t==T_FVEC)return v_float(col->F[row]);
-    if(col->t==T_BVEC)return v_bool(col->B[row]);
-    if(col->t==T_LIST)return v_ref(col->L[row]);
-    if(col->t==T_IMAT||col->t==T_FMAT||col->t==T_BMAT)return v_mat_row(col,row);
-    return v_ref(col);
+    return col_get(col, row);
 }
 static V *asof_gather_col(V *col,const int64_t *idx,int64_t n){
     int miss=0;
@@ -1452,7 +1471,7 @@ static V *bi_asof_index_count(V**a,in){
     int64_t hits=0,qtm=a[2]->j;
     for(int64_t j=0;j<qeq->n;j++){
         int64_t key=qeq->J[j];
-        if(key<0||key+1>=starts->n) continue;
+        if(starts->n < 2 || key<0 || key >= starts->n - 1) continue;
         int64_t start=starts->J[key],end=starts->J[key+1];
         if(start<end&&shakti_bin_i64(tm->J+start,end-start,qtm)>=0) hits++;
     }
@@ -1531,6 +1550,7 @@ static V *bi_map(V**a,in,Env*e){
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);v_free(item);
+            if(fn->j<0||fn->j>=fn_ast_n){env_free(ce);v_free(r);return v_err("map: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             r->L[i]=rv;env_free(ce);
         }
@@ -1558,6 +1578,7 @@ static V *bi_filter(V**a,in,Env*e){
             else if(iter->t==T_LIST)item=v_ref(iter->L[i]);else if(iter->t==T_STR){char b[2]={iter->s[i],0};item=v_str(b);}
             else item=v_nil();
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
+            if(fn->j<0||fn->j>=fn_ast_n){v_free(item);env_free(ce);free(tmp);return v_err("filter: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             int keep=rv&&((rv->t==T_BOOL&&rv->j)||(rv->t==T_INT&&rv->j)||(rv->t!=T_NIL&&rv->t!=T_BOOL&&rv->t!=T_INT));
             v_free(rv);env_free(ce);if(keep)tmp[out++]=item;else v_free(item);
@@ -1643,6 +1664,10 @@ static V *bi_group_sum(V**a,in){
         if(!strcmp(tbl->keys->L[i]->s,a[1]->s))gc=tbl->vals->L[i];
         if(!strcmp(tbl->keys->L[i]->s,a[2]->s))sc=tbl->vals->L[i];}
     P(gc->t==T_NIL||sc->t==T_NIL,v_err("column not found"))
+    if (sc->t != T_IVEC && sc->t != T_FVEC)
+        return v_err("group_sum: unsupported column type");
+    if (gc->t != T_STR && gc->t != T_IVEC && gc->t != T_FVEC && gc->t != T_LIST)
+        return v_err("group_sum: unsupported column type");
     V*k=v_list(0),*v=v_list(0);V*res=v_dict(k,v);v_free(k);v_free(v);
     for(int64_t i=0;i<tbl->n;i++){
         char *gs_owned=NULL;
@@ -2371,10 +2396,10 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
             fprintf(stderr,"AssertionError: %s\n",msg);exit(1);}
         return v_nil();}
     if(!strcmp(name,"save_context")){
-        P(nargs<1,v_err("save_context(path)"))
+        P(nargs<1 || args[0]->t != T_STR,v_err("save_context(path)"))
         return env_save(e,args[0]->s)?v_nil():v_err("save failed");}
     if(!strcmp(name,"load_context")){
-        P(nargs<1,v_err("load_context(path)"))
+        P(nargs<1 || args[0]->t != T_STR,v_err("load_context(path)"))
         return env_load(e,args[0]->s)?v_nil():v_err("load failed");}
     fn = bi_find(name);
     if(fn) return fn(args, nargs, kwn, kwv, nkw, e);
@@ -2388,10 +2413,18 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         v_free(al);return r;
     }
     if(!strcmp(name,"__invoke__")){
+        P(nargs < 2, v_err("__invoke__(fn, args)"))
         V*fnv=args[0],*al=args[1];
-        P(fnv->n == -1,builtin_call(fnv->s, al->L, al->n, NULL, NULL, 0, e))
+        P(!fnv || fnv->t != T_FN, v_err("__invoke__: not a function"))
+        P(!al || al->t != T_LIST, v_err("__invoke__: args must be a list"))
+        P(fnv->n == -1,builtin_call(fnv->s, al->L, (int)al->n, NULL, NULL, 0, e))
+        P(fnv->j < 0 || fnv->j >= fn_ast_n, v_err("__invoke__: bad function"))
         Env*ce=env_new(fnv->closure);V*p=fnv->params;
-        for(int i=0;i<p->n && i<al->n;i++) env_set(ce,p->L[i]->s,al->L[i]);
+        if (p && p->t == T_LIST) {
+            for(int i=0;i<p->n && i<al->n;i++) {
+                if (p->L[i] && p->L[i]->t == T_STR) env_set(ce,p->L[i]->s,al->L[i]);
+            }
+        }
         Node*body=fn_ast[(int)fnv->j];V*rv=eval_fn(body,ce);
         if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
         env_free(ce);return rv;
@@ -2412,6 +2445,11 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         {
             struct stat sb;
             if (stat(args[0]->s, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+                const char *safe = getenv("SHAKTI_SAFE");
+                const char *allow = getenv("SHAKTI_ALLOW_EXEC");
+                if ((safe && safe[0] && strcmp(safe, "0") != 0) ||
+                    (allow && allow[0] == '0' && allow[1] == '\0'))
+                    return v_err("load: subprocess disabled (SHAKTI_SAFE or SHAKTI_ALLOW_EXEC=0)");
                 int saved = open(".", O_RDONLY);
                 if (saved < 0) return v_err("load: cannot open cwd");
                 if (chdir(args[0]->s) != 0) {

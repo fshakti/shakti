@@ -31,8 +31,19 @@ V *require_sql(Env *e) {
     P(!shakti_sql_enabled(e),v_err("SQL requires: import sql"))
     return NULL;
 }
+static int import_name_safe(const char *name) {
+    const char *p;
+    if (!name || !name[0]) return 0;
+    if (name[0] == '/' || name[0] == '\\') return 0;
+    if (strstr(name, "..")) return 0;
+    for (p = name; *p; p++)
+        if (*p == '/' || *p == '\\') return 0;
+    return 1;
+}
 V *do_import(const char *name, Env *e) {
     P(!name || !name[0],v_err("import requires a module name"))
+    if (!import_name_safe(name))
+        return v_err("import: module name must be a relative identifier");
     {
         const char *dot = strchr(name, '.');
         if (dot && (dot - name) >= 256)

@@ -11,6 +11,7 @@ int ipc_rdma_init(void);
 void ipc_rdma_shutdown(void);
 int ipc_rdma_available(void);
 int ipc_rdma_poll_fd(void);
+int ipc_rdma_cq_fd(IpcRdmaConn *c);
 
 int ipc_rdma_listen(const char *host, int port, IpcRdmaConn **out, char *err, size_t err_cap);
 int ipc_rdma_accept(IpcRdmaConn *listen, IpcRdmaConn **out, char *err, size_t err_cap);

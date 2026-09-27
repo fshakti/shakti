@@ -1,10 +1,10 @@
 #include "ipc_internal.h"
 #include "shakti_internal.h"
 
+#include <netdb.h>
+
 static IpcHandle g_handles[IPC_MAX_HANDLES];
 static IpcShmSlot g_shm[IPC_MAX_HANDLES];
-
-#define IPC_RECV_REQ_ASYNC_MAX 64
 
 static void ipc_conn_poison(IpcHandle *s) {
     if (!s) return;
@@ -162,9 +162,8 @@ void ipc_free_handle(int h) {
 #if (defined(__linux__) || defined(__APPLE__)) && !defined(SHAKTI_WASM)
     if (s->kind == IPC_KIND_SHM_CHAN && s->shm_ptr) {
         if (s->shm_bcast && s->shm_side >= 0) {
-            IpcShmBcastHdr *bh = (IpcShmBcastHdr *)s->shm_ptr;
-            if (bh->magic == IPC_SHM_MAGIC_BCAST && (uint32_t)s->shm_side < bh->max_readers) {
-                atomic_uint *actives = (atomic_uint *)((uint8_t *)s->shm_ptr + IPC_SHM_HDR + bh->capacity);
+            if (s->shm_cap && (uint32_t)s->shm_side < s->shm_max_readers) {
+                atomic_uint *actives = (atomic_uint *)((uint8_t *)s->shm_ptr + IPC_SHM_HDR + s->shm_cap);
                 atomic_store(&actives[s->shm_side], 0);
             }
         } else if (!s->shm_bcast && s->shm_side == 1) {
@@ -185,6 +184,7 @@ void ipc_free_handle(int h) {
 #endif
     ipc_rx_free(&s->rx);
     ipc_inbox_free(&s->inbox);
+    ipc_inbox_free(&s->async_q);
     memset(s, 0, sizeof *s);
 }
 
@@ -282,8 +282,28 @@ int ipc_is_localhost(const char *host) {
 
 static int ipc_uds_path(int port, char *out, size_t cap) {
     const char *dir = getenv("SHAKTI_IPC_DIR");
+    char owned[96];
     int n;
-    if (!dir || !dir[0]) dir = "/tmp";
+    if (!dir || !dir[0])
+        dir = getenv("XDG_RUNTIME_DIR");
+    if (!dir || !dir[0]) {
+        n = snprintf(owned, sizeof owned, "/tmp/shakti-%ld", (long)getuid());
+        if (n < 0 || (size_t)n >= sizeof owned)
+            return -1;
+        if (mkdir(owned, 0700) != 0 && errno != EEXIST)
+            return -1;
+        struct stat dir_st;
+        if (stat(owned, &dir_st) != 0 || !S_ISDIR(dir_st.st_mode) || dir_st.st_uid != getuid())
+            return -1;
+        dir = owned;
+    }
+    {
+        struct stat dir_st;
+        if (stat(dir, &dir_st) != 0 || !S_ISDIR(dir_st.st_mode) || dir_st.st_uid != getuid())
+            return -1;
+        if ((dir_st.st_mode & 022) != 0)
+            return -1;
+    }
     n = snprintf(out, cap, "%s/shakti-%d.sock", dir, port);
     return (n < 0 || (size_t)n >= cap) ? -1 : 0;
 }
@@ -372,6 +392,12 @@ static int sock_listen_uds(int port, char *path_out, char *err, size_t err_cap) 
         close(s);
         return -1;
     }
+    if (chmod(path_out, 0700) != 0) {
+        snprintf(err, err_cap, "ipc: uds chmod: %s", strerror(errno));
+        close(s);
+        unlink(path_out);
+        return -1;
+    }
     if (listen(s, 16) < 0) {
         snprintf(err, err_cap, "ipc: uds listen: %s", strerror(errno));
         close(s);
@@ -383,25 +409,31 @@ static int sock_listen_uds(int port, char *path_out, char *err, size_t err_cap) 
 }
 
 static int sock_connect_tcp(const char *host, int port, char *err, size_t err_cap) {
-    int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0) {
-        snprintf(err, err_cap, "ipc: socket: %s", strerror(errno));
-        return -1;
-    }
-    ipc_set_cloexec(s);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof addr);
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
     if (!host || !host[0]) host = "127.0.0.1";
-    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
-        snprintf(err, err_cap, "ipc: bad host '%s'", host);
-        close(s);
+    char port_s[16];
+    snprintf(port_s, sizeof port_s, "%d", port);
+    struct addrinfo hints, *res = NULL, *ai;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int ga = getaddrinfo(host, port_s, &hints, &res);
+    if (ga != 0) {
+        snprintf(err, err_cap, "ipc: getaddrinfo: %s", gai_strerror(ga));
         return -1;
     }
-    if (connect(s, (struct sockaddr *)&addr, sizeof addr) < 0) {
-        snprintf(err, err_cap, "ipc: connect: %s", strerror(errno));
+    int s = -1;
+    for (ai = res; ai; ai = ai->ai_next) {
+        s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (s < 0) continue;
+        ipc_set_cloexec(s);
+        if (connect(s, ai->ai_addr, ai->ai_addrlen) == 0) break;
         close(s);
+        s = -1;
+    }
+    int saved = errno;
+    freeaddrinfo(res);
+    if (s < 0) {
+        snprintf(err, err_cap, "ipc: connect: %s", strerror(saved));
         return -1;
     }
     sock_set_tcp_nodelay(s);
@@ -571,6 +603,7 @@ int ipc_sock_recv_msg(IpcHandle *s, int block, char **out, size_t *out_len, char
         int rc = sock_read_some(s->fd, rx->data + rx->len, rx->msg_len - rx->len, block, &got);
         if (rc == -2) return -2;
         if (rc < 0) {
+            ipc_conn_poison(s);
             snprintf(err, err_cap, "ipc: recv body: disconnected");
             return -1;
         }
@@ -760,6 +793,8 @@ int ipc_env_recv_ex(IpcHandle *s, int block, int timeout_ms, int want_corr, uint
                     unsigned char **data, size_t *len, char *err, size_t err_cap) {
     if (use_inbox && ipc_inbox_take(&s->inbox, want_corr, corr, kind, corr_out, data, len) == 0)
         return 0;
+    if (!want_corr && ipc_inbox_take(&s->async_q, 0, 0, kind, corr_out, data, len) == 0)
+        return 0;
 
     struct timespec start;
     int have_start = 0;
@@ -813,7 +848,8 @@ int ipc_env_recv_ex(IpcHandle *s, int block, int timeout_ms, int want_corr, uint
                 *len = plen;
                 return 0;
             }
-            if (ipc_inbox_push(&s->inbox, k, c, pay, plen) != 0) {
+            IpcInbox *box = (k == IPC_ENV_ASYNC) ? &s->async_q : &s->inbox;
+            if (ipc_inbox_push(box, k, c, pay, plen) != 0) {
                 free(raw);
                 snprintf(err, err_cap, "ipc: inbox full");
                 return -1;
@@ -859,6 +895,7 @@ V *bi_ipc_listen(V **a, int n) {
     P(n < 1 || a[0]->t != T_INT, v_err("ipc_listen(port[, host, transport])"))
     int port = (int)a[0]->j;
     const char *host = (n > 1 && a[1]->t == T_STR) ? a[1]->s : "127.0.0.1";
+    if (!host || !host[0]) host = "127.0.0.1";
     IpcTransport tr = ipc_parse_transport(n > 2 && a[2]->t == T_STR ? a[2]->s : NULL);
     tr = ipc_resolve_listen(port, host, tr);
     char err[512];
@@ -937,6 +974,17 @@ V *bi_ipc_accept(V **a, int n) {
     int cfd = accept(ls->fd, NULL, NULL);
     if (cfd < 0) return v_err("ipc_accept: accept failed");
     ipc_set_cloexec(cfd);
+#if defined(__linux__)
+    if (ls->uds_path[0]) {
+        struct ucred cred;
+        socklen_t clen = sizeof cred;
+        if (getsockopt(cfd, SOL_SOCKET, SO_PEERCRED, &cred, &clen) != 0 ||
+            (cred.uid != getuid() && cred.uid != 0)) {
+            close(cfd);
+            return v_err("ipc_accept: peer credentials");
+        }
+    }
+#endif
     sock_set_tcp_nodelay(cfd);
     int h = ipc_alloc();
     if (h < 0) {
@@ -1258,7 +1306,6 @@ static V *ipc_do_recv_msg(IpcHandle *s, int block) {
 static V *ipc_do_recv_req(IpcHandle *s, int block) {
     char err[512];
     err[0] = 0;
-    int async_drops = 0;
     for (;;) {
         {
             IpcInbox *box = &s->inbox;
@@ -1289,11 +1336,11 @@ static V *ipc_do_recv_req(IpcHandle *s, int block) {
             return lst;
         }
         if (kind == IPC_ENV_ASYNC) {
-            free(data);
-            if (++async_drops > IPC_RECV_REQ_ASYNC_MAX) {
-                ipc_conn_poison(s);
-                return v_err("ipc_recv_req: async flood");
+            if (ipc_inbox_push(&s->async_q, kind, corr, data, len) != 0) {
+                free(data);
+                return v_err("ipc_recv_req: async queue full");
             }
+            free(data);
             continue;
         }
         if (ipc_inbox_push(&s->inbox, kind, corr, data, len) != 0) {
@@ -1611,7 +1658,7 @@ V *bi_ipc_poll(V **a, int n) {
         if (ipc_handle_from_elem(handles, i, &h) != 0) continue;
         IpcHandle *s = ipc_slot(h);
         if (!s) continue;
-        if (s->inbox.n > 0) v_list_append_own(ready, v_int(h));
+        if (s->inbox.n > 0 || s->async_q.n > 0) v_list_append_own(ready, v_int(h));
         else if (s->kind == IPC_KIND_SHM_CHAN && ipc_shm_readable(s))
             v_list_append_own(ready, v_int(h));
 #ifdef SHAKTI_HAVE_RDMA
@@ -1643,8 +1690,18 @@ V *bi_ipc_poll(V **a, int n) {
         if (!s) continue;
         if (s->kind == IPC_KIND_SHM_CHAN) continue;
 #ifdef SHAKTI_HAVE_RDMA
-        if (s->kind == IPC_KIND_RDMA_CONN || s->kind == IPC_KIND_RDMA_LISTEN)
+        if (s->kind == IPC_KIND_RDMA_LISTEN)
             continue;
+        if (s->kind == IPC_KIND_RDMA_CONN) {
+            int cfd = ipc_rdma_cq_fd(s->rdma);
+            if (cfd < 0 || np >= IPC_MAX_HANDLES) continue;
+            pfds[np].fd = cfd;
+            pfds[np].events = POLLIN;
+            pfds[np].revents = 0;
+            map[np] = h;
+            np++;
+            continue;
+        }
 #endif
         if (s->fd < 0) continue;
         if (np >= IPC_MAX_HANDLES) break;
@@ -1759,6 +1816,8 @@ V *bi_ipc_shm_create(V **a, int n) {
     size_t map_size = 0;
     char posix[256];
     int owner = 0;
+    if (a[1]->j < 0 || (uint64_t)a[1]->j > IPC_MAX_SHM)
+        return v_err("ipc_shm_create: size too large");
     if (ipc_shm_chan_open(a[0]->s, (size_t)a[1]->j, 1, &ptr, &map_size, posix, sizeof posix, &owner, err, sizeof err) != 0)
         return v_err(err[0] ? err : "ipc_shm_create failed");
     int h = ipc_alloc();
@@ -1772,6 +1831,7 @@ V *bi_ipc_shm_create(V **a, int n) {
     g_handles[h].kind = IPC_KIND_SHM_CHAN;
     g_handles[h].shm_ptr = ptr;
     g_handles[h].shm_size = map_size;
+    g_handles[h].shm_cap = (uint32_t)((map_size - IPC_SHM_HDR) / 2);
     g_handles[h].shm_owner = owner;
     g_handles[h].shm_side = 0;
     g_handles[h].shm_bcast = 0;
@@ -1815,6 +1875,7 @@ V *bi_ipc_shm_attach(V **a, int n) {
     g_handles[h].kind = IPC_KIND_SHM_CHAN;
     g_handles[h].shm_ptr = ptr;
     g_handles[h].shm_size = map_size;
+    g_handles[h].shm_cap = hdr->capacity;
     g_handles[h].shm_owner = 0;
     g_handles[h].shm_side = 1;
     g_handles[h].shm_bcast = 0;
@@ -1834,6 +1895,8 @@ V *bi_ipc_shm_broadcast_create(V **a, int n) {
             return v_err("ipc_shm_broadcast_create: bad max_readers");
         max_r = (uint32_t)a[2]->j;
     }
+    if (a[1]->j < 0 || (uint64_t)a[1]->j > IPC_MAX_SHM)
+        return v_err("ipc_shm_broadcast_create: size too large");
     size_t want = (size_t)a[1]->j;
     if (want < IPC_SHM_HDR + 256) return v_err("ipc_shm_broadcast_create: size too small");
     size_t ring_cap = want - IPC_SHM_HDR - sizeof(atomic_uint) * max_r * 2;
@@ -1886,6 +1949,8 @@ V *bi_ipc_shm_broadcast_create(V **a, int n) {
     g_handles[h].kind = IPC_KIND_SHM_CHAN;
     g_handles[h].shm_ptr = ptr;
     g_handles[h].shm_size = map_size;
+    g_handles[h].shm_cap = (uint32_t)ring_cap;
+    g_handles[h].shm_max_readers = max_r;
     g_handles[h].shm_owner = 1;
     g_handles[h].shm_side = -1;
     g_handles[h].shm_bcast = 1;
@@ -1907,6 +1972,10 @@ V *bi_ipc_shm_broadcast_attach(V **a, int n) {
     if (fd < 0) return v_err("ipc_shm_broadcast_attach: not found");
     struct stat sb;
     if (fstat(fd, &sb) != 0) { close(fd); return v_err("ipc_shm_broadcast_attach: fstat"); }
+    if (sb.st_size < 0 || (uint64_t)sb.st_size > IPC_MAX_SHM) {
+        close(fd);
+        return v_err("ipc_shm_broadcast_attach: size too large");
+    }
     size_t map_size = (size_t)sb.st_size;
     void *ptr = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
@@ -1951,6 +2020,8 @@ V *bi_ipc_shm_broadcast_attach(V **a, int n) {
     g_handles[h].kind = IPC_KIND_SHM_CHAN;
     g_handles[h].shm_ptr = ptr;
     g_handles[h].shm_size = map_size;
+    g_handles[h].shm_cap = bh->capacity;
+    g_handles[h].shm_max_readers = bh->max_readers;
     g_handles[h].shm_owner = 0;
     g_handles[h].shm_side = slot;
     g_handles[h].shm_bcast = 1;

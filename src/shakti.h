@@ -65,7 +65,9 @@ struct Node {
     int op;
     Node **ch;
     int nch;
+    int ch_cap;
     int fn_ast_i;
+    int fn_detached; /* tree has abandoned this node to the function slot */
 };
 
 enum {
@@ -353,6 +355,8 @@ V *mat_matmul(V *a, V *b);
 V *v_mat_row(V *m, int64_t row);
 V *v_list(int64_t n);
 void v_list_append(V *v, V *item);
+/* If *p is a shared list, replace it with a shallow clone and drop our ref. */
+void v_list_unshare(V **p);
 void v_list_append_own(V *v, V *item);
 V *v_dict(V *keys, V *vals);
 V *v_dict_empty(void);
@@ -374,6 +378,8 @@ void env_set_kind(Env *e, const char *name, V *val, unsigned kind);
 int env_slot_listed(const Env *e, int i);
 void env_set_local(Env *e, const char *name, V *val);
 V *env_get(Env *e, const char *name);
+V *env_get_here(Env *e, const char *name);
+void shakti_clear_flow(void);
 void env_ref(Env *e);
 void env_free(Env *e);
 extern Node *fn_ast[MAX_FN];
@@ -385,6 +391,8 @@ extern int g_error;
 extern V *g_retval;
 extern V *g_error_val;
 int fn_ast_store(Node *n);
+void fn_ast_release(int idx);
+V *col_get(V *col, int64_t row);
 void v_dict_set(V *d, const char *key, V *val);
 V *v_dict_get(V *d, const char *key);
 int env_save(Env *e, const char *path);

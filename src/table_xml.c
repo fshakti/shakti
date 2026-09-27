@@ -9,7 +9,14 @@
 #define XML_GE 1
 #endif
 #include <expat.h>
-struct xml_cb{V*tag;V*id;V*name;V*text;size_t cur_cap;};
+struct xml_cb{V*tag;V*id;V*name;V*text;size_t cur_cap;int*stack;int sp;int scap;};
+static void xml_push(struct xml_cb*c,int idx){
+ if(c->sp>=c->scap){
+  int ncap=c->scap?c->scap*2:16;
+  int*n=realloc(c->stack,(size_t)ncap*sizeof(int));
+  if(!n)return;
+  c->stack=n;c->scap=ncap;}
+ c->stack[c->sp++]=idx;}
 static void xml_start(void*ud,const char*name,const char**atts){
  struct xml_cb*c=(struct xml_cb*)ud;
  const char*idv="",*nm="";
@@ -20,16 +27,22 @@ static void xml_start(void*ud,const char*name,const char**atts){
  v_list_append_own(c->id,v_str(idv));
  v_list_append_own(c->name,v_str(nm));
  v_list_append_own(c->text,v_str(""));
- c->cur_cap=1;}
+ c->cur_cap=1;
+ xml_push(c,(int)c->text->n-1);}
+static void xml_end(void*ud,const char*name){
+ struct xml_cb*c=(struct xml_cb*)ud;
+ (void)name;
+ if(c->sp>0)c->sp--;}
 static void xml_ch(void*ud,const XML_Char*s,int len){
  struct xml_cb*c=(struct xml_cb*)ud;
- if(c->text->n==0||len<=0)return;
- if(c->text->L[c->text->n-1]->t!=T_STR)return;
- V*last=c->text->L[c->text->n-1];
+ if(c->sp<=0||len<=0)return;
+ int idx=c->stack[c->sp-1];
+ if(idx<0||idx>=c->text->n||c->text->L[idx]->t!=T_STR)return;
+ V*last=c->text->L[idx];
  size_t o=strlen(last->s);
  size_t need=o+(size_t)len+1;
- if(need>c->cur_cap){
-  size_t ncap=c->cur_cap?c->cur_cap*2:16;
+ if(need>o+1){
+  size_t ncap=o+1<16?16:o+1;
   while(ncap<need){
    if(ncap>(SIZE_MAX/2)){ncap=need;break;}
    ncap*=2;
@@ -37,7 +50,6 @@ static void xml_ch(void*ud,const XML_Char*s,int len){
   char*n=realloc(last->s,ncap);
   if(!n)return;
   last->s=n;
-  c->cur_cap=ncap;
  }
  memcpy(last->s+o,s,(size_t)len);
  last->s[o+(size_t)len]=0;}
@@ -68,6 +80,7 @@ V*table_xml_load(const char*path,V*columns_opt){
   v_free(cb.id);
   v_free(cb.name);
   v_free(cb.text);
+  free(cb.stack);
   return v_err("xml: parser");}
  XML_SetParamEntityParsing(p, XML_PARAM_ENTITY_PARSING_NEVER);
 #if defined(XML_DTD) || (defined(XML_GE) && XML_GE == 1)
@@ -75,7 +88,7 @@ V*table_xml_load(const char*path,V*columns_opt){
  XML_SetBillionLaughsAttackProtectionActivationThreshold(p, 8388608ull);
 #endif
  XML_SetUserData(p,&cb);
- XML_SetElementHandler(p,xml_start,NULL);
+ XML_SetElementHandler(p,xml_start,xml_end);
  XML_SetCharacterDataHandler(p,xml_ch);
  if(XML_Parse(p,buf,(int)got,1)==XML_STATUS_ERROR){
   enum XML_Error code=XML_GetErrorCode(p);
@@ -85,9 +98,11 @@ V*table_xml_load(const char*path,V*columns_opt){
   v_free(cb.id);
   v_free(cb.name);
   v_free(cb.text);
+  free(cb.stack);
   return v_errf("xml: parse: %s",XML_ErrorString(code));}
  XML_ParserFree(p);
  free(buf);
+ free(cb.stack);
  V*kl=v_list(4);
  kl->L[0]=v_str("tag");
  kl->L[1]=v_str("id");

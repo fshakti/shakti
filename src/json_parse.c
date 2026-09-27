@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 
 #define SHAKTI_JSON_MAX_DEPTH 512
 /* Resource limits: nesting depth is already bounded above. These additionally
@@ -41,7 +42,20 @@ static V*parse_string(const char*s,const char**end_out){
     s+=4;
     {
         unsigned uh=(unsigned)h;
-        int nbytes=(uh<=0x7Fu)?1:(uh<=0x7FFu)?2:3;
+        if (uh == 0) { free(buf); return v_err("json: \\u0000"); }
+        if (uh >= 0xDC00u && uh <= 0xDFFFu) { free(buf); return v_err("json: lone surrogate"); }
+        if (uh >= 0xD800u && uh <= 0xDBFFu) {
+            if (s[0] != '\\' || s[1] != 'u' || !s[2] || !s[3] || !s[4] || !s[5]) {
+                free(buf); return v_err("json: bad surrogate");
+            }
+            int e0=hex_digit(s[2]), e1=hex_digit(s[3]), e2=hex_digit(s[4]), e3=hex_digit(s[5]);
+            if (e0<0||e1<0||e2<0||e3<0) { free(buf); return v_err("json: bad surrogate"); }
+            unsigned low=(unsigned)((e0<<12)|(e1<<8)|(e2<<4)|e3);
+            if (low < 0xDC00u || low > 0xDFFFu) { free(buf); return v_err("json: bad surrogate"); }
+            s += 6;
+            uh = 0x10000u + ((uh - 0xD800u) << 10) + (low - 0xDC00u);
+        }
+        int nbytes=(uh<=0x7Fu)?1:(uh<=0x7FFu)?2:(uh<=0xFFFFu)?3:4;
         while(len+(size_t)nbytes+1>=cap){
          if(cap>=SHAKTI_JSON_MAX_STRING){free(buf);return v_err("json: string too long");}
          cap*=2;
@@ -52,8 +66,13 @@ static V*parse_string(const char*s,const char**end_out){
         else if(nbytes==2){
          buf[len++]=(char)(0xC0u|(uh>>6));
          buf[len++]=(char)(0x80u|(uh&0x3Fu));}
-        else{
+        else if(nbytes==3){
          buf[len++]=(char)(0xE0u|(uh>>12));
+         buf[len++]=(char)(0x80u|((uh>>6)&0x3Fu));
+         buf[len++]=(char)(0x80u|(uh&0x3Fu));}
+        else{
+         buf[len++]=(char)(0xF0u|(uh>>18));
+         buf[len++]=(char)(0x80u|((uh>>12)&0x3Fu));
          buf[len++]=(char)(0x80u|((uh>>6)&0x3Fu));
          buf[len++]=(char)(0x80u|(uh&0x3Fu));}
         continue;
@@ -91,8 +110,15 @@ static V*parse_number(const char*s,const char**end_out){
   P(e==s,v_err("json: bad number"))
   *end_out=e;
   return v_float(f);}
+ errno=0;
  long long j=strtoll(s,&e,10);
- P(e==s,v_err("json: bad number"))
+ if(e==s) return v_err("json: bad number");
+ if(errno==ERANGE){
+  errno=0;
+  double f=strtod(s,&e);
+  if(e==s) return v_err("json: bad number");
+  *end_out=e;
+  return v_float(f);}
  *end_out=e;
  return v_int((int64_t)j);}
 static V*parse_array(const char*s,const char**end_out,int depth){

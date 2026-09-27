@@ -92,8 +92,10 @@ static Token lex_fstring(Lexer *l) {
     while(p < l->len && s[p] != q) {
         if(s[p]=='{' && p+1<l->len && s[p+1]=='{') {
             if(!lex_append(l, &t, &qi, '{')) return make_tok(T_EOF_);
+            if(!lex_append(l, &t, &qi, '{')) return make_tok(T_EOF_);
             p += 2;
         } else if(s[p]=='}' && p+1<l->len && s[p+1]=='}') {
+            if(!lex_append(l, &t, &qi, '}')) return make_tok(T_EOF_);
             if(!lex_append(l, &t, &qi, '}')) return make_tok(T_EOF_);
             p += 2;
         } else if(s[p]=='{') {

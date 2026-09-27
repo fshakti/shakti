@@ -1004,11 +1004,15 @@ static Node *parse_try(Lexer *l) {
         lex_next(l); expect(l, T_COLON_); expect(l, T_NEWLINE_);
         Node *else_body = parse_block(l);
         node_add(n, else_body);
+    } else {
+        node_add(n, node_new(N_PASS));
     }
     if(lex_peek(l).type == T_FINALLY_) {
         lex_next(l); expect(l, T_COLON_); expect(l, T_NEWLINE_);
         Node *finally_body = parse_block(l);
         node_add(n, finally_body);
+    } else {
+        node_add(n, node_new(N_PASS));
     }
     return n;
 }

@@ -215,7 +215,8 @@ int ipc_mcast_open(const char *group, int port, const char *iface, const char *s
         memset(&bind_addr, 0, sizeof bind_addr);
         bind_addr.sin_family = AF_INET;
         bind_addr.sin_port = htons((uint16_t)port);
-        bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (inet_pton(AF_INET, group, &bind_addr.sin_addr) != 1)
+            bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(fd, (struct sockaddr *)&bind_addr, sizeof bind_addr) < 0) {
             snprintf(err, err_cap, "ipc: mcast bind: %s", strerror(errno));
             close(fd);
@@ -345,21 +346,53 @@ int ipc_mcast_recv(IpcHandle *s, int block, char **out, size_t *out_len,
     return 0;
 }
 
+#define IPC_REPLY_TTL 30
+
+static void ipc_reply_expire(IpcHandle *s) {
+    time_t now = time(NULL);
+    for (int i = 0; i < IPC_REPLY_TO_MAX; i++) {
+        if (s->reply_to[i].in_use && now - s->reply_to[i].at > IPC_REPLY_TTL)
+            s->reply_to[i].in_use = 0;
+    }
+}
+
 int ipc_reply_to_store(IpcHandle *s, uint32_t corr, int af, uint16_t port,
                        const uint8_t addr[16], const uint8_t cookie[8]) {
+    uint8_t zcookie[IPC_REPLY_COOKIE];
+    memset(zcookie, 0, sizeof zcookie);
+    const uint8_t *ck = cookie ? cookie : zcookie;
+    ipc_reply_expire(s);
+    int free_i = -1, oldest = -1;
+    time_t oldest_at = 0;
     for (int i = 0; i < IPC_REPLY_TO_MAX; i++) {
-        if (!s->reply_to[i].in_use) {
-            s->reply_to[i].in_use = 1;
-            s->reply_to[i].corr = corr;
-            s->reply_to[i].af = af;
-            s->reply_to[i].port = port;
-            memcpy(s->reply_to[i].addr, addr, 16);
-            if (cookie) memcpy(s->reply_to[i].cookie, cookie, IPC_REPLY_COOKIE);
-            else memset(s->reply_to[i].cookie, 0, IPC_REPLY_COOKIE);
-            return 0;
+        IpcReplyTo *r = &s->reply_to[i];
+        if (!r->in_use) {
+            if (free_i < 0) free_i = i;
+            continue;
+        }
+        if (r->corr == corr) {
+            if (r->af == af && r->port == port &&
+                memcmp(r->addr, addr, 16) == 0 && memcmp(r->cookie, ck, IPC_REPLY_COOKIE) == 0) {
+                r->at = time(NULL);
+                return 0;
+            }
+            return -1;
+        }
+        if (oldest < 0 || r->at < oldest_at) {
+            oldest = i;
+            oldest_at = r->at;
         }
     }
-    return -1;
+    int i = free_i >= 0 ? free_i : oldest;
+    if (i < 0) return -1;
+    s->reply_to[i].in_use = 1;
+    s->reply_to[i].corr = corr;
+    s->reply_to[i].af = af;
+    s->reply_to[i].port = port;
+    memcpy(s->reply_to[i].addr, addr, 16);
+    memcpy(s->reply_to[i].cookie, ck, IPC_REPLY_COOKIE);
+    s->reply_to[i].at = time(NULL);
+    return 0;
 }
 
 int ipc_reply_to_store_peer(IpcHandle *s, uint32_t corr, const struct sockaddr_storage *peer,
@@ -381,7 +414,12 @@ int ipc_reply_to_store_peer(IpcHandle *s, uint32_t corr, const struct sockaddr_s
 
 int ipc_reply_to_take(IpcHandle *s, uint32_t corr, int *af, uint16_t *port, uint8_t addr[16],
                       uint8_t cookie[8]) {
+    time_t now = time(NULL);
     for (int i = 0; i < IPC_REPLY_TO_MAX; i++) {
+        if (s->reply_to[i].in_use && now - s->reply_to[i].at > IPC_REPLY_TTL) {
+            s->reply_to[i].in_use = 0;
+            continue;
+        }
         if (s->reply_to[i].in_use && s->reply_to[i].corr == corr) {
             *af = s->reply_to[i].af;
             *port = s->reply_to[i].port;

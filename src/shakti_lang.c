@@ -5,7 +5,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.14.1"
+#define SHAKTI_PKG_VERSION "0.14.3"
 #endif
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>
@@ -244,6 +244,7 @@ int shakti_lang_main(int argc, char **argv) {
             putchar('\n');
         }
         v_free(r);
+        shakti_clear_flow();
         node_free(prog);
         if(interactive) run_repl(global);
     } else if(i < argc) {
@@ -264,6 +265,7 @@ int shakti_lang_main(int argc, char **argv) {
         P(!src,1)
         Node *prog = parse(src);
         V *r = eval(prog, global);
+        shakti_clear_flow();
         int script_err = g_error || (r && r->t == T_ERR);
         if(g_error && g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
         if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
