@@ -17,7 +17,7 @@ expr   lit name e.f e[i] e[a:b] f(…) f@ xs  xs f@ ys
 type   int float bool char str None · list dict table ktable
        list[int|float|char|bool] · matrix[int|float|char|bool]
        date datetime time
-built  range sum min max avg abs dot mmul
+built  len range sum min max avg abs dot mmul
        parse_check eval char chr hex clock timer exit sh
        read write load save json_loads json_dumps
 

@@ -299,7 +299,7 @@ static const char *BUILTINS[] = {
     "bin","asof_sort","asof_bin","asof_index","asof_index_count",
     "parse_check",
     "sort","reverse","zip","enumerate","map","filter",
-    "table","columns","shape","head","tail","group_sum",
+    "table","columns","shape","head","tail","sublist","drop","catenate","group_sum",
     "append","pop","keys","values",
     "load","save","input","readline","wait","repr","clock","timer",
     "input_get_hz","input_set_hz","input_get_x","input_get_y","input_get_wheel",
@@ -1662,6 +1662,141 @@ static V *bi_tail(V**a,in){
             else nd->L[j]=v_ref(col);})
         V*r=v_table(v->keys,nd);v_free(nd);return r;}
     return v_nil();}
+static int is_seq_t(int t) {
+    return t==T_STR||t==T_LIST||t==T_IVEC||t==T_FVEC||t==T_CVEC||t==T_BVEC;
+}
+static int64_t seq_n(V *v) {
+    if (!v) return 0;
+    if (v->t==T_STR) return v->s ? (int64_t)strlen(v->s) : 0;
+    return v->n;
+}
+static V *seq_elem(V *v, int64_t i) {
+    char b[2];
+    switch (v->t) {
+    case T_IVEC: return v_int(v->J[i]);
+    case T_FVEC: return v_float(v->F[i]);
+    case T_CVEC: return v_char(v->B[i]);
+    case T_BVEC: return v_bool(v->B[i] != 0);
+    case T_LIST: return v->L[i] ? v_ref(v->L[i]) : v_nil();
+    case T_STR: b[0]=v->s[i]; b[1]=0; return v_str(b);
+    default: return v_nil();
+    }
+}
+static V *seq_span(V *v, int64_t start, int64_t count) {
+    int64_t n = seq_n(v);
+    if (start < 0) start = 0;
+    if (start > n) start = n;
+    if (count < 0) count = 0;
+    if (count > n - start) count = n - start;
+    switch (v->t) {
+    case T_IVEC: { V *r=v_ivec(count); if(count) memcpy(r->J, v->J+start, (size_t)count*8); return r; }
+    case T_FVEC: { V *r=v_fvec(count); if(count) memcpy(r->F, v->F+start, (size_t)count*8); return r; }
+    case T_CVEC: { V *r=v_cvec(count); if(count) memcpy(r->B, v->B+start, (size_t)count); return r; }
+    case T_BVEC: { V *r=v_bvec(count); if(count) memcpy(r->B, v->B+start, (size_t)count); return r; }
+    case T_LIST: {
+        V *r=v_list(count);
+        for(int64_t i=0;i<count;i++) r->L[i]=v->L[start+i] ? v_ref(v->L[start+i]) : v_nil();
+        return r;
+    }
+    case T_STR: {
+        char *s = malloc((size_t)count + 1);
+        if (!s) return v_err("out of memory");
+        if (count) memcpy(s, v->s + start, (size_t)count);
+        s[count] = 0;
+        { V *r = v_str(s); free(s); return r; }
+    }
+    default: return v_err("not a list");
+    }
+}
+static int sublist_bounds(V *spec, int64_t n, int64_t *start, int64_t *count) {
+    int64_t i, c;
+    if (spec->t==T_INT || spec->t==T_CHAR) {
+        int64_t k = spec->j;
+        if (k >= 0) { *start = 0; *count = k; }
+        else if (k == INT64_MIN) { *start = 0; *count = n; }
+        else {
+            *count = -k;
+            *start = n - *count;
+            if (*start < 0) { *count += *start; *start = 0; }
+        }
+        return 1;
+    }
+    if (spec->t==T_IVEC && spec->n==2) { i = spec->J[0]; c = spec->J[1]; }
+    else if (spec->t==T_LIST && spec->n==2 && spec->L[0] && spec->L[1] &&
+             (spec->L[0]->t==T_INT || spec->L[0]->t==T_CHAR) &&
+             (spec->L[1]->t==T_INT || spec->L[1]->t==T_CHAR)) {
+        i = spec->L[0]->j; c = spec->L[1]->j;
+    } else return 0;
+    if (i < 0) i += n;
+    if (i < 0) { c += i; i = 0; }
+    if (c < 0) c = 0;
+    *start = i; *count = c;
+    return 1;
+}
+static V *bi_sublist(V**a,in){
+    int64_t start, count;
+    P(n<2,v_err("sublist(n, xs)"))
+    P(!is_seq_t(a[1]->t),v_err("sublist: not a list"))
+    P(!sublist_bounds(a[0], seq_n(a[1]), &start, &count),v_err("sublist: n must be int or [start, count]"))
+    return seq_span(a[1], start, count);
+}
+static V *bi_drop(V**a,in){
+    int64_t k, nlen, start, count;
+    P(n<2,v_err("drop(n, xs)"))
+    P(!(a[0]->t==T_INT||a[0]->t==T_CHAR),v_err("drop: n must be int"))
+    P(!is_seq_t(a[1]->t),v_err("drop: not a list"))
+    k = a[0]->j; nlen = seq_n(a[1]);
+    if (k >= 0) { start = k; count = nlen - k; }
+    else if (__builtin_add_overflow(nlen, k, &count)) { start = 0; count = 0; }
+    else start = 0;
+    return seq_span(a[1], start, count);
+}
+static V *seq_cat_same(V *a, V *b) {
+    int64_t na, nb, n;
+    if (a->t != b->t || !is_seq_t(a->t)) return NULL;
+    na = seq_n(a); nb = seq_n(b);
+    if (__builtin_add_overflow(na, nb, &n) || n < 0) return v_err("catenate: too large");
+    switch (a->t) {
+    case T_IVEC: { V *r=v_ivec(n); if(na)memcpy(r->J,a->J,(size_t)na*8); if(nb)memcpy(r->J+na,b->J,(size_t)nb*8); return r; }
+    case T_FVEC: { V *r=v_fvec(n); if(na)memcpy(r->F,a->F,(size_t)na*8); if(nb)memcpy(r->F+na,b->F,(size_t)nb*8); return r; }
+    case T_CVEC: { V *r=v_cvec(n); if(na)memcpy(r->B,a->B,(size_t)na); if(nb)memcpy(r->B+na,b->B,(size_t)nb); return r; }
+    case T_BVEC: { V *r=v_bvec(n); if(na)memcpy(r->B,a->B,(size_t)na); if(nb)memcpy(r->B+na,b->B,(size_t)nb); return r; }
+    case T_LIST: {
+        V *r=v_list(n);
+        for(int64_t i=0;i<na;i++) r->L[i]=a->L[i] ? v_ref(a->L[i]) : v_nil();
+        for(int64_t i=0;i<nb;i++) r->L[na+i]=b->L[i] ? v_ref(b->L[i]) : v_nil();
+        return r;
+    }
+    case T_STR: {
+        char *s;
+        if ((uint64_t)na > SIZE_MAX - 1 || (uint64_t)nb > SIZE_MAX - 1 - (size_t)na)
+            return v_err("catenate: too large");
+        s = malloc((size_t)na + (size_t)nb + 1);
+        if (!s) return v_err("out of memory");
+        if (na) memcpy(s, a->s, (size_t)na);
+        if (nb) memcpy(s + na, b->s, (size_t)nb);
+        s[na + nb] = 0;
+        { V *r = v_str(s); free(s); return r; }
+    }
+    default: return NULL;
+    }
+}
+static V *bi_catenate(V**a,in){
+    int64_t na, nb, ntot, k;
+    V *r, *same;
+    P(n<2,v_err("catenate(x, y)"))
+    same = seq_cat_same(a[0], a[1]);
+    if (same) return same;
+    na = is_seq_t(a[0]->t) ? seq_n(a[0]) : 1;
+    nb = is_seq_t(a[1]->t) ? seq_n(a[1]) : 1;
+    if (__builtin_add_overflow(na, nb, &ntot) || ntot < 0) return v_err("catenate: too large");
+    r = v_list(ntot); k = 0;
+    if (is_seq_t(a[0]->t)) { for(int64_t i=0;i<na;i++) r->L[k++]=seq_elem(a[0], i); }
+    else r->L[k++] = v_ref(a[0]);
+    if (is_seq_t(a[1]->t)) { for(int64_t i=0;i<nb;i++) r->L[k++]=seq_elem(a[1], i); }
+    else r->L[k++] = v_ref(a[1]);
+    return r;
+}
 static V *bi_group_sum(V**a,in){
     if(n<3||a[0]->t!=T_TABLE) {
         char buf[128];
@@ -1833,7 +1968,7 @@ static V *bi_parse_check(V **a, int n);
 BI0(parse_check)
 BI0(sort) BI0(reverse) BI0(zip) BI0(enumerate)
 BIE(map) BIE(filter) BIKWE(sorted)
-BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(group_sum)
+BIKW(table) BI0(columns) BI0(shape) BI0(head) BI0(tail) BI0(sublist) BI0(drop) BI0(catenate) BI0(group_sum)
 BI0(append) BI0(pop) BI0(keys) BI0(values) BI0(next)
 BI0(input) BI0(readline) BI0(wait) BI0(repr)
 BI0(input_get_hz) BI0(input_set_hz)
@@ -2033,6 +2168,7 @@ static const BiEntry bi_tab[] = {
     {"bool", bi_w_bool},
     {"bor", bi_w_bor},
     {"bxor", bi_w_bxor},
+    {"catenate", bi_w_catenate},
     {"ceil", bi_w_ceil},
     {"char", bi_w_char},
     {"chr", bi_w_chr},
@@ -2044,6 +2180,7 @@ static const BiEntry bi_tab[] = {
     {"decompress", bi_w_decompress},
     {"dict", bi_w_dict},
     {"dot", bi_w_dot},
+    {"drop", bi_w_drop},
 #ifdef SHAKTI_HAVE_DSP
     {"dsp_degree_freq", bi_w_dsp_degree_freq},
     {"dsp_et_cents", bi_w_dsp_et_cents},
@@ -2295,6 +2432,7 @@ static const BiEntry bi_tab[] = {
     {"stem_write_wav", bi_w_stem_write_wav},
 #endif
     {"str", bi_w_str},
+    {"sublist", bi_w_sublist},
     {"sum", bi_w_sum},
 #ifdef SHAKTI_HAVE_SYNTH
     {"synth_alive", bi_w_synth_alive},

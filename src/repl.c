@@ -129,7 +129,7 @@ static const char *HL_BIS[] = {
     "print","len","range","type","int","float","str","list","bool",
     "sum","avg","min","max","dot","mmul","abs","sqrt",
     "sort","reverse","zip","enumerate","map","filter",
-    "table","ktable","columns","shape","head","tail",
+    "table","ktable","columns","shape","head","tail","sublist","drop","catenate",
     "append","pop","keys","values",
     "load","save","input","repr","clock","timer","eval","exit",
     "read","write","readlines",

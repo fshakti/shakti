@@ -313,6 +313,31 @@ Leading `@` decorates. `mmul(a, b)` multiplies matrices.
 | `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `list[char]`, `matrix[int]`, `matrix[float]`, `matrix[bool]`, `matrix[char]` |
 | `find(substr)` | `str` — byte index of first match, or `-1` |
 
+## Lists
+
+`len(x)` counts items in a list, vector, or string, and rows in a matrix.
+
+| Call | Meaning |
+|------|---------|
+| `sublist(n, xs)` | First `n` items. A negative `n` takes from the end. |
+| `sublist([i, n], xs)` | `n` items starting at index `i` (`i` may be negative). |
+| `drop(n, xs)` | Drop the first `n` items. A negative `n` drops from the end. |
+| `catenate(x, y)` | Join lists, vectors, or strings. `+` on `list[int]` adds element-wise; `catenate` joins. |
+
+```ie
+xs : 1 2 3 4 5
+print(sublist(2, xs))         # [1, 2]
+print(sublist(-2, xs))        # [4, 5]
+print(sublist([1, 3], xs))    # [2, 3, 4]
+print(drop(2, xs))            # [3, 4, 5]
+print(drop(-1, xs))           # [1, 2, 3, 4]
+print(catenate(1 2, 3 4))     # [1, 2, 3, 4]
+print(catenate("ab", "cd"))   # abcd
+print(len(xs))                # 5
+```
+
+`xs[i:j]` is a sublist. `xs[n:]` drops the first `n` items.
+
 ## Vectors
 
 `range(n)` builds an `ivec` `[0, 1, …, n - 1]`. Element-wise `+`, `-`, `*`, `/`, `//`, `%` work on matching-length `ivec` / `fvec` pairs (and scalar broadcast).

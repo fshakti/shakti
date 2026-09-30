@@ -420,6 +420,13 @@ static Node *parse_postfix(Lexer *l) {
                 }
                 expect(l, T_RBRACKET_);
                 n = sl;
+            } else if(lex_peek(l).type == T_RBRACKET_) {
+                /* f[] applies f to []. An empty list is a value. */
+                lex_next(l);
+                Node *idx = node_new(N_INDEX);
+                node_add(idx, n);
+                node_add(idx, node_new(N_LIST));
+                n = idx;
             } else {
                 Node *first = parse_expr(l);
                 if(lex_peek(l).type == T_COLON_) {
