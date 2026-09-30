@@ -190,13 +190,19 @@ V *mat_binop(V *a, V *b, int op) {
     }
     return r;
 }
+static int is_arith_vec(int t) {
+    return t == T_IVEC || t == T_FVEC || t == T_CVEC;
+}
 V *vec_binop(V *a, V *b, int op) {
     if (is_mat_t(a->t) || is_mat_t(b->t)) {
         V *r = mat_binop(a, b, op);
         if (r) return r;
     }
+    /* Scalars broadcast. Two vectors must be the same length. */
+    if (is_arith_vec(a->t) && is_arith_vec(b->t) && a->n != b->n)
+        return v_err("length mismatch");
     if (a->t == T_IVEC && b->t == T_IVEC && op != OP_DIV && op != OP_POW) {
-        int64_t n = a->n < b->n ? a->n : b->n;
+        int64_t n = a->n;
         V *r = v_ivec(n);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
             mat_imat_binop_mm(r->J, a->J, b->J, n, op);
@@ -222,7 +228,7 @@ V *vec_binop(V *a, V *b, int op) {
         return r;
     }
     if (a->t == T_CVEC && b->t == T_CVEC && op != OP_DIV && op != OP_POW) {
-        int64_t n = a->n < b->n ? a->n : b->n;
+        int64_t n = a->n;
         V *r = v_cvec(n);
         const unsigned char *ac = a->B, *bc = b->B;
         unsigned char *rc = r->B;
@@ -406,7 +412,7 @@ V *vec_binop(V *a, V *b, int op) {
     }
     P(a->t==T_INT && b->t==T_STR && op==OP_MUL,vec_binop(b, a, op))
     if (a->t == T_FVEC && b->t == T_FVEC) {
-        int64_t n = a->n < b->n ? a->n : b->n;
+        int64_t n = a->n;
         V *r = v_fvec(n);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
             op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
@@ -436,7 +442,7 @@ V *vec_binop(V *a, V *b, int op) {
     }
     #define VEC_BIN(AT,BT,AJ,BJ) \
     if(a->t==AT && b->t==BT) { \
-        int64_t n=a->n<b->n?a->n:b->n; \
+        int64_t n=a->n; \
         int ui=(AT==T_IVEC&&BT==T_IVEC&&op!=OP_DIV&&op!=OP_POW); \
         if(ui){ V*r=v_ivec(n); for(int64_t i=0;i<n;i++){int64_t x=AJ[i],y=BJ[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
