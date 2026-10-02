@@ -234,8 +234,9 @@ int ipc_mcast_open(const char *group, int port, const char *iface, const char *s
         memset(&bind_addr, 0, sizeof bind_addr);
         bind_addr.sin_family = AF_INET;
         bind_addr.sin_port = htons((uint16_t)port);
-        if (inet_pton(AF_INET, group, &bind_addr.sin_addr) != 1)
-            bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        /* Bind the port only. Binding the multicast group itself makes sendto
+         * fail with EADDRNOTAVAIL on macOS (the group is not a local source). */
+        bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         if (bind(fd, (struct sockaddr *)&bind_addr, sizeof bind_addr) < 0) {
             snprintf(err, err_cap, "ipc: mcast bind: %s", strerror(errno));
             close(fd);

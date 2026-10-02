@@ -672,7 +672,8 @@ V *bi_hdb_next(V **a, int n) {
 
     if (idx_v->j == INT64_MAX)
         return v_err("hdb_next: index overflow");
-    if (!hdb_safe_name(root_v->s) || !hdb_safe_name(table_v->s))
+    /* root is a filesystem path (it may contain '/'); only the table name is a single component. */
+    if (!root_v->s[0] || !hdb_safe_name(table_v->s))
         return v_err("hdb_next: bad root or table");
     int64_t idx = idx_v->j + 1;
     if (idx < 0 || idx >= parts->n) {

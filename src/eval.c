@@ -429,11 +429,45 @@ static V *list_shallow(V *src) {
         c->L[i] = src->L[i] ? v_ref(src->L[i]) : v_nil();
     return c;
 }
+/* Lists passed into a call stay one object so append/pop inside the callee
+ * updates the caller's list. Top-level aliases still copy on write. */
+static V **g_list_arg_stack;
+static int g_list_arg_n;
+static int g_list_arg_cap;
+static int push_list_vals(V **vals, int n) {
+    int pushed = 0;
+    int i;
+    for (i = 0; i < n; i++) {
+        V **tmp;
+        int cap;
+        if (!vals[i] || vals[i]->t != T_LIST) continue;
+        if (g_list_arg_n >= g_list_arg_cap) {
+            cap = g_list_arg_cap ? g_list_arg_cap * 2 : 64;
+            tmp = realloc(g_list_arg_stack, (size_t)cap * sizeof(V *));
+            if (!tmp) break;
+            g_list_arg_stack = tmp;
+            g_list_arg_cap = cap;
+        }
+        g_list_arg_stack[g_list_arg_n++] = vals[i];
+        pushed++;
+    }
+    return pushed;
+}
+static void pop_list_vals(int pushed) {
+    if (pushed > g_list_arg_n) pushed = g_list_arg_n;
+    g_list_arg_n -= pushed;
+}
+static int list_is_call_arg(V *obj) {
+    int i;
+    for (i = 0; i < g_list_arg_n; i++)
+        if (g_list_arg_stack[i] == obj) return 1;
+    return 0;
+}
 /* Copy a shared list into the name or index that owns it. 0 ok, -1 no slot. */
 static int cow_list_arg(Env *e, Node *slot, V **objp) {
     V *obj = *objp;
     V *copy;
-    if (!obj || obj->t != T_LIST || obj->rc <= 2) return 0;
+    if (!obj || obj->t != T_LIST || obj->rc <= 2 || list_is_call_arg(obj)) return 0;
     copy = list_shallow(obj);
     if (slot && slot->type == N_NAME && slot->sval) {
         if (!env_update(e, slot->sval, copy))
@@ -1475,14 +1509,17 @@ V *eval(Node *n, Env *e) {
                         env_set(call_env, params->L[i]->s, attr->defaults->L[i]);
                     }
                 }
+                int npush = 0;
                 for(int i=1; i<n->nch; i++) {
                     if(n->ch[i]->type == N_KWARG) {
                         V *kv = eval(n->ch[i]->ch[0], e);
                         env_set(call_env, n->ch[i]->sval, kv);
+                        npush += push_list_vals(&kv, 1);
                         v_free(kv);
                     }
                 }
                 if (attr->j < 0 || attr->j >= fn_ast_n || !fn_ast[(int)attr->j]) {
+                    pop_list_vals(npush);
                     env_free(call_env);
                     v_free(obj);
                     for (int i = 0; i < nargs; i++) v_free(args[i]);
@@ -1490,7 +1527,9 @@ V *eval(Node *n, Env *e) {
                     return v_err("call: bad function");
                 }
                 Node *body = fn_ast[(int)attr->j];
+                npush += push_list_vals(args, nargs);
                 V *result = eval_fn(body, call_env);
+                pop_list_vals(npush);
                 if(g_returning) {
                     g_returning = 0; v_free(result);
                     result = g_retval ? g_retval : v_nil();
@@ -1611,7 +1650,9 @@ V *eval(Node *n, Env *e) {
         for(int i=0;i<nkw;i++)
             env_set(call_env, kwnames[i]->s, kwvals[i]);
         Node *body = fn_ast[(int)fn->j];
+        int npush = push_list_vals(args, nargs) + push_list_vals(kwvals, nkw);
         V *result = eval_fn(body, call_env);
+        pop_list_vals(npush);
         if(g_returning) {
             g_returning = 0;
             v_free(result);
