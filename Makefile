@@ -471,7 +471,46 @@ record-showcase: prod $(BUILD)/iefs_pack_cvec
 	bash tools/record_showcase.sh
 endif
 
-.PHONY: all build test clean prod prod-size prod-speed dist clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase wasm
+# iOS Simulator static library. A separate recipe so the desktop Darwin flags
+# (libomp, Accelerate, AudioToolbox, Homebrew OpenSSL) are not inherited.
+IOS_SIM_DIR := $(BUILD)/ios-sim
+IOS_SIM_LIB := $(IOS_SIM_DIR)/libshakti-ios.a
+IOS_SIM_SRCS := \
+	src/alloc.c src/value.c src/env.c src/lex.c src/ast.c src/parse.c \
+	src/vec_ops.c src/eval.c src/eval_each.c src/import.c src/repl.c \
+	src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c \
+	src/vec_kernels.c src/fb_present.c \
+	src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c \
+	src/input.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c \
+	src/shakti_ios.c
+
+ios-sim: $(IOS_SIM_LIB)
+
+$(IOS_SIM_LIB): $(IOS_SIM_SRCS) src/a.h src/shakti.h src/shakti_internal.h src/shakti_ios.h
+	@set -e; \
+	sdk=$$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null || true); \
+	cc=$$(xcrun --sdk iphonesimulator -f clang 2>/dev/null || true); \
+	if [ -z "$$sdk" ] || [ -z "$$cc" ]; then \
+	  echo "ios-sim: iphonesimulator SDK not found (install Xcode)" >&2; \
+	  exit 1; \
+	fi; \
+	arch=$$(uname -m); \
+	case "$$arch" in arm64|x86_64) ;; *) arch=arm64 ;; esac; \
+	rm -rf $(IOS_SIM_DIR)/objs; \
+	mkdir -p $(IOS_SIM_DIR)/objs; \
+	for src in $(IOS_SIM_SRCS); do \
+	  base=$$(basename "$$src" .c); \
+	  "$$cc" -isysroot "$$sdk" -target "$$arch-apple-ios16.0-simulator" \
+	    -O2 -g -std=gnu11 -D_GNU_SOURCE -D__IOS__ -DSHAKTI_STANDALONE=1 \
+	    -Isrc \
+	    -Wall -Wextra -Wno-misleading-indentation -Wno-sign-compare \
+	    -Wno-unused-result -Wno-missing-field-initializers \
+	    -c -o "$(IOS_SIM_DIR)/objs/$$base.o" "$$src"; \
+	done; \
+	libtool -static -o $@ $(IOS_SIM_DIR)/objs/*.o; \
+	echo "ios-sim $@"
+
+.PHONY: all build test clean prod prod-size prod-speed dist clean-shakti-artifacts install uninstall shakti_jni.o iefs-pack-cvec record-showcase wasm ios-sim
 
 test: shakti
 	@if [ -f tests/assert_prec.sh ]; then \

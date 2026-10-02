@@ -32,7 +32,7 @@
 #undef ss
 #undef st
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(__IOS__)
 #include <AudioToolbox/AudioToolbox.h>
 #include <pthread.h>
 #define PCM_HAVE 1
