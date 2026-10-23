@@ -13,8 +13,9 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 #include <time.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -635,7 +636,9 @@ static void stem_u32le(unsigned char *p, unsigned int v) {
     p[3] = (unsigned char)((v >> 24) & 255u);
 }
 
+static int stem_write_wav_errno = 0;
 static int stem_write_wav(const char *path, const float *x, int n, int sr, int wavfmt) {
+    stem_write_wav_errno = 0;
     FILE *fp;
     unsigned char hdr[44];
     unsigned int bps, align, br, data_bytes, riff_payload;
@@ -664,7 +667,7 @@ static int stem_write_wav(const char *path, const float *x, int n, int sr, int w
     data_bytes = (unsigned int)n * align;
     br = (unsigned int)sr * align;
     fp = fopen(path, "wb");
-    if (!fp) return -1;
+    if (!fp) { stem_write_wav_errno = errno; return -1; }
     riff_payload = 36u + data_bytes + (data_bytes & 1u);
     memset(hdr, 0, 44);
     memcpy(hdr, "RIFF", 4);
@@ -681,11 +684,13 @@ static int stem_write_wav(const char *path, const float *x, int n, int sr, int w
     memcpy(hdr + 36, "data", 4);
     stem_u32le(hdr + 40, data_bytes);
     if (fwrite(hdr, 1, 44, fp) != 44) {
+        stem_write_wav_errno = errno;
         fclose(fp);
         return -1;
     }
     if (wavfmt == STEM_WAV_F32) {
         if (n > 0 && fwrite(x, 4, (size_t)n, fp) != (size_t)n) {
+            stem_write_wav_errno = errno;
             fclose(fp);
             return -1;
         }
@@ -701,6 +706,7 @@ static int stem_write_wav(const char *path, const float *x, int n, int sr, int w
             if (fputc(s & 255, fp) == EOF ||
                 fputc((s >> 8) & 255, fp) == EOF ||
                 fputc((s >> 16) & 255, fp) == EOF) {
+                stem_write_wav_errno = errno;
                 fclose(fp);
                 return -1;
             }
@@ -713,20 +719,23 @@ static int stem_write_wav(const char *path, const float *x, int n, int sr, int w
             if (v < -1.f) v = -1.f;
             s = (int)lrintf(v * 32767.f);
             if (fputc(s & 255, fp) == EOF || fputc((s >> 8) & 255, fp) == EOF) {
+                stem_write_wav_errno = errno;
                 fclose(fp);
                 return -1;
             }
         }
     }
     if ((data_bytes & 1u) && fputc(0, fp) == EOF) {
+        stem_write_wav_errno = errno;
         fclose(fp);
         return -1;
     }
     if (fflush(fp) != 0 || ferror(fp)) {
+        stem_write_wav_errno = errno;
         fclose(fp);
         return -1;
     }
-    if (fclose(fp) != 0) return -1;
+    if (fclose(fp) != 0) { stem_write_wav_errno = errno; return -1; }
     return 0;
 }
 
@@ -1756,7 +1765,7 @@ V *bi_stem_write_wav(V **a, int n) {
     rc = stem_write_wav(path, buf, (int)ns, sr, wavfmt);
     free(buf);
     if (own == 1) free(ps);
-    if (rc != 0) return v_err("stem_write_wav: write failed");
+    if (rc != 0) return v_errf("stem_write_wav: write failed (%s)", strerror(stem_write_wav_errno ? stem_write_wav_errno : EIO));
     return v_nil();
 }
 
