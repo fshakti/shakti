@@ -259,7 +259,7 @@ static V *eval_with_table_columns(V *tbl, Node *expr, Env *e) {
             env_set(inner, cn->L[i]->s, dv->L[i]);
     }
     V *r = eval(expr, inner);
-    env_free(inner);
+    env_leave(inner);
     return r;
 }
 static V *eval_name_list(Node *n) {
@@ -311,7 +311,7 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv) {
         if(item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME) {
             V *val = eval(item->ch[1], inner);
             if (g_error) {   /* a raise (in from, or here on the right): the update stops */
-                env_free(inner);
+                env_leave(inner);
                 v_free(keys);
                 v_free(vals);
                 v_free(*errv); *errv = NULL;
@@ -325,14 +325,14 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv) {
             v_list_append_own(keys, v_str(item->ch[0]->sval));
             v_list_append_own(vals, val);
         } else {
-            env_free(inner);
+            env_leave(inner);
             v_free(keys);
             v_free(vals);
             v_free(*errv); *errv = NULL;
             return v_err("update: expected col: expr");
         }
     })
-    env_free(inner);
+    env_leave(inner);
     return v_dict_own(keys, vals);
 }
 /* update and delete give a new table r that may still hold some of the old table's
@@ -342,7 +342,7 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv) {
  * doesn't reach the other. r->vals is r's own list. */
 static void own_shared_cols(V *r, V *from) {
     if (!r || r->t != T_TABLE || !from || from->t != T_TABLE) return;
-    if (from->rc <= 1 && from->vals->rc <= 1) return;
+    if (shakti_count(from) <= 1 && shakti_count(from->vals) <= 1) return;
     for (int64_t c = 0; c < r->vals->n && c < from->vals->n; c++) {
         if (r->vals->L[c] == from->vals->L[c]) {
             V *own = col_copy(r->vals->L[c]);
@@ -484,7 +484,7 @@ static int list_is_call_arg(V *obj) {
 static int cow_list_arg(Env *e, Node *slot, V **objp) {
     V *obj = *objp;
     V *copy;
-    if (!obj || (obj->t != T_LIST && obj->t != T_IVEC) || obj->rc <= 2 || list_is_call_arg(obj)) return 0;
+    if (!obj || (obj->t != T_LIST && obj->t != T_IVEC) || shakti_count(obj) <= 2 || list_is_call_arg(obj)) return 0;
     if (obj->t == T_IVEC) {
         copy = v_ivec(obj->n);
         if (obj->n > 0 && obj->J)
@@ -713,7 +713,7 @@ static inline V *call_fn(V *fn, V *self, V **args, int nargs, V **kwn, V **kwv, 
         r = g_retval ? g_retval : v_nil();
         g_retval = NULL;
     }
-    env_free(ce);
+    env_leave(ce);
     return r;
 }
 V *shakti_call_fn(V *fn, V *self, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e) {
@@ -770,6 +770,55 @@ static V *class_new(V *cls, V **args, int nargs, V **kwn, V **kwv, int nkw, Env 
     return self;
 }
 
+/* x += e on a name, kept out of eval: inlined there, it made every call about 8% slower */
+static __attribute__((noinline)) V *eval_augassign_name(Node *n, Env *e) {
+    Node *target = n->ch[0];
+    int slot = env_index_here(e, target->sval);
+    V *local = slot < 0 ? NULL : e->vals[slot];
+    V *cur = local ? local : env_get(e, target->sval);
+    P(!cur,v_errf("name '%s' is not defined", target->sval))
+    /* Fast path: uniquely-owned local INT += INT. Outer bindings use vec_binop. */
+    if(local && cur->t == T_INT && shakti_count(cur) == 1 && n->ch[1]->type == N_INT && n->op == OP_ADD) {
+        int64_t z;
+        if (!__builtin_add_overflow(cur->j, n->ch[1]->ival, &z)) {
+            cur->j = z;
+            return v_ref(cur);
+        }
+    }
+    if(local && cur->t == T_INT && shakti_count(cur) == 1 && n->ch[1]->type == N_NAME && n->op == OP_ADD) {
+        V *rhs = env_get(e, n->ch[1]->sval);
+        if(rhs && rhs->t == T_INT) {
+            int64_t z;
+            if (!__builtin_add_overflow(cur->j, rhs->j, &z)) {
+                cur->j = z;
+                return v_ref(cur);
+            }
+        }
+    }
+    shakti_hold(cur); /* the right side may rebind the name */
+    V *delta = eval(n->ch[1], e);
+    /* in place only while x still names cur: where the right side rebound x, cur + e is
+       bound to x below, and cur (a cached int, say) is left as it is */
+    if(local && cur->t == T_INT && shakti_count(cur) == 1 && delta->t == T_INT &&
+       (n->op == OP_ADD || n->op == OP_SUB || n->op == OP_MUL) &&
+       slot < e->len && e->vals[slot] == cur) {
+        int64_t z;
+        int ov = n->op == OP_ADD ? __builtin_add_overflow(cur->j, delta->j, &z)
+               : n->op == OP_SUB ? __builtin_sub_overflow(cur->j, delta->j, &z)
+               : __builtin_mul_overflow(cur->j, delta->j, &z);
+        if (!ov) {
+            shakti_unhold(cur);
+            cur->j = z;
+            v_free(delta);
+            return cur;
+        }
+    }
+    shakti_unhold(cur);
+    V *newval = vec_binop(cur, delta, n->op);
+    env_set(e, target->sval, newval);
+    v_free(delta); v_free(cur);
+    V *r = v_ref(newval); v_free(newval); return r;
+}
 V *eval(Node *n, Env *e) {
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
@@ -959,9 +1008,11 @@ V *eval(Node *n, Env *e) {
         P(!existing,v_errf("insert: table '%s' not found", n->sval))
         V *cols = eval_name_list(n->ch[0]);
         P(cols->t == T_ERR,(cols))
+        shakti_hold(existing); /* the values may rebind the name */
         V *vals = eval_insert_values(n->ch[1], e);
-        P(vals->t == T_ERR,(v_free(cols),vals))
+        if (vals->t == T_ERR) { shakti_unhold(existing); v_free(existing); v_free(cols); return vals; }
         V *r = table_sql_insert(existing, cols, vals);
+        shakti_unhold(existing);
         if (r && r->t == T_ERR) {
             g_error = 1;
             if (g_error_val) v_free(g_error_val);
@@ -969,7 +1020,7 @@ V *eval(Node *n, Env *e) {
         } else if (r && r != existing) {
             env_update(e, n->sval, r);
         }
-        v_free(cols); v_free(vals);
+        v_free(cols); v_free(vals); v_free(existing);
         return r;
     }
     case N_JOIN: {
@@ -1544,46 +1595,7 @@ V *eval(Node *n, Env *e) {
     case N_AUGASSIGN: {
         EVAL_STACK_GUARD();
         Node *target = n->ch[0];
-        if(target->type == N_NAME) {
-            V *local = env_get_here(e, target->sval);
-            V *cur = local ? local : env_get(e, target->sval);
-            P(!cur,v_errf("name '%s' is not defined", target->sval))
-            /* Fast path: uniquely-owned local INT += INT. Outer bindings use vec_binop. */
-            if(local && cur->t == T_INT && cur->rc == 1 && n->ch[1]->type == N_INT && n->op == OP_ADD) {
-                int64_t z;
-                if (!__builtin_add_overflow(cur->j, n->ch[1]->ival, &z)) {
-                    cur->j = z;
-                    return v_ref(cur);
-                }
-            }
-            if(local && cur->t == T_INT && cur->rc == 1 && n->ch[1]->type == N_NAME && n->op == OP_ADD) {
-                V *rhs = env_get(e, n->ch[1]->sval);
-                if(rhs && rhs->t == T_INT) {
-                    int64_t z;
-                    if (!__builtin_add_overflow(cur->j, rhs->j, &z)) {
-                        cur->j = z;
-                        return v_ref(cur);
-                    }
-                }
-            }
-            V *delta = eval(n->ch[1], e);
-            if(local && cur->t == T_INT && cur->rc == 1 && delta->t == T_INT &&
-               (n->op == OP_ADD || n->op == OP_SUB || n->op == OP_MUL)) {
-                int64_t z;
-                int ov = n->op == OP_ADD ? __builtin_add_overflow(cur->j, delta->j, &z)
-                       : n->op == OP_SUB ? __builtin_sub_overflow(cur->j, delta->j, &z)
-                       : __builtin_mul_overflow(cur->j, delta->j, &z);
-                if (!ov) {
-                    cur->j = z;
-                    v_free(delta);
-                    return v_ref(cur);
-                }
-            }
-            V *newval = vec_binop(cur, delta, n->op);
-            env_set(e, target->sval, newval);
-            v_free(delta);
-            V *r = v_ref(newval); v_free(newval); return r;
-        }
+        if(target->type == N_NAME) return eval_augassign_name(n, e);
         if(target->type == N_INDEX) {
             V *obj = eval(target->ch[0], e);
             V *idx = eval(target->ch[1], e);
@@ -1788,6 +1800,7 @@ V *eval(Node *n, Env *e) {
                 attr = v_dict_get(obj, method);
             }
             if(attr && (attr->t == T_FN || shakti_is_class(attr))) {
+                attr = v_ref(attr); /* the keyword arguments below may replace it in obj */
                 int nkw = 0;
                 for(int i=1; i<n->nch; i++) nkw += n->ch[i]->type == N_KWARG;
                 V **kwnames = nkw ? calloc(nkw, sizeof(V*)) : NULL;
@@ -1810,7 +1823,6 @@ V *eval(Node *n, Env *e) {
                         self = obj;
                     }
                 }
-                attr = v_ref(attr);
                 V *result = attr->t == T_FN ? call_fn(attr, self, args, nargs, kwnames, kwvals, nkw, e)
                                             : class_new(attr, args, nargs, kwnames, kwvals, nkw, e);
                 v_free(attr);
@@ -1943,7 +1955,7 @@ V *eval(Node *n, Env *e) {
             result = g_retval ? g_retval : v_nil();
             g_retval = NULL;
         }
-        env_release(call_env);
+        env_leave(call_env);
         v_free(fn);
         for(int i=0;i<nargs;i++) v_free(args[i]);
         for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
@@ -2288,7 +2300,7 @@ V *eval(Node *n, Env *e) {
                 V *base = eval(n->ch[1]->ch[b], e);
                 if(!shakti_is_class(base)) {
                     v_free(base); v_free(bases); v_free(keys); v_free(vals);
-                    env_free(cls_env);
+                    env_leave(cls_env);
                     return v_errf("class %s: base is not a class", n->sval);
                 }
                 for(int64_t j=0; j<base->keys->n; j++) {
@@ -2308,8 +2320,8 @@ V *eval(Node *n, Env *e) {
         v_free(bases);
         V *cls = v_dict(keys, vals);
         env_set(e, n->sval, cls);
-        v_free(keys); v_free(vals);
-        env_free(cls_env);
+        v_free(keys); v_free(vals); v_free(cls);
+        env_leave(cls_env);
         return v_nil();
     }
     case N_BLOCK: {

@@ -124,7 +124,7 @@ static V *import_module(const char *name, Env *e) {
         if (stray) {
             node_free(prog);
             free(buf);
-            env_free(mod_env);
+            env_leave(mod_env);
             return v_err("import: return at module top level");
         }
     }
@@ -143,7 +143,7 @@ static V *import_module(const char *name, Env *e) {
         int plen = dot - name;
         if (plen < 0 || (size_t)plen >= sizeof parent) {
             v_free(mod_dict);
-            env_free(mod_env);
+            env_leave(mod_env);
             return v_err("import: parent name too long");
         }
         memcpy(parent, name, (size_t)plen); parent[plen] = 0;
@@ -168,7 +168,7 @@ static V *import_module(const char *name, Env *e) {
         v_free(flag);
     }
     v_free(mod_dict);
-    env_free(mod_env);
+    env_leave(mod_env);
     return v_nil();
 }
 /* The modules being imported, innermost first. A module that imports itself, directly or through
@@ -189,5 +189,6 @@ V *do_import(const char *name, Env *e) {
     import_stack = &self;
     V *r = import_module(name, e);
     import_stack = self.up;
+    env_imported();
     return r;
 }

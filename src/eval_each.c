@@ -178,6 +178,7 @@ static int each_table_find_col(V *t, const char *name) {
     return -1;
 }
 static V *each_col_get(V *col, int64_t i) {
+    if (i >= col->n) return v_nil(); /* the function shrank the column (as each_get_seq) */
     if (col->t == T_IVEC) return v_int(col->J[i]);
     if (col->t == T_FVEC) return v_float(col->F[i]);
     if (col->t == T_BVEC) return v_bool(col->B[i] != 0);
@@ -256,9 +257,11 @@ static V *each_unary(V *fn, V *xs, Env *e) {
                 v_free(new_data);
                 return v_err("out of memory");
             }
+            shakti_hold(col); /* the function may replace the column */
             for (int64_t r = 0; r < nr; r++) {
                 V *el = each_col_get(col, r);
                 if (el->t == T_ERR) {
+                    shakti_unhold(col); v_free(col);
                     each_free_items(items, r);
                     v_free(new_data);
                     return el;
@@ -266,15 +269,18 @@ static V *each_unary(V *fn, V *xs, Env *e) {
                 V *rv = each_invoke(fn, (V*[]){el}, 1, e);
                 v_free(el);
                 if (!rv || rv->t == T_ERR || g_error) {
+                    shakti_unhold(col); v_free(col);
                     each_free_items(items, r);
                     v_free(new_data);
                     return rv ? rv : v_nil();
                 }
                 items[r] = rv;
             }
+            shakti_unhold(col);
             new_data->L[c] = nr == 0 ? each_empty_seq_like(col)
                                      : each_pack_seq(items, nr, 0);
             free(items);
+            v_free(col);
             if (new_data->L[c]->t == T_ERR) {
                 V *err = new_data->L[c];
                 new_data->L[c] = NULL;
@@ -359,20 +365,24 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
                 V *col = xs->vals->L[c];
                 V **items = calloc(nr ? (size_t)nr : 1, sizeof(V*));
                 if (!items) { v_free(new_data); return v_err("out of memory"); }
+                shakti_hold(col); /* the function may replace the column */
                 for (int64_t r = 0; r < nr; r++) {
                     V *el = each_col_get(col, r);
                     V *rv = each_invoke(fn, (V*[]){el, ys}, 2, e);
                     v_free(el);
                     if (!rv || rv->t == T_ERR || g_error) {
+                        shakti_unhold(col); v_free(col);
                         each_free_items(items, r);
                         v_free(new_data);
                         return rv ? rv : v_nil();
                     }
                     items[r] = rv;
                 }
+                shakti_unhold(col);
                 new_data->L[c] = nr == 0 ? each_empty_seq_like(col)
                                          : each_pack_seq(items, nr, 0);
                 free(items);
+                v_free(col);
             }
             V *r = v_table(xs->keys, new_data);
             v_free(new_data);
@@ -443,20 +453,24 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
                 V *col = ys->vals->L[c];
                 V **items = calloc(nr ? (size_t)nr : 1, sizeof(V*));
                 if (!items) { v_free(new_data); return v_err("out of memory"); }
+                shakti_hold(col); /* the function may replace the column */
                 for (int64_t r = 0; r < nr; r++) {
                     V *el = each_col_get(col, r);
                     V *rv = each_invoke(fn, (V*[]){xs, el}, 2, e);
                     v_free(el);
                     if (!rv || rv->t == T_ERR || g_error) {
+                        shakti_unhold(col); v_free(col);
                         each_free_items(items, r);
                         v_free(new_data);
                         return rv ? rv : v_nil();
                     }
                     items[r] = rv;
                 }
+                shakti_unhold(col);
                 new_data->L[c] = nr == 0 ? each_empty_seq_like(col)
                                          : each_pack_seq(items, nr, 0);
                 free(items);
+                v_free(col);
             }
             V *r = v_table(ys->keys, new_data);
             v_free(new_data);
@@ -545,21 +559,26 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
             V *colx = xs->vals->L[c], *coly = ys->vals->L[yc];
             V **items = calloc(nr ? (size_t)nr : 1, sizeof(V*));
             if (!items) { v_free(new_data); return v_err("out of memory"); }
+            shakti_hold(colx); /* the function may replace either column */
+            shakti_hold(coly);
             for (int64_t r = 0; r < nr; r++) {
                 V *a = each_col_get(colx, r);
                 V *b = each_col_get(coly, r);
                 V *rv = each_invoke(fn, (V*[]){a, b}, 2, e);
                 v_free(a); v_free(b);
                 if (!rv || rv->t == T_ERR || g_error) {
+                    shakti_unhold(colx); shakti_unhold(coly); v_free(colx); v_free(coly);
                     each_free_items(items, r);
                     v_free(new_data);
                     return rv ? rv : v_nil();
                 }
                 items[r] = rv;
             }
+            shakti_unhold(colx); shakti_unhold(coly);
             new_data->L[c] = nr == 0 ? each_empty_seq_like(colx)
                                      : each_pack_seq(items, nr, 0);
             free(items);
+            v_free(colx); v_free(coly);
         }
         V *r = v_table(xs->keys, new_data);
         v_free(new_data);

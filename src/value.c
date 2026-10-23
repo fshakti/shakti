@@ -344,7 +344,7 @@ void v_list_unshare(V **p) {
     V *v;
     V *c;
     int64_t i;
-    if (!p || !*p || (*p)->t != T_LIST || (*p)->rc <= 1) return;
+    if (!p || !*p || (*p)->t != T_LIST || shakti_count(*p) <= 1) return;
     v = *p;
     c = v_list(v->n);
     for (i = 0; i < v->n; i++) c->L[i] = v_ref(v->L[i]);

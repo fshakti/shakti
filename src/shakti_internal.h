@@ -103,6 +103,8 @@ void node_sprint(Node *n, FILE *fp);
 
 Env *env_acquire(Env *parent);
 void env_release(Env *e);
+void env_leave(Env *e);
+void env_imported(void);
 int env_set_int_inplace(Env *e, const char *name, int64_t j);
 int env_get_int(Env *e, const char *name, int64_t *out);
 int env_update(Env *e, const char *name, V *val);
