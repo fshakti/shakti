@@ -1696,7 +1696,7 @@ V *table_sql_select(V *from, V *cols, V *by, V *where) {
     if (from->t != T_TABLE) {
         return v_err("select: need table");
     }
-    int from_shared = from->rc > 1 || from->vals->rc > 1;
+    int from_shared = shakti_count(from) > 1 || shakti_count(from->vals) > 1;
     const char *by_names[32];
     int nby = parse_by_names(by, by_names, 32);
     if (nby < 0) {
@@ -1877,7 +1877,7 @@ static inline void col_put(V *col, int64_t i, V *cell) {
 }
 static V *append_cell(V *col, V *cell) {
     if (col->t == T_IVEC) {
-        if (col->rc == 1) {
+        if (shakti_count(col) == 1) {
             if (col->owner_kind == V_OWNER_MAP_ALIAS) {
                 if (v_ensure_writable(col) != 0)
                     return v_err("insert: out of memory");
@@ -1948,7 +1948,7 @@ static V *append_cell(V *col, V *cell) {
         return out;
     }
     if (col->t == T_LIST) {
-        if (col->rc == 1) {
+        if (shakti_count(col) == 1) {
             if (col->n >= col->_ht_cap) {
                 int cap = col->_ht_cap ? col->_ht_cap * 2 : 8;
                 V **nl = realloc(col->L, (size_t)cap * sizeof(V*));
@@ -2234,7 +2234,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
             return err;
         }
     }
-    if (table->rc == 1 && table->vals && table->vals->rc == 1 && use_all_cols) {
+    if (shakti_count(table) == 1 && table->vals && shakti_count(table->vals) == 1 && use_all_cols) {
         int64_t *saved_n = malloc((size_t)table->keys->n * sizeof(int64_t));
         if (!saved_n) {
             if (free_vals_list) v_free(vals_list);

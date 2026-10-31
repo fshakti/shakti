@@ -94,6 +94,7 @@ enum {
 struct Env {
     int rc;
     int cap, len;
+    int cand;  /* 1 + its index in the collector's list of candidates, 0, or -1: never freed (env.c) */
     char **names;
     V **vals;
     uint32_t *hashes;
@@ -123,7 +124,8 @@ struct V {
     int rc;
     int64_t n;
     int bits;         /* lane width: bool=1; char=8; int/float 64 */
-    int owner_kind;   /* V_OWNER_* */
+    unsigned owner_kind : 8; /* V_OWNER_* */
+    unsigned held : 24;      /* holds among rc (shakti_hold) */
     union {
         int64_t j;        /* bool/int/char scalar; date/time; T_INPUT mode; T_FN body idx; T_SUBPROCESS fd */
         uint32_t _ht_cap; /* vec capacity / matrix cols / list cap / dict hashtable cap */
@@ -394,6 +396,13 @@ V *v_fn(V *params, V *defaults, Node *body_ast, Env *closure);
 V *v_datetime(int64_t ms_utc);
 V *v_ref(V *v);
 void v_free(V *v);
+/* A hold: a reference kept while user code runs (an insert's table while its values run, x while
+ * e runs in x += e, a table's column while each walks it), which no choice made by a count (copy
+ * or change in place, "shared list") counts: those use shakti_count. shakti_unhold ends the hold;
+ * the caller still has its reference to let go of. */
+static inline V *shakti_hold(V *v) { v->rc++; v->held++; return v; }
+static inline void shakti_unhold(V *v) { v->held--; }
+static inline int shakti_count(const V *v) { return v->rc - (int)v->held; }
 V *v_copy(V *v);
 void v_print(V *v, int nl);
 char *v_repr(V *v);
@@ -405,6 +414,8 @@ int env_slot_listed(const Env *e, int i);
 void env_set_local(Env *e, const char *name, V *val);
 V *env_get(Env *e, const char *name);
 V *env_get_here(Env *e, const char *name);
+/* where name is in e->names (not in a parent), or -1 */
+int env_index_here(Env *e, const char *name);
 void shakti_clear_flow(void);
 void env_ref(Env *e);
 void env_free(Env *e);

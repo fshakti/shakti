@@ -1708,9 +1708,9 @@ static V *bi_map(V**a,in,Env*e){
             if(iter->t!=T_STR&&i>=iter->n){r->n=i;break;}
             V*item=item_at(iter,i);
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);v_free(item);
-            if(fn->j<0||fn->j>=fn_ast_n){env_free(ce);v_free(r);return v_err("map: bad function");}
+            if(fn->j<0||fn->j>=fn_ast_n){env_leave(ce);v_free(r);return v_err("map: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
-            r->L[i]=rv;env_free(ce);
+            r->L[i]=rv;env_leave(ce);
         }
     }
     return r;
@@ -1735,10 +1735,10 @@ static V *bi_filter(V**a,in,Env*e){
             if(iter->t!=T_STR&&i>=iter->n)break;
             V*item=item_at(iter,i);
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
-            if(fn->j<0||fn->j>=fn_ast_n){v_free(item);env_free(ce);free(tmp);return v_err("filter: bad function");}
+            if(fn->j<0||fn->j>=fn_ast_n){v_free(item);env_leave(ce);free(tmp);return v_err("filter: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             int keep=is_truthy(rv);   /* the truth `if` uses */
-            v_free(rv);env_free(ce);if(keep)tmp[out++]=item;else v_free(item);
+            v_free(rv);env_leave(ce);if(keep)tmp[out++]=item;else v_free(item);
         }
     }
     V*r=v_list(out);memcpy(r->L,tmp,out*sizeof(V*));free(tmp);return r;
@@ -2879,7 +2879,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         shakti_bind_params(ce, fnv, al->L, (int)al->n, NULL, NULL, 0);
         Node*body=fn_ast[(int)fnv->j];V*rv=eval_fn(body,ce);
         if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
-        env_free(ce);return rv;
+        env_leave(ce);return rv;
     }
     if(!strcmp(name,"load")) {
         if(nargs < 1 || args[0]->t != T_STR) {
