@@ -671,20 +671,37 @@ static int item_truthy(V *v, int64_t i) {
     default: return is_truthy(v->L[i]);
     }
 }
+static V *any_all_err(V *v) {
+    if (v && v->t == T_LIST) {
+        for (int64_t j = 0; j < v->n; j++)
+            if (v->L[j] && v->L[j]->t == T_ERR) return v_ref(v->L[j]);
+    }
+    return NULL;
+}
 V *bi_any(V **a, in) {
     if (any_all_items(a, n)) {
+        V *err = any_all_err(a[0]);
+        if (err) return err;
         for (int64_t j = 0; j < a[0]->n; j++) P(item_truthy(a[0], j),v_bool(1))
         return v_bool(0);
     }
-    i(n,{P(is_truthy(a[i]),v_bool(1))})
+    i(n,{
+        if (a[i] && a[i]->t == T_ERR) return v_ref(a[i]);
+        P(is_truthy(a[i]),v_bool(1))
+    })
     return v_bool(0);
 }
 V *bi_all(V **a, in) {
     if (any_all_items(a, n)) {
+        V *err = any_all_err(a[0]);
+        if (err) return err;
         for (int64_t j = 0; j < a[0]->n; j++) P(!item_truthy(a[0], j),v_bool(0))
         return v_bool(1);
     }
-    i(n,{P(!is_truthy(a[i]),v_bool(0))})
+    i(n,{
+        if (a[i] && a[i]->t == T_ERR) return v_ref(a[i]);
+        P(!is_truthy(a[i]),v_bool(0))
+    })
     return v_bool(1);
 }
 V *bi_isinstance(V **a, in) {

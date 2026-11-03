@@ -6,6 +6,7 @@
 #include "iefs_io.h"
 #include "iefs_map.h"
 #endif
+#include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
 #if defined(__APPLE__) || defined(__linux__)
@@ -819,6 +820,86 @@ static __attribute__((noinline)) V *eval_augassign_name(Node *n, Env *e) {
     v_free(delta); v_free(cur);
     V *r = v_ref(newval); v_free(newval); return r;
 }
+/* Current value at obj[idx], for an in-place update. A missing dict key is None, matching a read. */
+static V *index_current(V *obj, V *idx) {
+    if (obj->t == T_DICT) {
+        V *found = v_dict_find(obj, idx);
+        return found ? v_ref(found) : v_nil();
+    }
+    if (idx->t != T_INT && idx->t != T_CHAR)
+        return v_errf("cannot index type %s with type %s", type_name(obj->t), type_name(idx->t));
+    int64_t i = idx->j;
+    if (i < 0) i += obj->n;
+    if (i < 0 || i >= obj->n) return v_err("index out of range");
+    if (obj->t == T_LIST) return obj->L[i] ? v_ref(obj->L[i]) : v_nil();
+    if (obj->t == T_IVEC) return v_int(obj->J[i]);
+    if (obj->t == T_FVEC) return v_float(obj->F[i]);
+    if (obj->t == T_BVEC) return v_bool(obj->B[i] != 0);
+    if (obj->t == T_CVEC) return v_char(obj->B[i]);
+    if (is_mat_t(obj->t)) return v_mat_row(obj, i);
+    return v_errf("cannot index type %s with type %s", type_name(obj->t), type_name(idx->t));
+}
+/* Write val into obj[idx]. Returns an out-of-memory result (temps freed, g_error set), or NULL.
+ * *stored is 1 when the container changed. *in_range is 1 when idx names an existing slot. */
+static V *store_at(V *obj, V *idx, V *val, int *stored, int *in_range) {
+    *stored = 0;
+    *in_range = 0;
+    if (obj->t == T_DICT) {
+        v_dict_set_key(obj, idx, val);
+        *stored = 1;
+        return NULL;
+    }
+    if (idx->t == T_INT || idx->t == T_CHAR) {
+        int64_t i = idx->j;
+        if (i < 0) i += obj->n;
+        if (i >= 0 && i < obj->n) {
+            *in_range = 1;
+            if (obj->t == T_LIST) { v_free(obj->L[i]); obj->L[i] = v_ref(val); *stored = 1; }
+            else if (obj->t == T_IVEC && (val->t == T_INT || val->t == T_CHAR)) {
+                if (v_ensure_writable(obj) != 0) return assign_map_oom(obj, idx, val, NULL);
+                obj->J[i] = val->j;
+                *stored = 1;
+            } else if (obj->t == T_FVEC && (val->t == T_FLOAT || val->t == T_INT || val->t == T_CHAR)) {
+                if (v_ensure_writable(obj) != 0) return assign_map_oom(obj, idx, val, NULL);
+                obj->F[i] = val->t == T_FLOAT ? val->f : (double)val->j;
+                *stored = 1;
+            } else if (obj->t == T_BVEC && val->t == T_BOOL) {
+                if (v_ensure_writable(obj) != 0) return assign_map_oom(obj, idx, val, NULL);
+                obj->B[i] = val->j ? 1 : 0;
+                *stored = 1;
+            } else if (obj->t == T_CVEC && (val->t == T_CHAR || val->t == T_INT)) {
+                if (v_ensure_writable(obj) != 0) return assign_map_oom(obj, idx, val, NULL);
+                obj->B[i] = (unsigned char)val->j;
+                *stored = 1;
+            } else if (is_mat_t(obj->t)) {
+                if (v_ensure_writable(obj) != 0) return assign_map_oom(obj, idx, val, NULL);
+                int64_t cols = mat_cols(obj);
+                if (obj->t == T_IMAT && val->t == T_IVEC && val->n == cols) {
+                    memcpy(obj->J + mat_idx(obj, i, 0), val->J, (size_t)cols * 8);
+                    *stored = 1;
+                } else if (obj->t == T_FMAT && val->t == T_FVEC && val->n == cols) {
+                    memcpy(obj->F + mat_idx(obj, i, 0), val->F, (size_t)cols * 8);
+                    *stored = 1;
+                } else if (obj->t == T_BMAT && val->t == T_BVEC && val->n == cols) {
+                    memcpy(obj->B + mat_idx(obj, i, 0), val->B, (size_t)cols);
+                    *stored = 1;
+                } else if (obj->t == T_CMAT && val->t == T_CVEC && val->n == cols) {
+                    memcpy(obj->B + mat_idx(obj, i, 0), val->B, (size_t)cols);
+                    *stored = 1;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+static V *index_fail(V *obj, V *idx, V *val, int in_range) {
+    int slot = obj->t == T_LIST || obj->t == T_IVEC || obj->t == T_FVEC || obj->t == T_BVEC
+            || obj->t == T_CVEC || is_mat_t(obj->t);
+    if (!slot || (idx->t != T_INT && idx->t != T_CHAR))
+        return v_errf("cannot index type %s with type %s", type_name(obj->t), type_name(idx->t));
+    if (!in_range) return v_err("index out of range");
+    return v_errf("cannot store type %s in type %s", type_name(val->t), type_name(obj->t));
+}
 V *eval(Node *n, Env *e) {
     P(!n,v_nil())
     P(g_returning || g_breaking || g_continuing || g_error,v_nil())
@@ -1505,68 +1586,51 @@ V *eval(Node *n, Env *e) {
                     v_free(obj); v_free(idx0); v_free(val);
                     return idx1 ? idx1 : v_err("bad assignment index");
                 }
-                if ((idx0->t == T_INT || idx0->t == T_CHAR) && (idx1->t == T_INT || idx1->t == T_CHAR)) {
+                int stored = 0, in_range = 0;
+                int ints = (idx0->t == T_INT || idx0->t == T_CHAR) && (idx1->t == T_INT || idx1->t == T_CHAR);
+                if (ints) {
                     int64_t r = idx0->j, c = idx1->j;
                     if (r < 0) r += obj->n;
                     if (c < 0) c += mat_cols(obj);
                     if (r >= 0 && r < obj->n && c >= 0 && c < mat_cols(obj)) {
+                        in_range = 1;
                         if (v_ensure_writable(obj) != 0)
                             return assign_map_oom(obj, idx0, idx1, val);
-                        if (obj->t == T_IMAT && (val->t == T_INT || val->t == T_CHAR))
+                        if (obj->t == T_IMAT && (val->t == T_INT || val->t == T_CHAR)) {
                             obj->J[mat_idx(obj, r, c)] = val->j;
-                        else if (obj->t == T_FMAT && (val->t == T_FLOAT || val->t == T_INT || val->t == T_CHAR))
+                            stored = 1;
+                        } else if (obj->t == T_FMAT && (val->t == T_FLOAT || val->t == T_INT || val->t == T_CHAR)) {
                             obj->F[mat_idx(obj, r, c)] = to_float(val);
-                        else if (obj->t == T_BMAT && val->t == T_BOOL)
+                            stored = 1;
+                        } else if (obj->t == T_BMAT && val->t == T_BOOL) {
                             obj->B[mat_idx(obj, r, c)] = val->j ? 1 : 0;
-                        else if (obj->t == T_CMAT && (val->t == T_CHAR || val->t == T_INT))
+                            stored = 1;
+                        } else if (obj->t == T_CMAT && (val->t == T_CHAR || val->t == T_INT)) {
                             obj->B[mat_idx(obj, r, c)] = (unsigned char)val->j;
+                            stored = 1;
+                        }
                     }
+                }
+                if (!stored) {
+                    V *err = !ints
+                        ? v_errf("cannot index type %s with type %s", type_name(obj->t), type_name(idx0->t))
+                        : !in_range ? v_err("index out of range")
+                        : v_errf("cannot store type %s in type %s", type_name(val->t), type_name(obj->t));
+                    v_free(obj); v_free(idx0); v_free(idx1); v_free(val);
+                    return err;
                 }
                 v_free(obj); v_free(idx0); v_free(idx1); v_free(val);
                 return v_nil();
             }
             V *idx = eval(target->ch[1], e);
             if (!idx || idx->t == T_ERR) { v_free(obj); v_free(val); return idx ? idx : v_err("bad assignment index"); }
-            if(obj->t==T_DICT) {
-                v_dict_set_key(obj, idx, val);
+            int stored = 0, in_range = 0;
+            V *oom = store_at(obj, idx, val, &stored, &in_range);
+            if (oom) return oom;
+            if (!stored) {
+                V *err = index_fail(obj, idx, val, in_range);
                 v_free(obj); v_free(idx); v_free(val);
-                return v_nil();
-            }
-            if(idx->t==T_INT || idx->t==T_CHAR) {
-                int64_t i = idx->j;
-                if(i < 0) i += obj->n;
-                if(i >= 0 && i < obj->n) {
-                    if(obj->t==T_LIST) { v_free(obj->L[i]); obj->L[i] = v_ref(val); }
-                    else if(obj->t==T_IVEC && (val->t==T_INT || val->t==T_CHAR)) {
-                        if (v_ensure_writable(obj) != 0)
-                            return assign_map_oom(obj, idx, val, NULL);
-                        obj->J[i] = val->j;
-                    } else if(obj->t==T_FVEC && (val->t==T_FLOAT||val->t==T_INT||val->t==T_CHAR)) {
-                        if (v_ensure_writable(obj) != 0)
-                            return assign_map_oom(obj, idx, val, NULL);
-                        obj->F[i] = val->t==T_FLOAT ? val->f : (double)val->j;
-                    } else if(obj->t==T_BVEC && val->t==T_BOOL) {
-                        if (v_ensure_writable(obj) != 0)
-                            return assign_map_oom(obj, idx, val, NULL);
-                        obj->B[i] = val->j ? 1 : 0;
-                    } else if(obj->t==T_CVEC && (val->t==T_CHAR || val->t==T_INT)) {
-                        if (v_ensure_writable(obj) != 0)
-                            return assign_map_oom(obj, idx, val, NULL);
-                        obj->B[i] = (unsigned char)val->j;
-                    } else if(is_mat_t(obj->t) && target->nch == 2) {
-                        if (v_ensure_writable(obj) != 0)
-                            return assign_map_oom(obj, idx, val, NULL);
-                        int64_t cols = mat_cols(obj);
-                        if(obj->t==T_IMAT && val->t==T_IVEC && val->n==cols)
-                            memcpy(obj->J + mat_idx(obj, i, 0), val->J, (size_t)cols * 8);
-                        else if(obj->t==T_FMAT && val->t==T_FVEC && val->n==cols)
-                            memcpy(obj->F + mat_idx(obj, i, 0), val->F, (size_t)cols * 8);
-                        else if(obj->t==T_BMAT && val->t==T_BVEC && val->n==cols)
-                            memcpy(obj->B + mat_idx(obj, i, 0), val->B, (size_t)cols);
-                        else if(obj->t==T_CMAT && val->t==T_CVEC && val->n==cols)
-                            memcpy(obj->B + mat_idx(obj, i, 0), val->B, (size_t)cols);
-                    }
-                }
+                return err;
             }
             v_free(obj); v_free(idx); v_free(val);
             return v_nil();
@@ -1611,16 +1675,29 @@ V *eval(Node *n, Env *e) {
             V *obj = eval(target->ch[0], e);
             V *idx = eval(target->ch[1], e);
             V *delta = eval(n->ch[1], e);
-            if(obj->t==T_DICT) {
-                int64_t i = v_dict_index(obj, idx);
-                if(i >= 0) {
-                    V *newval = vec_binop(obj->vals->L[i], delta, n->op);
-                    v_list_unshare(&obj->vals);
-                    v_free(obj->vals->L[i]);
-                    obj->vals->L[i] = newval;
-                }
+            if (!obj || obj->t == T_ERR) { v_free(idx); v_free(delta); return obj ? obj : v_err("bad augmented assignment target"); }
+            if (!idx || idx->t == T_ERR) { v_free(obj); v_free(delta); return idx ? idx : v_err("bad augmented assignment index"); }
+            if (!delta || delta->t == T_ERR) { v_free(obj); v_free(idx); return delta ? delta : v_err("bad augmented assignment value"); }
+            V *cur = index_current(obj, idx);
+            if (!cur || cur->t == T_ERR) {
+                v_free(obj); v_free(idx); v_free(delta);
+                return cur ? cur : v_err("bad augmented assignment index");
             }
-            v_free(obj); v_free(idx); v_free(delta);
+            V *newval = vec_binop(cur, delta, n->op);
+            v_free(cur);
+            if (!newval || newval->t == T_ERR) {
+                v_free(obj); v_free(idx); v_free(delta);
+                return newval ? newval : v_err("bad augmented assignment");
+            }
+            int stored = 0, in_range = 0;
+            V *oom = store_at(obj, idx, newval, &stored, &in_range);
+            if (oom) { v_free(delta); return oom; }
+            if (!stored) {
+                V *err = index_fail(obj, idx, newval, in_range);
+                v_free(obj); v_free(idx); v_free(delta); v_free(newval);
+                return err;
+            }
+            v_free(obj); v_free(idx); v_free(delta); v_free(newval);
             return v_nil();
         }
         return v_err("bad augmented assignment target");
@@ -2004,6 +2081,12 @@ V *eval(Node *n, Env *e) {
         if(fast) return fast;
         V *r = v_nil();
         for(;;) {
+            if (r && r->t == T_ERR) {
+                g_error = 1;
+                if (g_error_val) v_free(g_error_val);
+                g_error_val = r;
+                return v_nil();
+            }
             V *cond = eval(n->ch[0], e);
             if (cond && cond->t == T_ERR) {
                 g_error = 1;
@@ -2014,12 +2097,6 @@ V *eval(Node *n, Env *e) {
             }
             int t = is_truthy(cond); v_free(cond);
             if(!t) break;
-            if (r && r->t == T_ERR) {
-                g_error = 1;
-                if (g_error_val) v_free(g_error_val);
-                g_error_val = r;
-                return v_nil();
-            }
             v_free(r);
             r = eval(n->ch[1], e);
             P(g_returning || g_error,r)
@@ -2035,9 +2112,6 @@ V *eval(Node *n, Env *e) {
         V *r = v_nil();
         if(iter->t == T_IVEC) {
             for(int64_t i=0;i<iter->n;i++) {
-                V *item = iter->t == T_IVEC ? v_int(iter->J[i]) : iter->L[i] ? v_ref(iter->L[i]) : v_nil();
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
@@ -2045,6 +2119,9 @@ V *eval(Node *n, Env *e) {
                     v_free(iter);
                     return v_nil();
                 }
+                V *item = iter->t == T_IVEC ? v_int(iter->J[i]) : iter->L[i] ? v_ref(iter->L[i]) : v_nil();
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2054,15 +2131,16 @@ V *eval(Node *n, Env *e) {
         } else if(iter->t == T_FVEC) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_float(iter->F[i]);
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
                     g_error_val = r;
+                    v_free(item);
                     v_free(iter);
                     return v_nil();
                 }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2072,15 +2150,16 @@ V *eval(Node *n, Env *e) {
         } else if(iter->t == T_CVEC) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_char(iter->B[i]);
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
                     g_error_val = r;
+                    v_free(item);
                     v_free(iter);
                     return v_nil();
                 }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2090,15 +2169,16 @@ V *eval(Node *n, Env *e) {
         } else if(iter->t == T_BVEC) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_bool(iter->B[i] != 0);
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
                     g_error_val = r;
+                    v_free(item);
                     v_free(iter);
                     return v_nil();
                 }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2107,6 +2187,13 @@ V *eval(Node *n, Env *e) {
             }
         } else if(iter->t == T_LIST) {
             for(int64_t i=0;i<iter->n;i++) {
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
                 for_set_vars(vars, iter->L[i], e);
                 v_free(r);
                 r = eval(n->ch[2], e);
@@ -2117,15 +2204,16 @@ V *eval(Node *n, Env *e) {
         } else if(is_mat_t(iter->t)) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_mat_row(iter, i);
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
                     g_error_val = r;
+                    v_free(item);
                     v_free(iter);
                     return v_nil();
                 }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2137,6 +2225,14 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<slen;i++) {
                 char buf[2] = {iter->s[i], 0};
                 V *ch = v_str(buf);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(ch);
+                    v_free(iter);
+                    return v_nil();
+                }
                 for_set_vars(vars, ch, e);
                 v_free(ch); v_free(r);
                 r = eval(n->ch[2], e);
@@ -2146,11 +2242,6 @@ V *eval(Node *n, Env *e) {
             }
         } else if(iter->t == T_SUBPROCESS) {
             for(;;) {
-                V *item = subprocess_next(iter, 0.0);
-                if(g_error) { v_free(iter); return item; }
-                if(!item || item->t == T_NIL) { v_free(item); break; }
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
@@ -2158,6 +2249,11 @@ V *eval(Node *n, Env *e) {
                     v_free(iter);
                     return v_nil();
                 }
+                V *item = subprocess_next(iter, 0.0);
+                if(g_error) { v_free(iter); return item; }
+                if(!item || item->t == T_NIL) { v_free(item); break; }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2166,11 +2262,6 @@ V *eval(Node *n, Env *e) {
             }
         } else if(iter->t == T_INPUT) {
             for(;;) {
-                V *item = input_stream_next(iter);
-                if(g_error) { v_free(iter); return item; }
-                if(!item || item->t == T_NIL) { v_free(item); break; }
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
@@ -2178,6 +2269,11 @@ V *eval(Node *n, Env *e) {
                     v_free(iter);
                     return v_nil();
                 }
+                V *item = input_stream_next(iter);
+                if(g_error) { v_free(iter); return item; }
+                if(!item || item->t == T_NIL) { v_free(item); break; }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2187,15 +2283,16 @@ V *eval(Node *n, Env *e) {
         } else if(iter->t == T_TABLE) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = table_row(iter, i);
-                for_set_vars(vars, item, e);
-                v_free(item);
                 if (r && r->t == T_ERR) {
                     g_error = 1;
                     if (g_error_val) v_free(g_error_val);
                     g_error_val = r;
+                    v_free(item);
                     v_free(iter);
                     return v_nil();
                 }
+                for_set_vars(vars, item, e);
+                v_free(item);
                 v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
@@ -2204,6 +2301,13 @@ V *eval(Node *n, Env *e) {
             }
         } else if(iter->t == T_DICT) {
             for(int64_t i=0;i<iter->n;i++) {
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
                 if(vars->type == N_LIST && vars->nch >= 2) {
                     env_set(e, vars->ch[0]->sval, iter->keys->L[i]);
                     env_set(e, vars->ch[1]->sval, iter->vals->L[i]);

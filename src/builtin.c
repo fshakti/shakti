@@ -3,6 +3,7 @@
 #include "vec_kernels.h"
 #include "input.h"
 #include <limits.h>
+#include <stdio.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #ifndef _WIN32
@@ -1749,6 +1750,12 @@ static V *bi_filter(V**a,in,Env*e){
             V*item=item_at(iter,i);
             V*rv=builtin_call(fn->s,&item,1,NULL,NULL,0,e);
             if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
+            if (rv && rv->t == T_ERR) {
+                v_free(item);
+                for (int64_t k = 0; k < out; k++) v_free(tmp[k]);
+                free(tmp);
+                return rv;
+            }
             int keep=is_truthy(rv);   /* the truth `if` uses */
             v_free(rv);
             if(keep)tmp[out++]=item;else v_free(item);
@@ -1760,6 +1767,13 @@ static V *bi_filter(V**a,in,Env*e){
             Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
             if(fn->j<0||fn->j>=fn_ast_n){v_free(item);env_leave(ce);free(tmp);return v_err("filter: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
+            if (rv && rv->t == T_ERR) {
+                v_free(item);
+                env_leave(ce);
+                for (int64_t k = 0; k < out; k++) v_free(tmp[k]);
+                free(tmp);
+                return rv;
+            }
             int keep=is_truthy(rv);   /* the truth `if` uses */
             v_free(rv);env_leave(ce);if(keep)tmp[out++]=item;else v_free(item);
         }
