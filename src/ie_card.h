@@ -24,7 +24,7 @@ static const char IE_CARD_TEXT[] =
     "\n"
     "sql    import sql · select … by … from t where …\n"
     "note   . attr/col · @ each / deco · mmul matmul · == unsupported\n"
-    "       0xHH char (two hex digits) · longer 0x int\n"
+    "       0xHH char · even 0x (not 6 or 8 digits) and 0c list[char] · other 0x int\n"
     "       iefs layout 1 (char=4 str=5) · layout 0 refused\n"
     "       table(a:1 2, b:3 4) · table(a:1 2; b:3 4)\n"
     "\n"

@@ -1,106 +1,166 @@
-notes:["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"]
-hu:"0123456789ABCDEF"
+notes : ["C-","C#","D-","D#","E-","F-","F#","G-","G#","A-","A#","B-"]
+hu : "0123456789ABCDEF"
 
 def av(n):
-	return list[](n)
+    a : []
+    i : 0
+    while i < n:
+        a.append(0)
+        i : i + 1
+    return a
+
 def d2(n):
-	if n<1: return ".."
-	if n<10: return "0"+str(n)
-	if n<100: return str(n)
+    if n < 1:
+        return ".."
+    if n < 10:
+        return "0" + str(n)
+    if n < 100:
+        return str(n)
+    return str(n)
 
 def pn(p):
-	if p>13696 or p < 14: return -1
-	return int(1.5 + 12.0 * log(13696.0/p))
+    if p > 13696 or p < 14:
+        return -1
+    # Amiga period 856 is C-1; 428 is C-2, which this table shows as octave 2.
+    return int(0.5 + 12.0 * log(856.0 / p) / log(2.0)) + 12
 
 def asciiz(a):
-	if type(a)="str":return a
-	s:"";
-	for c in a:
-		if not c: break
-		if type(c)="str":s+:c
-		else: s+:chr(c)
-	return s
+    if type(a) = "str":
+        return a
+    s : ""
+    for c in a:
+        if not c:
+            break
+        if type(c) = "str":
+            s : s + c
+        else:
+            s : s + chr(int(c))
+    return s
 
-u16:lambda x:x[1]+x[0]*256
+def u16(x):
+    return int(x[1]) + int(x[0]) * 256
+
+def byte_at(m, i):
+    return int(m[i])
 
 class Sample:
-	def __init__(id:None,name:"",length:0,loop:None,finetine:0x00,volume:64,restart:None,repeatlength:None,patch:None):
-		self.id:id
-		self.name:asciiz(name)
-		self.length:length
-		self.finetune:int(finetune)
-		if volume < 1:  volume: 0
-		if volume > 64: volume: 64
-		self.volume:volume
-		if loop<>None:
-			if restart<>None or repeatlength<>None:
-				raise("Can't mix Sample(loop:) with Sample(restart:repeatlength:)")
-		elif restart<>None and repeatlength>0: loop:[restart,restart+repeatlength]
-		self.loop:loop
-		self.patch:patch
-	def __str__():
-		return self.name
+    def __init__(id:None, name:"", length:0, loop:None, finetune:0, volume:64, restart:None, repeatlength:None, patch:None):
+        self.id : id
+        self.name : asciiz(name)
+        self.length : length
+        self.finetune : int(finetune)
+        if volume < 1:
+            volume : 0
+        if volume > 64:
+            volume : 64
+        self.volume : volume
+        if loop != None:
+            if restart != None or repeatlength != None:
+                raise("Can't mix Sample(loop:) with Sample(restart:repeatlength:)")
+        elif restart != None and repeatlength > 0:
+            loop : [restart, restart + repeatlength]
+        self.loop : loop
+        self.patch : patch
+    def __str__():
+        return self.name
 
 class Note:
-	sample:None
-	period:None
-	note:None
-	fx:None
-	param:None
+    sample : None
+    period : None
+    note : None
+    fx : None
+    param : None
 
-	def __init__(*any,sample:None,period:None,note:None,fx:None,x:None,y:None,param:None):
-		for x in any:
-			if instanceof(x,Note):
-				self.sample: x.sample
-				self.period: x.period
-				self.note  : x.note
-				self.fx    : x.fx
-				self.param : x.param
-			elif instanceof(x,Sample):
-				self.sample: x.id
-		if instanceof(sample,Sample):self.sample
-		if type(sample)="int": self.sample:sample
-		if type(period)="int": self.period:period
-		if note=None and type(self.period)="int": self.note:pn(self.period)
-		if fx<>None: self.fx:fx
-		if param<>None: self.param:param
-		if x<>None and y<>None: self.param:[x,y]
-		elif x<>None: self.param:[x,self.param[1]]
-		elif y<>None: self.param:[self.param[0],y]
-	def __str__():
-		nt:"..."
-		if self.period > 0:
-			nt:notes[self.note%12]+str(self.note//12)
-		sn:d2(self.sample)
-		fx:"..."
-		if self.fx > 0 or self.param<>0x0000:
-			fx:hu[self.fx]+hu[self.param[0]]+hu[self.param[1]]
-		return nt+" "+sn+" "+fx
+    def __init__(*any, sample:None, period:None, note:None, fx:None, x:None, y:None, param:None):
+        for item in any:
+            if instanceof(item, Note):
+                self.sample : item.sample
+                self.period : item.period
+                self.note : item.note
+                self.fx : item.fx
+                self.param : item.param
+            elif instanceof(item, Sample):
+                self.sample : item.id
+        if instanceof(sample, Sample):
+            self.sample : sample.id
+        if type(sample) = "int":
+            self.sample : sample
+        if type(period) = "int":
+            self.period : period
+        if note = None and type(self.period) = "int":
+            self.note : pn(self.period)
+        if fx != None:
+            self.fx : fx
+        if param != None:
+            self.param : param
+        if x != None and y != None:
+            self.param : [x, y]
+        elif x != None:
+            py : 0
+            if type(self.param) = "list" and len(self.param) > 1:
+                py : self.param[1]
+            self.param : [x, py]
+        elif y != None:
+            px : 0
+            if type(self.param) = "list" and len(self.param) > 0:
+                px : self.param[0]
+            self.param : [px, y]
+    def __str__():
+        nt : "..."
+        if self.period > 0 and self.note != None:
+            nt : notes[self.note % 12] + str(self.note // 12)
+        sn : d2(self.sample)
+        fx : "..."
+        if type(self.param) = "list" and len(self.param) > 1:
+            fxn : 0
+            if self.fx != None:
+                fxn : self.fx
+            if fxn > 0 or self.param != 0:
+                fx : hu[fxn] + hu[self.param[0]] + hu[self.param[1]]
+        return nt + " " + sn + " " + fx
 
 def load(filename):
-	m:read(filename)
-	samples:[]
-	p:20
-	for i in range(31):
-		s:Sample(id:i+1,name:m[p:p+22],length:u16(m[p+22:p+24]),finetune:m[24],volume:int(m[25]),restart:u16(m[p+26:p+28]),repeatlength:u16(m[p+28:p+30]))
-		samples.push(s)
-		p+:30
-	tracks:map(int,m[p+2:p+m[p]])
-	patterns:[]
-	p+:134
-	for j in range(1+max(tracks)):
-		rows:[av(64),av(64),av(64),av(64)]
-		for i in range(256):
-			c:i%4
-			w:((m[p]//16)*16)+(m[p+2]//16)
-			period:(256*(m[p]%16))+m[p+1]
-			g:Note(sample:w,period:period,fx:m[p+2]%16,param:[m[p+3]//16,m[p+3]%16])
-			rows[c][i//4]:g
-			p+:4
-		append(patterns,rows)
-		rows:None
-	for s in samples:
-		n:s.length
-		s.patch: m[p:p+n]
-		p+:n
-	return {"title":asciiz(m[0:20]),"samples":samples,"patterns":patterns,"order":tracks}
+    m : read(filename, 1)
+    samples : []
+    p : 20
+    i : 0
+    while i < 31:
+        s : Sample(id:i + 1, name:m[p:p + 22], length:u16(m[p + 22:p + 24]), finetune:byte_at(m, p + 24), volume:byte_at(m, p + 25), restart:u16(m[p + 26:p + 28]), repeatlength:u16(m[p + 28:p + 30]))
+        samples.append(s)
+        p : p + 30
+        i : i + 1
+    norder : byte_at(m, p)
+    tracks : []
+    j : 0
+    while j < norder:
+        tracks.append(byte_at(m, p + 2 + j))
+        j : j + 1
+    patterns : []
+    p : p + 134
+    hi : 0
+    for t in tracks:
+        if t > hi:
+            hi : t
+    j : 0
+    while j < hi + 1:
+        rows : [av(64), av(64), av(64), av(64)]
+        k : 0
+        while k < 256:
+            c : k % 4
+            b0 : byte_at(m, p)
+            b1 : byte_at(m, p + 1)
+            b2 : byte_at(m, p + 2)
+            b3 : byte_at(m, p + 3)
+            w : ((b0 // 16) * 16) + (b2 // 16)
+            period : (256 * (b0 % 16)) + b1
+            g : Note(sample:w, period:period, fx:b2 % 16, param:[b3 // 16, b3 % 16])
+            rows[c][k // 4] : g
+            p : p + 4
+            k : k + 1
+        patterns.append(rows)
+        j : j + 1
+    for s in samples:
+        n : s.length * 2
+        s.patch : m[p:p + n]
+        p : p + n
+    return {"title": asciiz(m[0:20]), "samples": samples, "patterns": patterns, "order": tracks}

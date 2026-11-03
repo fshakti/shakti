@@ -216,7 +216,11 @@ V *mat_binop(V *a, V *b, int op) {
         return mat_binop(b, a, op);
     }
     if (!is_mat_t(a->t) || !is_mat_t(b->t))
-        return v_errf("unsupported operand types for op %d: %s and %s", op, type_name(a->t), type_name(b->t));
+        return v_errf("unsupported operand types for %s: %s and %s",
+                      op == OP_ADD ? "+" : op == OP_SUB ? "-" : op == OP_MUL ? "*" :
+                      op == OP_DIV ? "/" : op == OP_FLOORDIV ? "//" : op == OP_MOD ? "%" :
+                      op == OP_POW ? "**" : "that operator",
+                      type_name(a->t), type_name(b->t));
     if (a->n != b->n || mat_cols(a) != mat_cols(b))
         return v_err("matrix shape mismatch");
     if (op == OP_POW && a->t == T_IMAT && b->t == T_IMAT)
@@ -589,7 +593,13 @@ V *vec_binop(V *a, V *b, int op) {
         for(int64_t i=0;i<b->n;i++) r->L[a->n+i] = v_ref(b->L[i]);
         return r;
     }
-    return v_errf("unsupported operand types for op %d: %s and %s", op, type_name(a->t), type_name(b->t));
+    return v_errf("unsupported operand types for %s: %s and %s",
+                  op == OP_EQ ? "=" : op == OP_NE ? "!=" : op == OP_LT ? "<" :
+                  op == OP_GT ? ">" : op == OP_LE ? "<=" : op == OP_GE ? ">=" :
+                  op == OP_ADD ? "+" : op == OP_SUB ? "-" : op == OP_MUL ? "*" :
+                  op == OP_DIV ? "/" : op == OP_FLOORDIV ? "//" : op == OP_MOD ? "%" :
+                  op == OP_POW ? "**" : "that operator",
+                  type_name(a->t), type_name(b->t));
     #undef VEC_BIN
 }
 /* Numbers compare by their exact values, as Python's do: an int (bool, char) with an int as
@@ -755,7 +765,17 @@ int nums_have_row(V *m, V *a) {
     }
     return 0;
 }
+static int cmp_depth;
+static void cmp_depth_leave(int *p) { (void)p; if (cmp_depth > 0) cmp_depth--; }
 V *vec_cmp(V *a, V *b, int op) {
+    if (cmp_depth >= 2048) return v_err("comparison too deep");
+    cmp_depth++;
+    int cmp_guard __attribute__((cleanup(cmp_depth_leave))) = 1;
+    (void)cmp_guard;
+    if (a == b) {
+        if (op == OP_EQ) return v_bool(1);
+        if (op == OP_NE) return v_bool(0);
+    }
     if((a->t==T_INT||a->t==T_FLOAT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_BOOL||b->t==T_CHAR)) {
         return v_bool(num_cmp(a, 0, b, 0, op));
     }
@@ -824,6 +844,7 @@ V *vec_cmp(V *a, V *b, int op) {
             else if(b->t==T_CVEC) belem = v_char(b->B[i]);
             else belem = v_float(b->F[i]);
             V *c = vec_cmp(a->L[i], belem, OP_EQ);
+            if (c && c->t == T_ERR) { if (b->t != T_LIST) v_free(belem); return c; }
             int eq = c->t==T_BOOL && c->j;
             v_free(c); if(b->t != T_LIST) v_free(belem);
             P(!eq,v_bool(op==OP_NE))
@@ -860,10 +881,12 @@ V *vec_cmp(V *a, V *b, int op) {
             int found = 0;
             for(int64_t j=0;j<b->n;j++) {
                 V *kc = vec_cmp(ak, b->keys->L[j], OP_EQ);
+                if (kc && kc->t == T_ERR) return kc;
                 int keq = kc->t==T_BOOL && kc->j;
                 v_free(kc);
                 if(!keq) continue;
                 V *vc = vec_cmp(av, b->vals->L[j], OP_EQ);
+                if (vc && vc->t == T_ERR) return vc;
                 int veq = vc->t==T_BOOL && vc->j;
                 v_free(vc);
                 P(!veq,v_bool(op==OP_NE))

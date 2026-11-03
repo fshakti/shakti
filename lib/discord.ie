@@ -61,7 +61,7 @@ def put(path):
 def patch_json(path, obj):
     return request("PATCH", path, json_dumps(obj))
 
-def delete(path):
+def http_delete(path):
     return request("DELETE", path)
 
 def me():
@@ -121,7 +121,7 @@ def add_role(guild_id, user_id, role_id):
     return put("/guilds/" + str(guild_id) + "/members/" + str(user_id) + "/roles/" + str(role_id))
 
 def remove_role(guild_id, user_id, role_id):
-    return delete("/guilds/" + str(guild_id) + "/members/" + str(user_id) + "/roles/" + str(role_id))
+    return http_delete("/guilds/" + str(guild_id) + "/members/" + str(user_id) + "/roles/" + str(role_id))
 
 def create_role(guild_id, name, permissions:""):
     body : {"name": name}

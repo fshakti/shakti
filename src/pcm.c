@@ -222,11 +222,15 @@ V *bi_pcm_open(V **a, int n) {
     int rate = 44100, chans = 1;
     if (n >= 1) {
         if (a[0]->t == T_INT) rate = (int)a[0]->j;
-        else if (a[0]->t == T_FLOAT) rate = (int)a[0]->f;
+        else if (a[0]->t == T_FLOAT) {
+            if (!float_as_int(a[0]->f, &rate)) return v_err("pcm_open: rate out of range");
+        }
     }
     if (n >= 2) {
         if (a[1]->t == T_INT) chans = (int)a[1]->j;
-        else if (a[1]->t == T_FLOAT) chans = (int)a[1]->f;
+        else if (a[1]->t == T_FLOAT) {
+            if (!float_as_int(a[1]->f, &chans)) return v_err("pcm_open: channels out of range");
+        }
     }
     if (chans < 1) chans = 1;
     if (chans > 2) chans = 2;

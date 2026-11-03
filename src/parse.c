@@ -69,8 +69,6 @@ void parse_fail(const char *fmt, ...) {
     vsnprintf(g_parse_err_first, sizeof g_parse_err_first, fmt, ap);
     va_end(ap);
     snprintf(g_parse_err_msg, sizeof g_parse_err_msg, "%s", g_parse_err_first);
-    if (!g_parse_quiet && !g_parse_q_call_hint && !g_parse_first_after_lex)
-        fprintf(stderr, "%s\n", g_parse_err_msg);
 }
 
 static Node *parse_power(Lexer *l);
@@ -221,7 +219,30 @@ static const char *expect_tok_name(int t) {
     case T_DEDENT_: return "dedent";
     case T_NEWLINE_: return "newline";
     case T_NAME_: return "name";
+    case T_INT_: return "integer";
+    case T_FLOAT_: return "float";
+    case T_STR_: return "string";
     case T_COLON_: return "':'";
+    case T_COMMA_: return "','";
+    case T_DOT_: return "'.'";
+    case T_EQ_: return "'='";
+    case T_NE_: return "'!='";
+    case T_LT_: return "'<'";
+    case T_GT_: return "'>'";
+    case T_LE_: return "'<='";
+    case T_GE_: return "'>='";
+    case T_PLUS_: return "'+'";
+    case T_MINUS_: return "'-'";
+    case T_STAR_: return "'*'";
+    case T_SLASH_: return "'/'";
+    case T_DSLASH_: return "'//'";
+    case T_PERCENT_: return "'%'";
+    case T_LPAREN_: return "'('";
+    case T_RPAREN_: return "')'";
+    case T_LBRACKET_: return "'['";
+    case T_RBRACKET_: return "']'";
+    case T_LBRACE_: return "'{'";
+    case T_RBRACE_: return "'}'";
     case T_EOF_: return "end of input";
     default: return NULL;
     }
@@ -332,11 +353,11 @@ static Node *parse_atom_body(Lexer *l) {
                     node_add(defaults, expr);
                     node_add(body, parse_ternary(l));
                 } else {
-                    node_add(defaults, node_new(N_NONE));
+                    node_add(defaults, node_new(N_PASS));
                     node_add(body, expr);
                 }
             } else {
-                node_add(defaults, node_new(N_NONE));
+                node_add(defaults, node_new(N_PASS));
             }
         }
         if(body->nch == 0) {
@@ -360,7 +381,11 @@ static Node *parse_atom_body(Lexer *l) {
         return nm;
     }
     default:
-        parse_fail("parse error: unexpected token %d ('%s')", t.type, t.sval);
+        {
+            const char *nm = expect_tok_name(t.type);
+            if (nm) parse_fail("parse error: unexpected %s", nm);
+            else parse_fail("parse error: unexpected token %d", t.type);
+        }
         return node_new(N_NONE);
     }
 }
@@ -1060,7 +1085,7 @@ static Node *parse_def(Lexer *l) {
         if(lex_peek(l).type == T_COLON_) {
             lex_next(l); node_add(defaults, parse_expr(l));
         } else {
-            node_add(defaults, node_new(N_NONE));
+            node_add(defaults, node_new(N_PASS));
         }
         while(lex_peek(l).type == T_COMMA_) {
             lex_next(l);
@@ -1074,7 +1099,7 @@ static Node *parse_def(Lexer *l) {
             if(lex_peek(l).type == T_COLON_) {
                 lex_next(l); node_add(defaults, parse_expr(l));
             } else {
-                node_add(defaults, node_new(N_NONE));
+                node_add(defaults, node_new(N_PASS));
             }
         }
     }
@@ -1105,11 +1130,13 @@ static Node *parse_try(Lexer *l) {
     if(lex_peek(l).type == T_EXCEPT_) {
         lex_next(l);
         if(lex_peek(l).type == T_NAME_) {
-            lex_next(l);
+            Token ename = lex_next(l);
+            n->sval = strdup(ename.sval);
         }
         if(lex_peek(l).type == T_AS_) {
             lex_next(l);
             Token ename = lex_next(l);
+            free(n->sval);
             n->sval = strdup(ename.sval);
         }
         expect(l, T_COLON_);
@@ -1426,9 +1453,12 @@ static Node *parse_stmt(Lexer *l) {
         W(lex_peek(l).type == T_NEWLINE_,lex_next(l))
         return n;
     }
-    if(pk.type == T_PLUSEQ_ || pk.type == T_MINUSEQ_ || pk.type == T_STAREQ_ || pk.type == T_SLASHEQ_) {
+    if(pk.type == T_PLUSEQ_ || pk.type == T_MINUSEQ_ || pk.type == T_STAREQ_ || pk.type == T_SLASHEQ_
+       || pk.type == T_DSLASHEQ_ || pk.type == T_PERCENTEQ_ || pk.type == T_DSTAREQ_) {
         Token op = lex_next(l);
-        int o = op.type==T_PLUSEQ_?OP_ADD : op.type==T_MINUSEQ_?OP_SUB : op.type==T_STAREQ_?OP_MUL : OP_DIV;
+        int o = op.type==T_PLUSEQ_?OP_ADD : op.type==T_MINUSEQ_?OP_SUB : op.type==T_STAREQ_?OP_MUL
+              : op.type==T_DSLASHEQ_?OP_FLOORDIV : op.type==T_PERCENTEQ_?OP_MOD
+              : op.type==T_DSTAREQ_?OP_POW : OP_DIV;
         Node *val = parse_expr(l);
         Node *n = node_new(N_AUGASSIGN); n->op = o;
         node_add(n, expr);
@@ -1491,7 +1521,7 @@ Node *parse(const char *src) {
          * is replaced by the hint; unexpected-character and the specific
          * messages stay. Prefer table() kwargs hint when table([…] is
          * present. */
-        if (strstr(g_parse_err_first, "unexpected token") ||
+        if (strstr(g_parse_err_first, "unexpected") ||
             strstr(g_parse_err_first, ", got ")) {
             if (src_has_table_lbrack(src))
                 snprintf(g_parse_err_msg, sizeof g_parse_err_msg,
@@ -1503,7 +1533,6 @@ Node *parse(const char *src) {
                 snprintf(g_parse_err_msg, sizeof g_parse_err_msg,
                          "parse error: ';' inside (...) is not valid. Use commas between arguments");
         }
-        if (!g_parse_quiet) fprintf(stderr, "%s\n", g_parse_err_msg);
     }
     if(!l.failed && g_parse_error_count == 0 && tree_too_deep(prog, SHAKTI_EXPR_MAX_DEPTH))
         lex_fail(&l, "expression nesting too deep");

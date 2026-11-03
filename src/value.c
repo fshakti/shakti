@@ -559,58 +559,89 @@ void shakti_format_time_ms(int64_t ms_in_day, char *buf, size_t cap) {
         (long long)H, (long long)M, (long long)S, msec);
 }
 V *v_ref(V *v) { if(v) v->rc++; return v; }
+
+/* Children of a value that is about to be released. A nested list is freed
+ * from this work list so a few hundred thousand levels do not overflow the
+ * C stack. */
+static void v_free_push(V ***stk, size_t *n, size_t *cap, V *child) {
+    if (!child) return;
+    if (*n == *cap) {
+        size_t nc = *cap ? *cap * 2 : 64;
+        V **p = realloc(*stk, nc * sizeof(V *));
+        if (!p)
+            return;
+        *stk = p;
+        *cap = nc;
+    }
+    (*stk)[(*n)++] = child;
+}
+
 void v_free(V *v) {
     Pv(!v)
-    if (--v->rc > 0) return;
-    if (v->t == T_INT && isl_int_cache && v->j >= 0 && v->j < ISL_INT_CACHE_MAX && isl_int_cache[v->j] == v) {
-        v->rc = 1;
-        return;
-    }
-#ifdef SHAKTI_HAVE_IEFS
-    int mapped = (v->owner_kind == V_OWNER_MAP_ALIAS);
-#endif
-    int owned = (v->owner_kind == V_OWNER_MALLOC);
-    switch(v->t) {
-    case T_STR: case T_ERR: free(v->s); break;
-    case T_IVEC: if (owned) free(v->J); break;
-    case T_FVEC: if (owned) free(v->F); break;
-    case T_BVEC: case T_CVEC: if (owned) free(v->B); break;
-    case T_IMAT: if (owned) free(v->J); break;
-    case T_FMAT: if (owned) free(v->F); break;
-    case T_BMAT: case T_CMAT: if (owned) free(v->B); break;
-    case T_LIST:
-        for(int64_t i=0;i<v->n;i++) v_free(v->L[i]);
-        free(v->L); break;
-    case T_DICT: case T_TABLE:
-        free(v->_ht); v_free(v->keys); v_free(v->vals); break;
-    case T_FN:
-        if (v->n == -1) free(v->s);
-        else {
-            v_free(v->params);
-            if(v->defaults) v_free(v->defaults);
-            if(v->closure) env_free(v->closure);
-            fn_ast_release((int)v->j);
+    V **stk = NULL;
+    size_t n = 0, cap = 0;
+    v_free_push(&stk, &n, &cap, v);
+    while (n) {
+        V *cur = stk[--n];
+        if (!cur) continue;
+        if (--cur->rc > 0) continue;
+        if (cur->t == T_INT && isl_int_cache && cur->j >= 0 && cur->j < ISL_INT_CACHE_MAX &&
+            isl_int_cache[cur->j] == cur) {
+            cur->rc = 1;
+            continue;
         }
-        break;
-    case T_INPUT:
-        free(v->s);
-        break;
-    case T_SUBPROCESS:
+#ifdef SHAKTI_HAVE_IEFS
+        int mapped = (cur->owner_kind == V_OWNER_MAP_ALIAS);
+#endif
+        int owned = (cur->owner_kind == V_OWNER_MALLOC);
+        switch (cur->t) {
+        case T_STR: case T_ERR: free(cur->s); break;
+        case T_IVEC: if (owned) free(cur->J); break;
+        case T_FVEC: if (owned) free(cur->F); break;
+        case T_BVEC: case T_CVEC: if (owned) free(cur->B); break;
+        case T_IMAT: if (owned) free(cur->J); break;
+        case T_FMAT: if (owned) free(cur->F); break;
+        case T_BMAT: case T_CMAT: if (owned) free(cur->B); break;
+        case T_LIST:
+            for (int64_t i = cur->n - 1; i >= 0; i--)
+                v_free_push(&stk, &n, &cap, cur->L[i]);
+            free(cur->L);
+            break;
+        case T_DICT: case T_TABLE:
+            free(cur->_ht);
+            v_free_push(&stk, &n, &cap, cur->keys);
+            v_free_push(&stk, &n, &cap, cur->vals);
+            break;
+        case T_FN:
+            if (cur->n == -1) free(cur->s);
+            else {
+                v_free_push(&stk, &n, &cap, cur->params);
+                v_free_push(&stk, &n, &cap, cur->defaults);
+                if (cur->closure) env_free(cur->closure);
+                fn_ast_release((int)cur->j);
+            }
+            break;
+        case T_INPUT:
+            free(cur->s);
+            break;
+        case T_SUBPROCESS:
 #ifndef _WIN32
-        if (v->j >= 0) close((int)v->j);
-        if (v->n > 1) {
-            int wstatus;
-            waitpid((pid_t)v->n, &wstatus, 0);
+            if (cur->j >= 0) close((int)cur->j);
+            if (cur->n > 1) {
+                int wstatus;
+                waitpid((pid_t)cur->n, &wstatus, 0);
+            }
+#endif
+            break;
+        default: break;
         }
-#endif
-        break;
-    default: break;
-    }
 #ifdef SHAKTI_HAVE_IEFS
-    if (mapped && v->map_reg)
-        iefs_map_region_release((IefsMapRegion *)v->map_reg);
+        if (mapped && cur->map_reg)
+            iefs_map_region_release((IefsMapRegion *)cur->map_reg);
 #endif
-    free(v);
+        free(cur);
+    }
+    free(stk);
 }
 
 int v_ensure_writable(V *v) {
@@ -666,7 +697,7 @@ V *v_copy(V *v) {
     case T_CMAT:  { V *r=v_cmat(v->n, mat_cols(v)); memcpy(r->B,v->B,(size_t)v->n*mat_cols(v)); return r; }
     case T_LIST:  {
         V *r=v_list(v->n);
-        for(int64_t i=0;i<v->n;i++) r->L[i]=v_copy(v->L[i]);
+        for(int64_t i=0;i<v->n;i++) r->L[i]=v->L[i] ? v_copy(v->L[i]) : NULL;
         return r;
     }
     case T_DICT: {

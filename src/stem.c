@@ -749,12 +749,16 @@ V *bi_stem_open(V **a, int n) {
     if (g_stem.open) return v_err("stem_open: already open");
     if (n >= 1) {
         if (a[0]->t == T_INT) sr = (int)a[0]->j;
-        else if (a[0]->t == T_FLOAT) sr = (int)a[0]->f;
+        else if (a[0]->t == T_FLOAT) {
+            if (!float_as_int(a[0]->f, &sr)) return v_err("stem_open: sr out of range");
+        }
         else return v_err("stem_open(sr, block)");
     }
     if (n >= 2) {
         if (a[1]->t == T_INT) block = (int)a[1]->j;
-        else if (a[1]->t == T_FLOAT) block = (int)a[1]->f;
+        else if (a[1]->t == T_FLOAT) {
+            if (!float_as_int(a[1]->f, &block)) return v_err("stem_open: block out of range");
+        }
         else return v_err("stem_open(sr, block)");
     }
     if (sr < 8000) sr = 8000;
@@ -1389,7 +1393,9 @@ V *bi_stem_write_ml_synth(V **a, int n) {
     path = a[0]->s;
     if (n >= 2) {
         if (a[1]->t == T_INT) H = (int)a[1]->j;
-        else if (a[1]->t == T_FLOAT) H = (int)a[1]->f;
+        else if (a[1]->t == T_FLOAT) {
+            if (!float_as_int(a[1]->f, &H)) return v_err("stem_write_ml_synth: nhidden out of range");
+        }
     }
     if (H < 8) H = 8;
     if (H > 512) H = 512;
@@ -1436,11 +1442,15 @@ V *bi_stem_ml_spike(V **a, int n) {
     if (!g_ml.loaded) return v_err("stem_ml_spike: load weights first");
     if (n >= 1) {
         if (a[0]->t == T_INT) batch = (int)a[0]->j;
-        else if (a[0]->t == T_FLOAT) batch = (int)a[0]->f;
+        else if (a[0]->t == T_FLOAT) {
+            if (!float_as_int(a[0]->f, &batch)) return v_err("stem_ml_spike: batch out of range");
+        }
     }
     if (n >= 2) {
         if (a[1]->t == T_INT) iters = (int)a[1]->j;
-        else if (a[1]->t == T_FLOAT) iters = (int)a[1]->f;
+        else if (a[1]->t == T_FLOAT) {
+            if (!float_as_int(a[1]->f, &iters)) return v_err("stem_ml_spike: iters out of range");
+        }
     }
     if (batch < 1) batch = 1;
     if (batch > STEM_ML_BATCH_MAX) batch = STEM_ML_BATCH_MAX;
@@ -1729,7 +1739,12 @@ V *bi_stem_write_wav(V **a, int n) {
     if (own < 0) return v_err("stem_write_wav: samples must be fvec or list");
     if (n >= 3) {
         if (a[2]->t == T_INT) sr = (int)a[2]->j;
-        else if (a[2]->t == T_FLOAT) sr = (int)a[2]->f;
+        else if (a[2]->t == T_FLOAT) {
+            if (!float_as_int(a[2]->f, &sr)) {
+                if (own == 1) free(ps);
+                return v_err("stem_write_wav: sr out of range");
+            }
+        }
         else {
             if (own == 1) free(ps);
             return v_err("stem_write_wav: sr must be numeric");

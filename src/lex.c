@@ -1,5 +1,6 @@
 /* shakti/src/lex.c — tokenizer */
 #include "shakti_internal.h"
+#include <errno.h>
 
 static int is_id_start(char c) { return isalpha(c) || c=='_'; }
 static int is_id_char(char c)  { return isalnum(c) || c=='_'; }
@@ -163,7 +164,7 @@ int lex_peek_minus_is_subtraction(Lexer *l) {
     l->line = save_line;
     l->has_peek = save_peek;
     l->peek = save_tok;
-    return t.type == T_INT_;
+    return t.type == T_INT_ || t.type == T_FLOAT_;
 }
 static Token lex_fstring(Lexer *l) {
     const char *s = l->src;
@@ -377,9 +378,13 @@ static Token lex_raw(Lexer *l) {
         {
             int neg_lit = 0;
             if (c == '-' && !l->noun_pos && p + 1 < l->len && lex_src_is_digit_start(l, (size_t)(p + 1))) {
-                neg_lit = 1;
-                p++;
-                c = s[p];
+                /* -0c… is unary minus of a blob, not a signed integer. */
+                int blob0c = p + 3 < l->len && s[p + 1] == '0' && (s[p + 2] == 'c' || s[p + 2] == 'C');
+                if (!blob0c) {
+                    neg_lit = 1;
+                    p++;
+                    c = s[p];
+                }
             }
             if (isdigit((unsigned char)c) || (c == '.' && p + 1 < l->len && isdigit((unsigned char)s[p + 1]))) {
             Token t = {.type = T_INT_};
@@ -433,6 +438,10 @@ static Token lex_raw(Lexer *l) {
                     if(p<l->len && (s[p]=='+'||s[p]=='-')) p++;
                     if(!lex_digits(l, &p, &under)) return make_tok(T_EOF_);
                 }
+                if (is_float && p < l->len && s[p] == '.' && p + 1 < l->len && isdigit((unsigned char)s[p + 1])) {
+                    lex_fail(l, "invalid number");
+                    return make_tok(T_EOF_);
+                }
                 /* With separators, convert the digits alone, gathered in the lexer's text scratch. */
                 const char *lit = s + start;
                 if(under) {
@@ -447,8 +456,15 @@ static Token lex_raw(Lexer *l) {
                     t.fval=strtod(lit,NULL);
                     if (neg_lit) t.fval = -t.fval;
                 } else {
+                    errno = 0;
                     t.ival = strtoll(lit, NULL, 10);
-                    if (neg_lit) t.ival = -t.ival;
+                    if (errno == ERANGE) {
+                        t.type = T_FLOAT_;
+                        t.fval = strtod(lit, NULL);
+                        if (neg_lit) t.fval = -t.fval;
+                    } else if (neg_lit) {
+                        t.ival = -t.ival;
+                    }
                 }
             }
             l->pos = p;
@@ -474,6 +490,36 @@ static Token lex_raw(Lexer *l) {
             }
             if((c=='b'||c=='B') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
                 p++;
+                char q = s[p];
+                p++;
+                Token bt = {.type = T_CVECZ_};
+                int nhex = 0;
+                while (p < l->len && s[p] != q) {
+                    unsigned char byte;
+                    if (s[p] == '\\' && p + 1 < l->len) {
+                        p++;
+                        switch (s[p]) {
+                        case 'n': byte = '\n'; break;
+                        case 't': byte = '\t'; break;
+                        case 'r': byte = '\r'; break;
+                        case '0': byte = 0; break;
+                        case '\\': case '\'': case '"': byte = (unsigned char)s[p]; break;
+                        default: byte = (unsigned char)s[p]; break;
+                        }
+                    } else {
+                        byte = (unsigned char)s[p];
+                    }
+                    char hx[3];
+                    snprintf(hx, sizeof hx, "%02x", byte);
+                    if (!lex_append(l, &bt, &nhex, hx[0]) || !lex_append(l, &bt, &nhex, hx[1]))
+                        return make_tok(T_EOF_);
+                    p++;
+                }
+                lex_finish_text(l, &bt, nhex);
+                bt.ival = nhex / 2;
+                if (p < l->len) p++;
+                l->pos = p;
+                return bt;
             }
             Token t = {.type = T_NAME_};
             size_t start = p;
@@ -497,14 +543,22 @@ static Token lex_raw(Lexer *l) {
         case '+': if(p+1<l->len && (s[p+1]=='=' || s[p+1]==':')) { l->pos=p+2; return make_tok(T_PLUSEQ_); } return make_tok(T_PLUS_);
         case '-': if(p+1<l->len && (s[p+1]=='=' || s[p+1]==':')) { l->pos=p+2; return make_tok(T_MINUSEQ_); } return make_tok(T_MINUS_);
         case '*':
-            if(p+1<l->len && s[p+1]=='*') { l->pos=p+2; return make_tok(T_DSTAR_); }
+            if(p+1<l->len && s[p+1]=='*') {
+                if(p+2<l->len && (s[p+2]=='=' || s[p+2]==':')) { l->pos=p+3; return make_tok(T_DSTAREQ_); }
+                l->pos=p+2; return make_tok(T_DSTAR_);
+            }
             if(p+1<l->len && (s[p+1]=='=' || s[p+1]==':')) { l->pos=p+2; return make_tok(T_STAREQ_); }
             return make_tok(T_STAR_);
         case '/':
-            if(p+1<l->len && s[p+1]=='/') { l->pos=p+2; return make_tok(T_DSLASH_); }
+            if(p+1<l->len && s[p+1]=='/') {
+                if(p+2<l->len && (s[p+2]=='=' || s[p+2]==':')) { l->pos=p+3; return make_tok(T_DSLASHEQ_); }
+                l->pos=p+2; return make_tok(T_DSLASH_);
+            }
             if(p+1<l->len && (s[p+1]=='=' || s[p+1]==':')) { l->pos=p+2; return make_tok(T_SLASHEQ_); }
             return make_tok(T_SLASH_);
-        case '%': return make_tok(T_PERCENT_);
+        case '%':
+            if(p+1<l->len && (s[p+1]=='=' || s[p+1]==':')) { l->pos=p+2; return make_tok(T_PERCENTEQ_); }
+            return make_tok(T_PERCENT_);
         case '=': return make_tok(T_EQ_);
         case '!': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_NE_); } break;
         case '<': if(p+1<l->len && s[p+1]=='=') { l->pos=p+2; return make_tok(T_LE_); } return make_tok(T_LT_);

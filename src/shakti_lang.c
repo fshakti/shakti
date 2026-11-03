@@ -273,8 +273,8 @@ int shakti_lang_main(int argc, char **argv) {
         /* An uncaught error ends the program with status 1, as in a script. */
         int cmd_err = g_error || (r && r->t == T_ERR);
         if(g_error && g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
+        else if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
         if(parse_err) { node_free(prog); env_free(global); return 1; }
-        if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
         if(!shakti_prog_silent_last(prog) && r && r->t != T_NIL && r->t != T_ERR) {
             print_val(r, stdout, 1);
             putchar('\n');
@@ -283,7 +283,11 @@ int shakti_lang_main(int argc, char **argv) {
         shakti_clear_flow();
         node_free(prog);
         if(cmd_err && !interactive) { env_free(global); return 1; }
-        if(interactive) run_repl(global);
+        if(interactive) {
+            int rc = run_repl(global);
+            env_free(global);
+            return rc;
+        }
     } else if(i < argc) {
         if (shakti_require_ie(argv[i])) { env_free(global); return 2; }
         {
@@ -319,14 +323,16 @@ int shakti_lang_main(int argc, char **argv) {
         shakti_clear_flow();
         int script_err = g_error || (r && r->t == T_ERR);
         if(g_error && g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
-        if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
+        else if(r && r->t == T_ERR) fprintf(stderr, "Error: %s\n", r->s);
         v_free(r);
         node_free(prog);
         free(src);
         env_free(global);
         return script_err ? 1 : 0;
     } else {
-        run_repl(global);
+        int rc = run_repl(global);
+        env_free(global);
+        return rc;
     }
     env_free(global);
     return 0;

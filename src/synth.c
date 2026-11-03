@@ -2358,7 +2358,13 @@ const char *synth_row_label(int row) {
     return lbls[row];
 }
 #endif
-static inline int synth_arg_int(V**a,int n,int idx,int fallback){P(n<=idx,fallback)P(a[idx]->t==T_INT,(int)a[idx]->j)P(a[idx]->t==T_FLOAT,(int)a[idx]->f)return fallback;}
+static inline int synth_arg_int(V**a,int n,int idx,int fallback){
+    int x;
+    P(n<=idx,fallback)
+    P(a[idx]->t==T_INT,(int)a[idx]->j)
+    P(a[idx]->t==T_FLOAT, float_as_int(a[idx]->f, &x) ? x : fallback)
+    return fallback;
+}
 static V *synth_err(char *err) {
     P(err[0],v_err(err))return v_err("synth: failed");
 }

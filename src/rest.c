@@ -562,7 +562,12 @@ static V *body_value(const unsigned char *raw, size_t len, const char *content_t
     if (!tmp) return v_err("rest: out of memory");
     memcpy(tmp, raw, len);
     tmp[len] = 0;
-    if (tmp[0] == '{' || tmp[0] == '[') {
+    /* A declared type other than JSON stays text, even when the bytes parse. */
+    int json_ct = !content_type || !content_type[0] ||
+                  rest_ct_is(content_type, "application/json") ||
+                  rest_ct_is(content_type, "application/json-rpc") ||
+                  rest_ct_is(content_type, "text/json");
+    if (json_ct && (tmp[0] == '{' || tmp[0] == '[')) {
         V *parsed = shakti_json_parse(tmp, NULL);
         if (parsed && parsed->t != T_ERR) {
             free(tmp);

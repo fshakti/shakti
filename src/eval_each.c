@@ -186,6 +186,10 @@ static V *each_col_get(V *col, int64_t i) {
     if (col->t == T_LIST) return v_ref(col->L[i]);
     return v_err("each: unsupported table column type");
 }
+static int each_dict_moved(V *d, int64_t n, V *vals, V **slots) {
+    return !d || d->t != T_DICT || d->n != n || d->vals != vals || !vals ||
+           vals->n != n || vals->L != slots;
+}
 static V *each_unary(V *fn, V *xs, Env *e) {
     if (xs->t == T_INPUT)
         return v_err("each: input streams are not supported");
@@ -233,9 +237,18 @@ static V *each_unary(V *fn, V *xs, Env *e) {
     }
     if (xs->t == T_DICT) {
         int64_t n = xs->n;
+        V *held = xs->vals;
+        V **slots = held ? held->L : NULL;
         V *vals = v_list(n);
         for (int64_t i = 0; i < n; i++) {
-            V *rv = each_invoke(fn, (V*[]){xs->vals->L[i]}, 1, e);
+            if (each_dict_moved(xs, n, held, slots)) {
+                for (int64_t j = 0; j < i; j++) v_free(vals->L[j]);
+                free(vals->L); free(vals);
+                return v_err("each: dict changed size during iteration");
+            }
+            V *item = v_ref(slots[i]);
+            V *rv = each_invoke(fn, (V*[]){item}, 1, e);
+            v_free(item);
             if (!rv || rv->t == T_ERR || g_error) {
                 for (int64_t j = 0; j < i; j++) v_free(vals->L[j]);
                 free(vals->L); free(vals);
@@ -524,15 +537,26 @@ static V *each_dyadic(V *fn, V *xs, V *ys, Env *e) {
     }
     if (xs->t == T_DICT && ys->t == T_DICT) {
         if (xs->n != ys->n) return v_err("each: dictionary key set mismatch");
-        V *vals = v_list(xs->n);
-        for (int64_t i = 0; i < xs->n; i++) {
+        int64_t n = xs->n;
+        V *hx = xs->vals, *hy = ys->vals;
+        V **sx = hx ? hx->L : NULL, **sy = hy ? hy->L : NULL;
+        V *vals = v_list(n);
+        for (int64_t i = 0; i < n; i++) {
+            if (each_dict_moved(xs, n, hx, sx) || each_dict_moved(ys, n, hy, sy)) {
+                for (int64_t k = 0; k < i; k++) v_free(vals->L[k]);
+                free(vals->L); free(vals);
+                return v_err("each: dict changed size during iteration");
+            }
             int j = each_dict_find_key(ys, xs->keys->L[i]);
             if (j < 0) {
                 for (int64_t k = 0; k < i; k++) v_free(vals->L[k]);
                 free(vals->L); free(vals);
                 return v_err("each: dictionary key set mismatch");
             }
-            V *rv = each_invoke(fn, (V*[]){xs->vals->L[i], ys->vals->L[j]}, 2, e);
+            V *a = v_ref(sx[i]);
+            V *b = v_ref(sy[j]);
+            V *rv = each_invoke(fn, (V*[]){a, b}, 2, e);
+            v_free(a); v_free(b);
             if (!rv || rv->t == T_ERR || g_error) {
                 for (int64_t k = 0; k < i; k++) v_free(vals->L[k]);
                 free(vals->L); free(vals);

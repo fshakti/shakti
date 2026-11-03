@@ -391,6 +391,15 @@ int ipc_shm_chan_open(const char *user_name, size_t size, int create,
     int fd;
     size_t map_size = size;
     if (create) {
+        long page = sysconf(_SC_PAGESIZE);
+        if (page < 4096) page = 4096;
+        size_t p = (size_t)page;
+        size_t rounded = (map_size + p - 1) & ~(p - 1);
+        if (rounded < map_size || rounded > IPC_MAX_SHM) {
+            snprintf(err, err_cap, "ipc: shm size out of range");
+            return -1;
+        }
+        map_size = rounded;
         fd = ipc_shm_create_fd(posix_out, lock_out, lock_path, err, err_cap);
         if (fd < 0) return -1;
         if (ftruncate(fd, (off_t)map_size) != 0) {

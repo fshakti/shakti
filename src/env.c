@@ -1,5 +1,7 @@
 /* shakti/src/env.c — environments, fn_ast, interpreter globals */
 #include "shakti_internal.h"
+#include <fcntl.h>
+#include <unistd.h>
 
 Node *fn_ast[MAX_FN];
 int   fn_ast_n = 0;
@@ -542,18 +544,87 @@ void env_free(Env *e) {
     if(e->parent) env_free(e->parent);
     free(e);
 }
+/* A context holds data. A function, builtin, error, input or subprocess has
+ * no saved form, so saving one would load back as None. */
+static int ctx_data_ok(V *v) {
+    V **stk = NULL;
+    size_t n = 0, cap = 0, seen = 0;
+    if (!v) return 1;
+    for (;;) {
+        if (n == cap) {
+            size_t nc = cap ? cap * 2 : 32;
+            V **p = realloc(stk, nc * sizeof(V *));
+            if (!p) { free(stk); return 0; }
+            stk = p;
+            cap = nc;
+        }
+        if (n == 0 && seen == 0) stk[n++] = v;
+        if (n == 0) break;
+        V *cur = stk[--n];
+        seen++;
+        if (seen > 10000000u) { free(stk); return 0; }
+        if (!cur) continue;
+        switch (cur->t) {
+        case T_FN: case T_ERR: case T_INPUT: case T_SUBPROCESS:
+            free(stk);
+            return 0;
+        case T_LIST:
+            for (int64_t i = 0; i < cur->n; i++) {
+                if (n == cap) {
+                    size_t nc = cap * 2;
+                    V **p = realloc(stk, nc * sizeof(V *));
+                    if (!p) { free(stk); return 0; }
+                    stk = p;
+                    cap = nc;
+                }
+                stk[n++] = cur->L[i];
+            }
+            break;
+        case T_DICT: case T_TABLE:
+            if (n + 2 > cap) {
+                size_t nc = cap * 2 + 2;
+                V **p = realloc(stk, nc * sizeof(V *));
+                if (!p) { free(stk); return 0; }
+                stk = p;
+                cap = nc;
+            }
+            stk[n++] = cur->keys;
+            stk[n++] = cur->vals;
+            break;
+        default: break;
+        }
+    }
+    free(stk);
+    return 1;
+}
+static int ctx_write(FILE *fp, const void *p, size_t n) {
+    return fwrite(p, 1, n, fp) == n;
+}
 int env_save(Env *e, const char *path) {
-    FILE *fp = fopen(path, "wb");
-    P(!fp,0)
-    fwrite("KAIO_MCP", 1, 8, fp);
-    fwrite(&e->len, 4, 1, fp);
-    i(e->len,{
-        int nlen = strlen(e->names[i]);
-        fwrite(&nlen, 4, 1, fp);
-        fwrite(e->names[i], 1, nlen, fp);
-        v_serialize(e->vals[i], fp);
-    })
-    fclose(fp);
+    P(!e || !path,0)
+    for (int i = 0; i < e->len; i++)
+        if (!ctx_data_ok(e->vals[i])) return 0;
+    char tmp[8192];
+    int nw = snprintf(tmp, sizeof tmp, "%s.ctx.tmp.%d", path, (int)getpid());
+    if (nw < 0 || (size_t)nw >= sizeof tmp) return 0;
+    char ferr[128];
+    ferr[0] = 0;
+    if (shakti_fs_check(tmp, 1, ferr, sizeof ferr) != 0) return 0;
+    int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0) return 0;
+    FILE *fp = fdopen(fd, "wb");
+    if (!fp) { close(fd); unlink(tmp); return 0; }
+    int ok = ctx_write(fp, "KAIO_MCP", 8) && ctx_write(fp, &e->len, 4);
+    for (int i = 0; ok && i < e->len; i++) {
+        int nlen = (int)strlen(e->names[i]);
+        ok = ctx_write(fp, &nlen, 4) && ctx_write(fp, e->names[i], (size_t)nlen);
+        if (ok) v_serialize(e->vals[i], fp);
+        if (ok && ferror(fp)) ok = 0;
+    }
+    if (ok && fflush(fp) != 0) ok = 0;
+    if (fclose(fp) != 0) ok = 0;
+    if (!ok) { unlink(tmp); return 0; }
+    if (rename(tmp, path) != 0) { unlink(tmp); return 0; }
     return 1;
 }
 int env_load(Env *e, const char *path) {
@@ -563,20 +634,36 @@ int env_load(Env *e, const char *path) {
     if (fread(hdr, 1, 8, fp) != 8 || memcmp(hdr, "KAIO_MCP", 8)) { fclose(fp); return 0; }
     int count;
     if (fread(&count, 4, 1, fp) != 1 || count < 0 || count > SHAKTI_DESER_MAX_VARS) { fclose(fp); return 0; }
-    for (int i = 0; i < count; i++) {
+    char **names = count ? calloc((size_t)count, sizeof(char *)) : NULL;
+    V **vals = count ? calloc((size_t)count, sizeof(V *)) : NULL;
+    if (count && (!names || !vals)) {
+        free(names); free(vals); fclose(fp); return 0;
+    }
+    int got = 0;
+    for (; got < count; got++) {
         int nlen;
-        if (fread(&nlen, 4, 1, fp) != 1 || nlen < 0 || nlen > SHAKTI_ENV_MAX_NAME) { fclose(fp); return 0; }
+        if (fread(&nlen, 4, 1, fp) != 1 || nlen < 0 || nlen > SHAKTI_ENV_MAX_NAME) break;
         char *name = malloc((size_t)nlen + 1);
-        if (!name) { fclose(fp); return 0; }
-        if (nlen > 0 && fread(name, 1, (size_t)nlen, fp) != (size_t)nlen) { free(name); fclose(fp); return 0; }
+        if (!name) break;
+        if (nlen > 0 && fread(name, 1, (size_t)nlen, fp) != (size_t)nlen) { free(name); break; }
         name[nlen] = 0;
         V *val = v_deserialize(fp);
-        if (val->t == T_ERR) { free(name); v_free(val); fclose(fp); return 0; }
-        env_set(e, name, val);
-        v_free(val);
-        free(name);
+        if (!val || val->t == T_ERR) { free(name); if (val) v_free(val); break; }
+        names[got] = name;
+        vals[got] = val;
     }
     fclose(fp);
+    if (got != count) {
+        for (int i = 0; i < got; i++) { free(names[i]); v_free(vals[i]); }
+        free(names); free(vals);
+        return 0;
+    }
+    for (int i = 0; i < count; i++) {
+        env_set(e, names[i], vals[i]);
+        v_free(vals[i]);
+        free(names[i]);
+    }
+    free(names); free(vals);
     return 1;
 }
 

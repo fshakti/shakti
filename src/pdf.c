@@ -1357,7 +1357,9 @@ V *bi_pdf_text(V **a, int n) {
     int page_sel = 0; /* 0 = all, else 1-based */
     if (n >= 2) {
         if (a[1]->t == T_INT) page_sel = (int)a[1]->j;
-        else if (a[1]->t == T_FLOAT) page_sel = (int)a[1]->f;
+        else if (a[1]->t == T_FLOAT) {
+            if (!float_as_int(a[1]->f, &page_sel)) return v_err("pdf_text: page out of range");
+        }
     }
     int *pages = NULL, np = 0;
     char err[160];

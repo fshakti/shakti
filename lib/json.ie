@@ -5,15 +5,17 @@
 #   a: json.table(json.load("filename.json").rows)
 #   json.save(a, "file2.json")
 #
+_table : table
+
 def load(filename, *pluck, as_table:False):
 	j: json_load(filename)
 	if as_table or len(pluck):
-		return self.table(j,*pluck)
+		return table(j, *pluck)
 	return j
 
-def table(j,*pluck):
-	if type(j)="dict":
-		return table(j)
+def table(j, *pluck):
+	if type(j) = "dict":
+		return _table(j)
 	n:0
 	d:{}
 	for r in j:
@@ -27,6 +29,6 @@ def table(j,*pluck):
 				d[k]:a
 			d[k].append(v)
 		n:n+1
-	return table(d)
+	return _table(d)
 
 save : json_dump

@@ -243,7 +243,7 @@ static void hl_hadd(const char *s) {
 }
 static struct termios hl_orig;
 static int hl_raw=0;
-static void hl_raw_off(void){if(hl_raw){tcsetattr(STDIN_FILENO,TCSAFLUSH,&hl_orig);hl_raw=0;}}
+static void hl_raw_off(void){if(hl_raw){tcsetattr(STDIN_FILENO,TCSANOW,&hl_orig);hl_raw=0;}}
 static void hl_raw_on(void){
     if(!isatty(STDIN_FILENO))return;
     tcgetattr(STDIN_FILENO,&hl_orig);
@@ -253,7 +253,7 @@ static void hl_raw_on(void){
     r.c_cflag |= CS8;
     r.c_lflag &= ~(ECHO|ICANON|IEXTEN|ISIG);
     r.c_cc[VMIN]=1; r.c_cc[VTIME]=0;
-    tcsetattr(STDIN_FILENO,TCSAFLUSH,&r);
+    tcsetattr(STDIN_FILENO,TCSANOW,&r);
     hl_raw=1;
 }
 /* The line is UTF-8: a character is its first byte and the continuation bytes (10xxxxxx) after
@@ -464,13 +464,15 @@ static void repl_print_hl_doc(const char *name) {
     }
     fclose(f);
 }
-void run_repl(Env *e) {
+int run_repl(Env *e) {
 
 #if SHAKTI_HL
     atexit(hl_raw_off);
 #endif
     enum { REPL_INPUT_CAP = 262144 };
     static char input[REPL_INPUT_CAP];   /* static: on the C stack it takes 256 KB from the evaluator */
+    int failed = 0;
+    int tty = isatty(STDIN_FILENO);
     atexit(input_hub_shutdown);
     /* -c errors must not swallow the first interactive line. */
     if (g_error) {
@@ -568,15 +570,17 @@ void run_repl(Env *e) {
         if(g_error) {
             if(g_error_val) { fprintf(stderr, "Error: %s\n", g_error_val->s); v_free(g_error_val); g_error_val=NULL; }
             g_error = 0;
+            if (!tty) failed = 1;
+        } else if(result && result->t == T_ERR) {
+            fprintf(stderr, "Error: %s\n", result->s);
+            if (!tty) failed = 1;
         } else if(!shakti_prog_silent_last(prog) && result && result->t != T_NIL && result->t != T_ERR) {
             print_val(result, stdout, 1);
             putchar('\n');
-        }
-        if(result && result->t == T_ERR) {
-            fprintf(stderr, "Error: %s\n", result->s);
         }
         v_free(result);
         shakti_clear_flow();
         node_free(prog);
     }
+    return failed;
 }

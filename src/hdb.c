@@ -549,11 +549,15 @@ V *bi_hdb_write(V **a, int n) {
     if (codecs && iefs_codecs_check(a[3], codecs, "hdb_write", cerr, sizeof cerr) != 0)
         return v_err(cerr);
 
+    int dir_existed = access(pdir, F_OK) == 0;
     if (hdb_mkdir_p(pdir) != 0) return v_errf("hdb_write: mkdir: %s", strerror(errno));
+    int part_existed = access(pfile, F_OK) == 0;
 
     char err[256];
     if (iefs_store_write_full(a[3], pfile, 0, 0, 0, 3, 3, codecs, err, sizeof err) != 0) {
         const char *e = iefs_last_error();
+        if (!part_existed) unlink(pfile);
+        if (!dir_existed) rmdir(pdir);
         return v_err(e && e[0] ? e : (err[0] ? err : "hdb_write: iefs save failed"));
     }
     return v_nil();

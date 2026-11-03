@@ -1350,6 +1350,7 @@ static V *ipc_v_str(char *msg, size_t len) {
 
 V *bi_ipc_listen(V **a, int n) {
     P(n < 1 || a[0]->t != T_INT, v_err("ipc_listen(port[, host, transport])"))
+    if (a[0]->j < 0 || a[0]->j > 65535) return v_err("ipc_listen: port out of range");
     int port = (int)a[0]->j;
     const char *host = (n > 1 && a[1]->t == T_STR) ? a[1]->s : "127.0.0.1";
     if (!host || !host[0]) host = "127.0.0.1";
@@ -1360,6 +1361,8 @@ V *bi_ipc_listen(V **a, int n) {
     if (ipc_parse_transport("ipc_listen", n > 2 ? a[2]->s : NULL, &tr, err, sizeof err) != 0)
         return v_err(err);
     tr = ipc_resolve_listen(port, host, tr);
+    if (tr == IPC_TR_RDMA && !ipc_rdma_available())
+        return v_err("ipc_listen: rdma is not available");
     if (tr != IPC_TR_UDS) {
         if (!shakti_net_allowed())
             return v_err("ipc_listen: network disabled (SHAKTI_SAFE=1; set SHAKTI_ALLOW_NET=1)");
@@ -1479,6 +1482,8 @@ static V *ipc_do_connect(const char *host, int port, IpcTransport req) {
     char err[512];
     err[0] = 0;
     IpcTransport tr = ipc_resolve_connect(host, req);
+    if (tr == IPC_TR_RDMA && !ipc_rdma_available())
+        return v_err("ipc_connect: rdma is not available");
     const char *token = ipc_token();
     if (tr != IPC_TR_UDS) {
         if (!shakti_net_allowed())
@@ -1541,6 +1546,7 @@ V *bi_ipc_connect(V **a, int n) {
     IpcTransport tr;
     if (ipc_parse_transport("ipc_connect", n > 2 ? a[2]->s : NULL, &tr, err, sizeof err) != 0)
         return v_err(err);
+    if (a[1]->j < 0 || a[1]->j > 65535) return v_err("ipc_connect: port out of range");
     return ipc_do_connect(a[0]->s, (int)a[1]->j, tr);
 }
 

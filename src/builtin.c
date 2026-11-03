@@ -375,6 +375,7 @@ static const char *BUILTINS[] = {
     "hld_encode","hld_decode",
     "compress","decompress",
     "eval",
+    "exit",
     NULL
 };
 int is_builtin(const char *name){for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
@@ -888,54 +889,76 @@ static V *bi_max(V **a, in) {
 }
 static V *bi_abs(V **a, in) {
     P(n < 1,v_int(0))
-    P(a[0]->t == T_IVEC || a[0]->t == T_IMAT,vec_unary_int(a[0], iabs64))
+    if (a[0]->t == T_IVEC || a[0]->t == T_IMAT) {
+        int64_t ne = a[0]->t == T_IVEC ? a[0]->n : a[0]->n * mat_cols(a[0]);
+        int ov = 0;
+        for (int64_t i = 0; i < ne; i++) if (a[0]->J[i] == INT64_MIN) ov = 1;
+        if (ov) {
+            V *r = a[0]->t == T_IVEC ? v_fvec(a[0]->n) : v_fmat(a[0]->n, mat_cols(a[0]));
+            for (int64_t i = 0; i < ne; i++)
+                r->F[i] = a[0]->J[i] < 0 ? -(double)a[0]->J[i] : (double)a[0]->J[i];
+            return r;
+        }
+        return vec_unary_int(a[0], iabs64);
+    }
     P(a[0]->t == T_FVEC || a[0]->t == T_FMAT,vec_unary_double(a[0], fabs))
     V *v = a[0];
     P(v->t == T_INT && v->j == INT64_MIN,v_float(-(double)INT64_MIN))
     P(v->t == T_INT,v_int(v->j < 0 ? -v->j : v->j))
     P(v->t == T_FLOAT,v_float(fabs(v->f)))
-    return v_int(0);
+    P(v->t == T_CHAR,v_int(v->j < 0 ? -v->j : v->j))
+    P(v->t == T_ERR,v_ref(v))
+    return v_errf("abs: unsupported operand type %s", type_name(v->t));
 }
 /* Integer bitwise helpers (logical shifts on uint64 bits). */
-static int64_t bi_as_i64(V *v) {
-    if (v->t == T_INT) return v->j;
-    if (v->t == T_FLOAT) return (int64_t)v->f;
-    if (v->t == T_BOOL) return v->j ? 1 : 0;
+static int bi_as_i64(V *v, int64_t *out) {
+    if (!v || !out || v->t == T_ERR || v->t == T_NIL) return 0;
+    if (v->t == T_INT || v->t == T_CHAR) { *out = v->j; return 1; }
+    if (v->t == T_BOOL) { *out = v->j ? 1 : 0; return 1; }
+    if (v->t == T_FLOAT) {
+        if (!isfinite(v->f) || v->f < (double)INT64_MIN || v->f >= 9223372036854775808.0) return 0;
+        *out = (int64_t)v->f;
+        return 1;
+    }
     return 0;
 }
 static V *bi_band(V **a, in) {
+    int64_t x, y;
     P(n < 2, v_err("band(a, b)"))
-    return v_int(bi_as_i64(a[0]) & bi_as_i64(a[1]));
+    if (!bi_as_i64(a[0], &x) || !bi_as_i64(a[1], &y)) return v_err("band: expected int");
+    return v_int(x & y);
 }
 static V *bi_bor(V **a, in) {
+    int64_t x, y;
     P(n < 2, v_err("bor(a, b)"))
-    return v_int(bi_as_i64(a[0]) | bi_as_i64(a[1]));
+    if (!bi_as_i64(a[0], &x) || !bi_as_i64(a[1], &y)) return v_err("bor: expected int");
+    return v_int(x | y);
 }
 static V *bi_bxor(V **a, in) {
+    int64_t x, y;
     P(n < 2, v_err("bxor(a, b)"))
-    return v_int(bi_as_i64(a[0]) ^ bi_as_i64(a[1]));
+    if (!bi_as_i64(a[0], &x) || !bi_as_i64(a[1], &y)) return v_err("bxor: expected int");
+    return v_int(x ^ y);
 }
 static V *bi_bnot(V **a, in) {
+    int64_t x;
     P(n < 1, v_err("bnot(a)"))
-    return v_int(~bi_as_i64(a[0]));
+    if (!bi_as_i64(a[0], &x)) return v_err("bnot: expected int");
+    return v_int(~x);
 }
 static V *bi_shl(V **a, in) {
-    uint64_t x;
-    int64_t s;
+    int64_t x, s;
     P(n < 2, v_err("shl(a, b)"))
-    s = bi_as_i64(a[1]);
+    if (!bi_as_i64(a[0], &x) || !bi_as_i64(a[1], &s)) return v_err("shl: expected int");
     P(s < 0 || s >= 64, v_err("shl: shift out of range"))
-    x = (uint64_t)bi_as_i64(a[0]);
-    return v_int((int64_t)(x << (unsigned)s));
+    return v_int((int64_t)((uint64_t)x << (unsigned)s));
 }
 static V *bi_shr(V **a, in) {
-    uint64_t x;
-    int64_t s;
+    int64_t x, s;
     P(n < 2, v_err("shr(a, b)"))
-    s = bi_as_i64(a[1]);
+    if (!bi_as_i64(a[0], &x) || !bi_as_i64(a[1], &s)) return v_err("shr: expected int");
     P(s < 0 || s >= 64, v_err("shr: shift out of range"))
-    x = (uint64_t)bi_as_i64(a[0]);
-    return v_int((int64_t)(x >> (unsigned)s));
+    return v_int((int64_t)((uint64_t)x >> (unsigned)s));
 }
 /* Math builtins: an int, a float or a char (its code) gives a float; an int, float or char vector
  * or matrix maps item by item; an error operand passes through; anything else is refused. */
@@ -2844,12 +2867,27 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         clock_gettime(CLOCK_MONOTONIC, &tb);
         return v_float(tb.tv_sec + tb.tv_nsec / 1e9);
     }
+    if(!strcmp(name,"exit")){
+        int code = 0;
+        if(nargs >= 1){
+            if(args[0] && args[0]->t == T_ERR) return v_ref(args[0]);
+            if(args[0] && (args[0]->t == T_INT || args[0]->t == T_CHAR || args[0]->t == T_BOOL))
+                code = (int)args[0]->j;
+            else if(args[0] && args[0]->t == T_FLOAT){
+                int c;
+                if(!float_as_int(args[0]->f, &c)) return v_err("exit: code out of range");
+                code = c;
+            } else return v_err("exit(code)");
+        }
+        exit(code);
+    }
     if(!strcmp(name,"assert")){
         P(nargs<1,v_err("assert(condition[, message])"))
+        if(args[0] && args[0]->t==T_ERR) return v_ref(args[0]);
         int ok=is_truthy(args[0]);   /* the truth `if` uses */
         if(!ok){
             const char *msg=nargs>1&&args[1]->t==T_STR?args[1]->s:"assertion failed";
-            fprintf(stderr,"AssertionError: %s\n",msg);exit(1);}
+            return v_errf("AssertionError: %s", msg);}
         return v_nil();}
     if(!strcmp(name,"save_context")){
         P(nargs<1 || args[0]->t != T_STR,v_err("save_context(path)"))

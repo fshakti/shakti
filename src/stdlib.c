@@ -78,6 +78,8 @@ extern int is_truthy(V *v);
 } while (0)
 V *bi_fread(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("read(path)"))
+    int as_bytes = n >= 2 && a[1] &&
+        ((a[1]->t == T_BOOL && a[1]->j) || (a[1]->t == T_INT && a[1]->j));
     FS_GUARD("read", a[0]->s, 0);
     FILE *f = fopen(a[0]->s, "rb");
     P(!f,v_errf("read: %s", strerror(errno)))
@@ -96,6 +98,12 @@ V *bi_fread(V **a, in) {
     size_t got = fread(b, 1, (size_t)z, f);
     b[got] = 0;
     fclose(f);
+    if (as_bytes) {
+        V *v = v_cvec((int64_t)got);
+        if (got && v->B) memcpy(v->B, b, got);
+        free(b);
+        return v;
+    }
     return v_str_take(b);
 }
 V *bi_fwrite(V **a, in) {

@@ -124,6 +124,6 @@ V *shakti_instance_str(V *v, Env *e);
 int shakti_isinstance(V *obj, V *cls);
 
 int shakti_prog_silent_last(Node *prog);
-void run_repl(Env *e);
+int run_repl(Env *e);
 
 #endif /* SHAKTI_INTERNAL_H */

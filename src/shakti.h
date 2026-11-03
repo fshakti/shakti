@@ -18,6 +18,12 @@
 
 /* 1 when a float truncates to a C int: not NaN, not an infinity, and inside int's range */
 static inline int float_fits_int(double d) { return d > INT_MIN - 1.0 && d < INT_MAX + 1.0; }
+/* Defined conversion: 0 when d is NaN, infinite, or outside int. */
+static inline int float_as_int(double d, int *out) {
+    if (!out || !float_fits_int(d)) return 0;
+    *out = (int)d;
+    return 1;
+}
 /* d with a NaN's sign bit cleared, for writing as text: glibc writes "-nan" for a NaN with it set
  * (as 0 * inf makes on x86-64, or -float("nan")), other C libraries "nan" */
 static inline double nan_unsigned(double d) { return isnan(d) ? fabs(d) : d; }
@@ -228,6 +234,9 @@ enum {
     T_OUTER_ = 80,
     T_CHARZ_ = 81,
     T_CVECZ_ = 82,  /* 0x / 0c even hex → list[char] blob */
+    T_DSLASHEQ_ = 83, /* //= or //: */
+    T_PERCENTEQ_ = 84, /* %= or %: */
+    T_DSTAREQ_ = 85, /* **= or **: */
 };
 
 enum {

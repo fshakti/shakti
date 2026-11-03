@@ -248,11 +248,44 @@ static int json_encode(JsonBuf *b, V *v) {
         return jb_cstr(b, tmp);
     }
     if (v->t == T_STR) return jb_quoted(b, v->s);
-    if (v->t == T_LIST) {
+    if (v->t == T_LIST || v->t == T_IVEC || v->t == T_FVEC || v->t == T_BVEC || v->t == T_CVEC) {
         if (jb_cstr(b, "[") != 0) return -1;
         for (int64_t i = 0; i < v->n; i++) {
             if (i && jb_cstr(b, ",") != 0) return -1;
-            if (json_encode(b, v->L[i]) != 0) return -1;
+            if (v->t == T_LIST) {
+                if (json_encode(b, v->L[i]) != 0) return -1;
+            } else if (v->t == T_IVEC || v->t == T_CVEC) {
+                char tmp[32];
+                long long n = v->t == T_IVEC ? (long long)v->J[i] : (long long)v->B[i];
+                snprintf(tmp, sizeof tmp, "%lld", n);
+                if (jb_cstr(b, tmp) != 0) return -1;
+            } else if (v->t == T_BVEC) {
+                if (jb_cstr(b, v->B[i] ? "true" : "false") != 0) return -1;
+            } else {
+                char tmp[64];
+                snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                if (jb_cstr(b, tmp) != 0) return -1;
+            }
+        }
+        return jb_cstr(b, "]");
+    }
+    if (v->t == T_IMAT || v->t == T_FMAT || v->t == T_BMAT || v->t == T_CMAT) {
+        int64_t cols = mat_cols(v);
+        if (jb_cstr(b, "[") != 0) return -1;
+        for (int64_t r = 0; r < v->n; r++) {
+            if (r && jb_cstr(b, ",") != 0) return -1;
+            if (jb_cstr(b, "[") != 0) return -1;
+            for (int64_t c = 0; c < cols; c++) {
+                if (c && jb_cstr(b, ",") != 0) return -1;
+                char tmp[64];
+                int64_t i = mat_idx(v, r, c);
+                if (v->t == T_IMAT) snprintf(tmp, sizeof tmp, "%lld", (long long)v->J[i]);
+                else if (v->t == T_FMAT) snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                else if (v->t == T_BMAT) snprintf(tmp, sizeof tmp, "%s", v->B[i] ? "true" : "false");
+                else snprintf(tmp, sizeof tmp, "%lld", (long long)v->B[i]);
+                if (jb_cstr(b, tmp) != 0) return -1;
+            }
+            if (jb_cstr(b, "]") != 0) return -1;
         }
         return jb_cstr(b, "]");
     }

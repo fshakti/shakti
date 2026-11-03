@@ -15,8 +15,10 @@ class Popen:
 			cmd : str(parts[0])
 		else:
 			for p in parts:
-				cmd : cmd + " " + str(p)
-			cmd : cmd.strip()
+				if cmd = "":
+					cmd : str(p)
+				else:
+					cmd : cmd + " " + str(p)
 		if cwd:
 			cmd : "cd " + str(cwd) + " && " + cmd
 		self.cmd : cmd

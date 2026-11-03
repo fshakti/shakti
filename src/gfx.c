@@ -551,7 +551,11 @@ void gfx_core_mouse_move(int wx, int wy, int down) { (void)wx;(void)wy;(void)dow
 static inline int gfx_arg_int(V **a, int n, int idx, int fb) {
     if (n <= idx) return fb;
     if (a[idx]->t == T_INT) return (int)a[idx]->j;
-    if (a[idx]->t == T_FLOAT) return (int)a[idx]->f;
+    if (a[idx]->t == T_FLOAT) {
+        int x;
+        if (!float_as_int(a[idx]->f, &x)) return fb;
+        return x;
+    }
     return fb;
 }
 static V *gfx_err(char *err) { P(!err[0], v_err("gfx: failed")); return v_err(err); }

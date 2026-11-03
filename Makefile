@@ -628,18 +628,20 @@ prod-size: clean-shakti-artifacts shakti
 	$(MACOS_RESIGN)
 
 SHAKTI_PORTABLE_CPU ?= 0
+# Linux reports aarch64; macOS reports arm64. Both are 64-bit ARM.
 ifeq ($(SHAKTI_PORTABLE_CPU),1)
   ifeq ($(UNAME_M),arm64)
     # Floor for redistributable arm64 builds. Current Xcode clang rejects
     # -mcpu=apple-m5; bump when the toolchain adds it.
     PROD_SPEED_ARCH := -mcpu=apple-m4
+  else ifeq ($(UNAME_M),aarch64)
+    PROD_SPEED_ARCH := -march=armv8.2-a
   else
     PROD_SPEED_ARCH := -march=x86-64-v2 -mtune=generic
   endif
 else
-  ifeq ($(UNAME_M),arm64)
-    # Host tuning (Apple Silicon M5 and peers) — use native until clang
-    # exposes -mcpu=apple-m5.
+  ifneq (,$(filter arm64 aarch64,$(UNAME_M)))
+    # Host tuning. On Apple Silicon, native until clang exposes -mcpu=apple-m5.
     PROD_SPEED_ARCH := -mcpu=native
   else
     PROD_SPEED_ARCH := -march=x86-64-v2 -mtune=native

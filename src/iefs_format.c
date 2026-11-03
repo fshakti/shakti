@@ -2620,6 +2620,19 @@ static unsigned iefs_format_default(void) {
     return IEFS_VERSION;
 }
 
+/* 0 keeps the default. 2 and 3 are the only versions. Check the int before
+ * narrowing: (unsigned)4294967298 is 2. */
+static int iefs_take_format(V *v, unsigned *ver) {
+    if (!v || v->t != T_INT)
+        return -1;
+    if (v->j == 0)
+        return 0;
+    if (v->j != 2 && v->j != 3)
+        return -1;
+    *ver = (unsigned)v->j;
+    return 0;
+}
+
 static int iefs_sync_from_arg(V *v, int *out_sync) {
     if (!v || v->t != T_STR || !v->s)
         return -1;
@@ -2663,13 +2676,8 @@ V *bi_iefs_save(V **a, int n) {
         if (a[4]->t != T_INT )
             return v_err("iefs_save: level must be int");
         level = (int)a[4]->j;
-        if (a[5]->t != T_INT )
+        if (iefs_take_format(a[5], &ver) != 0)
             return v_err("iefs_save: format must be 2 or 3");
-        if (a[5]->j != 0) {
-            ver = (unsigned)a[5]->j;
-            if (ver != 2 && ver != 3)
-                return v_err("iefs_save: format must be 2 or 3");
-        }
         if (a[6]->t == T_DICT)
             codecs = a[6];
         else if (!(a[6]->t == T_LIST && a[6]->n == 0))
@@ -2704,10 +2712,7 @@ V *bi_iefs_save(V **a, int n) {
             argi++;
         }
         if (n > argi) {
-            if (a[argi]->t != T_INT)
-                return v_err("iefs_save: format must be 2 or 3");
-            ver = (unsigned)a[argi]->j;
-            if (ver != 2 && ver != 3)
+            if (iefs_take_format(a[argi], &ver) != 0)
                 return v_err("iefs_save: format must be 2 or 3");
             argi++;
         }
@@ -2831,13 +2836,8 @@ V *bi_iefs_dumps(V **a, int n) {
         level = (int)a[2]->j;
     }
     if (n > 3) {
-        if (a[3]->t != T_INT )
+        if (iefs_take_format(a[3], &ver) != 0)
             return v_err("iefs_dumps: format must be 2 or 3");
-        if (a[3]->j != 0) {
-            ver = (unsigned)a[3]->j;
-            if (ver != 2 && ver != 3)
-                return v_err("iefs_dumps: format must be 2 or 3");
-        }
     }
     if (n > 4) {
         if (a[4]->t != T_DICT && !(a[4]->t == T_LIST && a[4]->n == 0))

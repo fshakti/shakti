@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <sys/uio.h>
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 
 #if defined(_WIN32)
@@ -33,8 +34,15 @@ V*subprocess_ex(V**a,in,const char*dir_env){
     if(runfd>=0) close(runfd);
     return NULL;
   }
-  char runpath[64];
+  char runpath[PATH_MAX];
+#if defined(__APPLE__)
+  if (fcntl(runfd, F_GETPATH, runpath) != 0) {
+    close(runfd);
+    return v_err("subprocess");
+  }
+#else
   snprintf(runpath, sizeof runpath, "/proc/self/fd/%d", runfd);
+#endif
 
 #if defined(__linux__)
   int t;

@@ -22,6 +22,19 @@ int shakti_fs_check(const char *path, int write, char *err, size_t err_cap);
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* libSystem provides fdatasync; the macOS SDK headers may not declare it. */
+#ifdef __APPLE__
+int fdatasync(int fd);
+#endif
+
+/* macOS read/write/pread/pwrite reject a count above INT_MAX (EINVAL). */
+#ifndef IEFS_IO_MAX_XFER
+#define IEFS_IO_MAX_XFER (1u << 30)
+#endif
+static size_t xfer_n(size_t n) {
+    return n > (size_t)IEFS_IO_MAX_XFER ? (size_t)IEFS_IO_MAX_XFER : n;
+}
+
 #ifndef MADV_HUGEPAGE
 #define MADV_HUGEPAGE 14
 #endif
@@ -201,7 +214,7 @@ int iefs_io_pread(int fd, void *buf, size_t len, off_t off, char *err, size_t er
     }
     size_t got = 0;
     while (got < len) {
-        ssize_t r = pread(fd, (unsigned char *)buf + got, len - got, off + (off_t)got);
+        ssize_t r = pread(fd, (unsigned char *)buf + got, xfer_n(len - got), off + (off_t)got);
         if (r < 0) {
             if (errno == EINTR)
                 continue;
@@ -228,21 +241,57 @@ int iefs_io_extent_in_bounds(uint64_t off, uint64_t len, size_t n) {
     return 1;
 }
 
+typedef struct {
+    uint64_t a0, a1;
+} IefsSpan;
+
+static int iefs_span_cmp(const void *p, const void *q) {
+    const IefsSpan *a = p, *b = q;
+    if (a->a0 < b->a0) return -1;
+    if (a->a0 > b->a0) return 1;
+    if (a->a1 < b->a1) return -1;
+    if (a->a1 > b->a1) return 1;
+    return 0;
+}
+
 static int extents_overlap(const uint64_t *offs, const uint64_t *lens, uint32_t n_ext) {
+    if (n_ext < 2)
+        return 0;
+    IefsSpan *s = malloc((size_t)n_ext * sizeof *s);
+    if (!s) {
+        /* Fall back to the pairwise check if the sort buffer cannot be allocated. */
+        for (uint32_t i = 0; i < n_ext; i++) {
+            if (lens[i] == 0)
+                continue;
+            uint64_t a0 = offs[i], a1 = offs[i] + lens[i];
+            for (uint32_t j = i + 1; j < n_ext; j++) {
+                if (lens[j] == 0)
+                    continue;
+                uint64_t b0 = offs[j], b1 = offs[j] + lens[j];
+                if (a0 < b1 && b0 < a1)
+                    return 1;
+            }
+        }
+        return 0;
+    }
+    uint32_t m = 0;
     for (uint32_t i = 0; i < n_ext; i++) {
         if (lens[i] == 0)
             continue;
-        /* offs+lens already in-bounds ⇒ no wrap */
-        uint64_t a0 = offs[i], a1 = offs[i] + lens[i];
-        for (uint32_t j = i + 1; j < n_ext; j++) {
-            if (lens[j] == 0)
-                continue;
-            uint64_t b0 = offs[j], b1 = offs[j] + lens[j];
-            if (a0 < b1 && b0 < a1)
-                return 1;
+        s[m].a0 = offs[i];
+        s[m].a1 = offs[i] + lens[i];
+        m++;
+    }
+    qsort(s, m, sizeof *s, iefs_span_cmp);
+    int bad = 0;
+    for (uint32_t i = 1; i < m; i++) {
+        if (s[i].a0 < s[i - 1].a1) {
+            bad = 1;
+            break;
         }
     }
-    return 0;
+    free(s);
+    return bad;
 }
 
 static int validate_extents(const uint64_t *offs, const uint64_t *lens, uint32_t n_ext, size_t n,
@@ -628,7 +677,7 @@ static int read_all_buffered(int fd, size_t n, unsigned char **out, size_t *out_
     }
     size_t got = 0;
     while (got < n) {
-        ssize_t r = read(fd, buf + got, n - got);
+        ssize_t r = read(fd, buf + got, xfer_n(n - got));
         if (r < 0) {
             if (errno == EINTR)
                 continue;
@@ -658,7 +707,7 @@ static int read_all_direct(int fd, size_t n, unsigned char **out, size_t *out_le
     }
     size_t got = 0;
     while (got < aligned_n) {
-        ssize_t r = read(fd, buf + got, aligned_n - got);
+        ssize_t r = read(fd, buf + got, xfer_n(aligned_n - got));
         if (r < 0) {
             if (errno == EINTR)
                 continue;
@@ -684,7 +733,7 @@ static int read_all_direct(int fd, size_t n, unsigned char **out, size_t *out_le
         if (flags >= 0)
             (void)fcntl(fd, F_SETFL, flags & ~O_DIRECT);
         while (got < n) {
-            ssize_t r = read(fd, buf + got, n - got);
+            ssize_t r = read(fd, buf + got, xfer_n(n - got));
             if (r < 0) {
                 if (errno == EINTR)
                     continue;
@@ -727,29 +776,20 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
         return -1;
 
     int use_direct = 0;
-    int fd = -1;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        set_errf(err, err_cap, "iefs open", errno);
+        return -1;
+    }
 #if defined(__linux__) && defined(O_DIRECT)
     {
         struct stat st0;
-        if (stat(path, &st0) == 0 && S_ISREG(st0.st_mode) && st0.st_size >= 0)
+        if (fstat(fd, &st0) == 0 && S_ISREG(st0.st_mode) && st0.st_size >= 0)
             use_direct = iefs_io_want_direct((size_t)st0.st_size, mode);
         else if (mode == IEFS_IO_DIRECT)
             use_direct = 1;
     }
-    if (use_direct) {
-        fd = open(path, O_RDONLY | O_DIRECT);
-        if (fd < 0)
-            use_direct = 0; /* FS rejected O_DIRECT open → buffered */
-    }
 #endif
-    if (fd < 0) {
-        fd = open(path, O_RDONLY);
-        if (fd < 0) {
-            set_errf(err, err_cap, "iefs open", errno);
-            return -1;
-        }
-        use_direct = 0;
-    }
     struct stat st;
     if (fstat(fd, &st) < 0) {
         set_errf(err, err_cap, "iefs fstat", errno);
@@ -779,19 +819,32 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
         close(fd);
         return -1;
     }
-    int rc;
+    int rc = 0;
+#if defined(__linux__) && defined(O_DIRECT)
     if (use_direct) {
-        rc = read_all_direct(fd, n, out, out_len, err, err_cap);
-        if (rc == -2) {
-            close(fd);
-            fd = open(path, O_RDONLY);
-            if (fd < 0) {
-                set_errf(err, err_cap, "iefs open", errno);
-                return -1;
-            }
+        /* Header was read on a buffered fd. O_DIRECT refuses a short pread
+         * into an unaligned buffer, so the bulk read uses its own fd. */
+        int dfd = open(path, O_RDONLY | O_DIRECT);
+        if (dfd < 0) {
             rc = read_all_buffered(fd, n, out, out_len, err, err_cap);
+        } else {
+            close(fd);
+            fd = dfd;
+            rc = read_all_direct(fd, n, out, out_len, err, err_cap);
+            if (rc == -2) {
+                close(fd);
+                fd = open(path, O_RDONLY);
+                if (fd < 0) {
+                    set_errf(err, err_cap, "iefs open", errno);
+                    return -1;
+                }
+                rc = read_all_buffered(fd, n, out, out_len, err, err_cap);
+            }
         }
-    } else {
+    } else
+#endif
+    {
+        (void)use_direct;
         rc = read_all_buffered(fd, n, out, out_len, err, err_cap);
     }
     close(fd);
@@ -806,7 +859,7 @@ int iefs_io_read_all(const char *path, unsigned char **out, size_t *out_len, cha
 static int write_all_fd(int fd, const unsigned char *buf, size_t len) {
     size_t off = 0;
     while (off < len) {
-        ssize_t w = write(fd, buf + off, len - off);
+        ssize_t w = write(fd, buf + off, xfer_n(len - off));
         if (w < 0) {
             if (errno == EINTR)
                 continue;
@@ -848,7 +901,7 @@ static int write_direct_fd(int fd, const unsigned char *buf, size_t len) {
 
     size_t off = 0;
     while (off < padded) {
-        ssize_t w = write(fd, src + off, padded - off);
+        ssize_t w = write(fd, src + off, xfer_n(padded - off));
         if (w < 0) {
             if (errno == EINTR)
                 continue;
@@ -994,7 +1047,7 @@ int iefs_io_write_atomic(const char *path, const unsigned char *buf, size_t len,
 static int pwrite_all(int fd, const unsigned char *buf, size_t len, off_t off) {
     size_t got = 0;
     while (got < len) {
-        ssize_t w = pwrite(fd, buf + got, len - got, off + (off_t)got);
+        ssize_t w = pwrite(fd, buf + got, xfer_n(len - got), off + (off_t)got);
         if (w < 0) {
             if (errno == EINTR)
                 continue;

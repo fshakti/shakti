@@ -193,9 +193,17 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - `==` is not supported
 - `_` separates digits in a decimal number, as in Python: `1_000`, `0.000_1`, `1e1_0`; it must sit
   between two digits (`1_`, `1__0`, `1_.5` are errors)
-- `None`, `False`, zero (including `char(0)` and the zero date, time and datetime), `""`,
-  empty containers (list, matrix, dict, table) and error values are false in `if`, `while`,
+- `None`, `False`, zero (including `char(0)` and the zero date, time and datetime), `""`
+  and empty containers (list, matrix, dict, table) are false in `if`, `while`,
   `not`, `and`/`or`, `bool()`, `any()`, `all()` and `filter()`
+- An error value used as a condition, or as a statement whose result is not kept, raises,
+  so `try`/`except` can catch it. Storing one (`x : abs("nope")`) keeps the value.
+  `assert` raises `AssertionError`, which `try` catches. `bool` of an error is false
+- `=` compares a value with a value. `!=` is the opposite of `=`. Ordering two lists with `<` is an error
+- A missing dict key reads as `None`. `len` of a string is its length in bytes
+- SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
+- An integer literal that does not fit in a signed 64-bit int is a float. `abs` of the minimum int is that positive float
+- `b"..."` is `list[char]`. `//=`, `%=` and `**=` (and `//:`, `%:`, `**:`) update in place
 - Integer bitwise helpers: `band(a,b)`, `bor(a,b)`, `bxor(a,b)`, `bnot(a)`,
   `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical shifts on the low 64 bits;
   shift counts must be in `0..63`
@@ -558,10 +566,11 @@ Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TS
 
 ### CSV / TSV load
 
-- Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0`.
-  A column loads as an `ivec` when each of its fields is written as digits with an optional sign, once
+- Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0.0`
+  and makes that column an `fvec`.
+  A column loads as an `ivec` when every field is digits with an optional sign, once
   the spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off, inside quotes too:
-  `1, 2` and `1," 2 "` are ints; `2.0` and `1e3` make the column float.
+  `1, 2` and `1," 2 "` are ints; `2.0`, `1e3`, or any text such as `x` make the column float.
 - Empty fields (e.g. CSV `1,` or TSV `1\t`) pad as `0`. Leading/trailing empty fields are preserved.
 - String columns written by `save` do **not** round-trip as strings — reload yields numerics (often `0` for labels).
 - A field in double quotes may hold the delimiter, line breaks (anywhere in it, at its end too) and `""`

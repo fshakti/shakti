@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include <time.h>
 
 #ifdef SHAKTI_HAVE_SYNTH
@@ -135,7 +136,7 @@ void input_hub_key_set(int code, int down) {
 void input_hub_shutdown(void) {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
     if (g_in.raw && g_in.has_orig) {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_in.orig);
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_in.orig);
         g_in.raw = 0;
     }
 #endif
@@ -255,13 +256,13 @@ static void raw_on(void) {
     r.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
     r.c_cc[VMIN] = 0;
     r.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &r);
+    tcsetattr(STDIN_FILENO, TCSANOW, &r);
     g_in.raw = 1;
 }
 
 static void raw_off(void) {
     if (!g_in.raw || !g_in.has_orig) return;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_in.orig);
+    tcsetattr(STDIN_FILENO, TCSANOW, &g_in.orig);
     g_in.raw = 0;
 }
 
@@ -275,7 +276,7 @@ static void raw_wait_first(void) {
     r.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
     r.c_cc[VMIN] = 1;
     r.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &r);
+    tcsetattr(STDIN_FILENO, TCSANOW, &r);
     g_in.wait_first = 1;
 }
 
@@ -287,7 +288,13 @@ static void raw_after_first(void) {
 #endif
 
 static double now_ms(void) {
-    return (double)clock() / ((double)CLOCKS_PER_SEC / 1000.0);
+#if defined(_WIN32)
+    return (double)GetTickCount64();
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+#endif
 }
 
 static void pump_synth(void) {
@@ -348,10 +355,17 @@ static int read_byte_timed(int timeout_ms, unsigned char *out) {
         tv.tv_usec = (timeout_ms % 1000) * 1000;
     }
     pump_synth();
-    if (select(STDIN_FILENO + 1, &fds, NULL, NULL, timeout_ms < 0 ? NULL : &tv) > 0 &&
-        FD_ISSET(STDIN_FILENO, &fds)) {
-        ssize_t n = read(STDIN_FILENO, out, 1);
-        return n > 0;
+    int sel;
+    do {
+        sel = select(STDIN_FILENO + 1, &fds, NULL, NULL, timeout_ms < 0 ? NULL : &tv);
+    } while (sel < 0 && errno == EINTR);
+    if (sel > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
+        ssize_t n;
+        do {
+            n = read(STDIN_FILENO, out, 1);
+        } while (n < 0 && errno == EINTR);
+        if (n > 0) return 1;
+        return -1; /* EOF or a read error: waiting again would spin */
     }
     return 0;
 #endif
@@ -467,7 +481,8 @@ static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
     return 0;
 }
 
-static void tty_drain(int timeout_ms) {
+/* 0 when the wait ended, -1 when stdin is at end of input. */
+static int tty_drain(int timeout_ms) {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
     if (!g_in.raw && is_tty()) raw_on();
 #endif
@@ -482,9 +497,11 @@ static void tty_drain(int timeout_ms) {
          * begun is given up to 50 ms for its next byte, as a terminal's escape delay does */
         if (forever) timeout_ms = got ? 0 : -1;
         int wait = timeout_ms < 0 ? -1 : (int)(deadline - now_ms());
-        if (timeout_ms == 0) wait = forever && pn ? 50 : 0;
+        if (timeout_ms == 0) wait = forever && pn ? 500 : 0;
         if (wait < 0 && timeout_ms >= 0 && timeout_ms != 0 && now_ms() >= deadline) break;
-        if (!read_byte_timed(wait, &c)) {
+        int rd = read_byte_timed(wait, &c);
+        if (rd < 0) return -1;
+        if (!rd) {
             if (timeout_ms == 0) break;
             if (timeout_ms > 0 && now_ms() >= deadline) break;
             if (timeout_ms < 0) continue;
@@ -512,6 +529,7 @@ static void tty_drain(int timeout_ms) {
         }
         if (g_in.qt != qt) got = 1;
     }
+    return 0;
 }
 
 void input_hub_pump(int timeout_ms) {
@@ -557,7 +575,7 @@ V *input_wait_ms(int64_t ms) {
 #endif
     if (ms < 0 || ms == INPUT_WAIT_FOREVER) {
         for (;;) {
-            tty_drain(-1);
+            if (tty_drain(-1) < 0) break;
             if (!q_empty()) break;
         }
     } else if (ms == 0) {
@@ -584,11 +602,11 @@ V *v_input_stream(int mode, const char *prompt) {
 
 V *input_readline(const char *prompt) {
     input_hub_init();
-    if (prompt && prompt[0]) {
-        printf("%s", prompt);
-        fflush(stdout);
-    }
     if (!is_tty()) {
+        if (prompt && prompt[0]) {
+            printf("%s", prompt);
+            fflush(stdout);
+        }
         char buf[4096];
         if (!fgets(buf, sizeof buf, stdin)) return v_str("");
         size_t l = strlen(buf);
@@ -706,6 +724,21 @@ char *input_hub_readline_repl(const char *prompt) {
 #endif
             return buf;
         }
+        if (c == 27) {
+            char s0 = 0, s1 = 0;
+            if (!input_hub_read_char(&s0) || !input_hub_read_char(&s1)) continue;
+            if (s0 == '[') {
+                if (s1 == 'D' && pos > 0) {
+                    pos--;
+                    while (pos > 0 && ((unsigned char)buf[pos] & 0xc0) == 0x80) pos--;
+                } else if (s1 == 'C' && pos < len) {
+                    pos++;
+                    while (pos < len && ((unsigned char)buf[pos] & 0xc0) == 0x80) pos++;
+                } else if (s1 == 'H') pos = 0;
+                else if (s1 == 'F') pos = len;
+                else continue;
+            } else continue;
+        } else
         if (c == 127 || c == 8) {
             if (pos > 0) {
                 /* the whole character: back over its continuation bytes to its first byte */

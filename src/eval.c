@@ -406,7 +406,7 @@ static int eval_int_expr_i(Node *n, int64_t i, int64_t *out) {
 static V *try_fast_counting_while(Node *n, Env *e) {
     if(!n || n->nch < 2) return NULL;
     Node *cond = n->ch[0], *body = n->ch[1];
-    if(cond->type != N_BINOP || cond->op != OP_LT || cond->nch < 2) return NULL;
+    if((cond->type != N_CMP && cond->type != N_BINOP) || cond->op != OP_LT || cond->nch < 2) return NULL;
     if(cond->ch[0]->type != N_NAME || cond->ch[1]->type != N_INT) return NULL;
     if(body->type != N_BLOCK || body->nch < 1) return NULL;
     const char *iname = cond->ch[0]->sval;
@@ -688,7 +688,7 @@ static inline void bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V *
             positional = 0;
         } else if (positional && i < nargs) {
             env_set(ce, s, args[i]);
-        } else if (fn->defaults && i < fn->defaults->n && fn->defaults->L[i]->t != T_NIL) {
+        } else if (fn->defaults && i < fn->defaults->n && fn->defaults->L[i]) {
             env_set(ce, s, fn->defaults->L[i]);
         }
     }
@@ -828,7 +828,8 @@ V *eval(Node *n, Env *e) {
     case N_CVECS: {
         const char *h = n->sval ? n->sval : "";
         size_t nd = strlen(h);
-        if (nd < 2 || (nd % 2) != 0) return v_err("hex list[char]: need even digits");
+        if (nd == 0) return v_cvec(0);
+        if ((nd % 2) != 0) return v_err("hex list[char]: need even digits");
         int64_t nb = (int64_t)(nd / 2);
         V *r = v_cvec(nb);
         for (int64_t i = 0; i < nb; i++) {
@@ -1452,7 +1453,16 @@ V *eval(Node *n, Env *e) {
             if(a->t==T_FVEC) { V *r=v_fvec(a->n); for(int64_t i=0;i<a->n;i++) r->F[i]=-a->F[i]; v_free(a); return r; }
             if(a->t==T_FMAT) { int64_t ne=a->n*mat_cols(a); V *r=v_fmat(a->n,mat_cols(a)); for(int64_t i=0;i<ne;i++) r->F[i]=-a->F[i]; v_free(a); return r; }
         }
-        if(n->op == OP_NOT) { int r = !is_truthy(a); v_free(a); return v_bool(r); }
+        if(n->op == OP_NEG && a && a->t == T_CVEC) {
+            V *r = v_ivec(a->n);
+            for (int64_t i = 0; i < a->n; i++) r->J[i] = -(int64_t)(unsigned char)a->B[i];
+            v_free(a);
+            return r;
+        }
+        if(n->op == OP_NOT) {
+            if (a && a->t == T_ERR) return a;
+            int r = !is_truthy(a); v_free(a); return v_bool(r);
+        }
         v_free(a);
         return v_err("bad unop");
     }
@@ -1478,7 +1488,8 @@ V *eval(Node *n, Env *e) {
         }
         if(target->type == N_NAME) {
             env_set(e, target->sval, val);
-            V *r = v_ref(val); v_free(val); return r;
+            v_free(val);
+            return v_nil();
         }
         if(target->type == N_INDEX) {
             V *obj = eval(target->ch[0], e);
@@ -1926,6 +1937,14 @@ V *eval(Node *n, Env *e) {
             free(args); free(kwnames); free(kwvals);
             return result;
         }
+        if(fn && fn->t == T_FN && fn->n == -1 && fn->s) {
+            V *r = builtin_call(fn->s, args, nargs, kwnames, kwvals, nkw, e);
+            v_free(fn);
+            for(int i=0;i<nargs;i++) v_free(args[i]);
+            for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+            free(args); free(kwnames); free(kwvals);
+            return r;
+        }
         if(fn && shakti_is_class(fn)) {
             V *result = class_new(fn, args, nargs, kwnames, kwvals, nkw, e);
             v_free(fn);
@@ -1966,6 +1985,13 @@ V *eval(Node *n, Env *e) {
         EVAL_STACK_GUARD();
         for(int i=0; i<n->nch; i+=2) {
             V *cond = eval(n->ch[i], e);
+            if (cond && cond->t == T_ERR) {
+                g_error = 1;
+                if (g_error_val) v_free(g_error_val);
+                g_error_val = v_ref(cond);
+                v_free(cond);
+                return v_nil();
+            }
             int t = is_truthy(cond);
             v_free(cond);
             P(t,eval(n->ch[i+1], e))
@@ -1979,8 +2005,21 @@ V *eval(Node *n, Env *e) {
         V *r = v_nil();
         for(;;) {
             V *cond = eval(n->ch[0], e);
+            if (cond && cond->t == T_ERR) {
+                g_error = 1;
+                if (g_error_val) v_free(g_error_val);
+                g_error_val = v_ref(cond);
+                v_free(cond); v_free(r);
+                return v_nil();
+            }
             int t = is_truthy(cond); v_free(cond);
             if(!t) break;
+            if (r && r->t == T_ERR) {
+                g_error = 1;
+                if (g_error_val) v_free(g_error_val);
+                g_error_val = r;
+                return v_nil();
+            }
             v_free(r);
             r = eval(n->ch[1], e);
             P(g_returning || g_error,r)
@@ -1998,7 +2037,15 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = iter->t == T_IVEC ? v_int(iter->J[i]) : iter->L[i] ? v_ref(iter->L[i]) : v_nil();
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2008,7 +2055,15 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_float(iter->F[i]);
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2018,7 +2073,15 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_char(iter->B[i]);
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2028,7 +2091,15 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_bool(iter->B[i] != 0);
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2047,7 +2118,15 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = v_mat_row(iter, i);
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2071,7 +2150,15 @@ V *eval(Node *n, Env *e) {
                 if(g_error) { v_free(iter); return item; }
                 if(!item || item->t == T_NIL) { v_free(item); break; }
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2083,7 +2170,15 @@ V *eval(Node *n, Env *e) {
                 if(g_error) { v_free(iter); return item; }
                 if(!item || item->t == T_NIL) { v_free(item); break; }
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2093,7 +2188,15 @@ V *eval(Node *n, Env *e) {
             for(int64_t i=0;i<iter->n;i++) {
                 V *item = table_row(iter, i);
                 for_set_vars(vars, item, e);
-                v_free(item); v_free(r);
+                v_free(item);
+                if (r && r->t == T_ERR) {
+                    g_error = 1;
+                    if (g_error_val) v_free(g_error_val);
+                    g_error_val = r;
+                    v_free(iter);
+                    return v_nil();
+                }
+                v_free(r);
                 r = eval(n->ch[2], e);
                 if(g_returning||g_error) { v_free(iter); return r; }
                 if(g_breaking) { g_breaking=0; break; }
@@ -2123,10 +2226,10 @@ V *eval(Node *n, Env *e) {
         V *defaults = v_list(n->ch[0]->nch);
         for(int i=0; i<n->ch[0]->nch; i++) {
             params->L[i] = v_str(n->ch[0]->ch[i]->sval);
-            if(n->nch > 2 && i < n->ch[2]->nch && n->ch[2]->ch[i]->type != N_NONE) {
+            if(n->nch > 2 && i < n->ch[2]->nch && n->ch[2]->ch[i]->type != N_PASS) {
                 defaults->L[i] = eval(n->ch[2]->ch[i], e);
             } else {
-                defaults->L[i] = v_nil();
+                defaults->L[i] = NULL;
             }
         }
         Node *body = n->ch[1];
@@ -2148,10 +2251,10 @@ V *eval(Node *n, Env *e) {
         V *defaults = v_list(n->ch[0]->nch);
         for(int i=0; i<n->ch[0]->nch; i++) {
             params->L[i] = v_str(n->ch[0]->ch[i]->sval);
-            if(n->nch > 2 && i < n->ch[2]->nch && n->ch[2]->ch[i]->type != N_NONE) {
+            if(n->nch > 2 && i < n->ch[2]->nch && n->ch[2]->ch[i]->type != N_PASS) {
                 defaults->L[i] = eval(n->ch[2]->ch[i], e);
             } else {
-                defaults->L[i] = v_nil();
+                defaults->L[i] = NULL;
             }
         }
         Node *body = n->ch[1];
@@ -2328,6 +2431,12 @@ V *eval(Node *n, Env *e) {
         EVAL_STACK_GUARD();
         V *r = v_nil();
         i(n->nch,{
+            if (r && r->t == T_ERR) {
+                g_error = 1;
+                if (g_error_val) v_free(g_error_val);
+                g_error_val = r;
+                return v_nil();
+            }
             v_free(r);
             r = eval(n->ch[i], e);
             P(g_returning || g_breaking || g_continuing || g_error,r)
