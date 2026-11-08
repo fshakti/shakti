@@ -1,7 +1,7 @@
 # shakti
 
 [Website](https://shakti.com) · [Try shakti in your browser](https://shakti.com/?try)
-[Discord](https://discord.gg/PkKwUk9Tf) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
+[Discord](https://discord.gg/csWTFekpN) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
 
 Small interpreted language (0.15.0) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), asof helpers, and optional SQL,

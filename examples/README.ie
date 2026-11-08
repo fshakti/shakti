@@ -54,7 +54,7 @@ def fill_urls():
     urls[2] : "https://github.com/fshakti/shakti/tree/master/lib"
     urls[3] : "https://www.apache.org/licenses/LICENSE-2.0.txt"
     urls[4] : "https://github.com/avillega/tree-sitter-shakti"
-    urls[5] : "https://discord.gg/kf8hXkZSb"
+    urls[5] : "https://discord.gg/csWTFekpN"
     urls[6] : "https://shakti.com/?try"
     urls[7] : dist_url()
     return 0
