@@ -166,7 +166,7 @@ int lex_peek_minus_is_subtraction(Lexer *l) {
     l->line = save_line;
     l->has_peek = save_peek;
     l->peek = save_tok;
-    return t.type == T_INT_ || t.type == T_FLOAT_;
+    return t.type == T_INT_;
 }
 static Token lex_fstring(Lexer *l) {
     const char *s = l->src;
