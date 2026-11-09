@@ -83,6 +83,13 @@ V *bi_fread(V **a, in) {
     FS_GUARD("read", a[0]->s, 0);
     FILE *f = fopen(a[0]->s, "rb");
     P(!f,v_errf("read: %s", strerror(errno)))
+    {
+        char ferr[512];
+        if (shakti_fs_check_fd(fileno(f), 0, ferr, sizeof ferr) != 0) {
+            fclose(f);
+            return v_errf("read: %s", ferr);
+        }
+    }
     fseek(f, 0, SEEK_END);
     long z = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -111,6 +118,13 @@ V *bi_fwrite(V **a, in) {
     FS_GUARD("write", a[0]->s, 1);
     FILE *f = fopen(a[0]->s, "wb");
     P(!f,v_errf("write: %s", strerror(errno)))
+    {
+        char ferr[512];
+        if (shakti_fs_check_fd(fileno(f), 1, ferr, sizeof ferr) != 0) {
+            fclose(f);
+            return v_errf("write: %s", ferr);
+        }
+    }
     size_t w = fwrite(a[1]->s, 1, strlen(a[1]->s), f);
     fclose(f);
     return v_int((int64_t)w);
@@ -120,6 +134,13 @@ V *bi_readlines(V **a, in) {
     FS_GUARD("readlines", a[0]->s, 0);
     FILE *f = fopen(a[0]->s, "r");
     P(!f,v_errf("readlines: %s", strerror(errno)))
+    {
+        char ferr[512];
+        if (shakti_fs_check_fd(fileno(f), 0, ferr, sizeof ferr) != 0) {
+            fclose(f);
+            return v_errf("readlines: %s", ferr);
+        }
+    }
     V *r = v_list(0);
     char buf[8192];
     while (fgets(buf, sizeof buf, f)) {

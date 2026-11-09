@@ -707,29 +707,69 @@ int shakti_net_allowed(void) {
 }
 /* Safe mode confines file access to SHAKTI_FS_ROOT (default: the working
  * directory at first use). Paths are resolved with realpath, so symlinks that
- * point outside the root are rejected. */
+ * point outside the root are rejected. Callers that open the path must also
+ * call shakti_fs_check_fd on the resulting descriptor: the path can change
+ * between the name check and the open. */
+#ifndef _WIN32
+static char fs_root[4096];
+static int fs_root_load(char *err, size_t err_cap) {
+    if (fs_root[0]) return 0;
+    const char *r = getenv("SHAKTI_FS_ROOT");
+    char *rp = realpath(r && r[0] ? r : ".", NULL);
+    if (!rp) {
+        if (err && err_cap) snprintf(err, err_cap, "safe mode: bad SHAKTI_FS_ROOT");
+        return -1;
+    }
+    snprintf(fs_root, sizeof fs_root, "%s", rp);
+    free(rp);
+    return 0;
+}
+static int fs_inside(const char *full) {
+    size_t rl = strlen(fs_root);
+    return !strcmp(fs_root, "/") ||
+           (!strncmp(full, fs_root, rl) && (full[rl] == 0 || full[rl] == '/'));
+}
+#endif
+int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
+#ifdef _WIN32
+    (void)fd; (void)write; (void)err; (void)err_cap;
+    return 0;
+#else
+    char proc[64], full[8192];
+    if (!shakti_safe_mode()) return 0;
+    if (fd < 0) {
+        if (err && err_cap) snprintf(err, err_cap, "safe mode: bad fd");
+        return -1;
+    }
+    if (fs_root_load(err, err_cap) != 0) return -1;
+    snprintf(proc, sizeof proc, "/proc/self/fd/%d", fd);
+    char *rp = realpath(proc, NULL);
+    if (!rp) {
+        if (err && err_cap) snprintf(err, err_cap, "safe mode: cannot resolve opened file");
+        return -1;
+    }
+    snprintf(full, sizeof full, "%s", rp);
+    free(rp);
+    if (!fs_inside(full)) {
+        if (err && err_cap)
+            snprintf(err, err_cap, "safe mode: %s outside SHAKTI_FS_ROOT", write ? "write" : "read");
+        return -1;
+    }
+    return 0;
+#endif
+}
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap) {
 #ifdef _WIN32
     (void)path; (void)write; (void)err; (void)err_cap;
     return 0;
 #else
-    static char root[4096];
     char full[8192];
     if (!shakti_safe_mode()) return 0;
     if (!path || !path[0]) {
         if (err && err_cap) snprintf(err, err_cap, "safe mode: empty path");
         return -1;
     }
-    if (!root[0]) {
-        const char *r = getenv("SHAKTI_FS_ROOT");
-        char *rp = realpath(r && r[0] ? r : ".", NULL);
-        if (!rp) {
-            if (err && err_cap) snprintf(err, err_cap, "safe mode: bad SHAKTI_FS_ROOT");
-            return -1;
-        }
-        snprintf(root, sizeof root, "%s", rp);
-        free(rp);
-    }
+    if (fs_root_load(err, err_cap) != 0) return -1;
     char *rp = realpath(path, NULL);
     if (rp) {
         snprintf(full, sizeof full, "%s", rp);
@@ -753,10 +793,7 @@ int shakti_fs_check(const char *path, int write, char *err, size_t err_cap) {
         snprintf(full, sizeof full, "%s/%s", dp, base);
         free(dp);
     }
-    size_t rl = strlen(root);
-    int inside = !strcmp(root, "/") ||
-                 (!strncmp(full, root, rl) && (full[rl] == 0 || full[rl] == '/'));
-    if (!inside) {
+    if (!fs_inside(full)) {
         if (err && err_cap)
             snprintf(err, err_cap, "safe mode: %s outside SHAKTI_FS_ROOT: %s", write ? "write" : "read", path);
         return -1;

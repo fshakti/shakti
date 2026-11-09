@@ -21,6 +21,17 @@ V*subprocess(V**a,in){
   return subprocess_ex(a,n,NULL);
 }
 #else // linux, apple, etc
+/* The child of ./run receives this allowlist only. The parent's other
+ * variables, including tokens, stay in this process. */
+static int subprocess_env_keep(const char *kv) {
+    static const char *const pfx[] = {
+        "PATH=", "LANG=", "LC_ALL=", "LC_CTYPE=", "TZ=", "HOME="
+    };
+    size_t i;
+    for (i = 0; i < sizeof pfx / sizeof pfx[0]; i++)
+        if (!strncmp(kv, pfx[i], strlen(pfx[i]))) return 1;
+    return 0;
+}
 /* dir_env, when non-NULL, is exported to the child only as __dir__ (the
  * parent's environment is left untouched). */
 V*subprocess_ex(V**a,in,const char*dir_env){
@@ -80,12 +91,9 @@ V*subprocess_ex(V**a,in,const char*dir_env){
   if(!envp || (dir_env && !dir_kv)){ free(envp); free(dir_kv); close(runfd); close(t); posix_spawn_file_actions_destroy(&file_actions); return v_err("subprocess: oom"); }
   int ek = 0;
   for(char **e = environ; e && *e; e++){
-    if(!strncmp(*e, "__dir__=", 8) ||
-       !strncmp(*e, "SHAKTI_SERVE_TOKEN=", 19) ||
-       !strncmp(*e, "SHAKTI_REST_TOKEN=", 18) ||
-       !strncmp(*e, "SHAKTI_REST_TOKEN_HOSTS=", 24) ||
-       !strncmp(*e, "SHAKTI_TLS_KEY=", 15) ||
-       !strncmp(*e, "SHAKTI_TLS_CERT=", 16))
+    if(!strncmp(*e, "__dir__=", 8))
+      continue;
+    if(!subprocess_env_keep(*e))
       continue;
     envp[ek++] = *e;
   }

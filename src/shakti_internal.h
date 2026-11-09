@@ -63,6 +63,7 @@ int shakti_safe_mode(void);
 int shakti_exec_allowed(void);
 int shakti_net_allowed(void);
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap);
+int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
 
 void shakti_oom(const char *where);
 void *x_malloc(size_t sz, const char *where);
