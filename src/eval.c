@@ -666,44 +666,96 @@ static inline int call_arg_eval(Node *a, Env *e, V ***args, int *nargs, int *cap
     v_free(v);
     return 0;
 }
-static inline void bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V **kwv, int nkw) {
+/* NULL when the arguments fit. An error value when there are too many, too few,
+ * a repeated argument, or a keyword that names no parameter (#76). */
+static V *bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V **kwv, int nkw) {
     V *params = fn->params;
-    int positional = 1;
-    if (!params || params->t != T_LIST) return;
-    for (int i = 0; i < params->n; i++) {
+    int positional = 1, npos = 0, saw_star = 0, saw_dstar = 0, i, j;
+    unsigned char *used;
+    if (!params || params->t != T_LIST) return NULL;
+    for (i = 0; i < params->n; i++) {
         V *p = params->L[i];
-        if (!p || p->t != T_STR) continue;
-        const char *s = p->s;
+        if (!p || p->t != T_STR || !p->s) continue;
+        if (p->s[0] == '*' && p->s[1] == '*') saw_dstar = 1;
+        else if (p->s[0] == '*') saw_star = 1;
+        else npos++;
+    }
+    if (!saw_star && nargs > npos)
+        return v_err("too many arguments");
+    used = nkw > 0 ? calloc((size_t)nkw, 1) : NULL;
+    for (i = 0; i < params->n; i++) {
+        V *p = params->L[i];
+        const char *s;
+        int kw = -1;
+        if (!p || p->t != T_STR || !p->s) continue;
+        s = p->s;
         if (s[0] == '*' && s[1] == '*') {
-            V *k = v_list(nkw), *vl = v_list(nkw);
-            for (int j = 0; j < nkw; j++) { k->L[j] = v_ref(kwn[j]); vl->L[j] = v_ref(kwv[j]); }
-            V *d = v_dict(k, vl);
+            int nk = 0;
+            V *k, *vl, *d;
+            for (j = 0; j < nkw; j++) if (!used || !used[j]) nk++;
+            k = v_list(nk); vl = v_list(nk); nk = 0;
+            for (j = 0; j < nkw; j++) {
+                if (used && used[j]) continue;
+                k->L[nk] = v_ref(kwn[j]);
+                vl->L[nk] = v_ref(kwv[j]);
+                nk++;
+                if (used) used[j] = 1;
+            }
+            d = v_dict(k, vl);
             v_free(k); v_free(vl);
             env_set(ce, s + 2, d);
             v_free(d);
         } else if (s[0] == '*') {
             V *rest = v_list(nargs > i ? nargs - i : 0);
-            for (int j = i; j < nargs; j++) rest->L[j - i] = v_ref(args[j]);
+            for (j = i; j < nargs; j++) rest->L[j - i] = v_ref(args[j]);
             env_set(ce, s + 1, rest);
             v_free(rest);
             positional = 0;
-        } else if (positional && i < nargs) {
-            env_set(ce, s, args[i]);
-        } else if (fn->defaults && i < fn->defaults->n && fn->defaults->L[i]) {
-            env_set(ce, s, fn->defaults->L[i]);
+        } else {
+            for (j = 0; j < nkw; j++) {
+                if (used && used[j]) continue;
+                if (kwn[j] && kwn[j]->t == T_STR && !strcmp(kwn[j]->s, s)) { kw = j; break; }
+            }
+            if (kw >= 0 && positional && i < nargs) {
+                free(used);
+                return v_errf("multiple values for argument '%s'", s);
+            }
+            if (kw >= 0) {
+                env_set(ce, s, kwv[kw]);
+                if (used) used[kw] = 1;
+            } else if (positional && i < nargs) {
+                env_set(ce, s, args[i]);
+            } else if (fn->defaults && i < fn->defaults->n && fn->defaults->L[i]) {
+                env_set(ce, s, fn->defaults->L[i]);
+            } else {
+                free(used);
+                return v_errf("missing argument '%s'", s);
+            }
         }
     }
+    for (j = 0; j < nkw; j++) {
+        if (used && used[j]) continue;
+        if (!saw_dstar) {
+            const char *nm = (kwn[j] && kwn[j]->t == T_STR) ? kwn[j]->s : "?";
+            free(used);
+            return v_errf("unexpected keyword argument '%s'", nm);
+        }
+    }
+    free(used);
+    return NULL;
 }
-void shakti_bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V **kwv, int nkw) {
-    bind_params(ce, fn, args, nargs, kwn, kwv, nkw);
+V *shakti_bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V **kwv, int nkw) {
+    return bind_params(ce, fn, args, nargs, kwn, kwv, nkw);
 }
 static inline V *call_fn(V *fn, V *self, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e) {
     if (!fn || fn->t != T_FN) return v_err("call: not a function");
     if (fn->n == -1) return builtin_call(fn->s, args, nargs, kwn, kwv, nkw, e);
     if (fn->j < 0 || fn->j >= fn_ast_n || !fn_ast[(int)fn->j]) return v_err("call: bad function");
     Env *ce = env_new(fn->closure);
-    bind_params(ce, fn, args, nargs, kwn, kwv, nkw);
-    for (int i = 0; i < nkw; i++) env_set(ce, kwn[i]->s, kwv[i]);
+    {
+        V *err = bind_params(ce, fn, args, nargs, kwn, kwv, nkw);
+        if (err) { env_leave(ce); return err; }
+    }
     if (self) env_set(ce, "self", self);
     int npush = push_list_vals(args, nargs) + push_list_vals(kwv, nkw);
     V *r = eval_fn(fn_ast[(int)fn->j], ce);
@@ -1337,20 +1389,20 @@ V *eval(Node *n, Env *e) {
     case N_DICT: {
         EVAL_STACK_GUARD();
         int np = n->nch / 2;
-        V *keys = v_list(np);
-        V *vals = v_list(np);
+        V *r = v_dict_empty();
         for (int i = 0; i < np; i++) {
-            keys->L[i] = eval(n->ch[i*2], e);
-            vals->L[i] = eval(n->ch[i*2+1], e);
-            V *err = keys->L[i]->t == T_ERR ? keys->L[i] : vals->L[i]->t == T_ERR ? vals->L[i] : NULL;
-            if (err || g_error) {
-                if (err) v_ref(err);
-                v_free(keys); v_free(vals);
-                return err ? err : v_nil();
-            }
+            V *k = eval(n->ch[i*2], e);
+            V *val = eval(n->ch[i*2+1], e);
+            int64_t at;
+            if (!k || k->t == T_ERR) { v_free(val); v_free(r); return k ? k : v_err("dict"); }
+            if (!val || val->t == T_ERR) { v_free(k); v_free(r); return val ? val : v_err("dict"); }
+            if (k->t == T_STR) v_dict_set(r, k->s, val);
+            else if ((at = v_dict_hashed_index(r, k)) >= 0) {
+                v_free(r->vals->L[at]);
+                r->vals->L[at] = v_ref(val);
+            } else v_dict_push(r, k, val);
+            v_free(k); v_free(val);
         }
-        V *r = v_dict(keys, vals);
-        v_free(keys); v_free(vals);
         return r;
     }
     case N_BINOP: {
@@ -1744,7 +1796,7 @@ V *eval(Node *n, Env *e) {
                 } else next = v_err("index out of range");
             } else if(obj->t==T_DICT) {
                 V *found = v_dict_find(obj, idx);
-                next = found ? v_ref(found) : v_nil();
+                next = found ? v_ref(found) : v_err("key");
             } else if(obj->t==T_STR && (idx->t==T_INT||idx->t==T_CHAR)) {
                 int64_t j = idx->j;
                 int64_t slen = strlen(obj->s);
@@ -1818,6 +1870,18 @@ V *eval(Node *n, Env *e) {
             }
             if(n->nch==2) {
                 V *obj = eval(n->ch[1], e);
+                if(obj->t == T_LIST && obj->n == 0) {
+                    int tag = fn_node->ival;
+                    v_free(obj);
+                    switch(tag) {
+                    case T_BVEC: return v_bvec(0);
+                    case T_CVEC: return v_cvec(0);
+                    case T_FVEC: return v_fvec(0);
+                    case T_IVEC: return v_ivec(0);
+                    case T_LIST: return v_list(0);
+                    default: return v_err("bad typed constructor");
+                    }
+                }
                 if(obj->t != T_CHAR && obj->t != T_INT) {
                     V *r = builtin_call("list",&obj,1,NULL,NULL,0,e);
                     v_free(obj);
@@ -2038,9 +2102,17 @@ V *eval(Node *n, Env *e) {
             return v_errf("'%s' is not callable", fn_node->sval ? fn_node->sval : "?");
         }
         Env *call_env = env_acquire(fn->closure);
-        bind_params(call_env, fn, args, nargs, kwnames, kwvals, nkw);
-        for(int i=0;i<nkw;i++)
-            env_set(call_env, kwnames[i]->s, kwvals[i]);
+        {
+            V *err = bind_params(call_env, fn, args, nargs, kwnames, kwvals, nkw);
+            if (err) {
+                env_leave(call_env);
+                v_free(fn);
+                for(int i=0;i<nargs;i++) v_free(args[i]);
+                for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
+                free(args); free(kwnames); free(kwvals);
+                return err;
+            }
+        }
         Node *body = fn_ast[(int)fn->j];
         int npush = push_list_vals(args, nargs) + push_list_vals(kwvals, nkw);
         V *result = eval_fn(body, call_env);
@@ -2486,7 +2558,50 @@ V *eval(Node *n, Env *e) {
         v_free(ctx);
         return r;
     }
-    case N_DEL: return v_nil();
+    case N_DEL: {
+        Node *tgt = n->nch > 0 ? n->ch[0] : NULL;
+        if(!tgt) return v_err("bad del target");
+        if(tgt->type == N_NAME) {
+            if(!env_del(e, tgt->sval)) return v_errf("name '%s' is not defined", tgt->sval);
+            return v_nil();
+        }
+        if(tgt->type == N_INDEX && tgt->nch >= 2) {
+            V *obj = eval(tgt->ch[0], e);
+            V *idx = eval(tgt->ch[1], e);
+            int64_t j;
+            if(!obj || obj->t == T_ERR) { v_free(idx); return obj ? obj : v_err("bad del target"); }
+            if(!idx || idx->t == T_ERR) { v_free(obj); return idx ? idx : v_err("bad del target"); }
+            if(obj->t == T_DICT) {
+                int64_t at = v_dict_hashed_index(obj, idx);
+                if(at < 0) { v_free(obj); v_free(idx); return v_err("key"); }
+                v_dict_delete_at(obj, at);
+                v_free(obj); v_free(idx);
+                return v_nil();
+            }
+            if((idx->t == T_INT || idx->t == T_CHAR) &&
+               (obj->t == T_LIST || obj->t == T_IVEC || obj->t == T_FVEC || obj->t == T_BVEC || obj->t == T_CVEC)) {
+                j = idx->j;
+                if(j < 0) j += obj->n;
+                if(j < 0 || j >= obj->n) { v_free(obj); v_free(idx); return v_err("index out of range"); }
+                if(obj->t == T_LIST) {
+                    v_free(obj->L[j]);
+                    if(j + 1 < obj->n) memmove(obj->L + j, obj->L + j + 1, (size_t)(obj->n - j - 1) * sizeof(V *));
+                } else if(obj->t == T_IVEC) {
+                    if(j + 1 < obj->n) memmove(obj->J + j, obj->J + j + 1, (size_t)(obj->n - j - 1) * sizeof(int64_t));
+                } else if(obj->t == T_FVEC) {
+                    if(j + 1 < obj->n) memmove(obj->F + j, obj->F + j + 1, (size_t)(obj->n - j - 1) * sizeof(double));
+                } else {
+                    if(j + 1 < obj->n) memmove(obj->B + j, obj->B + j + 1, (size_t)(obj->n - j - 1));
+                }
+                obj->n--;
+                v_free(obj); v_free(idx);
+                return v_nil();
+            }
+            v_free(obj); v_free(idx);
+            return v_err("bad del target");
+        }
+        return v_err("bad del target");
+    }
     case N_GLOBAL: return v_nil();
     case N_CLASS: {
         EVAL_STACK_GUARD();

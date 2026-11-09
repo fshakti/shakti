@@ -574,6 +574,7 @@ test: shakti
 	  fi; \
 	  [ $$fail -eq 0 ] || exit 1; \
 	fi
+	@if [ -f tests/issues.sh ]; then SHAKTI=$(SHAKTI) bash tests/issues.sh || exit 1; fi
 ifneq ($(SHAKTI_TESTS),)
 	@for f in $(SHAKTI_TESTS); do \
 	  echo "Running $$f..."; case "$$f" in \

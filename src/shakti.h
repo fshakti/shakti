@@ -418,6 +418,7 @@ char *v_repr(V *v);
 char *v_to_str(V *v);
 Env *env_new(Env *parent);
 void env_set(Env *e, const char *name, V *val);
+int env_del(Env *e, const char *name);
 void env_set_kind(Env *e, const char *name, V *val, unsigned kind);
 int env_slot_listed(const Env *e, int i);
 void env_set_local(Env *e, const char *name, V *val);
@@ -444,6 +445,7 @@ V *table_copy_cols(V *t);
 V *table_row(V *t, int64_t row);
 void v_dict_set(V *d, const char *key, V *val);
 V *v_dict_get(V *d, const char *key);
+int v_dict_delete_at(V *d, int64_t idx);
 /* Position of key k in d, or -1: a string key matches by text, any other by `=`. */
 int64_t v_dict_index(V *d, V *k);
 /* The value under key k (borrowed), or NULL: a string key matches by text, any other by `=`. */

@@ -87,7 +87,9 @@ static int lex_append_escape(Lexer *l, Token *t, int *len, char ch) {
     case 'n': return lex_append(l, t, len, '\n');
     case 't': return lex_append(l, t, len, '\t');
     case 'r': return lex_append(l, t, len, '\r');
-    case '0': return lex_append(l, t, len, '\0');
+    case '0':
+        lex_fail(l, "parse error: NUL in string");
+        return 0;
     case '\\': case '\'': case '"': return lex_append(l, t, len, ch);
     default: return lex_append(l, t, len, '\\') && lex_append(l, t, len, ch);
     }
@@ -489,34 +491,20 @@ static Token lex_raw(Lexer *l) {
                 return t;
             }
             if((c=='b'||c=='B') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
+                /* There is no bytes type: b"abc" is the str "abc" (#121). */
                 p++;
                 char q = s[p];
                 p++;
-                Token bt = {.type = T_CVECZ_};
-                int nhex = 0;
+                Token bt = {.type = T_STR_};
+                int qi = 0;
                 while (p < l->len && s[p] != q) {
-                    unsigned char byte;
                     if (s[p] == '\\' && p + 1 < l->len) {
                         p++;
-                        switch (s[p]) {
-                        case 'n': byte = '\n'; break;
-                        case 't': byte = '\t'; break;
-                        case 'r': byte = '\r'; break;
-                        case '0': byte = 0; break;
-                        case '\\': case '\'': case '"': byte = (unsigned char)s[p]; break;
-                        default: byte = (unsigned char)s[p]; break;
-                        }
-                    } else {
-                        byte = (unsigned char)s[p];
-                    }
-                    char hx[3];
-                    snprintf(hx, sizeof hx, "%02x", byte);
-                    if (!lex_append(l, &bt, &nhex, hx[0]) || !lex_append(l, &bt, &nhex, hx[1]))
-                        return make_tok(T_EOF_);
+                        if (!lex_append_escape(l, &bt, &qi, s[p])) return make_tok(T_EOF_);
+                    } else if (!lex_append(l, &bt, &qi, s[p])) return make_tok(T_EOF_);
                     p++;
                 }
-                lex_finish_text(l, &bt, nhex);
-                bt.ival = nhex / 2;
+                lex_finish_text(l, &bt, qi);
                 if (p < l->len) p++;
                 l->pos = p;
                 return bt;

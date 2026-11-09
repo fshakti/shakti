@@ -891,6 +891,22 @@ V *v_dict_get(V *d, const char *key) {
     int64_t i = dict_str_index(d, key);
     return i < 0 ? NULL : d->vals->L[i];
 }
+int v_dict_delete_at(V *d, int64_t idx) {
+    if(!d || d->t != T_DICT || idx < 0 || idx >= d->n) return 0;
+    v_list_unshare(&d->keys);
+    v_list_unshare(&d->vals);
+    v_free(d->keys->L[idx]);
+    v_free(d->vals->L[idx]);
+    if(idx + 1 < d->n) {
+        memmove(d->keys->L + idx, d->keys->L + idx + 1, (size_t)(d->n - idx - 1) * sizeof(V *));
+        memmove(d->vals->L + idx, d->vals->L + idx + 1, (size_t)(d->n - idx - 1) * sizeof(V *));
+    }
+    d->n--;
+    d->keys->n--;
+    d->vals->n--;
+    dict_ht_rebuild(d);
+    return 1;
+}
 void v_serialize(V *v, FILE *fp) {
     if(!v) { fputc(T_NIL, fp); return; }
     fputc(v->t, fp);

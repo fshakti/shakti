@@ -254,6 +254,7 @@ int shakti_lang_main(int argc, char **argv) {
             return 1;
         }
         Node *prog = parse(src);
+        int bad = shakti_parse_errors() > 0 || g_error;
         if (prog && prog->nch > 0)
             node_sprint(prog->ch[prog->nch - 1], stdout);
         else
@@ -262,7 +263,7 @@ int shakti_lang_main(int argc, char **argv) {
         node_free(prog);
         free(file_buf);
         env_free(global);
-        return 0;
+        return bad ? 1 : 0;
     }
 
     if(cmd) {

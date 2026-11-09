@@ -1823,6 +1823,16 @@ static int ivec_own(V *v) {
     v->_ht_cap = v->n > 0 ? (uint32_t)v->n : 0;
     return 0;
 }
+static void numvec_grow(V *v, size_t el) {
+    uint32_t cap = v->_ht_cap ? v->_ht_cap : (v->n > 0 ? (uint32_t)v->n : 0);
+    void *p;
+    if ((uint32_t)v->n < cap && cap) return;
+    cap = cap ? cap * 2 : 8;
+    if (v->t == T_FVEC) { p = x_realloc(v->F, (size_t)cap * el, "vec_append"); v->F = p; }
+    else if (v->t == T_IVEC) { p = x_realloc(v->J, (size_t)cap * el, "vec_append"); v->J = p; }
+    else { p = x_realloc(v->B, (size_t)cap * el, "vec_append"); v->B = p; }
+    v->_ht_cap = cap;
+}
 static V *bi_append(V**a,in){
     if (n >= 2 && a[0] && a[0]->t == T_IVEC) {
         if (ivec_own(a[0]) != 0) return v_err("append: read-only vector");
@@ -1833,12 +1843,43 @@ static V *bi_append(V**a,in){
         }
         ivec_promote(a[0]);
     }
+    if (n >= 2 && a[0] && a[0]->t == T_FVEC && a[1] &&
+        (a[1]->t == T_FLOAT || a[1]->t == T_INT || a[1]->t == T_CHAR)) {
+        if (ivec_own(a[0]) != 0) return v_err("append: read-only vector");
+        numvec_grow(a[0], sizeof(double));
+        a[0]->F[a[0]->n++] = a[1]->t == T_FLOAT ? a[1]->f : (double)a[1]->j;
+        return v_nil();
+    }
+    if (n >= 2 && a[0] && a[0]->t == T_BVEC && a[1] && (a[1]->t == T_BOOL || a[1]->t == T_INT)) {
+        if (ivec_own(a[0]) != 0) return v_err("append: read-only vector");
+        numvec_grow(a[0], 1);
+        a[0]->B[a[0]->n++] = a[1]->j ? 1 : 0;
+        return v_nil();
+    }
+    if (n >= 2 && a[0] && a[0]->t == T_CVEC && a[1] && (a[1]->t == T_CHAR || a[1]->t == T_INT)) {
+        if (ivec_own(a[0]) != 0) return v_err("append: read-only vector");
+        numvec_grow(a[0], 1);
+        a[0]->B[a[0]->n++] = (unsigned char)a[1]->j;
+        return v_nil();
+    }
     P(n<2||a[0]->t!=T_LIST,v_err("append(list,val)"))
     v_list_append(a[0], a[1]); return v_nil();}
 static V *bi_pop(V**a,in){
     if (n >= 1 && a[0] && a[0]->t == T_IVEC) {
         if (a[0]->n <= 0) return v_err("pop");
         return v_int(a[0]->J[--a[0]->n]);
+    }
+    if (n >= 1 && a[0] && a[0]->t == T_FVEC) {
+        if (a[0]->n <= 0) return v_err("pop");
+        return v_float(a[0]->F[--a[0]->n]);
+    }
+    if (n >= 1 && a[0] && a[0]->t == T_BVEC) {
+        if (a[0]->n <= 0) return v_err("pop");
+        return v_bool(a[0]->B[--a[0]->n] != 0);
+    }
+    if (n >= 1 && a[0] && a[0]->t == T_CVEC) {
+        if (a[0]->n <= 0) return v_err("pop");
+        return v_char(a[0]->B[--a[0]->n]);
     }
     P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
     return a[0]->L[--a[0]->n];}
@@ -2870,8 +2911,25 @@ static int bi_kw_true(V **kwn, V **kwv, int nkw, const char *name) {
     return 0;
 }
 extern V *subprocess_ex(V **a, int n, const char *dir_env);
+static int bi_kw_known(const char *name, V **kwn, int nkw) {
+    int i;
+    if (nkw <= 0) return 1;
+    if (!strcmp(name, "table") || !strcmp(name, "dict") || !strcmp(name, "ktable")) return 1;
+    for (i = 0; i < nkw; i++) {
+        const char *s = (kwn && kwn[i] && kwn[i]->t == T_STR) ? kwn[i]->s : "";
+        int ok = 0;
+        if (!strcmp(name, "print") && (!strcmp(s, "sep") || !strcmp(s, "end"))) ok = 1;
+        if (!strcmp(name, "load") && (!strcmp(s, "exec") || !strcmp(s, "__dir__"))) ok = 1;
+        if (!ok) return 0;
+    }
+    return 1;
+}
 V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env *e){
     BiCall fn;
+    if (!bi_kw_known(name, kwn, nkw)) {
+        const char *s = (nkw > 0 && kwn && kwn[0] && kwn[0]->t == T_STR) ? kwn[0]->s : "?";
+        return v_errf("unexpected keyword argument '%s'", s);
+    }
     {
         V *denied = bi_fs_guard(name, args, nargs);
         if (denied) return denied;
@@ -2928,7 +2986,10 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         P(fnv->n == -1,builtin_call(fnv->s, al->L, (int)al->n, NULL, NULL, 0, e))
         P(fnv->j < 0 || fnv->j >= fn_ast_n, v_err("__invoke__: bad function"))
         Env*ce=env_new(fnv->closure);
-        shakti_bind_params(ce, fnv, al->L, (int)al->n, NULL, NULL, 0);
+        {
+            V *err = shakti_bind_params(ce, fnv, al->L, (int)al->n, NULL, NULL, 0);
+            if (err) { env_leave(ce); return err; }
+        }
         Node*body=fn_ast[(int)fnv->j];V*rv=eval_fn(body,ce);
         if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
         env_leave(ce);return rv;
