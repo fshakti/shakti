@@ -728,9 +728,13 @@ V *bi_getattr(V **a, in) {
     return n > 2 ? v_ref(a[2]) : v_nil();
 }
 V *bi_chr(V **a, in) {
-    P(n < 1 || a[0]->t != T_INT,v_err("chr"))
+    int64_t j;
     char b[8];
-    b[0] = (char)(a[0]->j & 255);
+    P(n < 1, v_err("chr"))
+    if (a[0]->t != T_INT && a[0]->t != T_CHAR) return v_err("chr");
+    j = a[0]->j;
+    if ((j & 255) == 0) return v_err("chr");
+    b[0] = (char)(j & 255);
     b[1] = 0;
     return v_str(b);
 }

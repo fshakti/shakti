@@ -116,7 +116,7 @@ V *require_sql(Env *e);
 /* Call-site `*expr` parses as N_UNOP with this op. */
 #define OP_SPLAT OP_MUL
 
-void shakti_bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V **kwv, int nkw);
+V *shakti_bind_params(Env *ce, V *fn, V **args, int nargs, V **kwn, V **kwv, int nkw);
 V *shakti_call_fn(V *fn, V *self, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e);
 int shakti_is_class(V *v);
 int shakti_is_instance(V *v);

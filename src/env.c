@@ -462,6 +462,29 @@ void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
 void env_set(Env *e, const char *name, V *val) {
     env_set_kind(e, name, val, ENV_BIND_USER);
 }
+int env_del(Env *e, const char *name) {
+    uint32_t h;
+    if(!e || !name) return 0;
+    h = fnv1a(name);
+    for(; e; e = e->parent) {
+        int i;
+        for(i = 0; i < e->len; i++) {
+            if(e->hashes[i] == h && strcmp(e->names[i], name) == 0) {
+                free(e->names[i]);
+                v_free(e->vals[i]);
+                if(i + 1 < e->len) {
+                    memmove(e->names + i, e->names + i + 1, (size_t)(e->len - i - 1) * sizeof(char *));
+                    memmove(e->vals + i, e->vals + i + 1, (size_t)(e->len - i - 1) * sizeof(V *));
+                    memmove(e->hashes + i, e->hashes + i + 1, (size_t)(e->len - i - 1) * sizeof(uint32_t));
+                    memmove(e->kinds + i, e->kinds + i + 1, (size_t)(e->len - i - 1) * sizeof(uint8_t));
+                }
+                e->len--;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
 int env_slot_listed(const Env *e, int i) {
     const char *n;
     if(!e || i < 0 || i >= e->len) return 0;
