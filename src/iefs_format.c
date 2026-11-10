@@ -1869,6 +1869,12 @@ static int crc32_iefs_v3_toc(const unsigned char *buf, uint64_t payload_len, uin
 
 /* verify_crc: check the checksum (load, loads). check_names (map of the file as it is,
  * not a compacted copy): check it from the TOC when a dict's names look damaged. */
+typedef struct { uint64_t off, len; } IefsExtRange;
+static int iefs_ext_range_cmp(const void *a, const void *b) {
+    uint64_t ao = ((const IefsExtRange *)a)->off, bo = ((const IefsExtRange *)b)->off;
+    return (ao > bo) - (ao < bo);
+}
+
 static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *reg, int verify_crc,
                          int check_names, V *colnames, uint64_t max_plain) {
     uint64_t payload_len = get_u64(buf + 8);
@@ -1893,16 +1899,20 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     if (payload_len < toc_need)
         return v_err("iefs: truncated v3 TOC");
     const unsigned char *names = body + 8 + (size_t)n_ext * IEFS_V3_EXTENT_SIZE;
-    /* A dict's keys are its extents' names. When map skipped the checksum and a name is
-     * missing, not NUL-terminated or repeated, check the header and TOC against it now: a
-     * damaged name is refused as load refuses it, and a dict that repeats a key (a literal
-     * can) still maps. */
+    /* Map does not read extent payloads at open, so per-extent CRCs stay
+     * lazy — but header/TOC integrity is verified unconditionally via the
+     * TOC-combined checksum (which folds in the stored extent CRCs).
+     * A dict's keys are its extents' names: when a name is missing, not
+     * NUL-terminated or repeated, a damaged name is refused as load refuses
+     * it, and a dict that repeats a key (a literal can) still maps. */
     int is_dict = (get_u16(buf + 6) & IEFS_FLAG_V3_DICT) != 0;
-    if (check_names && is_dict && !iefs_v3_names_distinct(body, n_ext, names, names_len)) {
+    if (!verify_crc ||
+        (check_names && is_dict && !iefs_v3_names_distinct(body, n_ext, names, names_len))) {
         uint32_t got_crc;
         if (crc32_iefs_v3_toc(buf, payload_len, n_ext, toc_need, &got_crc) != 0)
             return v_err("iefs: out of memory");
-        if (got_crc != expect_crc)
+        if (got_crc != expect_crc &&
+            crc32_iefs_layout(buf, body, (size_t)payload_len) != expect_crc)
             return v_err("iefs: checksum mismatch");
     }
     V **cols = calloc(n_ext ? n_ext : 1, sizeof(V *));
@@ -1910,6 +1920,38 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
     if (!cols || !keys) {
         free(cols); free(keys);
         return v_err("iefs: out of memory");
+    }
+    /* Reject overlapping (including duplicate) extents before decoding any:
+     * each extent is decoded and charged on its own, so a small file whose
+     * TOC repeats one extent could otherwise amplify into unbounded copies.
+     * Legitimate writers never overlap extents. */
+    if (n_ext > 1) {
+        IefsExtRange *ranges = malloc((size_t)n_ext * sizeof(IefsExtRange));
+        if (!ranges) {
+            free(cols); free(keys);
+            return v_err("iefs: out of memory");
+        }
+        for (uint32_t i = 0; i < n_ext; i++) {
+            const unsigned char *er = body + 8 + (size_t)i * IEFS_V3_EXTENT_SIZE;
+            ranges[i].off = get_u64(er + 20);
+            ranges[i].len = get_u64(er + 28);
+        }
+        /* ranges element size follows IefsExtRange */
+        qsort(ranges, n_ext, sizeof(IefsExtRange), iefs_ext_range_cmp);
+        int overlap = 0;
+        for (uint32_t i = 1; i < n_ext; i++) {
+            if (ranges[i].len && ranges[i - 1].len &&
+                ranges[i].off >= ranges[i - 1].off &&
+                ranges[i].off - ranges[i - 1].off < ranges[i - 1].len) {
+                overlap = 1;
+                break;
+            }
+        }
+        free(ranges);
+        if (overlap) {
+            free(cols); free(keys);
+            return v_err("iefs: overlapping extents");
+        }
     }
     int named = 0;
     uint32_t n_keep = 0;
@@ -1959,7 +2001,7 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
         int alias_ok = (reg != NULL) && (codec == SHAKTI_CODEC_NONE) && (outer == SHAKTI_CODEC_NONE) &&
                        (type != (int)IEFS_EXT_TLV);
         if (outer != SHAKTI_CODEC_NONE || codec != SHAKTI_CODEC_NONE) {
-            char err[256];
+            char err[256] = "";
             const unsigned char *cur = ep;
             size_t cur_len = (size_t)elen;
             if (outer != SHAKTI_CODEC_NONE) {
@@ -1999,6 +2041,15 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
             }
             inflated += pay_len;
             alias_ok = 0;
+        } else {
+            /* Uncompressed extents charge against the same budget, so the
+             * total decoded payload stays bounded by max_plain. */
+            if (pay_len > max_plain - inflated) {
+                for (uint32_t j=0;j<n_keep;j++){v_free(cols[j]); if(keys[j]) v_free(keys[j]);}
+                free(cols); free(keys);
+                return v_err("iefs: payload too large");
+            }
+            inflated += pay_len;
         }
         V *col;
         if (type == (int)IEFS_EXT_TLV) {
@@ -2390,7 +2441,13 @@ static V *iefs_decode_mapped_cols_names(const unsigned char *buf, size_t len, Ie
     if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
         return v_err("iefs: truncated file");
     const unsigned char *payload = buf + IEFS_HEADER_SIZE;
-    /* Skip CRC on map path (lazy open). */
+    /* Map stays lazy about materializing columns, but integrity is not
+     * optional: verify the whole-file checksum at open like load does. */
+    {
+        uint32_t expect_crc = get_u32(buf + 16);
+        if (crc32_iefs_layout(buf, payload, (size_t)payload_len) != expect_crc)
+            return v_err("iefs: checksum mismatch");
+    }
     IefsR r = {.p = payload, .n = (size_t)payload_len, .off = 0, .ver = ver, .depth = 0, .err = {0}, .map_reg = reg};
     V *v = decode_value(&r);
     if (v->t == T_ERR)

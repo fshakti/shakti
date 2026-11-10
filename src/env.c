@@ -1,6 +1,7 @@
 /* shakti/src/env.c — environments, fn_ast, interpreter globals */
 #include "shakti_internal.h"
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 Node *fn_ast[MAX_FN];
@@ -729,19 +730,74 @@ static int fs_inside(const char *full) {
     return !strcmp(fs_root, "/") ||
            (!strncmp(full, fs_root, rl) && (full[rl] == 0 || full[rl] == '/'));
 }
+/* Canonicalize `path` into `full`: realpath when it exists, otherwise
+ * realpath of the parent directory plus the final component. A trailing
+ * symlink is followed (one level; realpath handles deeper chains when the
+ * target exists) so a dangling symlink inside the root cannot smuggle a
+ * write outside it. Returns 0 on success. */
+static int fs_canon_d(const char *path, char *full, size_t cap, int depth) {
+    if (depth > 40) return -1;
+    char *rp = realpath(path, NULL);
+    if (rp) {
+        snprintf(full, cap, "%s", rp);
+        free(rp);
+        return 0;
+    }
+    char dir[8192];
+    const char *slash = strrchr(path, '/');
+    const char *base = slash ? slash + 1 : path;
+    if (slash == path) snprintf(dir, sizeof dir, "/");
+    else if (slash) snprintf(dir, sizeof dir, "%.*s", (int)(slash - path), path);
+    else snprintf(dir, sizeof dir, ".");
+    if (!base[0] || !strcmp(base, ".") || !strcmp(base, "..")) return -1;
+    struct stat lst;
+    if (lstat(path, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+        char tgt[8192];
+        ssize_t tl = readlink(path, tgt, sizeof tgt - 1);
+        if (tl < 0) return -1;
+        tgt[tl] = 0;
+        char joined[8192];
+        if (tgt[0] == '/') snprintf(joined, sizeof joined, "%s", tgt);
+        else if (slash) snprintf(joined, sizeof joined, "%.*s/%s", (int)(slash - path), path, tgt);
+        else snprintf(joined, sizeof joined, "%s", tgt);
+        return fs_canon_d(joined, full, cap, depth + 1);
+    }
+    char *dp = realpath(dir, NULL);
+    if (!dp) return -1;
+    snprintf(full, cap, "%s/%s", dp, base);
+    free(dp);
+    return 0;
+}
 #endif
 int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
+    if (!shakti_safe_mode()) return 0;
 #ifdef _WIN32
-    (void)fd; (void)write; (void)err; (void)err_cap;
-    return 0;
+    /* No canonical-path confinement on Windows yet: fail closed. */
+    (void)fd; (void)write;
+    if (err && err_cap) snprintf(err, err_cap, "safe mode: filesystem confinement unavailable on this platform");
+    return -1;
 #else
     char proc[64], full[8192];
-    if (!shakti_safe_mode()) return 0;
     if (fd < 0) {
         if (err && err_cap) snprintf(err, err_cap, "safe mode: bad fd");
         return -1;
     }
     if (fs_root_load(err, err_cap) != 0) return -1;
+#ifdef __APPLE__
+    if (fcntl(fd, F_GETPATH, full) != 0) {
+        if (err && err_cap) snprintf(err, err_cap, "safe mode: cannot resolve opened file");
+        return -1;
+    }
+    {
+        char *rp = realpath(full, NULL);
+        if (!rp) {
+            if (err && err_cap) snprintf(err, err_cap, "safe mode: cannot resolve opened file");
+            return -1;
+        }
+        snprintf(full, sizeof full, "%s", rp);
+        free(rp);
+    }
+#else
     snprintf(proc, sizeof proc, "/proc/self/fd/%d", fd);
     char *rp = realpath(proc, NULL);
     if (!rp) {
@@ -750,6 +806,7 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
     }
     snprintf(full, sizeof full, "%s", rp);
     free(rp);
+#endif
     if (!fs_inside(full)) {
         if (err && err_cap)
             snprintf(err, err_cap, "safe mode: %s outside SHAKTI_FS_ROOT", write ? "write" : "read");
@@ -759,39 +816,22 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
 #endif
 }
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap) {
+    if (!shakti_safe_mode()) return 0;
 #ifdef _WIN32
-    (void)path; (void)write; (void)err; (void)err_cap;
-    return 0;
+    /* No canonical-path confinement on Windows yet: fail closed. */
+    (void)path; (void)write;
+    if (err && err_cap) snprintf(err, err_cap, "safe mode: filesystem confinement unavailable on this platform");
+    return -1;
 #else
     char full[8192];
-    if (!shakti_safe_mode()) return 0;
     if (!path || !path[0]) {
         if (err && err_cap) snprintf(err, err_cap, "safe mode: empty path");
         return -1;
     }
     if (fs_root_load(err, err_cap) != 0) return -1;
-    char *rp = realpath(path, NULL);
-    if (rp) {
-        snprintf(full, sizeof full, "%s", rp);
-        free(rp);
-    } else {
-        char dir[8192];
-        const char *slash = strrchr(path, '/');
-        const char *base = slash ? slash + 1 : path;
-        if (slash == path) snprintf(dir, sizeof dir, "/");
-        else if (slash) snprintf(dir, sizeof dir, "%.*s", (int)(slash - path), path);
-        else snprintf(dir, sizeof dir, ".");
-        if (!base[0] || !strcmp(base, ".") || !strcmp(base, "..")) {
-            if (err && err_cap) snprintf(err, err_cap, "safe mode: bad path '%s'", path);
-            return -1;
-        }
-        char *dp = realpath(dir, NULL);
-        if (!dp) {
-            if (err && err_cap) snprintf(err, err_cap, "safe mode: cannot resolve '%s'", path);
-            return -1;
-        }
-        snprintf(full, sizeof full, "%s/%s", dp, base);
-        free(dp);
+    if (fs_canon_d(path, full, sizeof full, 0) != 0) {
+        if (err && err_cap) snprintf(err, err_cap, "safe mode: cannot resolve '%s'", path);
+        return -1;
     }
     if (!fs_inside(full)) {
         if (err && err_cap)

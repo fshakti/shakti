@@ -1,4 +1,5 @@
 #include "shakti.h"
+#include "shakti_internal.h"
 #include "synth.h"
 #include "synth_ui.h"
 #include "synth_render.h"
@@ -1926,6 +1927,13 @@ int synth_load_sample(const char *path, char *err, size_t err_cap) {
     if (!path || !path[0]) {
         if (err && err_cap) snprintf(err, err_cap, "synth_load_sample: path required");
         return -1;
+    }
+    {
+        char ferr[512];
+        if (shakti_fs_check(path, 0, ferr, sizeof ferr) != 0) {
+            if (err && err_cap) snprintf(err, err_cap, "synth_load_sample: %s", ferr);
+            return -1;
+        }
     }
     float *tmp = malloc((size_t)SYNTH_SAMPLE_MAX * sizeof(float));
     if (!tmp) {

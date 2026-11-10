@@ -78,6 +78,7 @@ static char g_rest_hdr_path[REST_TEMP_PATH_CAP];
 static char g_rest_body_path[REST_TEMP_PATH_CAP];
 static char g_rest_code_path[REST_TEMP_PATH_CAP];
 static char g_rest_data_path[REST_TEMP_PATH_CAP];
+static char g_rest_auth_path[REST_TEMP_PATH_CAP];
 static int g_rest_temps_ok;
 
 #ifndef SHAKTI_WASM
@@ -105,6 +106,7 @@ static void rest_unlink_temps(void) {
     unlink(g_rest_body_path);
     unlink(g_rest_code_path);
     unlink(g_rest_data_path);
+    unlink(g_rest_auth_path);
 }
 
 static void rest_init_tokens(void) {
@@ -178,13 +180,15 @@ static void rest_init(void) {
     if (!rest_fill_temp_tmpl(g_rest_hdr_path, sizeof g_rest_hdr_path, dir, "shakti-rest-hdr-XXXXXX") ||
         !rest_fill_temp_tmpl(g_rest_body_path, sizeof g_rest_body_path, dir, "shakti-rest-body-XXXXXX") ||
         !rest_fill_temp_tmpl(g_rest_code_path, sizeof g_rest_code_path, dir, "shakti-rest-code-XXXXXX") ||
-        !rest_fill_temp_tmpl(g_rest_data_path, sizeof g_rest_data_path, dir, "shakti-rest-data-XXXXXX")) {
+        !rest_fill_temp_tmpl(g_rest_data_path, sizeof g_rest_data_path, dir, "shakti-rest-data-XXXXXX") ||
+        !rest_fill_temp_tmpl(g_rest_auth_path, sizeof g_rest_auth_path, dir, "shakti-rest-auth-XXXXXX")) {
         return;
     }
     if (rest_make_temp(g_rest_hdr_path) == 0 &&
         rest_make_temp(g_rest_body_path) == 0 &&
         rest_make_temp(g_rest_code_path) == 0 &&
-        rest_make_temp(g_rest_data_path) == 0) {
+        rest_make_temp(g_rest_data_path) == 0 &&
+        rest_make_temp(g_rest_auth_path) == 0) {
         g_rest_temps_ok = 1;
         atexit(rest_unlink_temps);
     }
@@ -953,13 +957,30 @@ static V *rest_http_request(const char *method, const char *url, const unsigned 
         have_data = 1;
     }
 
-    char auth_hdr[4200];
-    auth_hdr[0] = 0;
-    if (g_rest_client_token[0] && rest_token_host_ok(url))
-        snprintf(auth_hdr, sizeof auth_hdr, "Authorization: Bearer %s", g_rest_client_token);
+    /* The bearer token must not appear in curl's argv (world-visible via
+     * `ps`). Write it to the 0600 auth temp file and pass it via -K. */
+    int have_auth = 0;
+    if (g_rest_client_token[0] && rest_token_host_ok(url)) {
+        char esc[4200];
+        size_t ei = 0;
+        for (const char *p = g_rest_client_token; *p && ei + 2 < sizeof esc; p++) {
+            if (*p == '\\' || *p == '"') esc[ei++] = '\\';
+            esc[ei++] = *p;
+        }
+        esc[ei] = 0;
+        char line[4400];
+        int ln = snprintf(line, sizeof line, "header = \"Authorization: Bearer %s\"\n", esc);
+        int afd = open(g_rest_auth_path, O_WRONLY | O_TRUNC | O_NOFOLLOW, 0600);
+        if (afd < 0) return v_err("rest: temp file failed");
+        int ok = ln > 0 && (size_t)ln < sizeof line && write(afd, line, (size_t)ln) == ln;
+        close(afd);
+        if (!ok) return v_err("rest: temp file failed");
+        have_auth = 1;
+    }
 
     /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
-     * literal argument, so URL/header/token contents cannot inject a command. */
+     * literal argument, so URL/header contents cannot inject a command.
+     * The bearer token travels via the -K config file, never argv. */
     int nextra = (extra_hdrs && extra_hdrs->t == T_DICT) ? (int)extra_hdrs->keys->n : 0;
     int max_args = 38 + nextra * 2;
     char **argv = calloc((size_t)max_args, sizeof(char *));
@@ -984,9 +1005,9 @@ static V *rest_http_request(const char *method, const char *url, const unsigned 
     argv[ac++] = resolve_pin;
     argv[ac++] = "-X";
     argv[ac++] = (char *)method;
-    if (auth_hdr[0]) {
-        argv[ac++] = "-H";
-        argv[ac++] = auth_hdr;
+    if (have_auth) {
+        argv[ac++] = "-K";
+        argv[ac++] = g_rest_auth_path;
     }
     if (extra_hdrs && extra_hdrs->t == T_DICT) {
         for (int64_t i = 0; i < extra_hdrs->keys->n; i++) {
@@ -1078,6 +1099,15 @@ static V *rest_do_listen(int port, const char *host) {
             return v_err("rest_listen: non-loopback bind requires SHAKTI_REST_ALLOW_PUBLIC=1");
         if (!loopback && !g_rest_server_token[0])
             return v_err("rest_listen: non-loopback bind requires SHAKTI_REST_SERVER_TOKEN");
+        if (loopback && !g_rest_server_token[0]) {
+            static int warned;
+            if (!warned) {
+                warned = 1;
+                fprintf(stderr,
+                        "shakti: warning: rest_listen on %s without SHAKTI_REST_SERVER_TOKEN; "
+                        "any local process can call these endpoints\n", host);
+            }
+        }
     }
 
 #if defined(AF_INET6)

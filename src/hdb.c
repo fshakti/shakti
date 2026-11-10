@@ -114,6 +114,20 @@ static const char *hdb_handle_root(V *h) {
     return root->s;
 }
 
+/* Handles are plain script dicts, so a script can forge one with an
+ * arbitrary root. Every entry point must re-validate the root against
+ * SHAKTI_FS_ROOT in safe mode, not just hdb_open. Returns an error V on
+ * failure, NULL on success (with *root_out set). */
+static V *hdb_root_or_err(V *h, const char *who, const char **root_out) {
+    const char *root = hdb_handle_root(h);
+    if (!root) return v_errf("%s: bad handle", who);
+    char ferr[512];
+    if (hdb_root_allowed(root, ferr, sizeof ferr) != 0)
+        return v_errf("%s: %s", who, ferr);
+    *root_out = root;
+    return NULL;
+}
+
 static V *hdb_handle_meta(V *h) {
     if (!h || h->t != T_DICT) return NULL;
     V *meta = v_dict_get(h, "meta");
@@ -470,7 +484,11 @@ V *bi_hdb_create(V **a, int n) {
     /* hdb_create(h, name, schema[, part_key]) */
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_DICT)
         return v_err("hdb_create(h, name, schema[, part])");
-    if (!hdb_handle_root(a[0])) return v_err("hdb_create: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_create", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s)) return v_err("hdb_create: bad table name");
 
     const char *part_key = "date";
@@ -482,7 +500,7 @@ V *bi_hdb_create(V **a, int n) {
     if (!tables || tables->t != T_DICT) return v_err("hdb_create: bad meta");
 
     char tdir[HDB_PATH_MAX];
-    if (snprintf(tdir, sizeof tdir, "%s/%s", hdb_handle_root(a[0]), a[1]->s) >= (int)sizeof tdir)
+    if (snprintf(tdir, sizeof tdir, "%s/%s", root, a[1]->s) >= (int)sizeof tdir)
         return v_err("hdb_create: path too long");
     if (hdb_mkdir_p(tdir) != 0)
         return v_errf("hdb_create: mkdir: %s", strerror(errno));
@@ -516,8 +534,11 @@ V *bi_hdb_write(V **a, int n) {
     if (n < 4 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR || !a[3] ||
         a[3]->t != T_TABLE)
         return v_err("hdb_write(h, name, part, table[, codecs])");
-    const char *root = hdb_handle_root(a[0]);
-    if (!root) return v_err("hdb_write: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_write", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s) || !hdb_safe_name(a[2]->s))
         return v_err("hdb_write: bad table/part name");
 
@@ -566,8 +587,11 @@ V *bi_hdb_write(V **a, int n) {
 V *bi_hdb_parts(V **a, int n) {
     /* hdb_parts(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_parts(h, name[, from[, to[, eq]]])");
-    const char *root = hdb_handle_root(a[0]);
-    if (!root) return v_err("hdb_parts: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_parts", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s)) return v_err("hdb_parts: bad table name");
 
     const char *from = "", *to = "", *eq = "";
@@ -581,8 +605,11 @@ V *bi_hdb_map(V **a, int n) {
     /* hdb_map(h, name, part[, pages[, device]]) */
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR)
         return v_err("hdb_map(h, name, part[, pages[, device]])");
-    const char *root = hdb_handle_root(a[0]);
-    if (!root) return v_err("hdb_map: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_map", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s) || !hdb_safe_name(a[2]->s))
         return v_err("hdb_map: bad table/part name");
 
@@ -613,8 +640,11 @@ V *bi_hdb_map(V **a, int n) {
 V *bi_hdb_load_part(V **a, int n) {
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR)
         return v_err("hdb_load_part(h, name, part)");
-    const char *root = hdb_handle_root(a[0]);
-    if (!root) return v_err("hdb_load_part: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_load_part", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s) || !hdb_safe_name(a[2]->s))
         return v_err("hdb_load_part: bad table/part name");
 
@@ -627,8 +657,11 @@ V *bi_hdb_load_part(V **a, int n) {
 V *bi_hdb_load(V **a, int n) {
     /* hdb_load(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_load(h, name[, from[, to[, eq]]])");
-    const char *root = hdb_handle_root(a[0]);
-    if (!root) return v_err("hdb_load: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_load", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s)) return v_err("hdb_load: bad table name");
 
     const char *from = "", *to = "", *eq = "";
@@ -683,8 +716,11 @@ V *bi_hdb_load(V **a, int n) {
 V *bi_hdb_scan(V **a, int n) {
     /* hdb_scan(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_scan(h, name[, from[, to[, eq]]])");
-    const char *root = hdb_handle_root(a[0]);
-    if (!root) return v_err("hdb_scan: bad handle");
+    const char *root;
+    {
+        V *e = hdb_root_or_err(a[0], "hdb_scan", &root);
+        if (e) return e;
+    }
     if (!hdb_safe_name(a[1]->s)) return v_err("hdb_scan: bad table name");
 
     const char *from = "", *to = "", *eq = "";
@@ -727,6 +763,12 @@ V *bi_hdb_next(V **a, int n) {
     /* root is a filesystem path (it may contain '/'); only the table name is a single component. */
     if (!root_v->s[0] || !hdb_safe_name(table_v->s))
         return v_err("hdb_next: bad root or table");
+    /* cursors are forgeable dicts too: re-validate the root */
+    {
+        char ferr[512];
+        if (hdb_root_allowed(root_v->s, ferr, sizeof ferr) != 0)
+            return v_errf("hdb_next: %s", ferr);
+    }
     int64_t idx = idx_v->j + 1;
     if (idx < 0 || idx >= parts->n) {
         v_dict_put(c, "idx", v_int(idx));

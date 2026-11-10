@@ -602,6 +602,7 @@ static int ws_tcp_connect(const char *host, int port) {
     for (rp = res; rp; rp = rp->ai_next) {
         fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (fd < 0) continue;
+        { int fl = fcntl(fd, F_GETFD); if (fl >= 0) (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC); }
         struct timeval tv = {.tv_sec = 30, .tv_usec = 0};
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
