@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,6 +93,7 @@ static int sp_open_socket(char *err, size_t err_cap) {
         snprintf(err, err_cap, "sonicpi: socket failed: %s", strerror(errno));
         return -1;
     }
+    { int fl = fcntl(fd, F_GETFD); if (fl >= 0) (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC); }
     g_fd = fd;
     return 0;
 }

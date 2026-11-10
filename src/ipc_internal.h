@@ -60,7 +60,7 @@
 #define IPC_BCAST_MAX_READERS 16
 #define IPC_MAC_LEN 32u
 #define IPC_MCAST_TRAILER (8u + 8u + IPC_MAC_LEN)
-#define IPC_MCAST_SEEN 64
+#define IPC_MCAST_SEEN 512
 #define IPC_REPLY_RATE_SLOTS 16
 
 typedef enum {

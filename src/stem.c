@@ -8,6 +8,7 @@
  * Matmuls are CPU-only (optional OpenMP). No GPU path.
  */
 #include "stem.h"
+#include "shakti_internal.h"
 
 #include <limits.h>
 #include <math.h>
@@ -639,6 +640,7 @@ static void stem_u32le(unsigned char *p, unsigned int v) {
 static int stem_write_wav_errno = 0;
 static int stem_write_wav(const char *path, const float *x, int n, int sr, int wavfmt) {
     stem_write_wav_errno = 0;
+    if (path && shakti_fs_check(path, 1, NULL, 0) != 0) { stem_write_wav_errno = EACCES; return -1; }
     FILE *fp;
     unsigned char hdr[44];
     unsigned int bps, align, br, data_bytes, riff_payload;
@@ -1281,6 +1283,11 @@ static int stem_ml_read_f32_as_f64(FILE *fp, double *dst, size_t n) {
 static V *stem_ml_load_path(const char *path) {
     FILE *fp;
     char magic[8];
+    {
+        char ferr[512];
+        if (shakti_fs_check(path, 0, ferr, sizeof ferr) != 0)
+            return v_errf("stem_load_ml: %s", ferr);
+    }
     int32_t hdr[4];
     int nbins, nhidden, nstems, flags;
     size_t nW1, nW2, nW3;
