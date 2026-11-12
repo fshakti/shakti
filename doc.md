@@ -1005,7 +1005,7 @@ Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` 
 
 # `mplsoccer` module
 
-Football **pitch charts** on [`gfx`](#gfx-module). Same shape as the common mplsoccer pitch calls: a statsbomb or uefa frame, scatter, lines, arrows, a rectangular heatmap, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
+Football **pitch charts** on [`gfx`](#gfx-module). Same shape as the common mplsoccer pitch calls: a pitch frame, scatter, lines, arrows, a rectangular heatmap, formations, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
 
 Build from the repo root (`make prod`; see [README](README.md)), then:
 
@@ -1027,7 +1027,7 @@ mplsoccer.arrows(20, 30, 70, 50, color:"yellow")
 mplsoccer.show()
 ```
 
-`custom` is the same 105×68 frame as `uefa`. Any other pitch type (`opta`, `wyscout`, `tracab`, `metricasports`, `skillcorner`, `impect`, `secondspectrum`) raises.
+`pitch_type` is `statsbomb` (120×80, y down), `uefa` (105×68, y up), `opta` or `wyscout` (0–100, drawn at 105:68), `impect` (105×68, origin at the center), or a sized frame. `custom` is meters with the origin at a corner; omit the size and it is 105×68. `tracab` is centimeters about the center (pass length and width in meters). `metricasports` is 0–1 with y down. `skillcorner` and `secondspectrum` are meters about the center. Those five need `pitch_length` and `pitch_width` (`custom` uses 105 and 68 when both are omitted). `standardize` takes the same sizes as `length_from`, `width_from`, `length_to`, and `width_to`.
 
 ## Examples
 
@@ -1041,21 +1041,22 @@ Module `lib/mplsoccer.ie` (imports `gfx` and `rest`).
 
 | Form | Meaning |
 |------|---------|
-| `mplsoccer.pitch(...)` | Horizontal pitch. `pitch_type` is `"statsbomb"` (120×80, y down) or `"uefa"` / `"custom"` (105×68, y up). Options: `half`, `pitch_color`, `line_color`, `stripe`, `stripe_color`, `pad_left` / `pad_right` / `pad_bottom` / `pad_top` (data units, default 4), `goal_type` (`"line"` or `"box"`), `corner_arcs`, `positional`, `shade_middle` |
+| `mplsoccer.pitch(...)` | Horizontal pitch. `pitch_type`: `statsbomb`, `uefa`, `opta`, `wyscout`, `impect`, `custom`, `tracab`, `metricasports`, `skillcorner`, `secondspectrum`. Sized frames take `pitch_length` and `pitch_width` in meters. Options: `half`, `pitch_color`, `line_color`, `stripe`, `stripe_color`, `pad_left` / `pad_right` / `pad_bottom` / `pad_top` (data units; default 4, or 0.04 on `metricasports`, and ×100 on `tracab`), `goal_type` (`"line"` or `"box"`), `corner_arcs`, `positional`, `shade_middle` |
 | `mplsoccer.vertical_pitch(...)` | Same options. Length runs up the screen |
-| `mplsoccer.standardize(x, y, pitch_from, pitch_to)` | Piecewise map through the pitch markings. `x` and `y` in the result are lists. `pitch_to` defaults to the current pitch |
+| `mplsoccer.standardize(x, y, pitch_from, pitch_to)` | Piecewise map through the pitch markings. `x` and `y` in the result are lists. `pitch_to` defaults to the current pitch. Sized frames also take `length_from`, `width_from`, `length_to`, `width_to` |
 | `mplsoccer.flip_side(x, y, flip)` | Reflect points to the other half when `flip` is on. One flag, or one per point |
 | `mplsoccer.calculate_angle_and_distance(x0, y0, x1, y1)` | Radians counter-clockwise in **data** coordinates, and Euclidean distance. On a statsbomb pitch, y grows down the screen |
 | `mplsoccer.scatter` / `plot` / `lines` / `arrows` / `text` | Queue marks in pitch coordinates. `text` is one string; `dy` is a pixel offset |
-| `mplsoccer.flow(x0, y0, x1, y1[, bins])` | One arrow per cell: the mean displacement of segments whose start falls in that cell. Default bins are 5 by 4 |
-| `mplsoccer.bin_statistic(x, y[, values, statistic, bins, normalize])` | `count` (default), `sum`, or `mean` on a rectangle grid. Points outside the pitch are dropped. Returns `statistic`, `x_edge`, `y_edge`, `cx`, `cy`, `nx`, `ny`. `normalize` divides by the total |
+| `mplsoccer.flow(x0, y0, x1, y1[, bins])` | One arrow per cell: the mean displacement of segments whose start falls in that cell. Default bins are 5 by 4. Each axis is capped at 200 |
+| `mplsoccer.bin_statistic(x, y[, values, statistic, bins, normalize])` | `count` (default), `sum`, `mean`, `std` (population), or `median` on a rectangle grid. Points outside the pitch are dropped. An empty cell is 0. Returns `statistic`, `x_edge`, `y_edge`, `cx`, `cy`, `nx`, `ny`. `normalize` divides by the total. Each axis is capped at 200 |
 | `mplsoccer.heatmap(stats[, vmin, vmax])` | Paint that grid white to blue |
-| `mplsoccer.formations()` / `formation(name)` / `draw_formation(name)` | Nine formations (`4-4-2`, `4-3-3`, `4-2-3-1`, `4-1-4-1`, `4-4-1-1`, `3-5-2`, `3-4-3`, `5-3-2`, `5-4-1`) stored in uefa meters and mapped onto the current pitch |
+| `mplsoccer.label_heatmap(stats[, color])` | `gfx.text` of each cell at its center. Whole numbers print as integers; other values print to one decimal. Default color is black |
+| `mplsoccer.formations()` / `formation(name)` / `draw_formation(name)` | The published formation table. Names are the digit string (`"442"`) or the same digits with dashes (`"4-4-2"`). Coordinates come from the current pitch |
 | `mplsoccer.draw()` / `show()` / `clf()` / `close()` | Paint, open the gfx window, clear overlays, close. `show` no-ops when `SHAKTI_GFX_SKIP=1` |
 | `mplsoccer.sblocal(path)` | Flatten a StatsBomb event JSON file to a table |
 | `mplsoccer.sbopen(match_id)` | GET that match from the public open-data events URL. Digits only. The dataset is not shipped in this tree |
 
-`sblocal` keeps events that have a location. Columns: `x`, `y`, `end_x`, `end_y`, `minute`, `angle`, `length`, `has_end`, `has_pass`, `type`, `player`, `team`. End location comes from a pass, shot, or carry. An event with no end keeps `has_end` 0 and copies `x`, `y`. Pass angle and length are 0 when the event is not a pass (`has_pass` 0).
+`sblocal` keeps events that have a location. Columns: `x`, `y`, `end_x`, `end_y`, `minute`, `angle`, `length`, `has_end`, `has_pass`, `type`, `player`, `team`, `player_id`, `team_id`, `outcome`, `period`. End location comes from a pass, shot, or carry. An event with no end keeps `has_end` 0 and copies `x`, `y`. Pass angle and length are 0 when the event is not a pass (`has_pass` 0). `outcome` is the name on the event, or on the pass, shot, or other action body. A missing id or period is 0.
 
 ## Not in this module
 

@@ -1,6 +1,5 @@
 # mplsoccer — football pitch charts on gfx.
-# A subset of the Python mplsoccer pitch tools: statsbomb and uefa (custom)
-# frames, rectangular heatmaps, arrows, and a StatsBomb event table.
+# Pitch frames, rectangular heatmaps, arrows, formations, and a StatsBomb event table.
 #
 #   import mplsoccer
 #   mplsoccer.pitch(pitch_type:"statsbomb")
@@ -13,6 +12,7 @@ import rest
 _PI : 3.141592653589793
 _W : 960
 _H : 540
+_BIN_MAX : 200
 
 _NAMES : dict(white:0xffffff, black:0x000000, red:0xd62728, blue:0x2171b5, green:0x1b7a3a, yellow:0xf2c14e, orange:0xff7f0e, grass:0x1b7a3a)
 
@@ -24,15 +24,75 @@ _FORMS : {}
 def _form(name, rows):
     _FORMS[name] : rows
 
-_form("4-4-2", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LM", 48.0, 8.0], ["LCM", 42.0, 26.0], ["RCM", 42.0, 42.0], ["RM", 48.0, 60.0], ["LS", 78.0, 28.0], ["RS", 78.0, 40.0]])
-_form("4-3-3", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LCM", 48.0, 22.0], ["CM", 44.0, 34.0], ["RCM", 48.0, 46.0], ["LW", 78.0, 10.0], ["ST", 86.0, 34.0], ["RW", 78.0, 58.0]])
-_form("4-2-3-1", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LDM", 38.0, 26.0], ["RDM", 38.0, 42.0], ["LAM", 62.0, 14.0], ["CAM", 64.0, 34.0], ["RAM", 62.0, 54.0], ["ST", 84.0, 34.0]])
-_form("4-1-4-1", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["DM", 36.0, 34.0], ["LM", 55.0, 8.0], ["LCM", 52.0, 26.0], ["RCM", 52.0, 42.0], ["RM", 55.0, 60.0], ["ST", 82.0, 34.0]])
-_form("4-4-1-1", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LM", 50.0, 8.0], ["LCM", 46.0, 26.0], ["RCM", 46.0, 42.0], ["RM", 50.0, 60.0], ["SS", 66.0, 34.0], ["ST", 84.0, 34.0]])
-_form("3-5-2", [["GK", 6.0, 34.0], ["LCB", 18.0, 20.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 48.0], ["LWB", 40.0, 6.0], ["LCM", 46.0, 24.0], ["CM", 42.0, 34.0], ["RCM", 46.0, 44.0], ["RWB", 40.0, 62.0], ["LS", 78.0, 28.0], ["RS", 78.0, 40.0]])
-_form("3-4-3", [["GK", 6.0, 34.0], ["LCB", 18.0, 20.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 48.0], ["LM", 48.0, 8.0], ["LCM", 42.0, 26.0], ["RCM", 42.0, 42.0], ["RM", 48.0, 60.0], ["LW", 78.0, 12.0], ["ST", 86.0, 34.0], ["RW", 78.0, 56.0]])
-_form("5-3-2", [["GK", 6.0, 34.0], ["LWB", 28.0, 6.0], ["LCB", 18.0, 18.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 50.0], ["RWB", 28.0, 62.0], ["LCM", 48.0, 22.0], ["CM", 44.0, 34.0], ["RCM", 48.0, 46.0], ["LS", 78.0, 28.0], ["RS", 78.0, 40.0]])
-_form("5-4-1", [["GK", 6.0, 34.0], ["LWB", 28.0, 6.0], ["LCB", 18.0, 18.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 50.0], ["RWB", 28.0, 62.0], ["LM", 52.0, 12.0], ["LCM", 46.0, 28.0], ["RCM", 46.0, 40.0], ["RM", 52.0, 56.0], ["ST", 80.0, 34.0]])
+# Formation slots: position, line (4, 5, 6=4 with a second striker, 7=5 with one), mesh index.
+_form("442", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("41212", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["CAM", 5, 16], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("433", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("451", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RM", 5, 3], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["LM", 5, 27], ["ST", 5, 17]])
+_form("4411", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("4141", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39], ["ST", 5, 17]])
+_form("4231", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RDM", 5, 8], ["LDM", 5, 20], ["RW", 5, 4], ["CAM", 5, 16], ["LW", 5, 28], ["ST", 5, 17]])
+_form("4321", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("532", [["GK", 5, 12], ["RB", 5, 1], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["LB", 5, 25], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("541", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RB", 5, 1], ["LB", 5, 25], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39], ["ST", 5, 17]])
+_form("352", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("532flat", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RB", 5, 1], ["LB", 5, 25], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("343", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("343flat", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RM", 5, 3], ["LM", 5, 27], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("31312", [["GK", 7, 14], ["RCB", 7, 8], ["CB", 7, 15], ["LCB", 7, 22], ["CDM", 7, 16], ["RCM", 7, 10], ["CM", 7, 17], ["LCM", 7, 24], ["RCF", 7, 13], ["LCF", 7, 27], ["SS", 7, 19]])
+_form("4222", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("3511", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["CDM", 5, 14], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("3511flat", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RM", 5, 3], ["CDM", 5, 14], ["LM", 5, 27], ["RCM", 5, 9], ["LCM", 5, 21], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("3421", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 4, 2], ["RDM", 4, 14], ["LDM", 4, 26], ["LWB", 4, 38], ["RAM", 4, 16], ["LAM", 4, 28], ["ST", 5, 17]])
+_form("3421flat", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RM", 4, 3], ["RDM", 4, 14], ["LDM", 4, 26], ["LM", 4, 39], ["RAM", 4, 16], ["LAM", 4, 28], ["ST", 5, 17]])
+_form("3412", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["CAM", 5, 16], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("3412flat", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RM", 5, 3], ["LM", 5, 27], ["RCM", 5, 9], ["LCM", 5, 21], ["CAM", 5, 16], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("3142", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["CDM", 5, 14], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("31213", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["CAM", 5, 16], ["LW", 5, 28], ["ST", 5, 17]])
+_form("4132", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RW", 4, 4], ["CAM", 5, 16], ["LW", 4, 40], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("424", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RDM", 5, 8], ["LDM", 5, 20], ["RW", 4, 4], ["LW", 4, 40], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("4312", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["CAM", 5, 16], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("3241", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RDM", 4, 14], ["LDM", 4, 26], ["RW", 4, 4], ["RAM", 4, 16], ["LAM", 4, 28], ["LW", 4, 40], ["ST", 5, 17]])
+_form("3331", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RDM", 5, 8], ["CDM", 5, 14], ["LDM", 5, 20], ["RM", 5, 3], ["LM", 5, 27], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("pyramid", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["RCF", 5, 11], ["ST", 5, 17], ["LCF", 5, 23]])
+_form("metodo", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["RWB", 5, 2], ["CDM", 5, 14], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("wm", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RDM", 4, 14], ["LDM", 4, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("41221", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("42211", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RDM", 5, 8], ["LDM", 5, 20], ["RM", 5, 3], ["LM", 5, 27], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("32221", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RDM", 4, 14], ["LDM", 4, 26], ["RM", 5, 3], ["LM", 5, 27], ["RAM", 4, 16], ["LAM", 4, 28], ["ST", 5, 17]])
+_form("5221", [["GK", 5, 12], ["RB", 5, 1], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["LB", 5, 25], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("3232", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("312112", [["GK", 7, 14], ["RCB", 7, 8], ["CB", 7, 15], ["LCB", 7, 22], ["CDM", 7, 16], ["RCM", 7, 10], ["LCM", 7, 24], ["CAM", 7, 18], ["RCF", 7, 13], ["LCF", 7, 27], ["SS", 7, 19]])
+_form("42121", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RDM", 5, 8], ["LDM", 5, 20], ["CM", 5, 15], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("31222", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("4213", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RDM", 5, 8], ["LDM", 5, 20], ["CAM", 5, 16], ["RCF", 5, 11], ["ST", 5, 17], ["LCF", 5, 23]])
+_form("32122", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["CM", 5, 15], ["RAM", 5, 10], ["LAM", 5, 22], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("3322", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RCM", 5, 9], ["LCM", 5, 21], ["CM", 5, 15], ["RAM", 5, 10], ["LAM", 5, 22], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("41131", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["CM", 5, 15], ["RW", 5, 4], ["CAM", 5, 16], ["LW", 5, 28], ["ST", 5, 17]])
+_form("432", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("441", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39], ["ST", 5, 17]])
+_form("4311", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("4221", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28], ["ST", 5, 17]])
+_form("4131", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["CDM", 5, 14], ["RW", 4, 4], ["CAM", 5, 16], ["LW", 4, 40], ["ST", 5, 17]])
+_form("4212", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RDM", 5, 8], ["LDM", 5, 20], ["CAM", 5, 16], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("342", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("3411", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["CAM", 5, 16], ["ST", 5, 17]])
+_form("351", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["ST", 5, 17]])
+_form("531", [["GK", 5, 12], ["RB", 5, 1], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["LB", 5, 25], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21], ["ST", 5, 17]])
+_form("431", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["CM", 5, 15], ["LCM", 5, 21], ["ST", 5, 17]])
+_form("44", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RM", 4, 3], ["RCM", 4, 15], ["LCM", 4, 27], ["LM", 4, 39]])
+_form("422", [["GK", 5, 12], ["RB", 4, 1], ["RCB", 4, 13], ["LCB", 4, 25], ["LB", 4, 37], ["RCM", 5, 9], ["LCM", 5, 21], ["RW", 5, 4], ["LW", 5, 28]])
+_form("341", [["GK", 5, 12], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["RCM", 5, 9], ["LCM", 5, 21], ["ST", 5, 17]])
+_form("53", [["GK", 5, 12], ["RB", 5, 1], ["RCB", 5, 7], ["CB", 5, 13], ["LCB", 5, 19], ["LB", 5, 25], ["CDM", 5, 14], ["RCM", 5, 9], ["LCM", 5, 21]])
+_form("1234", [["GK", 5, 12], ["CB", 5, 13], ["RDM", 5, 8], ["LDM", 5, 20], ["CM", 5, 15], ["LCM", 5, 21], ["RCM", 5, 9], ["RW", 5, 4], ["LW", 5, 28], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("1324", [["GK", 5, 12], ["CB", 5, 13], ["RDM", 5, 8], ["LDM", 5, 20], ["CDM", 5, 14], ["LCM", 5, 21], ["RCM", 5, 9], ["RW", 5, 4], ["LW", 5, 28], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("1432", [["GK", 5, 12], ["CB", 5, 13], ["RM", 5, 3], ["LM", 5, 27], ["LCM", 5, 21], ["RCM", 5, 9], ["RAM", 5, 10], ["LAM", 5, 22], ["CAM", 5, 16], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("1423", [["GK", 5, 12], ["CB", 5, 13], ["RM", 5, 3], ["LM", 5, 27], ["LCM", 5, 21], ["RCM", 5, 9], ["RAM", 5, 10], ["LAM", 5, 22], ["ST", 5, 17], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("2422", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["LCM", 5, 21], ["RCM", 5, 9], ["RAM", 5, 10], ["LAM", 5, 22], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("2413", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["LCM", 5, 21], ["RCM", 5, 9], ["CAM", 5, 16], ["ST", 5, 17], ["RCF", 4, 17], ["LCF", 4, 29]])
+_form("2431", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["RWB", 5, 2], ["LWB", 5, 26], ["LCM", 5, 21], ["RCM", 5, 9], ["CAM", 5, 16], ["LAM", 5, 22], ["RAM", 5, 10], ["ST", 5, 17]])
+_form("2332", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["CDM", 5, 14], ["LCM", 5, 21], ["RCM", 5, 9], ["CAM", 5, 16], ["LAM", 5, 22], ["RAM", 5, 10], ["RCF", 5, 11], ["LCF", 5, 23]])
+_form("2233", [["GK", 5, 12], ["RCB", 5, 7], ["LCB", 5, 19], ["LCM", 5, 21], ["RCM", 5, 9], ["CAM", 5, 16], ["LAM", 5, 22], ["RAM", 5, 10], ["RCF", 5, 11], ["LCF", 5, 23], ["ST", 5, 17]])
 
 def _blank(v):
     if v = None:
@@ -146,22 +206,125 @@ def _atan2(y, x):
     return r
 
 def _canon(name):
-    if name = "custom" or name = "uefa":
-        return "uefa"
-    if name = "statsbomb":
-        return "statsbomb"
+    if name = "statsbomb" or name = "uefa" or name = "opta" or name = "wyscout" or name = "tracab" or name = "metricasports" or name = "skillcorner" or name = "impect" or name = "secondspectrum" or name = "custom":
+        return name
     raise "mplsoccer: pitch type not supported: " + str(name)
 
-def _make_dim(name):
-    if name = "statsbomb":
-        d : dict(left:0.0, right:120.0, top:0.0, bottom:80.0, length:120.0, width:80.0, invert:1, center_length:60.0, center_width:40.0, penalty_left:12.0, penalty_area_length:18.0, penalty_area_width:44.0, six_yard_length:6.0, six_yard_width:20.0, goal_length:2.4, goal_width:8.0, circle_diameter:20.0, corner_diameter:2.186)
-        d["x_marks"] : [0.0, 6.0, 12.0, 18.0, 60.0, 102.0, 108.0, 114.0, 120.0]
-        d["y_marks"] : [0.0, 18.0, 30.0, 36.0, 44.0, 50.0, 62.0, 80.0]
-        return d
-    d : dict(left:0.0, right:105.0, top:68.0, bottom:0.0, length:105.0, width:68.0, invert:0, center_length:52.5, center_width:34.0, penalty_left:11.0, penalty_area_length:16.5, penalty_area_width:40.32, six_yard_length:5.5, six_yard_width:18.32, goal_length:2.0, goal_width:7.32, circle_diameter:18.3, corner_diameter:2.0)
-    d["x_marks"] : [0.0, 5.5, 11.0, 16.5, 52.5, 88.5, 94.0, 99.5, 105.0]
-    d["y_marks"] : [0.0, 13.84, 24.84, 30.34, 37.66, 43.16, 54.16, 68.0]
+def _varies(name):
+    if name = "tracab" or name = "metricasports" or name = "custom" or name = "skillcorner" or name = "secondspectrum":
+        return 1
+    return 0
+
+def _sizes(name, length, width):
+    if _varies(name) = 0:
+        return dict(length:0.0, width:0.0)
+    if name = "custom" and _blank(length) and _blank(width):
+        return dict(length:105.0, width:68.0)
+    if _blank(length) or _blank(width):
+        raise "mplsoccer: pitch_length and pitch_width required for " + name
+    L : float(length)
+    W : float(width)
+    if type(L) = "error" or type(W) = "error" or L <= 0 or W <= 0:
+        raise "mplsoccer: pitch_length and pitch_width must be positive"
+    return dict(length:L, width:W)
+
+def _sort_nums(a):
+    i : 1
+    while i < len(a):
+        v : a[i]
+        j : i
+        while j > 0 and a[j - 1] > v:
+            a[j] : a[j - 1]
+            j : j - 1
+        a[j] : v
+        i : i + 1
+    return a
+
+def _finish(d):
+    d["x_marks"] : _sort_nums([d["left"], d["six_left"], d["pen_left"], d["box_left"], d["center_length"], d["box_right"], d["pen_right"], d["six_right"], d["right"]])
+    d["y_marks"] : _sort_nums([d["bottom"], d["box_bottom"], d["six_bottom"], d["goal_bottom"], d["goal_top"], d["six_top"], d["box_top"], d["top"]])
+    cdl : d["circle_diameter"]
+    cdw : cdl
+    kdl : d["corner_diameter"]
+    kdw : kdl
+    if d["aspect_equal"] = 0:
+        cdl : d["circle_diameter"] / d["pitch_length"] * d["length"]
+        cdw : d["circle_diameter"] / d["pitch_width"] * d["width"]
+        kdl : d["corner_diameter"] / d["pitch_length"] * d["length"]
+        kdw : d["corner_diameter"] / d["pitch_width"] * d["width"]
+    d["circle_rx"] : cdl / 2.0
+    d["circle_ry"] : cdw / 2.0
+    d["corner_rx"] : kdl / 2.0
+    d["corner_ry"] : kdw / 2.0
+    d["pen_math"] : d["pen_left"] - d["left"]
     return d
+
+def _box_dims(d):
+    d["pen_right"] : d["right"] - d["pen_left"]
+    d["box_left"] : d["penalty_area_length"]
+    d["box_right"] : d["right"] - d["penalty_area_length"]
+    neg : 0.5
+    if d["invert"]:
+        neg : -0.5
+    d["box_bottom"] : d["center_width"] - neg * d["penalty_area_width"]
+    d["box_top"] : d["center_width"] + neg * d["penalty_area_width"]
+    d["six_bottom"] : d["center_width"] - neg * d["six_yard_width"]
+    d["six_top"] : d["center_width"] + neg * d["six_yard_width"]
+    d["goal_bottom"] : d["center_width"] - neg * d["goal_width"]
+    d["goal_top"] : d["center_width"] + neg * d["goal_width"]
+    d["six_left"] : d["six_yard_length"]
+    d["six_right"] : d["right"] - d["six_yard_length"]
+    return _finish(d)
+
+def _r4(v):
+    s : v * 10000.0
+    if s >= 0.0:
+        return int(s + 0.5) / 10000.0
+    return int(s - 0.5) / 10000.0
+
+def _fixed(left, right, top, bottom, length, width, invert, center_length, center_width, pen_left, pen_right, box_left, box_right, box_bottom, box_top, six_left, six_right, six_bottom, six_top, goal_bottom, goal_top, penalty_area_length, penalty_area_width, six_yard_length, six_yard_width, goal_length, goal_width, circle_diameter, corner_diameter, pitch_length, pitch_width, aspect, aspect_equal):
+    d : dict(left:left, right:right, top:top, bottom:bottom, length:length, width:width, invert:invert, center_length:center_length, center_width:center_width, pen_left:pen_left, pen_right:pen_right, box_left:box_left, box_right:box_right, box_bottom:box_bottom, box_top:box_top, six_left:six_left, six_right:six_right, six_bottom:six_bottom, six_top:six_top, goal_bottom:goal_bottom, goal_top:goal_top, penalty_area_length:penalty_area_length, penalty_area_width:penalty_area_width, six_yard_length:six_yard_length, six_yard_width:six_yard_width, goal_length:goal_length, goal_width:goal_width, circle_diameter:circle_diameter, corner_diameter:corner_diameter, pitch_length:pitch_length, pitch_width:pitch_width, aspect:aspect, aspect_equal:aspect_equal, pad_default:4.0, pad_mul:1.0)
+    return _finish(d)
+
+def _center_pitch(L, W, six_l, six_w, box_l, box_w, spot, goal_l, goal_w, circ, corn, pad_default, pad_mul):
+    left : -L / 2.0
+    right : L / 2.0
+    box_left : left + box_l
+    six_left : left + six_l
+    pen_left : left + spot
+    d : dict(left:left, right:right, top:W / 2.0, bottom:-W / 2.0, length:L, width:W, invert:0, center_length:0.0, center_width:0.0, pen_left:pen_left, pen_right:right - spot, box_left:box_left, box_right:-box_left, box_bottom:-box_w / 2.0, box_top:box_w / 2.0, six_left:six_left, six_right:-six_left, six_bottom:-six_w / 2.0, six_top:six_w / 2.0, goal_bottom:-goal_w / 2.0, goal_top:goal_w / 2.0, penalty_area_length:box_l, penalty_area_width:box_w, six_yard_length:six_l, six_yard_width:six_w, goal_length:goal_l, goal_width:goal_w, circle_diameter:circ, corner_diameter:corn, pitch_length:L, pitch_width:W, aspect:1.0, aspect_equal:1, pad_default:pad_default, pad_mul:pad_mul)
+    return _finish(d)
+
+_dim_cache : dict(ready:1)
+
+def _make_dim(name, length, width):
+    if _varies(name) = 0 and name in _dim_cache:
+        return _dim_cache[name]
+    d : _make_dim_build(name, length, width)
+    if _varies(name) = 0:
+        _dim_cache[name] : d
+    return d
+
+def _make_dim_build(name, length, width):
+    if name = "statsbomb":
+        return _fixed(0.0, 120.0, 0.0, 80.0, 120.0, 80.0, 1, 60.0, 40.0, 12.0, 108.0, 18.0, 102.0, 62.0, 18.0, 6.0, 114.0, 50.0, 30.0, 44.0, 36.0, 18.0, 44.0, 6.0, 20.0, 2.4, 8.0, 20.0, 2.186, 120.0, 80.0, 1.0, 1)
+    if name = "uefa":
+        return _fixed(0.0, 105.0, 68.0, 0.0, 105.0, 68.0, 0, 52.5, 34.0, 11.0, 94.0, 16.5, 88.5, 13.84, 54.16, 5.5, 99.5, 24.84, 43.16, 30.34, 37.66, 16.5, 40.32, 5.5, 18.32, 2.0, 7.32, 18.3, 2.0, 105.0, 68.0, 1.0, 1)
+    if name = "opta":
+        return _fixed(0.0, 100.0, 100.0, 0.0, 100.0, 100.0, 0, 50.0, 50.0, 11.5, 88.5, 17.0, 83.0, 21.1, 78.9, 5.8, 94.2, 36.8, 63.2, 45.2, 54.8, 17.0, 57.8, 5.8, 26.4, 1.9, 9.6, 18.3, 2.0, 105.0, 68.0, 68.0 / 105.0, 0)
+    if name = "wyscout":
+        return _fixed(0.0, 100.0, 0.0, 100.0, 100.0, 100.0, 1, 50.0, 50.0, 10.0, 90.0, 16.0, 84.0, 81.0, 19.0, 6.0, 94.0, 63.0, 37.0, 56.0, 44.0, 16.0, 62.0, 6.0, 26.0, 1.9, 12.0, 18.3, 2.0, 105.0, 68.0, 68.0 / 105.0, 0)
+    if name = "impect":
+        return _center_pitch(105.0, 68.0, 5.5, 18.32, 16.5, 40.32, 11.0, 2.0, 7.32, 18.3, 2.0, 4.0, 1.0)
+    if name = "skillcorner" or name = "secondspectrum":
+        return _center_pitch(length, width, 5.5, 18.32, 16.5, 40.32, 11.0, 2.0, 7.32, 18.3, 2.0, 4.0, 1.0)
+    if name = "tracab":
+        return _center_pitch(length * 100.0, width * 100.0, 550.0, 1832.0, 1650.0, 4032.0, 1100.0, 200.0, 732.0, 1830.0, 200.0, 4.0, 100.0)
+    if name = "metricasports":
+        d : dict(left:0.0, right:1.0, top:0.0, bottom:1.0, length:1.0, width:1.0, invert:1, center_length:0.5, center_width:0.5, pen_left:_r4(11.0 / length), penalty_area_length:_r4(16.5 / length), penalty_area_width:_r4(40.32 / width), six_yard_length:_r4(5.5 / length), six_yard_width:_r4(18.32 / width), goal_length:_r4(2.0 / length), goal_width:_r4(7.32 / width), circle_diameter:18.3, corner_diameter:2.0, pitch_length:length, pitch_width:width, aspect:width / length, aspect_equal:0, pad_default:0.04, pad_mul:1.0)
+        return _box_dims(d)
+    d : dict(left:0.0, right:length, top:width, bottom:0.0, length:length, width:width, invert:0, center_length:length / 2.0, center_width:width / 2.0, pen_left:11.0, penalty_area_length:16.5, penalty_area_width:40.32, six_yard_length:5.5, six_yard_width:18.32, goal_length:2.0, goal_width:7.32, circle_diameter:18.3, corner_diameter:2.0, pitch_length:length, pitch_width:width, aspect:1.0, aspect_equal:1, pad_default:4.0, pad_mul:1.0)
+    return _box_dims(d)
 
 def _y_lo(dim):
     if dim["top"] < dim["bottom"]:
@@ -208,15 +371,23 @@ def _one_xy(x, y, src, dst):
         ys : dst["bottom"] - ys
     return dict(x:xs, y:ys)
 
-def standardize(x, y, pitch_from, pitch_to:""):
+def standardize(x, y, pitch_from, pitch_to:"", length_from:"", width_from:"", length_to:"", width_to:""):
     src_name : _canon(pitch_from)
     dst_name : src_name
+    lt : length_to
+    wt : width_to
     if not _blank(pitch_to):
         dst_name : _canon(pitch_to)
     elif "pitch_type" in _pitch:
         dst_name : _pitch["pitch_type"]
-    src : _make_dim(src_name)
-    dst : _make_dim(dst_name)
+        if _blank(lt):
+            lt : _pitch["pitch_length"]
+        if _blank(wt):
+            wt : _pitch["pitch_width"]
+    ss : _sizes(src_name, length_from, width_from)
+    ds : _sizes(dst_name, lt, wt)
+    src : _make_dim(src_name, ss["length"], ss["width"])
+    dst : _make_dim(dst_name, ds["length"], ds["width"])
     xy : _pair(x, y)
     ox : []
     oy : []
@@ -228,22 +399,51 @@ def standardize(x, y, pitch_from, pitch_to:""):
         i : i + 1
     return dict(x:ox, y:oy)
 
-def _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, vertical):
+def _pad(v, dim):
+    p : dim["pad_default"]
+    if not _blank(v):
+        p : float(v)
+    return p * dim["pad_mul"]
+
+_sig : dict(on:0, pitch_type:"", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:"", pad_right:"", pad_bottom:"", pad_top:"", goal_type:"", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:"", vertical:0, pitch_length:"", pitch_width:"")
+
+def _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, vertical, pitch_length, pitch_width):
+    if _sig["on"] and type(_sig["pitch_type"]) = type(pitch_type) and _sig["pitch_type"] = pitch_type and type(_sig["half"]) = type(half) and _sig["half"] = half and type(_sig["pitch_color"]) = type(pitch_color) and _sig["pitch_color"] = pitch_color and type(_sig["line_color"]) = type(line_color) and _sig["line_color"] = line_color and type(_sig["stripe"]) = type(stripe) and _sig["stripe"] = stripe and type(_sig["stripe_color"]) = type(stripe_color) and _sig["stripe_color"] = stripe_color and type(_sig["pad_left"]) = type(pad_left) and _sig["pad_left"] = pad_left and type(_sig["pad_right"]) = type(pad_right) and _sig["pad_right"] = pad_right and type(_sig["pad_bottom"]) = type(pad_bottom) and _sig["pad_bottom"] = pad_bottom and type(_sig["pad_top"]) = type(pad_top) and _sig["pad_top"] = pad_top and type(_sig["goal_type"]) = type(goal_type) and _sig["goal_type"] = goal_type and type(_sig["corner_arcs"]) = type(corner_arcs) and _sig["corner_arcs"] = corner_arcs and type(_sig["positional"]) = type(positional) and _sig["positional"] = positional and type(_sig["positional_color"]) = type(positional_color) and _sig["positional_color"] = positional_color and type(_sig["shade_middle"]) = type(shade_middle) and _sig["shade_middle"] = shade_middle and type(_sig["shade_color"]) = type(shade_color) and _sig["shade_color"] = shade_color and type(_sig["vertical"]) = type(vertical) and _sig["vertical"] = vertical and type(_sig["pitch_length"]) = type(pitch_length) and _sig["pitch_length"] = pitch_length and type(_sig["pitch_width"]) = type(pitch_width) and _sig["pitch_width"] = pitch_width:
+        _pitch["overlays"] : []
+        return _pitch
     name : _canon(pitch_type)
     if goal_type != "line" and goal_type != "box":
         raise "mplsoccer: goal_type must be line or box"
+    L : 0.0
+    W : 0.0
+    if _varies(name):
+        sz : _sizes(name, pitch_length, pitch_width)
+        L : sz["length"]
+        W : sz["width"]
+    dim : _make_dim(name, L, W)
     _pitch["pitch_type"] : name
-    _pitch["dim"] : _make_dim(name)
+    _pitch["pitch_length"] : L
+    _pitch["pitch_width"] : W
+    _pitch["dim"] : dim
     _pitch["half"] : _on(half)
     _pitch["vertical"] : _on(vertical)
     _pitch["pitch_color"] : _color(pitch_color, 0x1b7a3a)
     _pitch["line_color"] : _color(line_color, 0xffffff)
     _pitch["stripe"] : _on(stripe)
     _pitch["stripe_color"] : _color(stripe_color, 0xc5d6a0)
-    _pitch["pad_left"] : float(pad_left)
-    _pitch["pad_right"] : float(pad_right)
-    _pitch["pad_bottom"] : float(pad_bottom)
-    _pitch["pad_top"] : float(pad_top)
+    scale : dim["pad_default"] * dim["pad_mul"]
+    _pitch["pad_left"] : scale
+    _pitch["pad_right"] : scale
+    _pitch["pad_bottom"] : scale
+    _pitch["pad_top"] : scale
+    if not _blank(pad_left):
+        _pitch["pad_left"] : float(pad_left) * dim["pad_mul"]
+    if not _blank(pad_right):
+        _pitch["pad_right"] : float(pad_right) * dim["pad_mul"]
+    if not _blank(pad_bottom):
+        _pitch["pad_bottom"] : float(pad_bottom) * dim["pad_mul"]
+    if not _blank(pad_top):
+        _pitch["pad_top"] : float(pad_top) * dim["pad_mul"]
     _pitch["goal_type"] : goal_type
     _pitch["corner_arcs"] : _on(corner_arcs)
     _pitch["positional"] : _on(positional)
@@ -251,13 +451,33 @@ def _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, 
     _pitch["shade_middle"] : _on(shade_middle)
     _pitch["shade_color"] : _color(shade_color, 0xd8d8d8)
     _pitch["overlays"] : []
+    _sig["on"] : 1
+    _sig["pitch_type"] : pitch_type
+    _sig["half"] : half
+    _sig["pitch_color"] : pitch_color
+    _sig["line_color"] : line_color
+    _sig["stripe"] : stripe
+    _sig["stripe_color"] : stripe_color
+    _sig["pad_left"] : pad_left
+    _sig["pad_right"] : pad_right
+    _sig["pad_bottom"] : pad_bottom
+    _sig["pad_top"] : pad_top
+    _sig["goal_type"] : goal_type
+    _sig["corner_arcs"] : corner_arcs
+    _sig["positional"] : positional
+    _sig["positional_color"] : positional_color
+    _sig["shade_middle"] : shade_middle
+    _sig["shade_color"] : shade_color
+    _sig["vertical"] : vertical
+    _sig["pitch_length"] : pitch_length
+    _sig["pitch_width"] : pitch_width
     return _pitch
 
-def pitch(pitch_type:"statsbomb", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:4.0, pad_right:4.0, pad_bottom:4.0, pad_top:4.0, goal_type:"line", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:""):
-    return _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, 0)
+def pitch(pitch_type:"statsbomb", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:"", pad_right:"", pad_bottom:"", pad_top:"", goal_type:"line", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:"", pitch_length:"", pitch_width:""):
+    return _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, 0, pitch_length, pitch_width)
 
-def vertical_pitch(pitch_type:"statsbomb", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:4.0, pad_right:4.0, pad_bottom:4.0, pad_top:4.0, goal_type:"line", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:""):
-    return _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, 1)
+def vertical_pitch(pitch_type:"statsbomb", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:"", pad_right:"", pad_bottom:"", pad_top:"", goal_type:"line", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:"", pitch_length:"", pitch_width:""):
+    return _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, 1, pitch_length, pitch_width)
 
 def clf():
     _pitch["overlays"] : []
@@ -266,7 +486,7 @@ def _layout():
     dim : _pitch["dim"]
     x1 : dim["right"]
     if _pitch["half"]:
-        x1 : dim["left"] + dim["center_length"]
+        x1 : dim["center_length"]
     vx0 : dim["left"] - _pitch["pad_left"]
     vx1 : x1 + _pitch["pad_right"]
     if dim["invert"]:
@@ -279,13 +499,13 @@ def _layout():
     disp_w : _lay["vy_bot"] - _lay["vy_top"]
     if disp_w < 0:
         disp_w : -disp_w
-    if disp_l < 1.0:
-        disp_l : 1.0
-    if disp_w < 1.0:
-        disp_w : 1.0
-    aspect : disp_l / disp_w
+    if disp_l < 0.000001:
+        disp_l : 0.000001
+    if disp_w < 0.000001:
+        disp_w : 0.000001
+    aspect : disp_l / (disp_w * dim["aspect"])
     if _pitch["vertical"]:
-        aspect : disp_w / disp_l
+        aspect : 1.0 / aspect
     avail_w : (_W - 48) * 1.0
     avail_h : (_H - 48) * 1.0
     pw : avail_w
@@ -406,7 +626,7 @@ def _spot_math(mx, my, color):
     d : _math_to_data(mx, my)
     p : _px(d["x"], d["y"])
     dim : _pitch["dim"]
-    r : dim["circle_diameter"] * 0.012
+    r : dim["circle_rx"] * 0.024
     q : _px(d["x"] + r, d["y"])
     dx : q["x"] - p["x"]
     dy : q["y"] - p["y"]
@@ -422,16 +642,19 @@ def _spot_math(mx, my, color):
     gfx.fill_circle(p["x"], p["y"], rr, color)
 
 def _arc_theta(dim):
-    dx : dim["penalty_area_length"] - dim["penalty_left"]
-    rx : dim["circle_diameter"] / 2.0
+    dx : dim["penalty_area_length"] - dim["pen_math"]
+    rx : dim["circle_rx"]
+    ry : dim["circle_ry"]
     if dx <= 0:
         return 90.0
+    if rx <= 0:
+        return 0.0
     if dx >= rx:
         return 0.0
     inner : 1.0 - (dx / rx) * (dx / rx)
     if inner <= 0:
         return 0.0
-    dy : rx * sqrt(inner)
+    dy : ry * sqrt(inner)
     return _atan2(dy, dx) * 180.0 / _PI
 
 def _stripe_edges(dim):
@@ -476,7 +699,7 @@ def _paint_pitch():
         _rect_math(length / 3.0, 0.0, length * 2.0 / 3.0, width, _pitch["shade_color"])
     if _pitch["positional"]:
         pa : dim["penalty_area_length"]
-        c : dim["center_length"]
+        c : dim["length"] / 2.0
         mid_l : pa + (c - pa) / 2.0
         mid_r : c + (length - pa - c) / 2.0
         pcol : _pitch["positional_color"]
@@ -498,21 +721,23 @@ def _paint_pitch():
     _box_math(length - pa, pen_lo, length, pen_hi, col)
     _box_math(0.0, six_lo, six, six_hi, col)
     _box_math(length - six, six_lo, length, six_hi, col)
-    rad : dim["circle_diameter"] / 2.0
-    _stroke_arc(length / 2.0, width / 2.0, rad, rad, 0.0, 360.0, col)
+    radx : dim["circle_rx"]
+    rady : dim["circle_ry"]
+    _stroke_arc(length / 2.0, width / 2.0, radx, rady, 0.0, 360.0, col)
     theta : _arc_theta(dim)
     if theta > 0:
-        _stroke_arc(dim["penalty_left"], width / 2.0, rad, rad, -theta, theta, col)
-        _stroke_arc(length - dim["penalty_left"], width / 2.0, rad, rad, 180.0 - theta, 180.0 + theta, col)
+        _stroke_arc(dim["pen_math"], width / 2.0, radx, rady, -theta, theta, col)
+        _stroke_arc(length - dim["pen_math"], width / 2.0, radx, rady, 180.0 - theta, 180.0 + theta, col)
     if _pitch["corner_arcs"]:
-        cr : dim["corner_diameter"] / 2.0
-        _stroke_arc(0.0, 0.0, cr, cr, 0.0, 90.0, col)
-        _stroke_arc(length, 0.0, cr, cr, 90.0, 180.0, col)
-        _stroke_arc(length, width, cr, cr, 180.0, 270.0, col)
-        _stroke_arc(0.0, width, cr, cr, 270.0, 360.0, col)
+        crx : dim["corner_rx"]
+        cry : dim["corner_ry"]
+        _stroke_arc(0.0, 0.0, crx, cry, 0.0, 90.0, col)
+        _stroke_arc(length, 0.0, crx, cry, 90.0, 180.0, col)
+        _stroke_arc(length, width, crx, cry, 180.0, 270.0, col)
+        _stroke_arc(0.0, width, crx, cry, 270.0, 360.0, col)
     _spot_math(length / 2.0, width / 2.0, col)
-    _spot_math(dim["penalty_left"], width / 2.0, col)
-    _spot_math(length - dim["penalty_left"], width / 2.0, col)
+    _spot_math(dim["pen_math"], width / 2.0, col)
+    _spot_math(length - dim["pen_math"], width / 2.0, col)
     glo : (width - dim["goal_width"]) / 2.0
     ghi : width - glo
     _line_math(0.0, glo, 0.0, ghi, col)
@@ -609,14 +834,21 @@ def _bin_index(v, lo, hi, n):
         i : 0
     return i
 
+def _limit_bins(n):
+    if type(n) = "error":
+        raise "mplsoccer: bins must be a positive count"
+    if n < 1:
+        n : 1
+    if n > _BIN_MAX:
+        raise "mplsoccer: bins exceed 200 per axis"
+    return n
+
 def _parse_bins(bins):
     if _blank(bins):
         return dict(nx:5, ny:4)
     t : type(bins)
     if t = "int" or t = "float":
-        n : int(bins)
-        if n < 1:
-            n : 1
+        n : _limit_bins(int(bins))
         return dict(nx:n, ny:n)
     nx : 5
     ny : 4
@@ -626,11 +858,7 @@ def _parse_bins(bins):
     elif len(bins) = 1:
         nx : int(bins[0])
         ny : nx
-    if nx < 1:
-        nx : 1
-    if ny < 1:
-        ny : 1
-    return dict(nx:nx, ny:ny)
+    return dict(nx:_limit_bins(nx), ny:_limit_bins(ny))
 
 def _paint_flow(op):
     dim : _pitch["dim"]
@@ -760,6 +988,7 @@ def text(x, y, s, color:"", dy:0):
     _pitch["overlays"].append(dict(kind:"text", x:float(x), y:float(y), s:str(s), color:_color(color, 0xffffff), dy:int(dy)))
 
 def flow(x0, y0, x1, y1, bins:"", color:""):
+    _parse_bins(bins)
     q : _quad(x0, y0, x1, y1)
     _pitch["overlays"].append(dict(kind:"flow", x0:q["x0"], y0:q["y0"], x1:q["x1"], y1:q["y1"], bins:bins, color:_color(color, 0xffffff)))
 
@@ -776,9 +1005,30 @@ def _blank_grid(nx, ny):
         iy : iy + 1
     return grid
 
+def _bad_num(v):
+    if type(v) = "error":
+        return 1
+    vs : str(v)
+    if vs = "nan" or vs = "-nan":
+        return 1
+    return 0
+
+def _blank_bags(nx, ny):
+    grid : []
+    iy : 0
+    while iy < ny:
+        row : []
+        ix : 0
+        while ix < nx:
+            row.append([])
+            ix : ix + 1
+        grid.append(row)
+        iy : iy + 1
+    return grid
+
 def bin_statistic(x, y, values:"", statistic:"count", bins:"", normalize:0):
-    if statistic != "count" and statistic != "sum" and statistic != "mean":
-        raise "mplsoccer: statistic must be count, sum, or mean"
+    if statistic != "count" and statistic != "sum" and statistic != "mean" and statistic != "std" and statistic != "median":
+        raise "mplsoccer: statistic must be count, sum, mean, std, or median"
     dim : _pitch["dim"]
     xy : _pair(x, y)
     xs : xy["x"]
@@ -803,26 +1053,64 @@ def bin_statistic(x, y, values:"", statistic:"count", bins:"", normalize:0):
     y1 : _y_hi(dim)
     total : _blank_grid(nx, ny)
     counts : _blank_grid(nx, ny)
+    sq : []
+    bags : []
+    if statistic = "std":
+        sq : _blank_grid(nx, ny)
+    if statistic = "median":
+        bags : _blank_bags(nx, ny)
     i : 0
     while i < len(xs):
         ix : _bin_index(float(xs[i]), x0, x1, nx)
         iy : _bin_index(float(ys[i]), y0, y1, ny)
+        vv : 0.0
+        if statistic != "count":
+            vv : float(vs[i])
+            if _bad_num(vv):
+                ix : -1
         if ix >= 0 and iy >= 0:
             counts[iy][ix] : counts[iy][ix] + 1.0
             if statistic = "count":
                 total[iy][ix] : total[iy][ix] + 1.0
+            elif statistic = "median":
+                bags[iy][ix].append(vv)
             else:
-                total[iy][ix] : total[iy][ix] + float(vs[i])
+                total[iy][ix] : total[iy][ix] + vv
+                if statistic = "std":
+                    sq[iy][ix] : sq[iy][ix] + vv * vv
         i : i + 1
     grid : total
-    if statistic = "mean":
+    if statistic = "mean" or statistic = "std":
         grid : _blank_grid(nx, ny)
         iy : 0
         while iy < ny:
             ix : 0
             while ix < nx:
                 if counts[iy][ix] > 0:
-                    grid[iy][ix] : total[iy][ix] / counts[iy][ix]
+                    mean : total[iy][ix] / counts[iy][ix]
+                    if statistic = "mean":
+                        grid[iy][ix] : mean
+                    else:
+                        var : sq[iy][ix] / counts[iy][ix] - mean * mean
+                        if var < 0:
+                            var : 0.0
+                        grid[iy][ix] : sqrt(var)
+                ix : ix + 1
+            iy : iy + 1
+    if statistic = "median":
+        grid : _blank_grid(nx, ny)
+        iy : 0
+        while iy < ny:
+            ix : 0
+            while ix < nx:
+                n : int(counts[iy][ix])
+                if n > 0:
+                    a : _sort_nums(bags[iy][ix])
+                    mid : int(n / 2)
+                    if n - mid * 2 = 1:
+                        grid[iy][ix] : a[mid]
+                    else:
+                        grid[iy][ix] : (a[mid - 1] + a[mid]) / 2.0
                 ix : ix + 1
             iy : iy + 1
     if _on(normalize):
@@ -859,6 +1147,40 @@ def bin_statistic(x, y, values:"", statistic:"count", bins:"", normalize:0):
         cy.append((y_edge[i] + y_edge[i + 1]) / 2.0)
         i : i + 1
     return dict(statistic:grid, x_edge:x_edge, y_edge:y_edge, cx:cx, cy:cy, nx:nx, ny:ny)
+
+def _fmt_cell(v):
+    iv : int(v)
+    if abs(v - iv) < 0.0005:
+        return str(iv)
+    s : v * 10.0
+    n : 0
+    if s >= 0.0:
+        n : int(s + 0.5)
+    else:
+        n : int(s - 0.5)
+    return str(n / 10.0)
+
+def label_heatmap(stats, color:""):
+    if type(stats) != "dict" or not ("statistic" in stats):
+        raise "mplsoccer: label_heatmap expects bin_statistic"
+    if not ("cx" in stats) or not ("cy" in stats):
+        raise "mplsoccer: label_heatmap expects bin_statistic"
+    grid : stats["statistic"]
+    cx : stats["cx"]
+    cy : stats["cy"]
+    col : color
+    if _blank(color):
+        col : "black"
+    iy : 0
+    while iy < len(grid):
+        row : grid[iy]
+        if len(cx) < len(row) or iy >= len(cy):
+            raise "mplsoccer: label_heatmap expects bin_statistic"
+        ix : 0
+        while ix < len(row):
+            text(cx[ix], cy[iy], _fmt_cell(row[ix]), color:col)
+            ix : ix + 1
+        iy : iy + 1
 
 def heatmap(stats, vmin:"", vmax:""):
     if type(stats) != "dict":
@@ -902,24 +1224,111 @@ def flip_side(x, y, flip:1):
         i : i + 1
     return dict(x:ox, y:oy)
 
+def _linspace(a, b, n):
+    out : []
+    i : 0
+    last : n - 1
+    while i < n:
+        out.append(a + (b - a) * i / last)
+        i : i + 1
+    return out
+
+def _y_slots(a, b, n, odd):
+    full : _linspace(a, b, n)
+    out : []
+    if odd:
+        i : 1
+        while i < len(full):
+            out.append(full[i])
+            i : i + 2
+        return out
+    i : 1
+    last : len(full) - 1
+    while i < last:
+        out.append(full[i])
+        i : i + 1
+    return out
+
+def _mesh(xs, ys):
+    pts : []
+    for y in ys:
+        for x in xs:
+            pts.append(x)
+            pts.append(y)
+    return pts
+
+def _line_pts(kind):
+    dim : _pitch["dim"]
+    nx : 6
+    odd : 0
+    if kind = 5 or kind = 7:
+        odd : 1
+    if kind = 6 or kind = 7:
+        nx : 7
+    n : 9
+    if odd:
+        n : 11
+    ys : _y_slots(dim["bottom"], dim["top"], n, odd)
+    xs : _linspace(dim["pen_left"], dim["pen_right"], nx)
+    return _mesh(xs, ys)
+
+def _form_key(name):
+    s : str(name)
+    out : ""
+    i : 0
+    while i < len(s):
+        c : s[i]
+        if c != "-" and c != "0":
+            out : out + c
+        i : i + 1
+    return out
+
+def _dashed(s):
+    out : ""
+    i : 0
+    while i < len(s):
+        if i > 0:
+            out : out + "-"
+        out : out + s[i]
+        i : i + 1
+    return out
+
+def _digit_key(s):
+    if len(s) = 0:
+        return 0
+    i : 0
+    while i < len(s):
+        if not (s[i] in "0123456789"):
+            return 0
+        i : i + 1
+    return 1
+
 def formations():
     out : []
     for k in _FORMS:
         out.append(k)
+        if _digit_key(k):
+            out.append(_dashed(k))
     return out
 
 def formation(name):
-    if not (name in _FORMS):
+    key : _form_key(name)
+    if not (key in _FORMS):
         raise "mplsoccer: unknown formation " + str(name)
-    rows : _FORMS[name]
+    rows : _FORMS[key]
+    grids : {}
     ps : []
     xs : []
     ys : []
     for row in rows:
-        xy : standardize(row[1], row[2], "uefa", _pitch["pitch_type"])
+        kind : str(row[1])
+        if not (kind in grids):
+            grids[kind] : _line_pts(row[1])
+        pts : grids[kind]
+        at : row[2] * 2
         ps.append(row[0])
-        xs.append(xy["x"][0])
-        ys.append(xy["y"][0])
+        xs.append(pts[at])
+        ys.append(pts[at + 1])
     return table(pos:ps, x:xs, y:ys)
 
 def draw_formation(name, color:""):
@@ -941,6 +1350,32 @@ def _xy_of(loc):
     if type(x) = "error" or type(y) = "error":
         return None
     return dict(x:x, y:y)
+
+def _int_of(v):
+    if v = None:
+        return 0
+    n : int(v)
+    if type(n) = "error":
+        return 0
+    return n
+
+def _id_of(obj):
+    if type(obj) != "dict":
+        return 0
+    if not ("id" in obj):
+        return 0
+    return _int_of(obj["id"])
+
+def _outcome_of(ev):
+    if "outcome" in ev:
+        return _label(ev["outcome"])
+    for k in ["pass", "shot", "duel", "goalkeeper", "dribble", "interception", "clearance", "block", "miscontrol", "ball_recovery", "50_50", "bad_behaviour"]:
+        if k in ev:
+            body : ev[k]
+            if type(body) = "dict":
+                if "outcome" in body:
+                    return _label(body["outcome"])
+    return ""
 
 def _label(obj):
     if obj = None:
@@ -987,6 +1422,10 @@ def _events_table(raw):
     kinds : []
     players : []
     teams : []
+    pids : []
+    tids : []
+    outcomes : []
+    periods : []
     for ev in raw:
         if type(ev) != "dict":
             continue
@@ -1027,8 +1466,16 @@ def _events_table(raw):
         if "player" in ev:
             player : _label(ev["player"])
         team : ""
+        pid : 0
+        tid : 0
+        if "player" in ev:
+            pid : _id_of(ev["player"])
         if "team" in ev:
             team : _label(ev["team"])
+            tid : _id_of(ev["team"])
+        period : 0
+        if "period" in ev:
+            period : _int_of(ev["period"])
         xs.append(loc["x"])
         ys.append(loc["y"])
         ex.append(endx)
@@ -1041,7 +1488,11 @@ def _events_table(raw):
         kinds.append(kind)
         players.append(player)
         teams.append(team)
-    return table(x:xs, y:ys, end_x:ex, end_y:ey, minute:minutes, angle:angs, length:lens, has_end:hes, has_pass:hps, type:kinds, player:players, team:teams)
+        pids.append(pid)
+        tids.append(tid)
+        outcomes.append(_outcome_of(ev))
+        periods.append(period)
+    return table(x:xs, y:ys, end_x:ex, end_y:ey, minute:minutes, angle:angs, length:lens, has_end:hes, has_pass:hps, type:kinds, player:players, team:teams, player_id:pids, team_id:tids, outcome:outcomes, period:periods)
 
 def sblocal(path):
     raw : json_load(path)

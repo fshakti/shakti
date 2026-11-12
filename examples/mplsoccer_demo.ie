@@ -19,16 +19,49 @@ same : mplsoccer.standardize(10, 20, pitch_from:"custom", pitch_to:"uefa")
 assert abs(same["x"][0] - 10.0) < 0.01
 assert abs(same["y"][0] - 20.0) < 0.01
 
+sized : mplsoccer.standardize(50, 25, pitch_from:"custom", pitch_to:"uefa", length_from:100, width_from:50)
+assert abs(sized["x"][0] - 52.5) < 0.01
+assert abs(sized["y"][0] - 34.0) < 0.01
+
 back : mplsoccer.standardize(52.5, 34, pitch_from:"uefa", pitch_to:"statsbomb")
 assert abs(back["x"][0] - 60.0) < 0.01
 assert abs(back["y"][0] - 40.0) < 0.01
 
+opta : mplsoccer.standardize(50, 50, pitch_from:"opta", pitch_to:"uefa")
+assert abs(opta["x"][0] - 52.5) < 0.01
+assert abs(opta["y"][0] - 34.0) < 0.01
+
+wys : mplsoccer.standardize(50, 50, pitch_from:"wyscout", pitch_to:"uefa")
+assert abs(wys["x"][0] - 52.5) < 0.01
+assert abs(wys["y"][0] - 34.0) < 0.01
+
+imp : mplsoccer.standardize(0, 0, pitch_from:"impect", pitch_to:"uefa")
+assert abs(imp["x"][0] - 52.5) < 0.01
+assert abs(imp["y"][0] - 34.0) < 0.01
+
 caught : 0
 try:
-    mplsoccer.standardize(1, 1, pitch_from:"opta")
+    mplsoccer.standardize(0, 0, pitch_from:"tracab", pitch_to:"uefa")
 except:
     caught : 1
 assert caught = 1
+
+mplsoccer.pitch(pitch_type:"opta", corner_arcs:1)
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"wyscout", corner_arcs:1)
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"impect")
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"custom", pitch_length:100, pitch_width:64)
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"tracab", pitch_length:105, pitch_width:68)
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"metricasports", pitch_length:105, pitch_width:68)
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"skillcorner", pitch_length:105, pitch_width:68)
+mplsoccer.draw()
+mplsoccer.pitch(pitch_type:"secondspectrum", pitch_length:105, pitch_width:68)
+mplsoccer.draw()
 
 mplsoccer.pitch()
 ad : mplsoccer.calculate_angle_and_distance([0, 0], [0, 0], [3, 0], [0, 1])
@@ -48,14 +81,39 @@ assert abs(st["statistic"][2][1] - 1.0) < 0.01
 sm : mplsoccer.bin_statistic([10, 30], [10, 20], values:[2, 8], statistic:"sum", bins:[2, 2], normalize:1)
 assert abs(sm["statistic"][0][0] - 1.0) < 0.01
 
-assert len(mplsoccer.formation("4-3-3")) = 11
+sd : mplsoccer.bin_statistic([10, 20], [10, 10], values:[2, 8], statistic:"std", bins:[2, 2])
+assert abs(sd["statistic"][0][0] - 3.0) < 0.01
+md : mplsoccer.bin_statistic([10, 20, 15], [10, 10, 10], values:[2, 8, 4], statistic:"median", bins:[2, 2])
+assert abs(md["statistic"][0][0] - 4.0) < 0.01
+
+capped : 0
+try:
+    mplsoccer.bin_statistic([1], [1], bins:201)
+except:
+    capped : 1
+assert capped = 1
+flow_capped : 0
+try:
+    mplsoccer.flow(1, 1, 2, 2, bins:201)
+except:
+    flow_capped : 1
+assert flow_capped = 1
+mplsoccer.clf()
+
+form : mplsoccer.formation("4-3-3")
+assert len(form) = 11
+assert abs(form.x[0] - 12.0) < 0.01
+assert abs(form.y[0] - 40.0) < 0.01
 assert "4-4-2" in mplsoccer.formations()
+assert "442" in mplsoccer.formations()
 
 body : dict(end_location:[40.0, 30.0], angle:0.5, length:12.0)
 ev : dict(location:[10.0, 20.0], minute:3)
 ev["type"] : dict(name:"Pass")
-ev["player"] : dict(name:"Ada")
-ev["team"] : dict(name:"Home")
+ev["player"] : dict(id:7, name:"Ada")
+ev["team"] : dict(id:3, name:"Home")
+ev["period"] : 1
+body["outcome"] : dict(name:"Incomplete")
 ev["pass"] : body
 shot : dict(location:[80.0, 40.0], minute:10)
 shot["type"] : dict(name:"Shot")
@@ -73,6 +131,11 @@ t : mplsoccer.sblocal("/tmp/mplsoccer_ev.json")
 assert len(t) = 2
 assert t.type[0] = "Pass"
 assert t.player[0] = "Ada"
+assert t.player_id[0] = 7
+assert t.team_id[0] = 3
+assert t.outcome[0] = "Incomplete"
+assert t.period[0] = 1
+assert t.outcome[1] = ""
 assert abs(t.x[0] - 10.0) < 0.01
 assert abs(t.end_x[0] - 40.0) < 0.01
 assert abs(t.angle[0] - 0.5) < 0.01
@@ -87,6 +150,7 @@ mplsoccer.draw()
 
 mplsoccer.pitch(pitch_type:"statsbomb", stripe:1, corner_arcs:1, positional:1, goal_type:"box")
 mplsoccer.heatmap(st)
+mplsoccer.label_heatmap(st, color:"black")
 mplsoccer.scatter([20, 40, 60], [20, 40, 50], color:"white")
 mplsoccer.arrows([20], [30], [70], [50], color:"yellow")
 mplsoccer.lines([10], [15], [40], [45])
