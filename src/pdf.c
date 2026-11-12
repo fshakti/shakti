@@ -186,9 +186,11 @@ struct PdfObj {
     size_t slen;
     PdfObj **items;
     int nitems;
+    int items_cap;
     char **keys;
     PdfObj **vals;
     int nkeys;
+    int keys_cap;
     int ref_n, ref_g;
     PdfObj *stream_dict;
     size_t stream_off, stream_len;
@@ -437,6 +439,37 @@ static PdfObj *pp_parse_number_or_ref(PdfParse *p) {
     return o;
 }
 
+/* Geometric growth for object arrays/dicts (was realloc-per-element, O(n^2)
+ * on adversarial files), with a hard element-count ceiling. */
+#define PDF_MAX_OBJ_ITEMS 10000000
+static int po_items_grow(PdfObj *o) {
+    if (o->nitems >= PDF_MAX_OBJ_ITEMS) return -1;
+    if (o->nitems == o->items_cap) {
+        int ncap = o->items_cap ? o->items_cap * 2 : 8;
+        if (ncap > PDF_MAX_OBJ_ITEMS) ncap = PDF_MAX_OBJ_ITEMS;
+        PdfObj **ni = realloc(o->items, (size_t)ncap * sizeof(PdfObj *));
+        if (!ni) return -1;
+        o->items = ni;
+        o->items_cap = ncap;
+    }
+    return 0;
+}
+static int po_keys_grow(PdfObj *o) {
+    if (o->nkeys >= PDF_MAX_OBJ_ITEMS) return -1;
+    if (o->nkeys == o->keys_cap) {
+        int ncap = o->keys_cap ? o->keys_cap * 2 : 8;
+        if (ncap > PDF_MAX_OBJ_ITEMS) ncap = PDF_MAX_OBJ_ITEMS;
+        char **nk = realloc(o->keys, (size_t)ncap * sizeof(char *));
+        if (!nk) return -1;
+        PdfObj **nv = realloc(o->vals, (size_t)ncap * sizeof(PdfObj *));
+        if (!nv) { o->keys = nk; return -1; }
+        o->keys = nk;
+        o->vals = nv;
+        o->keys_cap = ncap;
+    }
+    return 0;
+}
+
 static PdfObj *pp_parse_array(PdfParse *p) {
     if (p->depth >= PDF_MAX_PARSE_DEPTH) return NULL;
     if (!pp_consume(p, "[")) return NULL;
@@ -448,9 +481,7 @@ static PdfObj *pp_parse_array(PdfParse *p) {
         if (p->pos < p->len && p->data[p->pos] == ']') { p->pos++; break; }
         PdfObj *item = pp_parse_obj(p);
         if (!item) { po_free(o); p->depth--; return NULL; }
-        PdfObj **ni = realloc(o->items, (size_t)(o->nitems + 1) * sizeof(PdfObj *));
-        if (!ni) { po_free(item); po_free(o); p->depth--; return NULL; }
-        o->items = ni;
+        if (po_items_grow(o) != 0) { po_free(item); po_free(o); p->depth--; return NULL; }
         o->items[o->nitems++] = item;
     }
     p->depth--;
@@ -470,18 +501,10 @@ static PdfObj *pp_parse_dict(PdfParse *p) {
         if (!key) { po_free(o); p->depth--; return NULL; }
         PdfObj *val = pp_parse_obj(p);
         if (!val) { po_free(key); po_free(o); p->depth--; return NULL; }
-        char **nk = realloc(o->keys, (size_t)(o->nkeys + 1) * sizeof(char *));
-        if (!nk) {
+        if (po_keys_grow(o) != 0) {
             po_free(key); po_free(val); po_free(o); p->depth--;
             return NULL;
         }
-        o->keys = nk;
-        PdfObj **nv = realloc(o->vals, (size_t)(o->nkeys + 1) * sizeof(PdfObj *));
-        if (!nv) {
-            po_free(key); po_free(val); po_free(o); p->depth--;
-            return NULL;
-        }
-        o->vals = nv;
         o->keys[o->nkeys] = key->s;
         key->s = NULL;
         po_free(key);
@@ -1034,6 +1057,9 @@ static int pdf_page_content(PdfDoc *d, int page_obj, PdfBuf *out, char *err, siz
 
 static int extract_append_str(PdfBuf *out, const char *s, size_t n) {
     if (n == 0) return 0;
+    /* enforce the text ceiling during extraction, not only after (a page
+     * could otherwise inflate memory far past the cap before the check) */
+    if (out->len + n + 1 > PDF_MAX_TEXT_BYTES) return -1;
     if (out->len && buf_append(out, " ", 1) < 0) return -1;
     return buf_append(out, s, n);
 }

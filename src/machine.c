@@ -1,4 +1,5 @@
 #include "machine.h"
+#include "shakti_internal.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -210,7 +211,7 @@ static void fill_os(V *root) {
         mput_out(os, "arch", "Architecture", uts.machine);
     }
     char host[256];
-    if (gethostname(host, sizeof host) == 0)
+    if (!shakti_safe_mode() && gethostname(host, sizeof host) == 0)
         mput_out(os, "hostname", "Hostname", host);
 #else
     mput_out(os, "name", "Operating system", "unknown");
@@ -874,6 +875,15 @@ V *bi_machine(V **a, in) {
 V *shakti_machine_info(void) {
     V *root = mdict();
     fill_os(root);
+    if (shakti_safe_mode()) {
+        /* Safe mode: host inventory (CPU model, RAM, disks, GPUs) is host
+         * fingerprinting data; withhold it. */
+        mput(root, "safe_mode", v_bool(1));
+        mput(root, "cpu", v_list(0));
+        mput(root, "gpu", v_list(0));
+        mput(root, "disks", v_list(0));
+        return root;
+    }
     fill_cpu(root);
     fill_ram(root);
     fill_gpus(root);

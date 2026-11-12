@@ -84,6 +84,8 @@ def _parse_color(c):
         return c
     if type(c) = "float":
         return int(c)
+    if type(c) != "str":
+        return _COLORS["C0"]
     if c = "":
         return _COLORS["C0"]
     if c in _COLORS:
@@ -101,7 +103,7 @@ def _next_color():
     return name
 
 def _resolve_color(color):
-    if color = "":
+    if type(color) = "str" and color = "":
         return _parse_color(_next_color())
     return _parse_color(color)
 
@@ -114,7 +116,7 @@ def _as_list(v):
 def plot(a, b:"", color:"", label:""):
     xs : []
     ys : []
-    if b = "":
+    if type(b) = "str" and b = "":
         ys : _as_list(a)
         i : 0
         while i < len(ys):

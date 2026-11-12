@@ -9,6 +9,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdint.h>
@@ -744,6 +745,7 @@ void server_serve(int port, Env *global_env) {
         printf("[serve] socket failed\n");
         return;
     }
+    { int fl = fcntl(srv, F_GETFD); if (fl >= 0) (void)fcntl(srv, F_SETFD, fl | FD_CLOEXEC); }
     int opt = 1;
     setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in addr;
@@ -833,6 +835,7 @@ void server_serve(int port, Env *global_env) {
             if (errno == EINTR) continue;
             break;
         }
+        { int fl = fcntl(cfd, F_GETFD); if (fl >= 0) (void)fcntl(cfd, F_SETFD, fl | FD_CLOEXEC); }
         {
             struct timeval tv;
             tv.tv_sec = 1;

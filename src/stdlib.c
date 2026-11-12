@@ -449,6 +449,10 @@ V *bi_mkdir(V **a, in) {
 }
 V *bi_getenv(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("getenv"))
+    /* Safe mode: the host environment carries secrets (tokens, keys).
+     * Only Shakti's own configuration variables stay readable. */
+    if (shakti_safe_mode() && strncmp(a[0]->s, "SHAKTI_", 7) != 0)
+        return v_err("getenv: blocked in safe mode (only SHAKTI_* variables)");
     const char *v = getenv(a[0]->s);
     return v ? v_str(v) : v_nil();
 }

@@ -226,6 +226,7 @@ int ipc_mcast_make_reply_sock(int af, const char *iface, uint16_t *port_out, cha
         snprintf(err, err_cap, "ipc: reply socket: %s", strerror(errno));
         return -1;
     }
+    { int fl = fcntl(fd, F_GETFD); if (fl >= 0) (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC); }
     if (af == AF_INET6) {
         struct sockaddr_in6 a;
         memset(&a, 0, sizeof a);
@@ -274,6 +275,18 @@ int ipc_mcast_make_reply_sock(int af, const char *iface, uint16_t *port_out, cha
     return fd;
 }
 
+/* Without SHAKTI_IPC_MCAST_KEY, multicast traffic is unauthenticated:
+ * anyone on the segment can read and inject messages. Warn once. */
+static void ipc_mcast_warn_no_key(void) {
+    static int warned;
+    if (warned) return;
+    warned = 1;
+    if (!ipc_mcast_key())
+        fprintf(stderr,
+                "shakti: warning: multicast IPC without SHAKTI_IPC_MCAST_KEY is "
+                "unauthenticated (any host on the segment can read/inject)\n");
+}
+
 int ipc_mcast_open(const char *group, int port, const char *iface, const char *source,
                    int *af_out, struct sockaddr_storage *grp_out, socklen_t *grp_len_out,
                    char *err, size_t err_cap) {
@@ -281,6 +294,7 @@ int ipc_mcast_open(const char *group, int port, const char *iface, const char *s
         snprintf(err, err_cap, "ipc: bad mcast group/port");
         return -1;
     }
+    ipc_mcast_warn_no_key();
     int af = ipc_mcast_detect_af(group);
     if (af < 0) {
         snprintf(err, err_cap, "ipc: bad mcast group '%s'", group);
@@ -291,6 +305,7 @@ int ipc_mcast_open(const char *group, int port, const char *iface, const char *s
         snprintf(err, err_cap, "ipc: mcast socket: %s", strerror(errno));
         return -1;
     }
+    { int fl = fcntl(fd, F_GETFD); if (fl >= 0) (void)fcntl(fd, F_SETFD, fl | FD_CLOEXEC); }
     int one = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
 #ifdef SO_REUSEPORT
@@ -465,6 +480,7 @@ int ipc_mcast_open(const char *group, int port, const char *iface, const char *s
 
 int ipc_mcast_publish_on(IpcHandle *s, int fd, const unsigned char *data, size_t len,
                          char *err, size_t err_cap) {
+    ipc_mcast_warn_no_key();
     if (!s->mcast_addr_ok) {
         snprintf(err, err_cap, "ipc: mcast address unset");
         return -1;
