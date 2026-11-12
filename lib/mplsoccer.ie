@@ -1,0 +1,1073 @@
+# mplsoccer — football pitch charts on gfx.
+# A subset of the Python mplsoccer pitch tools: statsbomb and uefa (custom)
+# frames, rectangular heatmaps, arrows, and a StatsBomb event table.
+#
+#   import mplsoccer
+#   mplsoccer.pitch(pitch_type:"statsbomb")
+#   mplsoccer.scatter([20, 40], [30, 50])
+#   mplsoccer.show()
+
+import gfx
+import rest
+
+_PI : 3.141592653589793
+_W : 960
+_H : 540
+
+_NAMES : dict(white:0xffffff, black:0x000000, red:0xd62728, blue:0x2171b5, green:0x1b7a3a, yellow:0xf2c14e, orange:0xff7f0e, grass:0x1b7a3a)
+
+_pitch : {}
+_lay : dict(ox:40, oy:24, pw:880, ph:460, vx0:0.0, vx1:1.0, vy_top:0.0, vy_bot:1.0, vertical:0)
+
+_FORMS : {}
+
+def _form(name, rows):
+    _FORMS[name] : rows
+
+_form("4-4-2", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LM", 48.0, 8.0], ["LCM", 42.0, 26.0], ["RCM", 42.0, 42.0], ["RM", 48.0, 60.0], ["LS", 78.0, 28.0], ["RS", 78.0, 40.0]])
+_form("4-3-3", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LCM", 48.0, 22.0], ["CM", 44.0, 34.0], ["RCM", 48.0, 46.0], ["LW", 78.0, 10.0], ["ST", 86.0, 34.0], ["RW", 78.0, 58.0]])
+_form("4-2-3-1", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LDM", 38.0, 26.0], ["RDM", 38.0, 42.0], ["LAM", 62.0, 14.0], ["CAM", 64.0, 34.0], ["RAM", 62.0, 54.0], ["ST", 84.0, 34.0]])
+_form("4-1-4-1", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["DM", 36.0, 34.0], ["LM", 55.0, 8.0], ["LCM", 52.0, 26.0], ["RCM", 52.0, 42.0], ["RM", 55.0, 60.0], ["ST", 82.0, 34.0]])
+_form("4-4-1-1", [["GK", 6.0, 34.0], ["LB", 22.0, 10.0], ["LCB", 18.0, 24.0], ["RCB", 18.0, 44.0], ["RB", 22.0, 58.0], ["LM", 50.0, 8.0], ["LCM", 46.0, 26.0], ["RCM", 46.0, 42.0], ["RM", 50.0, 60.0], ["SS", 66.0, 34.0], ["ST", 84.0, 34.0]])
+_form("3-5-2", [["GK", 6.0, 34.0], ["LCB", 18.0, 20.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 48.0], ["LWB", 40.0, 6.0], ["LCM", 46.0, 24.0], ["CM", 42.0, 34.0], ["RCM", 46.0, 44.0], ["RWB", 40.0, 62.0], ["LS", 78.0, 28.0], ["RS", 78.0, 40.0]])
+_form("3-4-3", [["GK", 6.0, 34.0], ["LCB", 18.0, 20.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 48.0], ["LM", 48.0, 8.0], ["LCM", 42.0, 26.0], ["RCM", 42.0, 42.0], ["RM", 48.0, 60.0], ["LW", 78.0, 12.0], ["ST", 86.0, 34.0], ["RW", 78.0, 56.0]])
+_form("5-3-2", [["GK", 6.0, 34.0], ["LWB", 28.0, 6.0], ["LCB", 18.0, 18.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 50.0], ["RWB", 28.0, 62.0], ["LCM", 48.0, 22.0], ["CM", 44.0, 34.0], ["RCM", 48.0, 46.0], ["LS", 78.0, 28.0], ["RS", 78.0, 40.0]])
+_form("5-4-1", [["GK", 6.0, 34.0], ["LWB", 28.0, 6.0], ["LCB", 18.0, 18.0], ["CB", 16.0, 34.0], ["RCB", 18.0, 50.0], ["RWB", 28.0, 62.0], ["LM", 52.0, 12.0], ["LCM", 46.0, 28.0], ["RCM", 46.0, 40.0], ["RM", 52.0, 56.0], ["ST", 80.0, 34.0]])
+
+def _blank(v):
+    if v = None:
+        return 1
+    if type(v) = "str":
+        if v = "":
+            return 1
+    return 0
+
+def _on(v):
+    if v = True:
+        return 1
+    if v = False or v = None:
+        return 0
+    if type(v) = "int" or type(v) = "float":
+        if v = 0:
+            return 0
+        return 1
+    if type(v) = "str":
+        if v = "":
+            return 0
+        return 1
+    return 1
+
+def _parse_color(c):
+    if type(c) = "int":
+        return c
+    if type(c) = "float":
+        return int(c)
+    if type(c) != "str":
+        return 0xffffff
+    if c in _NAMES:
+        return _NAMES[c]
+    if len(c) > 0:
+        if c[0] = "#":
+            n : int("0x" + c[1:])
+            if type(n) != "error":
+                return n
+    return 0xffffff
+
+def _color(c, default):
+    if _blank(c):
+        return default
+    return _parse_color(c)
+
+def _as_list(v):
+    t : type(v)
+    if t = "int" or t = "float" or t = "bool" or t = "str" or t = "NoneType" or t = "error":
+        out : []
+        out.append(v)
+        return out
+    out : []
+    for x in v:
+        out.append(x)
+    return out
+
+def _pair(a, b):
+    xs : _as_list(a)
+    ys : _as_list(b)
+    if len(xs) = 1 and len(ys) > 1:
+        v : xs[0]
+        xs : []
+        i : 0
+        while i < len(ys):
+            xs.append(v)
+            i : i + 1
+    if len(ys) = 1 and len(xs) > 1:
+        v : ys[0]
+        ys : []
+        i : 0
+        while i < len(xs):
+            ys.append(v)
+            i : i + 1
+    if len(xs) != len(ys):
+        raise "mplsoccer: x and y length mismatch"
+    return dict(x:xs, y:ys)
+
+def _quad(a, b, c, d):
+    xs : _pair(a, b)
+    ys : _pair(c, d)
+    if len(xs["x"]) != len(ys["x"]):
+        raise "mplsoccer: start and end length mismatch"
+    return dict(x0:xs["x"], y0:xs["y"], x1:ys["x"], y1:ys["y"])
+
+def _atan2(y, x):
+    if x = 0:
+        if y = 0:
+            return 0.0
+    ax : x
+    if ax < 0:
+        ax : -ax
+    ay : y
+    if ay < 0:
+        ay : -ay
+    small : ax
+    big : ay
+    if ay < ax:
+        small : ay
+        big : ax
+    if big = 0:
+        return 0.0
+    q : small / big
+    s : q * q
+    r : ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * q + q
+    if ay > ax:
+        r : 1.5707963267948966 - r
+    if x < 0:
+        r : 3.141592653589793 - r
+    if y < 0:
+        r : -r
+    return r
+
+def _canon(name):
+    if name = "custom" or name = "uefa":
+        return "uefa"
+    if name = "statsbomb":
+        return "statsbomb"
+    raise "mplsoccer: pitch type not supported: " + str(name)
+
+def _make_dim(name):
+    if name = "statsbomb":
+        d : dict(left:0.0, right:120.0, top:0.0, bottom:80.0, length:120.0, width:80.0, invert:1, center_length:60.0, center_width:40.0, penalty_left:12.0, penalty_area_length:18.0, penalty_area_width:44.0, six_yard_length:6.0, six_yard_width:20.0, goal_length:2.4, goal_width:8.0, circle_diameter:20.0, corner_diameter:2.186)
+        d["x_marks"] : [0.0, 6.0, 12.0, 18.0, 60.0, 102.0, 108.0, 114.0, 120.0]
+        d["y_marks"] : [0.0, 18.0, 30.0, 36.0, 44.0, 50.0, 62.0, 80.0]
+        return d
+    d : dict(left:0.0, right:105.0, top:68.0, bottom:0.0, length:105.0, width:68.0, invert:0, center_length:52.5, center_width:34.0, penalty_left:11.0, penalty_area_length:16.5, penalty_area_width:40.32, six_yard_length:5.5, six_yard_width:18.32, goal_length:2.0, goal_width:7.32, circle_diameter:18.3, corner_diameter:2.0)
+    d["x_marks"] : [0.0, 5.5, 11.0, 16.5, 52.5, 88.5, 94.0, 99.5, 105.0]
+    d["y_marks"] : [0.0, 13.84, 24.84, 30.34, 37.66, 43.16, 54.16, 68.0]
+    return d
+
+def _y_lo(dim):
+    if dim["top"] < dim["bottom"]:
+        return dim["top"]
+    return dim["bottom"]
+
+def _y_hi(dim):
+    if dim["top"] > dim["bottom"]:
+        return dim["top"]
+    return dim["bottom"]
+
+def _std_axis(src, dst, coord):
+    last : len(src) - 1
+    if coord <= src[0]:
+        return dst[0]
+    if coord >= src[last]:
+        return dst[last]
+    i : 1
+    while i < last and src[i] < coord:
+        i : i + 1
+    span : src[i] - src[i - 1]
+    if span = 0:
+        return dst[i]
+    prop : (coord - src[i - 1]) / span
+    return dst[i - 1] + (dst[i] - dst[i - 1]) * prop
+
+def _one_xy(x, y, src, dst):
+    if x < src["left"]:
+        x : src["left"]
+    if x > src["right"]:
+        x : src["right"]
+    lo : _y_lo(src)
+    hi : _y_hi(src)
+    if y < lo:
+        y : lo
+    if y > hi:
+        y : hi
+    y_up : y
+    if src["invert"]:
+        y_up : src["bottom"] - y
+    xs : _std_axis(src["x_marks"], dst["x_marks"], x)
+    ys : _std_axis(src["y_marks"], dst["y_marks"], y_up)
+    if dst["invert"]:
+        ys : dst["bottom"] - ys
+    return dict(x:xs, y:ys)
+
+def standardize(x, y, pitch_from, pitch_to:""):
+    src_name : _canon(pitch_from)
+    dst_name : src_name
+    if not _blank(pitch_to):
+        dst_name : _canon(pitch_to)
+    elif "pitch_type" in _pitch:
+        dst_name : _pitch["pitch_type"]
+    src : _make_dim(src_name)
+    dst : _make_dim(dst_name)
+    xy : _pair(x, y)
+    ox : []
+    oy : []
+    i : 0
+    while i < len(xy["x"]):
+        p : _one_xy(float(xy["x"][i]), float(xy["y"][i]), src, dst)
+        ox.append(p["x"])
+        oy.append(p["y"])
+        i : i + 1
+    return dict(x:ox, y:oy)
+
+def _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, vertical):
+    name : _canon(pitch_type)
+    if goal_type != "line" and goal_type != "box":
+        raise "mplsoccer: goal_type must be line or box"
+    _pitch["pitch_type"] : name
+    _pitch["dim"] : _make_dim(name)
+    _pitch["half"] : _on(half)
+    _pitch["vertical"] : _on(vertical)
+    _pitch["pitch_color"] : _color(pitch_color, 0x1b7a3a)
+    _pitch["line_color"] : _color(line_color, 0xffffff)
+    _pitch["stripe"] : _on(stripe)
+    _pitch["stripe_color"] : _color(stripe_color, 0xc5d6a0)
+    _pitch["pad_left"] : float(pad_left)
+    _pitch["pad_right"] : float(pad_right)
+    _pitch["pad_bottom"] : float(pad_bottom)
+    _pitch["pad_top"] : float(pad_top)
+    _pitch["goal_type"] : goal_type
+    _pitch["corner_arcs"] : _on(corner_arcs)
+    _pitch["positional"] : _on(positional)
+    _pitch["positional_color"] : _color(positional_color, 0xeadddd)
+    _pitch["shade_middle"] : _on(shade_middle)
+    _pitch["shade_color"] : _color(shade_color, 0xd8d8d8)
+    _pitch["overlays"] : []
+    return _pitch
+
+def pitch(pitch_type:"statsbomb", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:4.0, pad_right:4.0, pad_bottom:4.0, pad_top:4.0, goal_type:"line", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:""):
+    return _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, 0)
+
+def vertical_pitch(pitch_type:"statsbomb", half:0, pitch_color:"", line_color:"", stripe:0, stripe_color:"", pad_left:4.0, pad_right:4.0, pad_bottom:4.0, pad_top:4.0, goal_type:"line", corner_arcs:0, positional:0, positional_color:"", shade_middle:0, shade_color:""):
+    return _configure(pitch_type, half, pitch_color, line_color, stripe, stripe_color, pad_left, pad_right, pad_bottom, pad_top, goal_type, corner_arcs, positional, positional_color, shade_middle, shade_color, 1)
+
+def clf():
+    _pitch["overlays"] : []
+
+def _layout():
+    dim : _pitch["dim"]
+    x1 : dim["right"]
+    if _pitch["half"]:
+        x1 : dim["left"] + dim["center_length"]
+    vx0 : dim["left"] - _pitch["pad_left"]
+    vx1 : x1 + _pitch["pad_right"]
+    if dim["invert"]:
+        _lay["vy_top"] : dim["top"] - _pitch["pad_top"]
+        _lay["vy_bot"] : dim["bottom"] + _pitch["pad_bottom"]
+    else:
+        _lay["vy_top"] : dim["top"] + _pitch["pad_top"]
+        _lay["vy_bot"] : dim["bottom"] - _pitch["pad_bottom"]
+    disp_l : vx1 - vx0
+    disp_w : _lay["vy_bot"] - _lay["vy_top"]
+    if disp_w < 0:
+        disp_w : -disp_w
+    if disp_l < 1.0:
+        disp_l : 1.0
+    if disp_w < 1.0:
+        disp_w : 1.0
+    aspect : disp_l / disp_w
+    if _pitch["vertical"]:
+        aspect : disp_w / disp_l
+    avail_w : (_W - 48) * 1.0
+    avail_h : (_H - 48) * 1.0
+    pw : avail_w
+    ph : avail_h
+    if avail_w / avail_h > aspect:
+        ph : avail_h
+        pw : ph * aspect
+    else:
+        pw : avail_w
+        ph : pw / aspect
+    ipw : int(pw)
+    iph : int(ph)
+    if ipw < 1:
+        ipw : 1
+    if iph < 1:
+        iph : 1
+    _lay["ox"] : (_W - ipw) // 2
+    _lay["oy"] : (_H - iph) // 2
+    _lay["pw"] : ipw
+    _lay["ph"] : iph
+    _lay["vx0"] : vx0
+    _lay["vx1"] : vx1
+    _lay["vertical"] : _pitch["vertical"]
+
+def _px(x, y):
+    if _lay["vertical"]:
+        sx : _lay["ox"] + (y - _lay["vy_top"]) / (_lay["vy_bot"] - _lay["vy_top"]) * _lay["pw"]
+        sy : _lay["oy"] + (_lay["vx1"] - x) / (_lay["vx1"] - _lay["vx0"]) * _lay["ph"]
+    else:
+        sx : _lay["ox"] + (x - _lay["vx0"]) / (_lay["vx1"] - _lay["vx0"]) * _lay["pw"]
+        sy : _lay["oy"] + (y - _lay["vy_top"]) / (_lay["vy_bot"] - _lay["vy_top"]) * _lay["ph"]
+    return dict(x:int(sx), y:int(sy))
+
+def _math_to_data(mx, my):
+    dim : _pitch["dim"]
+    x : dim["left"] + mx
+    y : dim["bottom"] + my
+    if dim["invert"]:
+        y : dim["bottom"] - my
+    return dict(x:x, y:y)
+
+def _clip_fill(x, y, w, h, color):
+    x1 : x + w
+    y1 : y + h
+    L : _lay["ox"]
+    T : _lay["oy"]
+    R : L + _lay["pw"]
+    B : T + _lay["ph"]
+    if x < L:
+        x : L
+    if y < T:
+        y : T
+    if x1 > R:
+        x1 : R
+    if y1 > B:
+        y1 : B
+    if x1 <= x or y1 <= y:
+        return
+    gfx.fill_rect(x, y, x1 - x, y1 - y, color)
+
+def _rect_data(x0, y0, x1, y1, color):
+    p : _px(x0, y0)
+    q : _px(x1, y1)
+    xa : p["x"]
+    xb : q["x"]
+    ya : p["y"]
+    yb : q["y"]
+    if xa > xb:
+        tmp : xa
+        xa : xb
+        xb : tmp
+    if ya > yb:
+        tmp : ya
+        ya : yb
+        yb : tmp
+    _clip_fill(xa, ya, xb - xa, yb - ya, color)
+
+def _line_math(x0, y0, x1, y1, color):
+    a : _math_to_data(x0, y0)
+    b : _math_to_data(x1, y1)
+    p : _px(a["x"], a["y"])
+    q : _px(b["x"], b["y"])
+    gfx.line(p["x"], p["y"], q["x"], q["y"], color)
+
+def _rect_math(x0, y0, x1, y1, color):
+    a : _math_to_data(x0, y0)
+    b : _math_to_data(x1, y1)
+    _rect_data(a["x"], a["y"], b["x"], b["y"], color)
+
+def _box_math(x0, y0, x1, y1, color):
+    _line_math(x0, y0, x1, y0, color)
+    _line_math(x1, y0, x1, y1, color)
+    _line_math(x1, y1, x0, y1, color)
+    _line_math(x0, y1, x0, y0, color)
+
+def _stroke_arc(cx, cy, rx, ry, deg0, deg1, color):
+    span : deg1 - deg0
+    if span < 0:
+        span : span + 360.0
+    n : int(span / 8.0)
+    if n < 4:
+        n : 4
+    i : 0
+    prevx : 0.0
+    prevy : 0.0
+    while i <= n:
+        deg : deg0 + span * i / n
+        rad : deg * _PI / 180.0
+        mx : cx + rx * cos(rad)
+        my : cy + ry * sin(rad)
+        if i > 0:
+            _line_math(prevx, prevy, mx, my, color)
+        prevx : mx
+        prevy : my
+        i : i + 1
+
+def _spot_math(mx, my, color):
+    d : _math_to_data(mx, my)
+    p : _px(d["x"], d["y"])
+    dim : _pitch["dim"]
+    r : dim["circle_diameter"] * 0.012
+    q : _px(d["x"] + r, d["y"])
+    dx : q["x"] - p["x"]
+    dy : q["y"] - p["y"]
+    if dx < 0:
+        dx : -dx
+    if dy < 0:
+        dy : -dy
+    rr : dx
+    if dy > rr:
+        rr : dy
+    if rr < 2:
+        rr : 2
+    gfx.fill_circle(p["x"], p["y"], rr, color)
+
+def _arc_theta(dim):
+    dx : dim["penalty_area_length"] - dim["penalty_left"]
+    rx : dim["circle_diameter"] / 2.0
+    if dx <= 0:
+        return 90.0
+    if dx >= rx:
+        return 0.0
+    inner : 1.0 - (dx / rx) * (dx / rx)
+    if inner <= 0:
+        return 0.0
+    dy : rx * sqrt(inner)
+    return _atan2(dy, dx) * 180.0 / _PI
+
+def _stripe_edges(dim):
+    pen : (dim["penalty_area_length"] - dim["six_yard_length"]) / 2.0
+    other : (dim["length"] - 2.0 * dim["six_yard_length"] - 6.0 * pen) / 10.0
+    widths : []
+    widths.append(dim["six_yard_length"])
+    i : 0
+    while i < 3:
+        widths.append(pen)
+        i : i + 1
+    i : 0
+    while i < 10:
+        widths.append(other)
+        i : i + 1
+    i : 0
+    while i < 3:
+        widths.append(pen)
+        i : i + 1
+    widths.append(dim["six_yard_length"])
+    edges : []
+    edges.append(0.0)
+    acc : 0.0
+    for dw in widths:
+        acc : acc + dw
+        edges.append(acc)
+    return edges
+
+def _paint_pitch():
+    dim : _pitch["dim"]
+    length : dim["length"]
+    width : dim["width"]
+    col : _pitch["line_color"]
+    _rect_math(0.0, 0.0, length, width, _pitch["pitch_color"])
+    if _pitch["stripe"]:
+        edges : _stripe_edges(dim)
+        i : 1
+        while i < len(edges):
+            _rect_math(edges[i - 1], 0.0, edges[i], width, _pitch["stripe_color"])
+            i : i + 2
+    if _pitch["shade_middle"]:
+        _rect_math(length / 3.0, 0.0, length * 2.0 / 3.0, width, _pitch["shade_color"])
+    if _pitch["positional"]:
+        pa : dim["penalty_area_length"]
+        c : dim["center_length"]
+        mid_l : pa + (c - pa) / 2.0
+        mid_r : c + (length - pa - c) / 2.0
+        pcol : _pitch["positional_color"]
+        for mx in [0.0, pa, mid_l, c, mid_r, length - pa, length]:
+            _line_math(mx, 0.0, mx, width, pcol)
+        ylo_pen : (width - dim["penalty_area_width"]) / 2.0
+        ylo_six : (width - dim["six_yard_width"]) / 2.0
+        for my in [0.0, ylo_pen, ylo_six, width - ylo_six, width - ylo_pen, width]:
+            _line_math(0.0, my, length, my, pcol)
+    _box_math(0.0, 0.0, length, width, col)
+    _line_math(length / 2.0, 0.0, length / 2.0, width, col)
+    pen_lo : (width - dim["penalty_area_width"]) / 2.0
+    pen_hi : width - pen_lo
+    six_lo : (width - dim["six_yard_width"]) / 2.0
+    six_hi : width - six_lo
+    pa : dim["penalty_area_length"]
+    six : dim["six_yard_length"]
+    _box_math(0.0, pen_lo, pa, pen_hi, col)
+    _box_math(length - pa, pen_lo, length, pen_hi, col)
+    _box_math(0.0, six_lo, six, six_hi, col)
+    _box_math(length - six, six_lo, length, six_hi, col)
+    rad : dim["circle_diameter"] / 2.0
+    _stroke_arc(length / 2.0, width / 2.0, rad, rad, 0.0, 360.0, col)
+    theta : _arc_theta(dim)
+    if theta > 0:
+        _stroke_arc(dim["penalty_left"], width / 2.0, rad, rad, -theta, theta, col)
+        _stroke_arc(length - dim["penalty_left"], width / 2.0, rad, rad, 180.0 - theta, 180.0 + theta, col)
+    if _pitch["corner_arcs"]:
+        cr : dim["corner_diameter"] / 2.0
+        _stroke_arc(0.0, 0.0, cr, cr, 0.0, 90.0, col)
+        _stroke_arc(length, 0.0, cr, cr, 90.0, 180.0, col)
+        _stroke_arc(length, width, cr, cr, 180.0, 270.0, col)
+        _stroke_arc(0.0, width, cr, cr, 270.0, 360.0, col)
+    _spot_math(length / 2.0, width / 2.0, col)
+    _spot_math(dim["penalty_left"], width / 2.0, col)
+    _spot_math(length - dim["penalty_left"], width / 2.0, col)
+    glo : (width - dim["goal_width"]) / 2.0
+    ghi : width - glo
+    _line_math(0.0, glo, 0.0, ghi, col)
+    _line_math(length, glo, length, ghi, col)
+    if _pitch["goal_type"] = "box":
+        gl : dim["goal_length"]
+        _line_math(-gl, glo, -gl, ghi, col)
+        _line_math(-gl, glo, 0.0, glo, col)
+        _line_math(-gl, ghi, 0.0, ghi, col)
+        _line_math(length + gl, glo, length + gl, ghi, col)
+        _line_math(length, glo, length + gl, glo, col)
+        _line_math(length, ghi, length + gl, ghi, col)
+
+def _cmap(t):
+    r : int(247 + (8 - 247) * t)
+    g : int(251 + (48 - 251) * t)
+    b : int(255 + (107 - 255) * t)
+    return r * 65536 + g * 256 + b
+
+def _paint_heatmap(op):
+    st : op["stats"]
+    grid : st["statistic"]
+    xe : st["x_edge"]
+    ye : st["y_edge"]
+    ny : len(grid)
+    if ny = 0:
+        return
+    nx : len(grid[0])
+    lo : 0.0
+    hi : 0.0
+    seen : 0
+    if _blank(op["vmin"]) or _blank(op["vmax"]):
+        for row in grid:
+            for v in row:
+                if seen = 0:
+                    lo : v
+                    hi : v
+                    seen : 1
+                else:
+                    if v < lo:
+                        lo : v
+                    if v > hi:
+                        hi : v
+    if not _blank(op["vmin"]):
+        lo : float(op["vmin"])
+    if not _blank(op["vmax"]):
+        hi : float(op["vmax"])
+    span : hi - lo
+    if len(xe) < nx + 1 or len(ye) < ny + 1:
+        return
+    iy : 0
+    while iy < ny:
+        ix : 0
+        while ix < nx:
+            t : 0.0
+            if span > 0:
+                t : (grid[iy][ix] - lo) / span
+            if t < 0:
+                t : 0.0
+            if t > 1:
+                t : 1.0
+            _rect_data(xe[ix], ye[iy], xe[ix + 1], ye[iy + 1], _cmap(t))
+            ix : ix + 1
+        iy : iy + 1
+
+def _arrow_px(x0, y0, x1, y1, color):
+    if x0 = x1 and y0 = y1:
+        return
+    gfx.line(x0, y0, x1, y1, color)
+    ang : _atan2(y1 - y0, x1 - x0)
+    h : 10.0
+    a : 0.45
+    gfx.line(x1, y1, int(x1 - h * cos(ang - a)), int(y1 - h * sin(ang - a)), color)
+    gfx.line(x1, y1, int(x1 - h * cos(ang + a)), int(y1 - h * sin(ang + a)), color)
+
+def _paint_arrows(x0, y0, x1, y1, color):
+    i : 0
+    while i < len(x0):
+        p : _px(x0[i], y0[i])
+        q : _px(x1[i], y1[i])
+        _arrow_px(p["x"], p["y"], q["x"], q["y"], color)
+        i : i + 1
+
+def _bin_index(v, lo, hi, n):
+    vs : str(v)
+    if type(v) = "error" or vs = "nan" or vs = "-nan":
+        return -1
+    if v < lo or v > hi:
+        return -1
+    i : int((v - lo) / (hi - lo) * n)
+    if i >= n:
+        i : n - 1
+    if i < 0:
+        i : 0
+    return i
+
+def _parse_bins(bins):
+    if _blank(bins):
+        return dict(nx:5, ny:4)
+    t : type(bins)
+    if t = "int" or t = "float":
+        n : int(bins)
+        if n < 1:
+            n : 1
+        return dict(nx:n, ny:n)
+    nx : 5
+    ny : 4
+    if len(bins) >= 2:
+        nx : int(bins[0])
+        ny : int(bins[1])
+    elif len(bins) = 1:
+        nx : int(bins[0])
+        ny : nx
+    if nx < 1:
+        nx : 1
+    if ny < 1:
+        ny : 1
+    return dict(nx:nx, ny:ny)
+
+def _paint_flow(op):
+    dim : _pitch["dim"]
+    b : _parse_bins(op["bins"])
+    nx : b["nx"]
+    ny : b["ny"]
+    x0 : dim["left"]
+    x1 : dim["right"]
+    y0 : _y_lo(dim)
+    y1 : _y_hi(dim)
+    sums : []
+    iy : 0
+    while iy < ny:
+        row : []
+        ix : 0
+        while ix < nx:
+            row.append(dict(sx:0.0, sy:0.0, n:0))
+            ix : ix + 1
+        sums.append(row)
+        iy : iy + 1
+    i : 0
+    while i < len(op["x0"]):
+        ix : _bin_index(op["x0"][i], x0, x1, nx)
+        iy : _bin_index(op["y0"][i], y0, y1, ny)
+        if ix >= 0 and iy >= 0:
+            cell : sums[iy][ix]
+            cell["sx"] : cell["sx"] + (op["x1"][i] - op["x0"][i])
+            cell["sy"] : cell["sy"] + (op["y1"][i] - op["y0"][i])
+            cell["n"] : cell["n"] + 1
+        i : i + 1
+    iy : 0
+    while iy < ny:
+        ix : 0
+        while ix < nx:
+            cell : sums[iy][ix]
+            if cell["n"] > 0:
+                cx : x0 + (ix + 0.5) * (x1 - x0) / nx
+                cy : y0 + (iy + 0.5) * (y1 - y0) / ny
+                p : _px(cx, cy)
+                q : _px(cx + cell["sx"] / cell["n"], cy + cell["sy"] / cell["n"])
+                _arrow_px(p["x"], p["y"], q["x"], q["y"], op["color"])
+            ix : ix + 1
+        iy : iy + 1
+
+def _paint_op(op):
+    kind : op["kind"]
+    if kind = "heatmap":
+        _paint_heatmap(op)
+    elif kind = "scatter":
+        i : 0
+        while i < len(op["x"]):
+            p : _px(op["x"][i], op["y"][i])
+            gfx.fill_circle(p["x"], p["y"], op["r"], op["color"])
+            i : i + 1
+    elif kind = "plot":
+        i : 0
+        while i < len(op["x"]) - 1:
+            p : _px(op["x"][i], op["y"][i])
+            q : _px(op["x"][i + 1], op["y"][i + 1])
+            gfx.line(p["x"], p["y"], q["x"], q["y"], op["color"])
+            i : i + 1
+    elif kind = "lines":
+        i : 0
+        while i < len(op["x0"]):
+            p : _px(op["x0"][i], op["y0"][i])
+            q : _px(op["x1"][i], op["y1"][i])
+            gfx.line(p["x"], p["y"], q["x"], q["y"], op["color"])
+            i : i + 1
+    elif kind = "arrows":
+        _paint_arrows(op["x0"], op["y0"], op["x1"], op["y1"], op["color"])
+    elif kind = "flow":
+        _paint_flow(op)
+    elif kind = "text":
+        p : _px(op["x"], op["y"])
+        tw : gfx.text_width(op["s"], 1)
+        gfx.text(p["x"] - tw // 2, p["y"] + op["dy"], op["s"], op["color"], 1)
+
+def draw():
+    _layout()
+    gfx.clear(0x101410)
+    _paint_pitch()
+    for op in _pitch["overlays"]:
+        _paint_op(op)
+    gfx.tick()
+
+def show():
+    if getenv("SHAKTI_GFX_SKIP") = "1":
+        print("mplsoccer: show skipped (SHAKTI_GFX_SKIP=1)")
+        return
+    if not gfx.available():
+        print("mplsoccer: gfx not available")
+        return
+    r : gfx.open("mplsoccer")
+    if type(r) = "error":
+        print("mplsoccer: cannot open window:", r)
+        return
+    draw()
+    while gfx.alive():
+        gfx.tick()
+    gfx.close()
+
+def close():
+    if gfx.available():
+        if gfx.alive():
+            gfx.close()
+
+def scatter(x, y, color:"", r:3):
+    xy : _pair(x, y)
+    rr : int(r)
+    if rr < 1:
+        rr : 1
+    _pitch["overlays"].append(dict(kind:"scatter", x:xy["x"], y:xy["y"], color:_color(color, 0xffffff), r:rr))
+
+def plot(x, y, color:""):
+    xy : _pair(x, y)
+    _pitch["overlays"].append(dict(kind:"plot", x:xy["x"], y:xy["y"], color:_color(color, 0xffffff)))
+
+def lines(x0, y0, x1, y1, color:""):
+    q : _quad(x0, y0, x1, y1)
+    _pitch["overlays"].append(dict(kind:"lines", x0:q["x0"], y0:q["y0"], x1:q["x1"], y1:q["y1"], color:_color(color, 0xffffff)))
+
+def arrows(x0, y0, x1, y1, color:""):
+    q : _quad(x0, y0, x1, y1)
+    _pitch["overlays"].append(dict(kind:"arrows", x0:q["x0"], y0:q["y0"], x1:q["x1"], y1:q["y1"], color:_color(color, 0xf2c14e)))
+
+def text(x, y, s, color:"", dy:0):
+    _pitch["overlays"].append(dict(kind:"text", x:float(x), y:float(y), s:str(s), color:_color(color, 0xffffff), dy:int(dy)))
+
+def flow(x0, y0, x1, y1, bins:"", color:""):
+    q : _quad(x0, y0, x1, y1)
+    _pitch["overlays"].append(dict(kind:"flow", x0:q["x0"], y0:q["y0"], x1:q["x1"], y1:q["y1"], bins:bins, color:_color(color, 0xffffff)))
+
+def _blank_grid(nx, ny):
+    grid : []
+    iy : 0
+    while iy < ny:
+        row : []
+        ix : 0
+        while ix < nx:
+            row.append(0.0)
+            ix : ix + 1
+        grid.append(row)
+        iy : iy + 1
+    return grid
+
+def bin_statistic(x, y, values:"", statistic:"count", bins:"", normalize:0):
+    if statistic != "count" and statistic != "sum" and statistic != "mean":
+        raise "mplsoccer: statistic must be count, sum, or mean"
+    dim : _pitch["dim"]
+    xy : _pair(x, y)
+    xs : xy["x"]
+    ys : xy["y"]
+    vs : []
+    if statistic != "count":
+        if _blank(values):
+            raise "mplsoccer: values required for " + statistic
+        vs : _as_list(values)
+        if len(vs) != len(xs):
+            raise "mplsoccer: values length mismatch"
+    elif not _blank(values):
+        vs : _as_list(values)
+        if len(vs) != len(xs):
+            raise "mplsoccer: values length mismatch"
+    b : _parse_bins(bins)
+    nx : b["nx"]
+    ny : b["ny"]
+    x0 : dim["left"]
+    x1 : dim["right"]
+    y0 : _y_lo(dim)
+    y1 : _y_hi(dim)
+    total : _blank_grid(nx, ny)
+    counts : _blank_grid(nx, ny)
+    i : 0
+    while i < len(xs):
+        ix : _bin_index(float(xs[i]), x0, x1, nx)
+        iy : _bin_index(float(ys[i]), y0, y1, ny)
+        if ix >= 0 and iy >= 0:
+            counts[iy][ix] : counts[iy][ix] + 1.0
+            if statistic = "count":
+                total[iy][ix] : total[iy][ix] + 1.0
+            else:
+                total[iy][ix] : total[iy][ix] + float(vs[i])
+        i : i + 1
+    grid : total
+    if statistic = "mean":
+        grid : _blank_grid(nx, ny)
+        iy : 0
+        while iy < ny:
+            ix : 0
+            while ix < nx:
+                if counts[iy][ix] > 0:
+                    grid[iy][ix] : total[iy][ix] / counts[iy][ix]
+                ix : ix + 1
+            iy : iy + 1
+    if _on(normalize):
+        tot : 0.0
+        for row in grid:
+            for v in row:
+                tot : tot + v
+        if tot != 0:
+            iy : 0
+            while iy < ny:
+                ix : 0
+                while ix < nx:
+                    grid[iy][ix] : grid[iy][ix] / tot
+                    ix : ix + 1
+                iy : iy + 1
+    x_edge : []
+    y_edge : []
+    cx : []
+    cy : []
+    i : 0
+    while i <= nx:
+        x_edge.append(x0 + (x1 - x0) * i / nx)
+        i : i + 1
+    i : 0
+    while i <= ny:
+        y_edge.append(y0 + (y1 - y0) * i / ny)
+        i : i + 1
+    i : 0
+    while i < nx:
+        cx.append((x_edge[i] + x_edge[i + 1]) / 2.0)
+        i : i + 1
+    i : 0
+    while i < ny:
+        cy.append((y_edge[i] + y_edge[i + 1]) / 2.0)
+        i : i + 1
+    return dict(statistic:grid, x_edge:x_edge, y_edge:y_edge, cx:cx, cy:cy, nx:nx, ny:ny)
+
+def heatmap(stats, vmin:"", vmax:""):
+    if type(stats) != "dict":
+        raise "mplsoccer: heatmap expects bin_statistic"
+    if not ("statistic" in stats):
+        raise "mplsoccer: heatmap expects bin_statistic"
+    _pitch["overlays"].append(dict(kind:"heatmap", stats:stats, vmin:vmin, vmax:vmax))
+
+def calculate_angle_and_distance(x0, y0, x1, y1):
+    q : _quad(x0, y0, x1, y1)
+    ang : []
+    dist : []
+    i : 0
+    while i < len(q["x0"]):
+        dx : float(q["x1"][i]) - float(q["x0"][i])
+        dy : float(q["y1"][i]) - float(q["y0"][i])
+        ang.append(_atan2(dy, dx))
+        dist.append(sqrt(dx * dx + dy * dy))
+        i : i + 1
+    return dict(angle:ang, distance:dist)
+
+def flip_side(x, y, flip:1):
+    xy : _pair(x, y)
+    fs : _as_list(flip)
+    if len(fs) != 1 and len(fs) != len(xy["x"]):
+        raise "mplsoccer: flip length mismatch"
+    dim : _pitch["dim"]
+    ox : []
+    oy : []
+    i : 0
+    while i < len(xy["x"]):
+        f : fs[0]
+        if len(fs) != 1:
+            f : fs[i]
+        if _on(f):
+            ox.append(dim["left"] + dim["right"] - float(xy["x"][i]))
+            oy.append(dim["top"] + dim["bottom"] - float(xy["y"][i]))
+        else:
+            ox.append(float(xy["x"][i]))
+            oy.append(float(xy["y"][i]))
+        i : i + 1
+    return dict(x:ox, y:oy)
+
+def formations():
+    out : []
+    for k in _FORMS:
+        out.append(k)
+    return out
+
+def formation(name):
+    if not (name in _FORMS):
+        raise "mplsoccer: unknown formation " + str(name)
+    rows : _FORMS[name]
+    ps : []
+    xs : []
+    ys : []
+    for row in rows:
+        xy : standardize(row[1], row[2], "uefa", _pitch["pitch_type"])
+        ps.append(row[0])
+        xs.append(xy["x"][0])
+        ys.append(xy["y"][0])
+    return table(pos:ps, x:xs, y:ys)
+
+def draw_formation(name, color:""):
+    t : formation(name)
+    scatter(t.x, t.y, color:color, r:4)
+    for r in t:
+        text(r["x"], r["y"], r["pos"], color:color, dy:-12)
+
+def _xy_of(loc):
+    if loc = None:
+        return None
+    t : type(loc)
+    if t != "list" and t != "list[int]" and t != "list[float]":
+        return None
+    if len(loc) < 2:
+        return None
+    x : float(loc[0])
+    y : float(loc[1])
+    if type(x) = "error" or type(y) = "error":
+        return None
+    return dict(x:x, y:y)
+
+def _label(obj):
+    if obj = None:
+        return ""
+    if type(obj) = "str":
+        return obj
+    if type(obj) = "dict":
+        if "name" in obj:
+            if obj["name"] = None:
+                return ""
+            return str(obj["name"])
+    return ""
+
+def _end_of(ev):
+    for k in ["pass", "shot", "carry"]:
+        if k in ev:
+            body : ev[k]
+            if type(body) = "dict":
+                if "end_location" in body:
+                    loc : _xy_of(body["end_location"])
+                    if not (loc = None):
+                        return loc
+    return None
+
+def _events_table(raw):
+    if type(raw) = "dict":
+        if "events" in raw:
+            raw : raw["events"]
+        elif "location" in raw:
+            one : []
+            one.append(raw)
+            raw : one
+    if type(raw) != "list":
+        raise "mplsoccer: expected a list of events"
+    xs : []
+    ys : []
+    ex : []
+    ey : []
+    minutes : []
+    angs : []
+    lens : []
+    hes : []
+    hps : []
+    kinds : []
+    players : []
+    teams : []
+    for ev in raw:
+        if type(ev) != "dict":
+            continue
+        loc : None
+        if "location" in ev:
+            loc : _xy_of(ev["location"])
+        if loc = None:
+            continue
+        end : _end_of(ev)
+        has_end : 0
+        endx : loc["x"]
+        endy : loc["y"]
+        if not (end = None):
+            has_end : 1
+            endx : end["x"]
+            endy : end["y"]
+        ang : 0.0
+        ln : 0.0
+        hp : 0
+        if "pass" in ev:
+            body : ev["pass"]
+            if type(body) = "dict":
+                hp : 1
+                if "angle" in body:
+                    if not (body["angle"] = None):
+                        ang : float(body["angle"])
+                if "length" in body:
+                    if not (body["length"] = None):
+                        ln : float(body["length"])
+        minute : 0.0
+        if "minute" in ev:
+            if not (ev["minute"] = None):
+                minute : float(ev["minute"])
+        kind : ""
+        if "type" in ev:
+            kind : _label(ev["type"])
+        player : ""
+        if "player" in ev:
+            player : _label(ev["player"])
+        team : ""
+        if "team" in ev:
+            team : _label(ev["team"])
+        xs.append(loc["x"])
+        ys.append(loc["y"])
+        ex.append(endx)
+        ey.append(endy)
+        minutes.append(minute)
+        angs.append(ang)
+        lens.append(ln)
+        hes.append(has_end)
+        hps.append(hp)
+        kinds.append(kind)
+        players.append(player)
+        teams.append(team)
+    return table(x:xs, y:ys, end_x:ex, end_y:ey, minute:minutes, angle:angs, length:lens, has_end:hes, has_pass:hps, type:kinds, player:players, team:teams)
+
+def sblocal(path):
+    raw : json_load(path)
+    if type(raw) = "error":
+        raise "mplsoccer: " + str(raw)
+    return _events_table(raw)
+
+def _digits(v):
+    s : str(v)
+    if len(s) = 0:
+        raise "mplsoccer: match id required"
+    i : 0
+    while i < len(s):
+        if not (s[i] in "0123456789"):
+            raise "mplsoccer: match id must be digits"
+        i : i + 1
+    return s
+
+def sbopen(match_id):
+    mid : _digits(match_id)
+    url : "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/" + mid + ".json"
+    resp : rest.get(url)
+    if type(resp) = "error":
+        raise "mplsoccer: " + str(resp)
+    if not rest.ok(resp):
+        raise "mplsoccer: statsbomb open-data HTTP " + str(rest.status(resp))
+    return _events_table(rest.json(resp))
+
+pitch()

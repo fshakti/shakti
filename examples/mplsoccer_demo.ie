@@ -1,0 +1,106 @@
+# mplsoccer demo — pitch, heatmap, arrows, and a local event file
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/mplsoccer_demo.ie
+#   SHAKTI_GFX_SKIP=1 ./shakti examples/mplsoccer_demo.ie   # no window
+import mplsoccer
+import gfx
+
+xy : mplsoccer.standardize(60, 40, pitch_from:"statsbomb", pitch_to:"uefa")
+assert abs(xy["x"][0] - 52.5) < 0.01
+assert abs(xy["y"][0] - 34.0) < 0.01
+
+corners : mplsoccer.standardize([0, 120], [0, 80], pitch_from:"statsbomb", pitch_to:"uefa")
+assert abs(corners["x"][0] - 0.0) < 0.01
+assert abs(corners["x"][1] - 105.0) < 0.01
+assert abs(corners["y"][0] - 68.0) < 0.01
+assert abs(corners["y"][1] - 0.0) < 0.01
+
+same : mplsoccer.standardize(10, 20, pitch_from:"custom", pitch_to:"uefa")
+assert abs(same["x"][0] - 10.0) < 0.01
+assert abs(same["y"][0] - 20.0) < 0.01
+
+back : mplsoccer.standardize(52.5, 34, pitch_from:"uefa", pitch_to:"statsbomb")
+assert abs(back["x"][0] - 60.0) < 0.01
+assert abs(back["y"][0] - 40.0) < 0.01
+
+caught : 0
+try:
+    mplsoccer.standardize(1, 1, pitch_from:"opta")
+except:
+    caught : 1
+assert caught = 1
+
+mplsoccer.pitch()
+ad : mplsoccer.calculate_angle_and_distance([0, 0], [0, 0], [3, 0], [0, 1])
+assert abs(ad["distance"][0] - 3.0) < 0.01
+assert abs(ad["angle"][0] - 0.0) < 0.001
+assert abs(ad["distance"][1] - 1.0) < 0.01
+assert abs(ad["angle"][1] - 1.5707963) < 0.01
+
+fl : mplsoccer.flip_side(10, 20, 1)
+assert abs(fl["x"][0] - 110.0) < 0.01
+assert abs(fl["y"][0] - 60.0) < 0.01
+
+st : mplsoccer.bin_statistic([10, 10, 50], [10, 10, 40], bins:[4, 4])
+assert abs(st["statistic"][0][0] - 2.0) < 0.01
+assert abs(st["statistic"][2][1] - 1.0) < 0.01
+
+sm : mplsoccer.bin_statistic([10, 30], [10, 20], values:[2, 8], statistic:"sum", bins:[2, 2], normalize:1)
+assert abs(sm["statistic"][0][0] - 1.0) < 0.01
+
+assert len(mplsoccer.formation("4-3-3")) = 11
+assert "4-4-2" in mplsoccer.formations()
+
+body : dict(end_location:[40.0, 30.0], angle:0.5, length:12.0)
+ev : dict(location:[10.0, 20.0], minute:3)
+ev["type"] : dict(name:"Pass")
+ev["player"] : dict(name:"Ada")
+ev["team"] : dict(name:"Home")
+ev["pass"] : body
+shot : dict(location:[80.0, 40.0], minute:10)
+shot["type"] : dict(name:"Shot")
+shot["player"] : dict(name:"Bea")
+shot["team"] : dict(name:"Home")
+shot["shot"] : dict(end_location:[120.0, 40.0])
+noise : dict(minute:1)
+noise["type"] : dict(name:"Starting XI")
+events : []
+events.append(ev)
+events.append(shot)
+events.append(noise)
+json_dump(events, "/tmp/mplsoccer_ev.json")
+t : mplsoccer.sblocal("/tmp/mplsoccer_ev.json")
+assert len(t) = 2
+assert t.type[0] = "Pass"
+assert t.player[0] = "Ada"
+assert abs(t.x[0] - 10.0) < 0.01
+assert abs(t.end_x[0] - 40.0) < 0.01
+assert abs(t.angle[0] - 0.5) < 0.01
+assert t.has_pass[0] = 1
+assert t.type[1] = "Shot"
+assert t.has_pass[1] = 0
+assert t.has_end[1] = 1
+assert t.player[1] = "Bea"
+
+mplsoccer.vertical_pitch(pitch_type:"uefa", half:1, corner_arcs:1, stripe:1, positional:1, shade_middle:1, goal_type:"box")
+mplsoccer.draw()
+
+mplsoccer.pitch(pitch_type:"statsbomb", stripe:1, corner_arcs:1, positional:1, goal_type:"box")
+mplsoccer.heatmap(st)
+mplsoccer.scatter([20, 40, 60], [20, 40, 50], color:"white")
+mplsoccer.arrows([20], [30], [70], [50], color:"yellow")
+mplsoccer.lines([10], [15], [40], [45])
+mplsoccer.plot([15, 25, 35], [50, 55, 45], color:"blue")
+mplsoccer.text(60, 40, "C", color:"white")
+mplsoccer.flow([20, 25], [30, 32], [50, 40], [40, 50], bins:[5, 4])
+mplsoccer.draw_formation("4-3-3", color:"yellow")
+mplsoccer.draw()
+
+if getenv("SHAKTI_GFX_SKIP") = "1":
+    print("mplsoccer demo: show skipped (SHAKTI_GFX_SKIP=1)")
+else:
+    if not gfx.available():
+        print("mplsoccer demo: gfx not available")
+    else:
+        mplsoccer.show()
+print("mplsoccer demo ok")

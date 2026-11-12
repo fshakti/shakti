@@ -17,6 +17,7 @@ Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]`
 - [graph module](#graph-module)
 - [`gfx` module](#gfx-module)
 - [`pyplot` module](#pyplot-module)
+- [`mplsoccer` module](#mplsoccer-module)
 - [`jupyter` module](#jupyter-module)
 - [`input` module](#input-module)
 - [IPC module](#ipc-module)
@@ -72,6 +73,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import chess` | `chess_demo.ie` | Chess gfx launcher ([`examples/chess_demo.ie`](examples/chess_demo.ie)) |
 | `import draughts` | `draughts_demo.ie` | Draughts gfx launcher ([`examples/draughts_demo.ie`](examples/draughts_demo.ie)) |
 | `import pyplot` | `pyplot_demo.ie` | Line / scatter / bar charts on gfx |
+| `import mplsoccer` | `mplsoccer_demo.ie` | Pitch, heatmap, arrows ([`examples/mplsoccer_demo.ie`](examples/mplsoccer_demo.ie)) |
 | `import jupyter` | `jupyter_demo.ie` | Notebook cells, `eval`, `.ipynb` R/W, gfx view |
 | `import input` | `input_demo.ie` | `readline` + timed event poll |
 | `import input` + `synth` | `synth_input.ie` | QWERTY jam with synth window |
@@ -103,6 +105,7 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `graph` | [graph module](#graph-module) |
 | `gfx` | [gfx module](#gfx-module) |
 | `pyplot` | [pyplot module](#pyplot-module) |
+| `mplsoccer` | [mplsoccer module](#mplsoccer-module) |
 | `jupyter` | [jupyter module](#jupyter-module) |
 | `input` | [input module](#input-module) |
 | `synth` | [synth module](#synth-module) |
@@ -645,6 +648,7 @@ on the right of an `update`, comes first), and a raise in it stops the statement
 | `graph` | [graph module](#graph-module) | `graph_demo.ie` |
 | `gfx` | [gfx module](#gfx-module) | `gfx_demo.ie` |
 | `pyplot` | [pyplot module](#pyplot-module) | `pyplot_demo.ie` |
+| `mplsoccer` | [mplsoccer module](#mplsoccer-module) | `mplsoccer_demo.ie` |
 | `jupyter` | [jupyter module](#jupyter-module) | `jupyter_demo.ie` |
 | `input` | [input module](#input-module) | `input_demo.ie` |
 | `synth` | [synth module](#synth-module) | `synth_demo.ie` |
@@ -996,6 +1000,68 @@ Module `lib/pyplot.ie` (imports `gfx`).
 | `pyplot.close()` | Close the gfx window if open |
 
 Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` strings, or `0xRRGGBB` ints. Auto color cycles when `color` is omitted. Headless demos: set `SHAKTI_GFX_SKIP=1` to skip `show()`.
+
+---
+
+# `mplsoccer` module
+
+Football **pitch charts** on [`gfx`](#gfx-module). Same shape as the common mplsoccer pitch calls: a statsbomb or uefa frame, scatter, lines, arrows, a rectangular heatmap, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
+
+Build from the repo root (`make prod`; see [README](README.md)), then:
+
+```bash
+export SHAKTI_LIB=$PWD/lib
+SHAKTI_GFX_SKIP=1 ./.build/shakti examples/mplsoccer_demo.ie
+```
+
+## Example
+
+```ie
+import mplsoccer
+
+mplsoccer.pitch(pitch_type:"statsbomb", corner_arcs:1)
+stats : mplsoccer.bin_statistic([20, 40, 40], [30, 30, 50], bins:[6, 5])
+mplsoccer.heatmap(stats)
+mplsoccer.scatter([20, 40], [30, 50], color:"white")
+mplsoccer.arrows(20, 30, 70, 50, color:"yellow")
+mplsoccer.show()
+```
+
+`custom` is the same 105×68 frame as `uefa`. Any other pitch type (`opta`, `wyscout`, `tracab`, `metricasports`, `skillcorner`, `impect`, `secondspectrum`) raises.
+
+## Examples
+
+| File | Description |
+|------|-------------|
+| `examples/mplsoccer_demo.ie` | Coordinate checks, a local event file, pitch, heatmap, arrow |
+
+## API
+
+Module `lib/mplsoccer.ie` (imports `gfx` and `rest`).
+
+| Form | Meaning |
+|------|---------|
+| `mplsoccer.pitch(...)` | Horizontal pitch. `pitch_type` is `"statsbomb"` (120×80, y down) or `"uefa"` / `"custom"` (105×68, y up). Options: `half`, `pitch_color`, `line_color`, `stripe`, `stripe_color`, `pad_left` / `pad_right` / `pad_bottom` / `pad_top` (data units, default 4), `goal_type` (`"line"` or `"box"`), `corner_arcs`, `positional`, `shade_middle` |
+| `mplsoccer.vertical_pitch(...)` | Same options. Length runs up the screen |
+| `mplsoccer.standardize(x, y, pitch_from, pitch_to)` | Piecewise map through the pitch markings. `x` and `y` in the result are lists. `pitch_to` defaults to the current pitch |
+| `mplsoccer.flip_side(x, y, flip)` | Reflect points to the other half when `flip` is on. One flag, or one per point |
+| `mplsoccer.calculate_angle_and_distance(x0, y0, x1, y1)` | Radians counter-clockwise in **data** coordinates, and Euclidean distance. On a statsbomb pitch, y grows down the screen |
+| `mplsoccer.scatter` / `plot` / `lines` / `arrows` / `text` | Queue marks in pitch coordinates. `text` is one string; `dy` is a pixel offset |
+| `mplsoccer.flow(x0, y0, x1, y1[, bins])` | One arrow per cell: the mean displacement of segments whose start falls in that cell. Default bins are 5 by 4 |
+| `mplsoccer.bin_statistic(x, y[, values, statistic, bins, normalize])` | `count` (default), `sum`, or `mean` on a rectangle grid. Points outside the pitch are dropped. Returns `statistic`, `x_edge`, `y_edge`, `cx`, `cy`, `nx`, `ny`. `normalize` divides by the total |
+| `mplsoccer.heatmap(stats[, vmin, vmax])` | Paint that grid white to blue |
+| `mplsoccer.formations()` / `formation(name)` / `draw_formation(name)` | Nine formations (`4-4-2`, `4-3-3`, `4-2-3-1`, `4-1-4-1`, `4-4-1-1`, `3-5-2`, `3-4-3`, `5-3-2`, `5-4-1`) stored in uefa meters and mapped onto the current pitch |
+| `mplsoccer.draw()` / `show()` / `clf()` / `close()` | Paint, open the gfx window, clear overlays, close. `show` no-ops when `SHAKTI_GFX_SKIP=1` |
+| `mplsoccer.sblocal(path)` | Flatten a StatsBomb event JSON file to a table |
+| `mplsoccer.sbopen(match_id)` | GET that match from the public open-data events URL. Digits only. The dataset is not shipped in this tree |
+
+`sblocal` keeps events that have a location. Columns: `x`, `y`, `end_x`, `end_y`, `minute`, `angle`, `length`, `has_end`, `has_pass`, `type`, `player`, `team`. End location comes from a pass, shot, or carry. An event with no end keeps `has_end` 0 and copies `x`, `y`. Pass angle and length are 0 when the event is not a pass (`has_pass` 0).
+
+## Not in this module
+
+`kdeplot`, `hexbin`, `voronoi`, `convexhull`, `triplot`, sonar, radar, pizza, and bumpy charts, inset images, zone editors, multi-axes grids, and the authenticated StatsBomb API.
+
+Colors: names (`"white"`, `"yellow"`, `"blue"`, `"green"`, `"red"`, `"black"`, …), `#RRGGBB`, or `0xRRGGBB` ints.
 
 ---
 

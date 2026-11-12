@@ -5,7 +5,7 @@
 
 Small interpreted language (0.15.0) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), asof helpers, and optional SQL,
-graph, IPC, REST, gfx, pyplot, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
+graph, IPC, REST, gfx, pyplot, mplsoccer, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
 
 ## binaries
@@ -74,6 +74,7 @@ scalar `for`/`while` micros stay in the AST interpreter (`src/eval.c`).
 | `graph` | Knowledge graph | [doc](doc.md#graph-module) |
 | `gfx` | Pixel window | [doc](doc.md#gfx-module) |
 | `pyplot` | Charts (pyplot-shaped) | [doc](doc.md#pyplot-module) |
+| `mplsoccer` | Pitch charts | [doc](doc.md#mplsoccer-module) |
 | `jupyter` | Notebook / IPython-shaped | [doc](doc.md#jupyter-module) |
 | `synth` | Softsynth UI | [doc](doc.md#synth-module) |
 | `dsp` | Just intonation | [doc](doc.md#dsp-module) |
@@ -94,7 +95,7 @@ Demo games (gfx; need `SHAKTI_GFX=1`): [`import pong`](lib/pong.ie) then `pong.r
 ./shakti examples/draughts_test.ie
 ```
 
-Merged copy-paste sections also live in [`examples/example.ie`](examples/example.ie) (`pyplot_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/jupyter demos.
+Merged copy-paste sections also live in [`examples/example.ie`](examples/example.ie) (`pyplot_demo.ie`, `mplsoccer_demo.ie`, `jupyter_demo.ie`, …) — copy a section out; do not run the whole file. Use `SHAKTI_GFX_SKIP=1` to skip gfx windows in pyplot/mplsoccer/jupyter demos.
 
 ## games / demos
 

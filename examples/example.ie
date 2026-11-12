@@ -422,6 +422,38 @@ else:
         print("done")
 
 # =============================================================================
+# mplsoccer_demo.ie
+# =============================================================================
+# Football pitch charts on gfx (statsbomb / uefa).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/example.ie  # section: mplsoccer_demo.ie
+# Also: examples/mplsoccer_demo.ie
+#   SHAKTI_GFX_SKIP=1 ./shakti examples/mplsoccer_demo.ie   # no window
+
+import mplsoccer
+import gfx
+
+xy : mplsoccer.standardize(60, 40, pitch_from:"statsbomb", pitch_to:"uefa")
+assert abs(xy["x"][0] - 52.5) < 0.01
+assert abs(xy["y"][0] - 34.0) < 0.01
+
+mplsoccer.pitch(pitch_type:"statsbomb", stripe:1, corner_arcs:1, goal_type:"box")
+st : mplsoccer.bin_statistic([10, 10, 50], [10, 10, 40], bins:[4, 4])
+mplsoccer.heatmap(st)
+mplsoccer.scatter([20, 40, 60], [20, 40, 50], color:"white")
+mplsoccer.arrows([20], [30], [70], [50], color:"yellow")
+mplsoccer.draw()
+
+if getenv("SHAKTI_GFX_SKIP") = "1":
+    print("mplsoccer demo: show skipped (SHAKTI_GFX_SKIP=1)")
+else:
+    if not gfx.available():
+        print("mplsoccer demo: gfx not available")
+    else:
+        mplsoccer.show()
+print("mplsoccer demo ok")
+
+# =============================================================================
 # jupyter_demo.ie
 # =============================================================================
 # IPython / Notebook-shaped cells on eval + .ipynb R/W (optional gfx view).
