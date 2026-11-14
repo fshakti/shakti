@@ -2583,6 +2583,7 @@ V *eval(Node *n, Env *e) {
                 j = idx->j;
                 if(j < 0) j += obj->n;
                 if(j < 0 || j >= obj->n) { v_free(obj); v_free(idx); return v_err("index out of range"); }
+                if (v_ensure_writable(obj) != 0) return assign_map_oom(obj, idx, NULL, NULL);
                 if(obj->t == T_LIST) {
                     v_free(obj->L[j]);
                     if(j + 1 < obj->n) memmove(obj->L + j, obj->L + j + 1, (size_t)(obj->n - j - 1) * sizeof(V *));
