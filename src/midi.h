@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef SHAKTI_MIDI_H
 #define SHAKTI_MIDI_H
 

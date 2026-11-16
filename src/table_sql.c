@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 #include "mat_simd.h"
 #include "vec_kernels.h"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/vec_ops.c — vector/matrix binops, compare, table filter */
 #include "shakti_internal.h"
 #include "mat_simd.h"

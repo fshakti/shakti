@@ -1,6 +1,6 @@
 # Shakti documentation
 
-Version **0.15.0**.
+Version **0.15.1**.
 
 Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]` … `list`), dict/table/function/datetime/time/input/subprocess, then matrices through `matrix[bool]`. IEFS writes that layout in header word 20 and rejects layout 0 (tag 4 was `str`); re-save those files.
 
@@ -1005,7 +1005,7 @@ Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` 
 
 # `mplsoccer` module
 
-Football **pitch charts** on [`gfx`](#gfx-module). Same shape as the common mplsoccer pitch calls: a pitch frame, scatter, lines, arrows, a rectangular heatmap, formations, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
+Football **pitch charts** on [`gfx`](#gfx-module). Data fetched by the StatsBomb event helpers comes from [StatsBomb Open Data](https://github.com/statsbomb/open-data); if you publish results produced with it, credit StatsBomb as its terms require ("StatsBomb" attribution with their logo/link where applicable). Same shape as the common mplsoccer pitch calls: a pitch frame, scatter, lines, arrows, a rectangular heatmap, formations, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
 
 Build from the repo root (`make prod`; see [README](README.md)), then:
 
@@ -2094,6 +2094,7 @@ Also: parser nesting is capped at 40 (deeper input is a parse error, "nesting to
 | `SHAKTI_IPC_MCAST_KEY` | unset | Authenticates multicast datagrams (HMAC-SHA256 trailer with timestamp ±60 s and replay cache; payload limit shrinks by 48 bytes). All group members must share it. Needs a TLS build. |
 | `SHAKTI_IPC_MCAST_REPLY_RATE` | `100` | Max `ipc.reply` per second to one reply-to address (global cap 10×); `0` disables. |
 
+- With `SHAKTI_IPC_TOKEN` set, every socket frame after the handshake carries a sequence number and HMAC-SHA256 trailer (session key derived from the handshake nonces): injected, tampered, replayed, or reordered frames are rejected and the connection is dropped. Non-loopback TCP binds also require TLS (`SHAKTI_TLS_CERT` / `SHAKTI_TLS_KEY`) unless `SHAKTI_IPC_ALLOW_PLAINTEXT=1`; clients wrap TLS for non-loopback connects (skip verification only with `SHAKTI_IPC_TLS_INSECURE=1`). Without a token, IPC has no peer authentication — loopback/UDS or trusted networks only. Correlation IDs are drawn fresh from the OS RNG per request.
 - `ipc.join` accepts only datagrams addressed to the joined group (on Linux the socket binds to the group); unicast to the port is dropped. A full reply-to table evicts the oldest entry; `ipc.reply` refuses multicast, broadcast, unspecified and port-0 destinations.
 - Shared memory: on Linux segments are named `shakti_ipc_<euid>_<name>`; attach refuses segments owned by another user, group/world-accessible, or smaller than the header. Sharing a channel between users is not supported.
 - `/tmp/shakti-<uid>` (the Unix-socket directory when neither `SHAKTI_IPC_DIR` nor `XDG_RUNTIME_DIR` is set, and always the directory of shared-memory lock files) must be a real directory owned by the user with no group/other permissions. A socket directory named by `SHAKTI_IPC_DIR` or `XDG_RUNTIME_DIR` must be the user's and not writable by group or others.

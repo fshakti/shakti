@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 #include "json_parse.h"
 #include <stdlib.h>

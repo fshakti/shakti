@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* ws — RFC6455 WebSocket client/server (ws:// and wss://). */
 #include "ws.h"
 #include "http_line.h"

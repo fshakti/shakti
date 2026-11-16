@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # synth — software synthesizer (Linux, homemade C module in src/synth.c)
 # Requires shakti built with SHAKTI_SYNTH:1.
 #

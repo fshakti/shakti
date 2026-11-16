@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef MAT_SIMD_H
 #define MAT_SIMD_H
 

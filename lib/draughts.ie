@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # draughts — title / play / game-over loop (press-drag-release pieces)
 # Requires Shakti built with SHAKTI_GFX=1.
 #

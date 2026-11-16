@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # sql — enable in-memory table SQL statement syntax.
 #
 # After `import sql`, use:

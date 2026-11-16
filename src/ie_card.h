@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 static const char IE_CARD_TEXT[] =
     "shakti 0.15.0\n"
     "run   ./shakti · ./shakti f.ie · ./shakti -c '…'\n"

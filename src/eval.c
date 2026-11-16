@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/eval.c — tree-walk evaluator */
 #include "shakti_internal.h"
 #include "input.h"

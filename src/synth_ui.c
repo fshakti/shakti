@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "synth_ui.h"
 #include <math.h>
 #include <stdio.h>

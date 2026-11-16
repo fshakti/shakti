@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* pdf — from-scratch PDF 1.4 reader/writer (no third-party PDF libs)
  *
  *   import pdf

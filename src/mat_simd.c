@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "mat_simd.h"
 #include "i64bin.h"
 #include "a.h"

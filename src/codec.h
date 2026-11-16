@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Host byte codecs: zstd + snappy + Sprintz-shaped residual (optional LZ at build). */
 #ifndef SHAKTI_CODEC_H
 #define SHAKTI_CODEC_H

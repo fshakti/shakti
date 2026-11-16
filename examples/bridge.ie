@@ -1,5 +1,11 @@
 # Bridge hand dealer — solves the bridge challenge at http://www.lescasse.com/Content/Quiz.aspx
 # Copyright (c) 2026 Daniel Martin
+# Contributed to Shakti and distributed under the project's Apache-2.0
+# licence (see LICENSE); author credit retained. (Grant to be confirmed
+# in writing by the author — see AUTHORS.md process in CONTRIBUTING.md.)
+# Contributed to Shakti and distributed under the project's Apache-2.0
+# licence (see LICENSE); author credit retained. (Grant to be confirmed
+# in writing by the author — see AUTHORS.md process in CONTRIBUTING.md.)
 #
 # Usage (from repo root):
 #   make prod

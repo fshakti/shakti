@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti_ios.h"
 
 #include <errno.h>

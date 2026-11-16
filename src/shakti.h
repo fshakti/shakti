@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/shakti.h — language/runtime public header (generated) */
 #ifndef SHAKTI_H
 #define SHAKTI_H

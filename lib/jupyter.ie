@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # jupyter — IPython / Notebook-shaped cells on eval + json (optional gfx view).
 # Requires no extra C backend. Not JupyterLab — document model + run + .ipynb R/W.
 #

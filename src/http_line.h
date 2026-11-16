@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef SHAKTI_HTTP_LINE_H
 #define SHAKTI_HTTP_LINE_H
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Shakti HDB: partitioned IEFS v3 tables with prune/scan.
  */

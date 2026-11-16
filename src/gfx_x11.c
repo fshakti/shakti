@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifdef __linux__
 #include "gfx_platform.h"
 #include "gfx.h"

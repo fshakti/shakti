@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # talk — microphone speech-to-text (macOS, homemade C module in src/talk.c)
 # Requires shakti built with SHAKTI_TALK:1. Optional: SHAKTI_TALK_LOCALE:en-US
 #

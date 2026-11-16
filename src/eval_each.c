@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* each / adverb application, split out of the tree-walk evaluator. */
 #include "shakti_internal.h"
 

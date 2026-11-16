@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/env.c — environments, fn_ast, interpreter globals */
 #include "shakti_internal.h"
 #include <fcntl.h>

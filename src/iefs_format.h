@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * IE file store (IEFS) — versioned little-endian durable V codec.
  * Magic "IEF1", CRC32 over payload, atomic writers via iefs_io.

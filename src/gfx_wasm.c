@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* gfx_wasm.c — Emscripten present: CPU framebuffer, JS blits to canvas. */
 #include "gfx_platform.h"
 #include "gfx.h"

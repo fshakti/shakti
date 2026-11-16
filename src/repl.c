@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/repl.c — interactive loop, highlighting, docs */
 #include "ie_card.h"
 #include "shakti_internal.h"
@@ -11,7 +12,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.15.0"
+#define SHAKTI_PKG_VERSION "0.15.1"
 #endif
 
 static int shakti_stmt_silent(Node *s) {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Bit-packed lane helpers for narrow numerics (bool + int/uint/float/decimal). */
 #ifndef SHAKTI_PACK_H
 #define SHAKTI_PACK_H

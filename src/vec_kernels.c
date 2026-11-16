@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* vec_kernels.c — SIMD/OpenMP vector reductions (dot, sum). */
 #include "vec_kernels.h"
 #include "a.h"

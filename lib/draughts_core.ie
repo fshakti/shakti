@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # draughts_core — English draughts board, jumps, promotion, win/loss
 #
 # Light is positive and moves first (toward row 0). Dark is negative.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #import <Cocoa/Cocoa.h>
 #include <ApplicationServices/ApplicationServices.h>
 #include <stdio.h>

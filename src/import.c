@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/import.c — .ie module loader */
 #include "shakti_internal.h"
 #include <sys/stat.h>

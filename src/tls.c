@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* tls — OpenSSL transport for long-lived sockets (wss, rest.listen_tls). */
 #include "tls.h"
 

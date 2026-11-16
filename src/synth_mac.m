@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * synth_mac.m — macOS platform layer for Shakti synth (Cocoa + AudioQueue).
  */

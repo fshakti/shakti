@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * IE file store format: portable little-endian V serialization.
  */

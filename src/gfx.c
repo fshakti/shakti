@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "gfx.h"
 #include "gfx_platform.h"
 #include "fb_present.h"

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # sonicpi — OSC bridge to Sonic Pi (native UDP in src/sonicpi.c)
 # Requires shakti built with SHAKTI_SONICPI=1 (default).
 #

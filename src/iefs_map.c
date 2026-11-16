@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * IEFS mmap region + iefs_store_map entry (pages / GPU warm hint).
  */

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # discord — Discord REST API via `import rest`
 #
 #   export DISCORD_BOT_TOKEN=...   # or DISCORD_TOKEN

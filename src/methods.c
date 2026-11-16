@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 V*method_call(V*o,const g0*m,V**a,in,Env*e){
  P(!strcmp(m,"append")&&(o->t==T_LIST||o->t==T_IVEC||o->t==T_FVEC||o->t==T_BVEC||o->t==T_CVEC)&&n<1,v_err("append(value)"))

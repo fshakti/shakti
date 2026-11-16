@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef VEC_KERNELS_H
 #define VEC_KERNELS_H
 

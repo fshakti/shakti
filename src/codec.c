@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Host compression: zstd + snappy + residual column codecs (delta/FIRE/Gorilla).
  * Build with SHAKTI_HAVE_ZSTD / SHAKTI_HAVE_SNAPPY when libs are present.

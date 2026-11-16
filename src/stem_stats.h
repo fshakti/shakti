@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* stem_stats.h — scalar f32 spectrogram stats for stem.
  * Live callback: one-core only. Do not OpenMP from the stem process path. */
 #ifndef STEM_STATS_H

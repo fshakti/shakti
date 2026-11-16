@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # pong — classic Pong demo (gfx + terminal).
 # Requires Shakti built with SHAKTI_GFX=1 for gfx mode.
 #

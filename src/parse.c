@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/parse.c — Pratt parser + statements */
 #include "shakti_internal.h"
 #include <stdarg.h>
