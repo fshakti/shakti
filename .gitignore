@@ -57,6 +57,8 @@ CONTEXT.md
 /*_coverage*.md
 
 # local-only workspace trees (not in published repo)
+# tests live in shakti-private, not this repo
+/tests/
 local/
 qa/
 /scripts/
