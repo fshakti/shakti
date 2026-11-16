@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "rest.h"
 #include "http_line.h"
 #include "json_parse.h"
@@ -915,6 +916,19 @@ static int rest_run_curl(char *const argv[], const char *code_path) {
     return -1;
 }
 
+/* Write one `header = "K: V"` line to the curl -K config file (0600).
+ * All headers travel there, never in curl argv (visible via ps). */
+static int rest_cfg_write_header(int fd, const char *line) {
+    if (write(fd, "header = \"", 10) != 10) return -1;
+    for (const char *pp = line; *pp; pp++) {
+        if (*pp == '\\' || *pp == '"')
+            if (write(fd, "\\", 1) != 1) return -1;
+        if (write(fd, pp, 1) != 1) return -1;
+    }
+    if (write(fd, "\"\n", 2) != 2) return -1;
+    return 0;
+}
+
 static V *rest_http_request(const char *method, const char *url, const unsigned char *body,
                             size_t body_len, const char *content_type, V *extra_hdrs) {
     if (!shakti_net_allowed())
@@ -957,25 +971,50 @@ static V *rest_http_request(const char *method, const char *url, const unsigned 
         have_data = 1;
     }
 
-    /* The bearer token must not appear in curl's argv (world-visible via
-     * `ps`). Write it to the 0600 auth temp file and pass it via -K. */
-    int have_auth = 0;
-    if (g_rest_client_token[0] && rest_token_host_ok(url)) {
-        char esc[4200];
-        size_t ei = 0;
-        for (const char *p = g_rest_client_token; *p && ei + 2 < sizeof esc; p++) {
-            if (*p == '\\' || *p == '"') esc[ei++] = '\\';
-            esc[ei++] = *p;
+    /* No header may appear in curl's argv (world-visible via ps /
+     * /proc/<pid>/cmdline): the bearer token, caller headers (e.g. a
+     * Discord bot token from lib/discord.ie), and Content-Type all go to
+     * the 0600 -K config temp file. */
+    int have_cfg = 0;
+    {
+        if (extra_hdrs && extra_hdrs->t == T_DICT) {
+            for (int64_t i = 0; i < extra_hdrs->keys->n; i++) {
+                V *k = extra_hdrs->keys->L[i];
+                V *v = extra_hdrs->vals->L[i];
+                if (k->t != T_STR || v->t != T_STR) continue;
+                if (rest_has_ctl(k->s) || rest_has_ctl(v->s))
+                    return v_err("rest: invalid control character in headers");
+            }
         }
-        esc[ei] = 0;
-        char line[4400];
-        int ln = snprintf(line, sizeof line, "header = \"Authorization: Bearer %s\"\n", esc);
         int afd = open(g_rest_auth_path, O_WRONLY | O_TRUNC | O_NOFOLLOW, 0600);
         if (afd < 0) return v_err("rest: temp file failed");
-        int ok = ln > 0 && (size_t)ln < sizeof line && write(afd, line, (size_t)ln) == ln;
+        int ok = 1;
+        if (g_rest_client_token[0] && rest_token_host_ok(url)) {
+            char auth_hdr[4400];
+            snprintf(auth_hdr, sizeof auth_hdr, "Authorization: Bearer %s", g_rest_client_token);
+            if (rest_cfg_write_header(afd, auth_hdr) != 0) ok = 0;
+            else have_cfg = 1;
+        }
+        if (ok && extra_hdrs && extra_hdrs->t == T_DICT) {
+            for (int64_t i = 0; i < extra_hdrs->keys->n && ok; i++) {
+                V *k = extra_hdrs->keys->L[i];
+                V *v = extra_hdrs->vals->L[i];
+                if (k->t != T_STR || v->t != T_STR) continue;
+                size_t ln = strlen(k->s) + strlen(v->s) + 3;
+                char *line = malloc(ln);
+                if (!line) { ok = 0; break; }
+                snprintf(line, ln, "%s: %s", k->s, v->s);
+                if (rest_cfg_write_header(afd, line) != 0) ok = 0;
+                free(line);
+                have_cfg = 1;
+            }
+        }
+        if (ok && have_data) {
+            if (rest_cfg_write_header(afd, ct_hdr) != 0) ok = 0;
+            else have_cfg = 1;
+        }
         close(afd);
         if (!ok) return v_err("rest: temp file failed");
-        have_auth = 1;
     }
 
     /* Assemble a curl argv (no shell). Each value is passed to execvp() as a
@@ -1005,33 +1044,11 @@ static V *rest_http_request(const char *method, const char *url, const unsigned 
     argv[ac++] = resolve_pin;
     argv[ac++] = "-X";
     argv[ac++] = (char *)method;
-    if (have_auth) {
+    if (have_cfg) {
         argv[ac++] = "-K";
         argv[ac++] = g_rest_auth_path;
     }
-    if (extra_hdrs && extra_hdrs->t == T_DICT) {
-        for (int64_t i = 0; i < extra_hdrs->keys->n; i++) {
-            V *k = extra_hdrs->keys->L[i];
-            V *v = extra_hdrs->vals->L[i];
-            if (k->t != T_STR || v->t != T_STR) continue;
-            if (rest_has_ctl(k->s) || rest_has_ctl(v->s)) {
-                for (int j = 0; j < nh; j++) free(hdr_lines[j]);
-                free(hdr_lines);
-                free(argv);
-                return v_err("rest: invalid control character in headers");
-            }
-            size_t ln = strlen(k->s) + strlen(v->s) + 3;
-            char *line = malloc(ln);
-            if (!line) continue;
-            snprintf(line, ln, "%s: %s", k->s, v->s);
-            hdr_lines[nh++] = line;
-            argv[ac++] = "-H";
-            argv[ac++] = line;
-        }
-    }
     if (have_data) {
-        argv[ac++] = "-H";
-        argv[ac++] = ct_hdr;
         argv[ac++] = "--data-binary";
         argv[ac++] = data_at;
     }
