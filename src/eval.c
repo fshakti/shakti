@@ -964,7 +964,7 @@ V *eval(Node *n, Env *e) {
             } else
 #endif
             {
-                from = table_load(from0->s, NULL);
+                from = table_load(from0->s, NULL, NULL);
             }
             v_free(from0);
             P(from->t == T_ERR,from)

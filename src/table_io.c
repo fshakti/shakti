@@ -11,8 +11,8 @@
 
 extern V *table_xml_load(const char *path, V *columns_opt);
 
-static V *table_tsv_load(const char *path, V *columns_opt);
-static V *table_csv_load(const char *path, V *columns_opt);
+static V *table_tsv_load(const char *path, V *columns_opt, V *schema_opt);
+static V *table_csv_load(const char *path, V *columns_opt, V *schema_opt);
 static int table_csv_save(V *table, const char *path);
 static int table_tsv_save(V *table, const char *path);
 
@@ -21,18 +21,21 @@ static int ends_with(const char *s, const char *t) {
     return ls >= lu && strcmp(s + ls - lu, t) == 0;
 }
 
-V *table_load(const char *path, V *columns_opt) {
+V *table_load(const char *path, V *columns_opt, V *schema_opt) {
     P(!path, v_err("load: path"))
     {
         char err[512];
         if (shakti_fs_check(path, 0, err, sizeof err) != 0) return v_errf("load: %s", err);
     }
     if (ends_with(path, ".csv"))
-        return table_csv_load(path, columns_opt);
-    if (ends_with(path, ".xml"))
+        return table_csv_load(path, columns_opt, schema_opt);
+    if (ends_with(path, ".xml")) {
+        if (schema_opt) return v_err("load: schema only supported for .csv/.tsv");
         return table_xml_load(path, columns_opt);
+    }
     if (ends_with(path, ".tsv"))
-        return table_tsv_load(path, columns_opt);
+        return table_tsv_load(path, columns_opt, schema_opt);
+    if (schema_opt) return v_err("load: schema only supported for .csv/.tsv");
     return v_err("load: supported formats are .csv, .xml and .tsv");
 }
 
@@ -258,6 +261,8 @@ static int field_needs_quote(const char *s, char delim) {
 }
 static int all_int_span(const char *s, size_t n);
 static int all_float_span(const char *s, size_t n);
+static int csv_parse_i64_span(const char *s, const char *e, int64_t *out);
+static int csv_parse_f64_span(const char *s, const char *e, double *out);
 
 static int fputs_field_quoted(FILE *f, const char *s, char delim, int force_quote) {
     if (!s) s = "";
@@ -396,6 +401,11 @@ typedef struct {
     int *out_of;
     int *kind;
     int *seen;
+    int *schemed;
+    /* Set when scan_record_kinds returns -2: the schemed column/cell that failed. */
+    const char *bad_col;
+    int bad_kind;
+    char bad_cell[96];
 } DelimPlan;
 
 static void delim_plan_free(DelimPlan *p) {
@@ -408,15 +418,19 @@ static void delim_plan_free(DelimPlan *p) {
     free(p->out_of);
     free(p->kind);
     free(p->seen);
+    free(p->schemed);
     memset(p, 0, sizeof *p);
 }
 
 /* Build the plan from a header record (split in place; the names are copied). On failure
  * returns an error value and leaves the plan freed. */
-static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt, const char *fmt) {
+static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt, V *schema_opt,
+                          const char *fmt) {
     memset(p, 0, sizeof *p);
     if (columns_opt && columns_opt->t != T_LIST)
         return v_err("load: columns must be a list of names");
+    if (schema_opt && schema_opt->t != T_DICT)
+        return v_err("load: schema must be a dict of name:prototype");
     int nh = count_delim_fields(header, delim);
     if (nh <= 0 || nh > 1000000) return v_errf("%s: bad header", fmt);
     char **hdr_cells = calloc((size_t)nh, sizeof(char *));
@@ -450,7 +464,8 @@ static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt
     p->src = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
     p->kind = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
     p->seen = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
-    if (!p->src || !p->kind || !p->seen) {
+    p->schemed = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    if (!p->src || !p->kind || !p->seen || !p->schemed) {
         delim_plan_free(p);
         return v_errf("%s: out of memory", fmt);
     }
@@ -475,6 +490,39 @@ static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt
         for (int i = 0; i < n_out; i++) {
             p->src[i] = i;
             p->out_of[i] = i;
+        }
+    }
+    if (schema_opt) {
+        for (int64_t i = 0; i < schema_opt->n; i++) {
+            V *name = schema_opt->keys ? schema_opt->keys->L[i] : NULL;
+            V *proto = schema_opt->vals ? schema_opt->vals->L[i] : NULL;
+            if (!name || name->t != T_STR || !name->s) {
+                delim_plan_free(p);
+                return v_err("load: schema column name must be a string");
+            }
+            int kind;
+            if (proto && proto->t == T_INT) kind = KIND_INT;
+            else if (proto && proto->t == T_FLOAT) kind = KIND_FLOAT;
+            else if (proto && proto->t == T_STR) kind = KIND_STR;
+            else {
+                delim_plan_free(p);
+                return v_errf("load: schema column '%s': prototype must be 0, 0.0 or \"\"",
+                              name->s);
+            }
+            int found = -1;
+            for (int j = 0; j < nh; j++)
+                if (!strcmp(p->hdr[j], name->s)) { found = j; break; }
+            if (found < 0) {
+                delim_plan_free(p);
+                return v_errf("load: schema column '%s' not in file", name->s);
+            }
+            int oi = p->out_of[found];
+            if (oi < 0) {
+                delim_plan_free(p);
+                return v_errf("load: schema column '%s' not in projected columns", name->s);
+            }
+            p->kind[oi] = kind;
+            p->schemed[oi] = 1;
         }
     }
     return NULL;
@@ -577,7 +625,27 @@ static void next_field_view(const char **pp, char delim, const char **start, siz
     *pp = p;
 }
 
-/* Fold one record into the plan's inferred kinds. Returns the field count. */
+/* Strict check for a schemed numeric cell: the whole span must parse as the declared kind. */
+static int schemed_span_ok(int kind, const char *s, size_t n) {
+    if (kind == KIND_INT) {
+        int64_t v = 0;
+        return csv_parse_i64_span(s, s + n, &v);
+    }
+    double x = 0.0;
+    if (csv_parse_f64_span(s, s + n, &x)) return 1;
+    if (n == 0 || n >= 256) return 0;
+    char buf[256];
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    char *end = NULL;
+    (void)strtod(buf, &end);
+    return end && end != buf && *end == 0;
+}
+
+/* Fold one record into the plan's inferred kinds. Returns the field count, or -2 when a
+ * schemed cell fails its declared kind (plan->bad_* describe it). Schemed columns keep
+ * their declared kind: no promotion, and quoted cells are validated from their text
+ * instead of forcing a string column. */
 static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
     const char *p = line ? line : "";
     int nf = 0;
@@ -588,7 +656,21 @@ static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
         next_field_view(&p, delim, &s, &n, &quoted, &ate);
         int oi = nf < plan->nh ? plan->out_of[nf] : -1;
         if (oi >= 0) {
-            if (quoted) {
+            if (plan->schemed[oi]) {
+                if (n && !is_na_token(s, n)) {
+                    if (plan->kind[oi] != KIND_STR &&
+                        !schemed_span_ok(plan->kind[oi], s, n)) {
+                        plan->bad_col = plan->hdr[plan->src[oi]];
+                        plan->bad_kind = plan->kind[oi];
+                        size_t cpy = n < sizeof plan->bad_cell - 1 ? n
+                                                                   : sizeof plan->bad_cell - 1;
+                        memcpy(plan->bad_cell, s, cpy);
+                        plan->bad_cell[cpy] = 0;
+                        return -2;
+                    }
+                    plan->seen[oi]++;
+                }
+            } else if (quoted) {
                 plan->kind[oi] = KIND_STR;
                 plan->seen[oi]++;
             } else if (!is_na_token(s, n)) {
@@ -603,10 +685,12 @@ static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
     return nf;
 }
 
-/* Columns nothing real was ever seen in are string columns, not zero-filled ints. */
+/* Columns nothing real was ever seen in are string columns, not zero-filled ints.
+ * Schemed columns keep their declared kind even when nothing was ever seen. */
 static void delim_plan_finish_kinds(DelimPlan *plan) {
     for (int i = 0; i < plan->n_out; i++)
-        if (plan->kind[i] == KIND_INT && plan->seen[i] == 0) plan->kind[i] = KIND_STR;
+        if (!plan->schemed[i] && plan->kind[i] == KIND_INT && plan->seen[i] == 0)
+            plan->kind[i] = KIND_STR;
 }
 
 static void csv_trim_span(const char **a, const char **b) {
@@ -738,7 +822,8 @@ static V *delim_finish_table(DelimPlan *plan, V **cols, int64_t row) {
     t->n = row;
     return t;
 }
-static V *table_delim_load(const char *path, V *columns_opt, char c, const char *fmt) {
+static V *table_delim_load(const char *path, V *columns_opt, V *schema_opt, char c,
+                           const char *fmt) {
     /* Prefer a single buffered read for normal-sized files (fast path / benches).
      * Fall back to two-pass getline streaming when the file exceeds
      * SHAKTI_CSV_MAX_BYTES (default 1 GiB) or cannot be mapped that way. */
@@ -799,7 +884,7 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         }
         strip_pad(lines[0], c);
         DelimPlan plan;
-        V *perr = delim_plan_init(&plan, lines[0], c, columns_opt, fmt);
+        V *perr = delim_plan_init(&plan, lines[0], c, columns_opt, schema_opt, fmt);
         if (perr) {
             free(lines);
             free(raw);
@@ -817,7 +902,18 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
             strip_pad(lines[li], c);
             if (!lines[li][0])
                 continue;
-            if (scan_record_kinds(&plan, lines[li], c) != plan.nh) {
+            int scanned = scan_record_kinds(&plan, lines[li], c);
+            if (scanned == -2) {
+                V *err = v_errf("%s: column '%s' row %d: value '%s' is not a valid %s", fmt,
+                                plan.bad_col, data_rows + 1, plan.bad_cell,
+                                plan.bad_kind == KIND_INT ? "int" : "float");
+                free(rowmap);
+                delim_plan_free(&plan);
+                free(lines);
+                free(raw);
+                return err;
+            }
+            if (scanned != plan.nh) {
                 free(rowmap);
                 delim_plan_free(&plan);
                 free(lines);
@@ -882,7 +978,7 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         header += 3;
     strip_pad(header, c);
     DelimPlan plan;
-    V *perr = delim_plan_init(&plan, header, c, columns_opt, fmt);
+    V *perr = delim_plan_init(&plan, header, c, columns_opt, schema_opt, fmt);
     if (perr) {
         fclose(f);
         free(line);
@@ -901,7 +997,18 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         if (!line[0])
             continue;
         data_rows++;
-        if (scan_record_kinds(&plan, line, c) != plan.nh) {
+        int scanned = scan_record_kinds(&plan, line, c);
+        if (scanned == -2) {
+            V *err = v_errf("%s: column '%s' row %lld: value '%s' is not a valid %s", fmt,
+                            plan.bad_col, (long long)data_rows, plan.bad_cell,
+                            plan.bad_kind == KIND_INT ? "int" : "float");
+            free(cells);
+            delim_plan_free(&plan);
+            fclose(f);
+            free(line);
+            return err;
+        }
+        if (scanned != plan.nh) {
             free(cells);
             delim_plan_free(&plan);
             fclose(f);
@@ -961,10 +1068,10 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
     return t;
 }
 
-static V *table_csv_load(const char *path, V *columns_opt) {
-    return table_delim_load(path, columns_opt, ',', "csv");
+static V *table_csv_load(const char *path, V *columns_opt, V *schema_opt) {
+    return table_delim_load(path, columns_opt, schema_opt, ',', "csv");
 }
 
-static V *table_tsv_load(const char *path, V *columns_opt) {
-    return table_delim_load(path, columns_opt, '\t', "tsv");
+static V *table_tsv_load(const char *path, V *columns_opt, V *schema_opt) {
+    return table_delim_load(path, columns_opt, schema_opt, '\t', "tsv");
 }

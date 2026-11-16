@@ -556,11 +556,23 @@ and `reverse(d)` is the dict with its entries in reverse order.
 t : load("file.csv")
 t : load("file.tsv")
 t : load("file.xml")
+t : load("file.csv", ["id", "score"])                            # projection, in asked order
+t : load("file.csv", dict(id:0, score:0.0, name:""))             # typed schema (prototype dict)
+t : load("file.csv", ["id", "score"], schema: dict(score:0.0))   # schema + projection
 save(t, "out.csv")
 save(t, "out.tsv")
 ```
 
 Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TSV** only.
+
+A schema dict (CSV/TSV only, also accepted as `schema:` with a projection list) fixes column
+kinds *before* parsing instead of inferring them: the prototype's type declares the kind —
+`0` → int, `0.0` → float, `""` → string; any other prototype is an error. Columns the schema
+does not name still infer. A schema name missing from the file (or from the projection) is an
+error, and a non-empty, non-missing cell that does not parse as its declared kind (e.g. `1.5`
+or an int64-overflowing literal in an int column) fails the load, naming the column and row.
+Missing cells keep the usual padding (`0` / `0.0` / `""`). Prefer a schema over loading
+untyped and casting afterwards: it parses each field once, directly into the typed column.
 
 ### CSV / TSV save
 

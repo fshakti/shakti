@@ -160,7 +160,10 @@ void *shakti_tls_connect(int fd, const char *hostname, int insecure) {
         else if (ip)
             ok = X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), hostname) == 1;
         else
-            ok = SSL_set1_host(ssl, hostname) == 1;
+            /* SSL_set1_host is deprecated in OpenSSL 4; setting the expected
+             * DNS name on the verify param directly is its equivalent and
+             * is available in every supported OpenSSL/LibreSSL. */
+            ok = X509_VERIFY_PARAM_set1_host(SSL_get0_param(ssl), hostname, 0) == 1;
         if (!ok) {
             SSL_free(ssl);
             return NULL;

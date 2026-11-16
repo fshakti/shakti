@@ -3052,7 +3052,8 @@ static int bi_kw_known(const char *name, V **kwn, int nkw) {
         const char *s = (kwn && kwn[i] && kwn[i]->t == T_STR) ? kwn[i]->s : "";
         int ok = 0;
         if (!strcmp(name, "print") && (!strcmp(s, "sep") || !strcmp(s, "end"))) ok = 1;
-        if (!strcmp(name, "load") && (!strcmp(s, "exec") || !strcmp(s, "__dir__"))) ok = 1;
+        if (!strcmp(name, "load") && (!strcmp(s, "exec") || !strcmp(s, "__dir__") ||
+                                       !strcmp(s, "schema"))) ok = 1;
         if (!ok) return 0;
     }
     return 1;
@@ -3128,21 +3129,30 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         env_leave(ce);return rv;
     }
     if(!strcmp(name,"load")) {
-        if(nargs < 1 || args[0]->t != T_STR) {
-            return v_err("load(path) or load(path, [column, ...])");
+        if(!args || nargs < 1 || !args[0] || args[0]->t != T_STR) {
+            return v_err("load(path), load(path, [column, ...]) or load(path, schema_dict)");
         }
+        V *schema_kw = kw_get(kwn, kwv, nkw, "schema");
+        if(schema_kw && schema_kw->t != T_DICT)
+            return v_err("load: schema must be a dict of name:prototype");
+        if(schema_kw && nargs > 1 && args[1] && args[1]->t == T_DICT)
+            return v_err("load: schema given twice (positional and schema:)");
+        int has_schema = schema_kw || (nargs > 1 && args[1] && args[1]->t == T_DICT);
 #ifdef SHAKTI_HAVE_IEFS
         {
             const char *path = args[0]->s;
             size_t plen = strlen(path);
-            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs"))
+            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs")) {
+                if (has_schema) return v_err("load: schema only supported for .csv/.tsv");
                 return iefs_store_read(path);
+            }
         }
 #endif
 #ifndef _WIN32
         {
             struct stat sb;
             if (stat(args[0]->s, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+                if (has_schema) return v_err("load: schema only supported for .csv/.tsv");
                 /* A data loader must not run code implicitly: spawning the
                  * directory's ./run helper requires an explicit exec:True. */
                 if (!bi_kw_true(kwn, kwv, nkw, "exec"))
@@ -3170,13 +3180,21 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         }
 #endif
         V *cols = NULL;
+        V *schema = schema_kw;
+        if(nargs > 2)
+            return v_err("load(path), load(path, [column, ...]) or load(path, schema_dict)");
         if(nargs > 1) {
-            if(args[1]->t != T_LIST) {
-                return v_err("load(path, [columns]): columns must be a list of strings");
+            if(!args[1]) {
+                return v_err("load: second argument must be a list of columns or a schema dict");
+            } else if(args[1]->t == T_LIST) {
+                cols = args[1];
+            } else if(args[1]->t == T_DICT) {
+                schema = args[1];
+            } else {
+                return v_err("load: second argument must be a list of columns or a schema dict");
             }
-            cols = args[1];
         }
-        return table_load(args[0]->s, cols);
+        return table_load(args[0]->s, cols, schema);
     }
     if(!strcmp(name,"save")) {
         if(nargs < 2 || args[1]->t != T_STR)

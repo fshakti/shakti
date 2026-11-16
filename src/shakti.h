@@ -475,7 +475,7 @@ V *eval_fn(Node *body, Env *e);
 /* Note the calling thread's C stack for eval_fn's guard; shakti_lang_main calls it first. */
 void shakti_stack_start(void);
 int shakti_lang_main(int argc, char **argv);
-V *table_load(const char *path, V *columns_opt);
+V *table_load(const char *path, V *columns_opt, V *schema_opt);
 int table_save(V *table, const char *path);
 /* Materialize MAP_ALIAS payloads before in-place mutation. 0 ok, -1 OOM. */
 int v_ensure_writable(V *v);
