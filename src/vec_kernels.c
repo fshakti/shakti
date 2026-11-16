@@ -74,30 +74,103 @@ double shakti_sum_f64(const double *d, int64_t n) {
     }
 #endif
 #if defined(__aarch64__)
-    if (n >= ISL_OMP_VEC_MIN) {
-        double r = 0;
-#ifdef _OPENMP
-        #pragma omp parallel reduction(+:r)
-        {
-            int tid = omp_get_thread_num(), nt = omp_get_num_threads();
-            int64_t chunk = (n + nt - 1) / nt;
-            int64_t start = (int64_t)tid * chunk;
-            int64_t len = (start + chunk > n) ? (n - start) : chunk;
-            if (len > 0) r += sum_f64_neon(d + start, len);
-        }
-#else
-        r = sum_f64_neon(d, n);
-#endif
-        return r;
-    }
+    /* One order on every run. A threaded reduction changed the bits from run to run. */
     return sum_f64_neon(d, n);
 #else
     double r = 0;
-#ifdef _OPENMP
-    int nt = isl_vec_omp_threads(n);
-    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
-#endif
     for (int64_t i = 0; i < n; i++) r += d[i];
+    return r;
+#endif
+}
+
+#if defined(__aarch64__)
+/* One pass: NEON min/max, plus a NaN mask. vmin/vmax keep a number when the other lane is NaN. */
+static double extremum_f64_neon(const double *d, int64_t n, int want_max) {
+    int64_t i = 0;
+    float64x2_t acc;
+    uint64x2_t ones = vdupq_n_u64(~0ull);
+    uint64x2_t nanv = vdupq_n_u64(0);
+    if ((n & 1) == 0) {
+        acc = vld1q_f64(d);
+        nanv = veorq_u64(vceqq_f64(acc, acc), ones);
+        i = 2;
+    } else {
+        acc = vdupq_n_f64(d[0]);
+        if (d[0] != d[0]) nanv = ones;
+        i = 1;
+    }
+    for (; i + 8 <= n; i += 8) {
+        float64x2_t a = vld1q_f64(d + i);
+        float64x2_t b = vld1q_f64(d + i + 2);
+        float64x2_t c = vld1q_f64(d + i + 4);
+        float64x2_t e = vld1q_f64(d + i + 6);
+        nanv = vorrq_u64(nanv, veorq_u64(vceqq_f64(a, a), ones));
+        nanv = vorrq_u64(nanv, veorq_u64(vceqq_f64(b, b), ones));
+        nanv = vorrq_u64(nanv, veorq_u64(vceqq_f64(c, c), ones));
+        nanv = vorrq_u64(nanv, veorq_u64(vceqq_f64(e, e), ones));
+        if (want_max) {
+            acc = vmaxq_f64(acc, a); acc = vmaxq_f64(acc, b);
+            acc = vmaxq_f64(acc, c); acc = vmaxq_f64(acc, e);
+        } else {
+            acc = vminq_f64(acc, a); acc = vminq_f64(acc, b);
+            acc = vminq_f64(acc, c); acc = vminq_f64(acc, e);
+        }
+    }
+    for (; i + 2 <= n; i += 2) {
+        float64x2_t a = vld1q_f64(d + i);
+        nanv = vorrq_u64(nanv, veorq_u64(vceqq_f64(a, a), ones));
+        acc = want_max ? vmaxq_f64(acc, a) : vminq_f64(acc, a);
+    }
+    if (i < n) {
+        if (d[i] != d[i]) nanv = ones;
+        acc = want_max ? vmaxq_f64(acc, vdupq_n_f64(d[i])) : vminq_f64(acc, vdupq_n_f64(d[i]));
+    }
+    if (vgetq_lane_u64(nanv, 0) | vgetq_lane_u64(nanv, 1)) return NAN;
+    {
+        double x = vgetq_lane_f64(acc, 0), y = vgetq_lane_f64(acc, 1);
+        if (x != x || y != y) return NAN;
+        return want_max ? (x > y ? x : y) : (x < y ? x : y);
+    }
+}
+#endif
+
+static double extremum_f64(const double *d, int64_t n, int want_max) {
+#if defined(__aarch64__)
+#ifdef _OPENMP
+    if (n >= ISL_OMP_VEC_MIN) {
+        int nt = isl_vec_omp_threads(n);
+        double parts[ISL_OMP_VEC_MAX_THREADS];
+        int t;
+        if (nt > ISL_OMP_VEC_MAX_THREADS) nt = ISL_OMP_VEC_MAX_THREADS;
+        if (nt < 1) nt = 1;
+        #pragma omp parallel num_threads(nt)
+        {
+            int tid = omp_get_thread_num();
+            int64_t chunk = (n + nt - 1) / nt;
+            int64_t lo = (int64_t)tid * chunk;
+            int64_t hi = lo + chunk;
+            if (hi > n) hi = n;
+            parts[tid] = (lo < hi) ? extremum_f64_neon(d + lo, hi - lo, want_max)
+                                   : (want_max ? -INFINITY : INFINITY);
+        }
+        {
+            double r = parts[0];
+            for (t = 0; t < nt; t++) {
+                if (parts[t] != parts[t]) return NAN;
+                if (want_max ? parts[t] > r : parts[t] < r) r = parts[t];
+            }
+            return r;
+        }
+    }
+#endif
+    return extremum_f64_neon(d, n, want_max);
+#else
+    double r = d[0];
+    int64_t i;
+    for (i = 1; i < n; i++) {
+        if (d[i] != d[i] || r != r) return NAN;
+        if (want_max ? d[i] > r : d[i] < r) r = d[i];
+    }
     return r;
 #endif
 }
@@ -105,25 +178,13 @@ double shakti_sum_f64(const double *d, int64_t n) {
 double shakti_min_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
     if (n == 1) return d[0];
-    double r = d[0];
-#ifdef _OPENMP
-    int nt = isl_vec_omp_threads(n);
-    #pragma omp parallel for reduction(min:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
-#endif
-    for (int64_t i = 1; i < n; i++) if (d[i] < r) r = d[i];
-    return r;
+    return extremum_f64(d, n, 0);
 }
 
 double shakti_max_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
     if (n == 1) return d[0];
-    double r = d[0];
-#ifdef _OPENMP
-    int nt = isl_vec_omp_threads(n);
-    #pragma omp parallel for reduction(max:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
-#endif
-    for (int64_t i = 1; i < n; i++) if (d[i] > r) r = d[i];
-    return r;
+    return extremum_f64(d, n, 1);
 }
 
 int64_t shakti_min_i64(const int64_t *d, int64_t n) {

@@ -95,7 +95,8 @@ struct Node {
 enum {
     ENV_BIND_USER = 0,
     ENV_BIND_IMPORT = 1,
-    ENV_BIND_INTERNAL = 2
+    ENV_BIND_INTERNAL = 2,
+    ENV_BIND_GLOBAL = 3 /* this frame's slot is a `global` mark; the value lives in the root */
 };
 
 struct Env {
@@ -392,6 +393,7 @@ static inline int timeout_ms_arg(const V *v, int *ms) {
 V *mat_matmul(V *a, V *b);
 V *v_mat_row(V *m, int64_t row);
 V *v_list(int64_t n);
+void v_specialize(V *v);
 void v_list_append(V *v, V *item);
 /* If *p is a shared list, replace it with a shallow clone and drop our ref. */
 void v_list_unshare(V **p);

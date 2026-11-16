@@ -205,12 +205,20 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - `=` compares a value with a value. `!=` is the opposite of `=`. Ordering two lists with `<` is an error
 - A missing dict key reads as `None`. `len` of a string is its length in bytes
 - SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
-- An integer literal that does not fit in a signed 64-bit int is a float. `abs` of the minimum int is that positive float
+- An integer literal that does not fit in a signed 64-bit int is a parse error. `abs` of the minimum int is that positive float
+- `//` and `%` are floor division: `x = (x // y) * y + (x % y)`, for ints and for floats
+- A float `sum` adds in one order on a given build, so one vector sums to the same bits every run. Accelerate, NEON and a plain loop can still disagree with each other
+- `global name` inside a function assigns that name in the root environment
+- A function with no `return` yields the value of its last statement. A binding's value is `None`
+- `len` of a `str` is its length in bytes. `repr` of a string escapes quotes, backslashes and newlines, and writes enough digits that a float reads back
+- `json_dumps` writes JSON (`null`, `true`, `false`), which `json_loads` reads
+- Ordering two matrices is an error, as ordering two lists is. `None <= None` and `None >= None` are true
 - `b"..."` is `list[char]`. `//=`, `%=` and `**=` (and `//:`, `%:`, `**:`) update in place
 - Integer bitwise helpers: `band(a,b)`, `bor(a,b)`, `bxor(a,b)`, `bnot(a)`,
   `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical shifts on the low 64 bits;
   shift counts must be in `0..63`
 - `0xHH` (exactly two hex digits) is `char`; `0x1234` (even length except 6/8) is `list[char]`; `0c…` is always `list[char]`; 6/8-digit or odd `0x` is `int`
+- Adding, subtracting, or multiplying a `list[char]` stays `list[char]` while every result fits in a byte. A result outside 0..255 makes the whole value `list[int]` (or `list[float]` if it does not fit in an int), the same number `char` arithmetic returns.
 - `char(n)` builds a `char` from an int (distinct from `chr`, which returns a
   one-character `str`)
 - `int(x)` of a float truncates toward zero; a NaN, an infinity or a float outside the int range
@@ -396,7 +404,7 @@ A zero divisor in `/`, `//` or `%` on a vector or matrix, whether an item or the
 | Builtin | Meaning |
 |---------|---------|
 | `dot(a, b)` | Inner product (fused; no intermediate vector) |
-| `sum(v)` | Sum of elements (of an empty `list[float]` or `matrix[float]`: `0.0`; of any other empty vector or matrix: `0`); of a `list[char]` or `matrix[char]`, the sum of the codes; a bool counts as 0 or 1, so of a `list[bool]` or `matrix[bool]` it is the number of `True`s; of a `list`, its items added in order: ints exactly (a char as its code, a bool as 0 or 1), giving an int if the total fits, else a float, and in float from the first float item on; `sum(a, b, ...)` adds its arguments the same way, a vector, matrix or `list` argument summed first, so one whose own sum overflows is a float before it is added; an error operand passes through; of anything else but a number, bool, char, vector or matrix (`sum("x")`), an error |
+| `sum(v)` | Sum of elements (of an empty `list[float]` or `matrix[float]`: `0.0`; of any other empty vector or matrix: `0`); of a `list[char]` or `matrix[char]`, the sum of the codes; a bool counts as 0 or 1, so of a `list[bool]` or `matrix[bool]` it is the number of `True`s; of a `list`, its items added in order: ints exactly (a char as its code, a bool as 0 or 1), giving an int if the total fits, else a float, and in float from the first float item on; `sum(a, b, ...)` adds its arguments the same way, walking a vector or `list` argument item by item so a later int can bring an overflowing prefix back into an int (`sum([M, M], m)` with `M` the maximum int and `m` one below the minimum is the exact int `9223372036854775806`); a matrix argument is still summed on its own first; an error operand passes through; of anything else but a number, bool, char, vector or matrix (`sum("x")`), an error |
 | `min(v)`, `max(v)` | Least and greatest element (`None` of an empty vector or matrix); of a `list[char]` or `matrix[char]`, `min`/`max` are chars, ordered by code; of a `list[bool]` or `matrix[bool]`, `min`/`max` are bools; of a `str`, its least and greatest character (a `char`); a scalar is its own `min` and `max` (`max(5)` is `5`) |
 | `min(a, b, ...)`, `max(a, b, ...)` | Compare the arguments with `<` and `>`, as in Python: `max(3, 9, 4)` is `9`; arguments, or items of a list, that don't compare (`1` and `"a"`, or a `None`) are an error |
 | `avg(v)` | Mean of elements (`nan` of an empty vector or matrix); of a `list[char]` or `matrix[char]`, the mean of the codes; of a `list[bool]` or `matrix[bool]`, the fraction of `True`s; of anything but a vector or matrix (`avg(5)`), an error |

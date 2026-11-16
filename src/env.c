@@ -438,6 +438,10 @@ static void env_uncand(Env *e) {
     e->cand = 0;
     env_release(e);
 }
+int shakti_builtin_fn_shadow;
+static void note_builtin_fn(const char *name, V *val) {
+    if (val && val->t == T_FN && name && is_builtin(name)) shakti_builtin_fn_shadow = 1;
+}
 void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
     uint32_t h = fnv1a(name);
     for(int i=0; i<e->len; i++) {
@@ -445,6 +449,7 @@ void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
             v_free(e->vals[i]);
             e->vals[i] = v_ref(val);
             e->kinds[i] = (uint8_t)kind;
+            note_builtin_fn(name, val);
             return;
         }
     }
@@ -455,13 +460,26 @@ void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
         e->hashes = x_realloc(e->hashes, e->cap * sizeof(uint32_t), "env_set");
         e->kinds  = x_realloc(e->kinds,  e->cap * sizeof(uint8_t), "env_set");
     }
+    note_builtin_fn(name, val);
     e->names[e->len]  = x_strdup(name, "env_set");
     e->vals[e->len]   = v_ref(val);
     e->hashes[e->len] = h;
     e->kinds[e->len]  = (uint8_t)kind;
     e->len++;
 }
+static Env *env_root(Env *e) {
+    while (e && e->parent) e = e->parent;
+    return e;
+}
+static int env_marked_global(Env *e, const char *name) {
+    int i = env_index_here(e, name);
+    return i >= 0 && e->kinds && e->kinds[i] == ENV_BIND_GLOBAL;
+}
 void env_set(Env *e, const char *name, V *val) {
+    if (e && e->parent && env_marked_global(e, name)) {
+        env_set_kind(env_root(e), name, val, ENV_BIND_USER);
+        return;
+    }
     env_set_kind(e, name, val, ENV_BIND_USER);
 }
 int env_del(Env *e, const char *name) {
@@ -531,6 +549,7 @@ int env_update(Env *e, const char *name, V *val) {
                     v_free(e->vals[i]);
                     e->vals[i] = v_ref(val);
                 }
+                note_builtin_fn(name, val);
                 return 1;
             }
     return 0;
@@ -553,8 +572,10 @@ V *env_get(Env *e, const char *name) {
     uint32_t h = fnv1a(name);
     for(; e; e=e->parent)
         for(int i=0; i<e->len; i++)
-            if(e->hashes[i] == h && strcmp(e->names[i], name)==0)
+            if(e->hashes[i] == h && strcmp(e->names[i], name)==0) {
+                if (e->kinds && e->kinds[i] == ENV_BIND_GLOBAL) continue;
                 return e->vals[i];
+            }
     return NULL;
 }
 void env_ref(Env *e) { if(e) e->rc++; }

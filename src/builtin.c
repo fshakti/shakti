@@ -4,7 +4,8 @@
 #include "vec_kernels.h"
 #include "input.h"
 #include <limits.h>
-#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #ifndef _WIN32
@@ -380,7 +381,27 @@ static const char *BUILTINS[] = {
     "exit",
     NULL
 };
-int is_builtin(const char *name){for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
+static int bi_name_cmp_ptr(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+int is_builtin(const char *name) {
+    static const char **sorted;
+    static size_t n;
+    if (!name) return 0;
+    if (!sorted) {
+        size_t i;
+        for (i = 0; BUILTINS[i]; i++);
+        n = i;
+        sorted = malloc(n * sizeof *sorted);
+        if (!sorted) {
+            for (i = 0; i < n; i++) if (!strcmp(name, BUILTINS[i])) return 1;
+            return 0;
+        }
+        for (i = 0; i < n; i++) sorted[i] = BUILTINS[i];
+        qsort(sorted, n, sizeof *sorted, bi_name_cmp_ptr);
+    }
+    return bsearch(&name, sorted, n, sizeof *sorted, bi_name_cmp_ptr) != NULL;
+}
 
 static V *kw_get(V**kwn,V**kwv,int nkw,const char*name){
     i(nkw,{P(kwn[i]->t==T_STR&&!strcmp(kwn[i]->s,name),kwv[i])})return NULL;}
@@ -407,6 +428,7 @@ static V *bi_print(V**a,in,V**kwn,V**kwv,int nkw,Env*e){
     printf("%s",end);fflush(stdout);return v_nil();}
 static V *bi_len(V**a,in){
     P(n<1,v_err("len()"))V*v=a[0];
+    P(v->t==T_ERR,v_ref(v))
     P(v->t==T_STR,v_int(strlen(v->s)))
     P(is_vec_t(v->t)||v->t==T_LIST||is_mat_t(v->t),v_int(v->n))
     P(v->t==T_DICT||v->t==T_TABLE,v_int(v->n))
@@ -486,10 +508,10 @@ static V *bi_str(V**a,in,Env*e){
 static V *bi_list(V**a,in){
     P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_CHAR){V*r=v_list(1);r->L[0]=v_char((unsigned char)v->j);return r;}
-    if(v->t==T_CVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_char(v->B[i]);return r;}
-    if(v->t==T_BVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_bool(v->B[i]!=0);return r;}
-    if(v->t==T_IVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_int(v->J[i]);return r;}
-    if(v->t==T_FVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_float(v->F[i]);return r;}
+    if(v->t==T_CVEC){V*r=v_cvec(v->n);if(v->n)memcpy(r->B,v->B,(size_t)v->n);return r;}
+    if(v->t==T_BVEC){V*r=v_bvec(v->n);if(v->n)memcpy(r->B,v->B,(size_t)v->n);return r;}
+    if(v->t==T_IVEC){V*r=v_ivec(v->n);if(v->n)memcpy(r->J,v->J,(size_t)v->n*8);return r;}
+    if(v->t==T_FVEC){V*r=v_fvec(v->n);if(v->n)memcpy(r->F,v->F,(size_t)v->n*8);return r;}
     P(v->t==T_LIST,v_copy(v))
     if(v->t==T_STR){int64_t sl=strlen(v->s);V*r=v_list(sl);for(int64_t i=0;i<sl;i++){char b[2]={v->s[i],0};r->L[i]=v_str(b);}return r;}
     if(v->t==T_DICT){V*r=v_copy(v->keys);return r;}
@@ -615,6 +637,9 @@ static V *bi_extreme(const char *fn, V **a, int64_t n, int op) {
     if (m->t == T_ERR) return v_ref(m);
     for (int64_t i = 1; i < n; i++) {
         if (a[i]->t == T_ERR) return v_ref(a[i]);
+        if ((a[i]->t == T_FLOAT && isnan(a[i]->f)) || (m->t == T_FLOAT && isnan(m->f))) {
+            return v_float(NAN);
+        }
         V *c = vec_cmp(a[i], m, op);
         /* None compares False either way, so it would win or lose by its place: refuse it */
         int win = c->t == T_BOOL && c->j, ok = c->t == T_BOOL && m->t != T_NIL && a[i]->t != T_NIL;
@@ -636,7 +661,10 @@ static V *vec_reduce_min(V *v) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         double m = v->F[0];
         int64_t ne = mat_nelem(v);
-        for (int64_t i = 1; i < ne; i++) if (v->F[i] < m) m = v->F[i];
+        for (int64_t i = 1; i < ne; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] < m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_IVEC) {
@@ -652,7 +680,10 @@ static V *vec_reduce_min(V *v) {
         if (v->n >= ISL_OMP_VEC_MIN)
             return v_float(shakti_min_f64(v->F, v->n));
         double m = v->F[0];
-        for (int64_t i = 1; i < v->n; i++) if (v->F[i] < m) m = v->F[i];
+        for (int64_t i = 1; i < v->n; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] < m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_CVEC || v->t == T_CMAT) {
@@ -688,7 +719,10 @@ static V *vec_reduce_max(V *v) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         double m = v->F[0];
         int64_t ne = mat_nelem(v);
-        for (int64_t i = 1; i < ne; i++) if (v->F[i] > m) m = v->F[i];
+        for (int64_t i = 1; i < ne; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] > m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_IVEC) {
@@ -704,7 +738,10 @@ static V *vec_reduce_max(V *v) {
         if (v->n >= ISL_OMP_VEC_MIN)
             return v_float(shakti_max_f64(v->F, v->n));
         double m = v->F[0];
-        for (int64_t i = 1; i < v->n; i++) if (v->F[i] > m) m = v->F[i];
+        for (int64_t i = 1; i < v->n; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] > m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_CVEC || v->t == T_CMAT) {
@@ -813,12 +850,29 @@ static V *bi_sum(V **a, in) {
         if (a[i]->t == T_INT || a[i]->t == T_CHAR) sum_add_int(&s, a[i]->j);
         else if (a[i]->t == T_BOOL) sum_add_int(&s, a[i]->j != 0);
         else if (a[i]->t == T_FLOAT) sum_add_float(&s, a[i]->f);
-        else if (a[i]->t >= T_IVEC && a[i]->t <= T_LIST) {
-            V *p = vec_reduce_sum(a[i]);
-            P(p->t == T_ERR,p)
-            if (p->t == T_FLOAT) sum_add_float(&s, p->f);
-            else sum_add_int(&s, p->j);
-            v_free(p);
+        else if (a[i]->t == T_IVEC) {
+            for (int64_t k = 0; k < a[i]->n; k++) sum_add_int(&s, a[i]->J[k]);
+        } else if (a[i]->t == T_BVEC || a[i]->t == T_CVEC) {
+            for (int64_t k = 0; k < a[i]->n; k++) sum_add_int(&s, a[i]->B[k]);
+        } else if (a[i]->t == T_FVEC) {
+            for (int64_t k = 0; k < a[i]->n; k++) sum_add_float(&s, a[i]->F[k]);
+        } else if (a[i]->t == T_LIST) {
+            for (int64_t k = 0; k < a[i]->n; k++) {
+                V *e = a[i]->L[k];
+                if (!e) continue;
+                if (e->t == T_INT || e->t == T_CHAR) sum_add_int(&s, e->j);
+                else if (e->t == T_BOOL) sum_add_int(&s, e->j != 0);
+                else if (e->t == T_FLOAT) sum_add_float(&s, e->f);
+                else {
+                    V *p = vec_reduce_sum(e);
+                    if (!p) return v_err("sum: bad item");
+                    if (p->t == T_ERR) return p;
+                    if (p->t == T_FLOAT) sum_add_float(&s, p->f);
+                    else if (p->t == T_INT) sum_add_int(&s, p->j);
+                    else { v_free(p); return v_err("sum: unsupported item"); }
+                    v_free(p);
+                }
+            }
         } else if (a[i]->t >= T_IMAT && a[i]->t <= T_BMAT) {
             V *p = vec_reduce_sum(a[i]);
             P(p->t == T_ERR,p)
@@ -1712,9 +1766,23 @@ static V *bi_enumerate(V**a,in){
         V*u=v_list(2);
         u->L[0]=v_int(i);
         u->L[1]=item_at(v,i);
+        v_specialize(u);
         r->L[i]=u;
     }
     return r;
+}
+/* One required parameter and no default: bind it directly. Anything else uses bind_params. */
+static int bind_one_param(Env *ce, V *fn, V *arg) {
+    V *p;
+    const char *s;
+    if (!fn->params || fn->params->t != T_LIST || fn->params->n != 1) return 0;
+    if (fn->defaults && fn->defaults->n > 0 && fn->defaults->L && fn->defaults->L[0]) return 0;
+    p = fn->params->L[0];
+    if (!p || p->t != T_STR || !p->s || p->s[0] == '*') return 0;
+    s = p->s;
+    if (!strcmp(s, "self") && env_get_here(ce, "self")) return 1;
+    env_set(ce, s, arg);
+    return 1;
 }
 static V *bi_map(V**a,in,Env*e){
     P(n<2||a[0]->t!=T_FN,v_err("map(fn,iter)"))
@@ -1733,7 +1801,11 @@ static V *bi_map(V**a,in,Env*e){
         for(int64_t i=0;i<cnt;i++){
             if(iter->t!=T_STR&&i>=iter->n){r->n=i;break;}
             V*item=item_at(iter,i);
-            Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);v_free(item);
+            Env*ce=env_new(fn->closure);
+            int fast=bind_one_param(ce,fn,item);
+            V*berr=fast ? NULL : shakti_bind_params(ce,fn,&item,1,NULL,NULL,0);
+            v_free(item);
+            if(berr){env_leave(ce);r->L[i]=berr;continue;}
             if(fn->j<0||fn->j>=fn_ast_n){env_leave(ce);v_free(r);return v_err("map: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             r->L[i]=rv;env_leave(ce);
@@ -1766,7 +1838,10 @@ static V *bi_filter(V**a,in,Env*e){
         for(int64_t i=0;i<cnt;i++){
             if(iter->t!=T_STR&&i>=iter->n)break;
             V*item=item_at(iter,i);
-            Env*ce=env_new(fn->closure);if(fn->params->n>0)env_set(ce,fn->params->L[0]->s,item);
+            Env*ce=env_new(fn->closure);
+            int fast=bind_one_param(ce,fn,item);
+            V*berr=fast ? NULL : shakti_bind_params(ce,fn,&item,1,NULL,NULL,0);
+            if(berr){v_free(item);env_leave(ce);for(int64_t k=0;k<out;k++)v_free(tmp[k]);free(tmp);return berr;}
             if(fn->j<0||fn->j>=fn_ast_n){v_free(item);env_leave(ce);free(tmp);return v_err("filter: bad function");}
             V*rv=eval_fn(fn_ast[(int)fn->j],ce);if(g_returning){g_returning=0;v_free(rv);rv=g_retval;g_retval=NULL;}
             if (rv && rv->t == T_ERR) {
@@ -1884,9 +1959,63 @@ static V *bi_pop(V**a,in){
         return v_char(a[0]->B[--a[0]->n]);
     }
     P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
-    return a[0]->L[--a[0]->n];}
+    V *popped = a[0]->L[--a[0]->n];
+    a[0]->L[a[0]->n] = NULL;
+    v_specialize(a[0]);
+    return popped;}
 static V *bi_keys(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->keys):v_list(0);}
-static V *bi_values(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->vals):v_list(0);}
+static V *values_copy(V *vals) {
+    int64_t i, n;
+    int all_int = 1, all_u8 = 1, all_num = 1, all_bool = 1;
+    if (!vals || vals->t != T_LIST || vals->n <= 0) {
+        V *c = vals ? v_copy(vals) : v_list(0);
+        v_specialize(c);
+        return c;
+    }
+    n = vals->n;
+    for (i = 0; i < n; i++) {
+        V *e = vals->L[i];
+        if (!e) return v_copy(vals);
+        if (e->t != T_INT && e->t != T_CHAR) all_int = 0;
+        if (e->t != T_CHAR) all_u8 = 0;
+        if (e->t != T_INT && e->t != T_FLOAT && e->t != T_CHAR) all_num = 0;
+        if (e->t != T_BOOL) all_bool = 0;
+    }
+    if (all_u8) {
+        V *c = v_cvec(n);
+        for (i = 0; i < n; i++) c->B[i] = (unsigned char)vals->L[i]->j;
+        return c;
+    }
+    if (all_int) {
+        V *c = v_ivec(n);
+        for (i = 0; i < n; i++) c->J[i] = vals->L[i]->j;
+        return c;
+    }
+    if (all_num) {
+        V *c = v_fvec(n);
+        for (i = 0; i < n; i++) {
+            V *e = vals->L[i];
+            c->F[i] = e->t == T_FLOAT ? e->f : (double)e->j;
+        }
+        return c;
+    }
+    if (all_bool) {
+        V *c = v_bvec(n);
+        for (i = 0; i < n; i++) c->B[i] = vals->L[i]->j ? 1 : 0;
+        return c;
+    }
+    {
+        V *c = v_copy(vals);
+        v_specialize(c);
+        return c;
+    }
+}
+static V *bi_values(V**a,in){
+    V *c;
+    if (!(n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE))) return v_list(0);
+    c = values_copy(a[0]->vals);
+    return c;
+}
 static V *list_ref_elems(V *src) {
     V *c = v_list(src ? src->n : 0);
     int64_t i;
@@ -1901,7 +2030,9 @@ static V *table_cols(V *k, V *v) {
         if(c->t==T_ERR)return v_ref(c);
         if(!is_vec_t(c->t)&&c->t!=T_LIST&&!is_mat_t(c->t))
             return v_errf("table column must be a vector, list or matrix, not %s",type_name(c->t));}
-    return v_table(k,v);
+    V *data = v_list(v->n);
+    for (int64_t i = 0; i < v->n; i++) data->L[i] = col_copy(v->L[i]);
+    return v_table_own(v_ref(k), data);
 }
 static V *bi_table(V**a,in,V**kwn,V**kwv,int nkw){
     if(n==1&&a[0]->t==T_DICT){

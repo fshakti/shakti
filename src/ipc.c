@@ -874,18 +874,17 @@ static int sock_listen_uds(int port, char *path_out, int *lock_out, char *err, s
         return -1;
     }
     ipc_set_cloexec(s);
+    /* Create the socket 0700. chmod of the path can be aimed at a different
+     * file, and fchmod on a Unix socket is rejected on macOS. */
+    mode_t prev_umask = umask(077);
     if (bind(s, (struct sockaddr *)&addr, sizeof addr) < 0) {
+        umask(prev_umask);
         snprintf(err, err_cap, "ipc: uds bind: %s", strerror(errno));
         close(s);
         uds_unlock(path_out, lock, 0);
         return -1;
     }
-    if (chmod(path_out, 0700) != 0) {
-        snprintf(err, err_cap, "ipc: uds chmod: %s", strerror(errno));
-        close(s);
-        uds_release(path_out, lock);
-        return -1;
-    }
+    umask(prev_umask);
     if (listen(s, 16) < 0) {
         snprintf(err, err_cap, "ipc: uds listen: %s", strerror(errno));
         close(s);

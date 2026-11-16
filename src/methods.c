@@ -15,4 +15,17 @@ V*method_call(V*o,const g0*m,V**a,in,Env*e){
   const g0*p=strstr(o->s,a[0]->s);
   return p?v_int((int64_t)(p-o->s)):v_int(-1);
  }
+ if(!strcmp(m,"strip")&&o->t==T_STR){
+  const char *s = o->s ? o->s : "";
+  size_t n;
+  char *b;
+  while(*s==' '||*s=='\t'||*s=='\n'||*s=='\r') s++;
+  n = strlen(s);
+  while(n && (s[n-1]==' '||s[n-1]=='\t'||s[n-1]=='\n'||s[n-1]=='\r')) n--;
+  b = malloc(n+1);
+  if(!b) return v_err("out of memory");
+  memcpy(b, s, n);
+  b[n] = 0;
+  return v_str_take(b);
+ }
  return v_errf("method '%s' for type %s",m,type_name(o->t));}

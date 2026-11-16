@@ -860,7 +860,7 @@ static int dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *dim
             }
         }
     }
-    return 0;
+    return 1; /* slots are filled; 0 means this path did not handle the group */
 }
 /* LSD radix argsort of indices by uint64 keys (stable). */
 static int radix_argsort_u64(uint64_t *keys, int64_t *idx, int64_t n) {
@@ -1509,7 +1509,8 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
         for (int s = 0; s < nspecs; s++) {
             keys->L[c] = v_str(specs[s].kind == COL_COUNT && specs[s].src[0] == 0 ? "count" : specs[s].name);
             V *src = specs[s].src[0] ? tbl_col(tbl, tbl_col_idx(tbl, specs[s].src)) : NULL;
-            if (specs[s].kind == COL_COUNT || (src && sum_is_int(specs[s].kind, src->t))) {
+            if (specs[s].kind == COL_COUNT || (src && sum_is_int(specs[s].kind, src->t)) ||
+                (specs[s].kind == COL_SUM && src && src->t == T_BVEC)) {
                 data->L[c] = v_ivec(tab->nslots);
             } else if (specs[s].kind == COL_NAME) {
                 data->L[c] = v_list(tab->nslots);
@@ -1553,8 +1554,13 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
                 if (agg_done[s]) {
                     /* filled above */
                 } else if (colv->t == T_IVEC) {
+                    V *srcb = specs[s].src[0] ? tbl_col(tbl, tbl_col_idx(tbl, specs[s].src)) : NULL;
+                    if (specs[s].kind == COL_SUM && srcb && srcb->t == T_BVEC) {
+                        colv->J[g] = (int64_t)slot->sum[s];
+                    } else {
                     if (specs[s].kind == COL_SUM && slot->icarry[s]) g_isum_ovf = 1;
                     colv->J[g] = specs[s].kind == COL_SUM ? slot->isum[s] : slot->nrows;
+                    }
                 } else if (colv->t == T_FVEC) {
                     if (specs[s].kind == COL_SUM) colv->F[g] = slot->sum[s];
                     else if (specs[s].kind == COL_AVG)
@@ -2289,6 +2295,32 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
         if (next != col) {
             v_free(new_data->L[idx]);
             new_data->L[idx] = next;
+        }
+    }
+    /* A column the insert did not name keeps its old length. Fill it so the
+     * table stays rectangular: 0, 0.0, False, or None, matching the column. */
+    int64_t want = 0;
+    for (int64_t c = 0; c < new_data->n; c++)
+        if (new_data->L[c] && new_data->L[c]->n > want) want = new_data->L[c]->n;
+    for (int64_t c = 0; c < new_data->n; c++) {
+        V *col = new_data->L[c];
+        while (col && col->n < want) {
+            V *fill = v_nil();
+            if (col->t == T_IVEC || col->t == T_CVEC) fill = v_int(0);
+            else if (col->t == T_FVEC) fill = v_float(0);
+            else if (col->t == T_BVEC) fill = v_bool(0);
+            V *next = append_cell(col, fill);
+            v_free(fill);
+            if (next && next->t == T_ERR) {
+                v_free(new_data);
+                if (free_vals_list) v_free(vals_list);
+                return next;
+            }
+            if (next != col) {
+                v_free(new_data->L[c]);
+                new_data->L[c] = next;
+                col = next;
+            }
         }
     }
     if (free_vals_list) v_free(vals_list);

@@ -255,20 +255,22 @@ V *v_mat_row(V *m, int64_t r) {
 V *try_promote_matrix(V **elems, int nch) {
     if (nch <= 0) return NULL;
     int64_t cols = -1;
-    int all_int = 1, all_u8 = 1, all_num = 1, all_bool = 1;
+    int all_int = 1, all_u8 = 1, all_num = 1, all_bool = 1, typed = 0;
     for (int i = 0; i < nch; i++) {
         V *row = elems[i];
         int64_t row_len = 0;
         if (row->t == T_IVEC) {
-            row_len = row->n; all_u8 = 0; all_bool = 0;
+            row_len = row->n; all_u8 = 0; all_bool = 0; typed = 1;
         } else if (row->t == T_CVEC) {
-            row_len = row->n; all_bool = 0;
+            row_len = row->n; all_bool = 0; typed = 1;
         } else if (row->t == T_FVEC) {
-            row_len = row->n; all_int = 0; all_u8 = 0; all_bool = 0;
+            row_len = row->n; all_int = 0; all_u8 = 0; all_bool = 0; typed = 1;
         } else if (row->t == T_BVEC) {
-            row_len = row->n; all_int = 0; all_u8 = 0; all_num = 0;
+            row_len = row->n; all_int = 0; all_u8 = 0; all_num = 0; typed = 1;
         } else if (row->t == T_LIST) {
             row_len = row->n;
+            if (row->n == 0) all_u8 = 0;
+            else typed = 1;
             for (int64_t j = 0; j < row->n; j++) {
                 if (!elems[i]->L[j]) return NULL;
                 if (elems[i]->L[j]->t != T_CHAR) all_u8 = 0;
@@ -280,6 +282,8 @@ V *try_promote_matrix(V **elems, int nch) {
         if (cols < 0) cols = row_len;
         else if (cols != row_len) return NULL;
     }
+    /* An empty list is not a row of chars. With no typed row, [[]] stays a list. */
+    if (!typed) return NULL;
     if (all_u8) {
         V *r = v_cmat(nch, cols);
         for (int i = 0; i < nch; i++) {
@@ -323,6 +327,65 @@ V *try_promote_matrix(V **elems, int nch) {
         return r;
     }
     return NULL;
+}
+/* A list whose items are one kind becomes that vector, and rows of one width
+ * become a matrix. The object stays the same pointer. Shared lists are left. */
+void v_specialize(V *v) {
+    int all_int, all_u8, all_num, all_bool;
+    int64_t i;
+    if (!v || v->t != T_LIST || v->n <= 0) return;
+    all_int = all_u8 = all_num = all_bool = 1;
+    for (i = 0; i < v->n; i++) {
+        V *e = v->L[i];
+        if (!e) return;
+        if (e->t != T_INT && e->t != T_CHAR) all_int = 0;
+        if (e->t != T_CHAR) all_u8 = 0;
+        if (e->t != T_INT && e->t != T_FLOAT && e->t != T_CHAR) all_num = 0;
+        if (e->t != T_BOOL) all_bool = 0;
+    }
+    if (all_u8 || all_int || all_num || all_bool) {
+        void *buf;
+        int t;
+        if (all_u8) { buf = malloc((size_t)v->n); t = T_CVEC; }
+        else if (all_int) { buf = malloc((size_t)v->n * sizeof(int64_t)); t = T_IVEC; }
+        else if (all_num) { buf = malloc((size_t)v->n * sizeof(double)); t = T_FVEC; }
+        else { buf = malloc((size_t)v->n); t = T_BVEC; }
+        if (!buf) return;
+        for (i = 0; i < v->n; i++) {
+            V *e = v->L[i];
+            if (t == T_CVEC) ((unsigned char *)buf)[i] = (unsigned char)e->j;
+            else if (t == T_IVEC) ((int64_t *)buf)[i] = e->j;
+            else if (t == T_BVEC) ((unsigned char *)buf)[i] = e->j ? 1 : 0;
+            else ((double *)buf)[i] = e->t == T_FLOAT ? e->f : (double)e->j;
+        }
+        for (i = 0; i < v->n; i++) v_free(v->L[i]);
+        free(v->L);
+        v->L = NULL;
+        v->t = t;
+        if (t == T_IVEC) v->J = buf;
+        else if (t == T_FVEC) v->F = buf;
+        else v->B = buf;
+        v->_ht_cap = v->n > 0 ? (uint32_t)v->n : 0;
+        v->owner_kind = V_OWNER_MALLOC;
+        return;
+    }
+    if (v->n > 2147483647) return;
+    {
+        V *m = try_promote_matrix(v->L, (int)v->n);
+        if (!m) return;
+        for (i = 0; i < v->n; i++) v_free(v->L[i]);
+        free(v->L);
+        v->L = NULL;
+        v->t = m->t;
+        v->n = m->n;
+        v->_ht_cap = m->_ht_cap;
+        v->J = m->J;
+        v->owner_kind = V_OWNER_MALLOC;
+        m->J = NULL;
+        m->t = T_NIL;
+        m->n = 0;
+        v_free(m);
+    }
 }
 V *mat_matmul(V *a, V *b) {
     P(!is_mat_t(a->t) || !is_mat_t(b->t), v_err("mmul requires numeric matrices"))
@@ -576,24 +639,72 @@ V *v_ref(V *v) { if(v) v->rc++; return v; }
 /* Children of a value that is about to be released. A nested list is freed
  * from this work list so a few hundred thousand levels do not overflow the
  * C stack. */
-static void v_free_push(V ***stk, size_t *n, size_t *cap, V *child) {
+static void v_free_push(V ***stk, size_t *n, size_t *cap, V *child, int *heaped) {
     if (!child) return;
     if (*n == *cap) {
         size_t nc = *cap ? *cap * 2 : 64;
-        V **p = realloc(*stk, nc * sizeof(V *));
-        if (!p)
-            return;
+        V **p;
+        if (!*heaped) {
+            p = malloc(nc * sizeof(V *));
+            if (!p) return;
+            if (*n) memcpy(p, *stk, *n * sizeof(V *));
+            *heaped = 1;
+        } else {
+            p = realloc(*stk, nc * sizeof(V *));
+            if (!p) return;
+        }
         *stk = p;
         *cap = nc;
     }
     (*stk)[(*n)++] = child;
 }
 
+/* A value with no child values. The heap stack exists so a nested list cannot
+ * recurse; a scalar or a vector does not need it. */
+static int v_free_leaf(V *v) {
+    if (v->t == T_LIST || v->t == T_DICT || v->t == T_TABLE || v->t == T_FN) return 0;
+    if (--v->rc > 0) return 1;
+    if (v->t == T_INT && isl_int_cache && v->j >= 0 && v->j < ISL_INT_CACHE_MAX &&
+        isl_int_cache[v->j] == v) {
+        v->rc = 1;
+        return 1;
+    }
+    int owned = (v->owner_kind == V_OWNER_MALLOC);
+#ifdef SHAKTI_HAVE_IEFS
+    int mapped = (v->owner_kind == V_OWNER_MAP_ALIAS);
+#endif
+    switch (v->t) {
+    case T_STR: case T_ERR: case T_INPUT: free(v->s); break;
+    case T_IVEC: case T_IMAT: if (owned) free(v->J); break;
+    case T_FVEC: case T_FMAT: if (owned) free(v->F); break;
+    case T_BVEC: case T_CVEC: case T_BMAT: case T_CMAT: if (owned) free(v->B); break;
+    case T_SUBPROCESS:
+#ifndef _WIN32
+        if (v->j >= 0) close((int)v->j);
+        if (v->n > 1) {
+            int wstatus;
+            waitpid((pid_t)v->n, &wstatus, 0);
+        }
+#endif
+        break;
+    default: break;
+    }
+#ifdef SHAKTI_HAVE_IEFS
+    if (mapped && v->map_reg)
+        iefs_map_region_release((IefsMapRegion *)v->map_reg);
+#endif
+    free(v);
+    return 1;
+}
+
 void v_free(V *v) {
     Pv(!v)
-    V **stk = NULL;
-    size_t n = 0, cap = 0;
-    v_free_push(&stk, &n, &cap, v);
+    if (v_free_leaf(v)) return;
+    V *local[64];
+    V **stk = local;
+    size_t n = 0, cap = 64;
+    int heaped = 0;
+    v_free_push(&stk, &n, &cap, v, &heaped);
     while (n) {
         V *cur = stk[--n];
         if (!cur) continue;
@@ -617,19 +728,19 @@ void v_free(V *v) {
         case T_BMAT: case T_CMAT: if (owned) free(cur->B); break;
         case T_LIST:
             for (int64_t i = cur->n - 1; i >= 0; i--)
-                v_free_push(&stk, &n, &cap, cur->L[i]);
+                v_free_push(&stk, &n, &cap, cur->L[i], &heaped);
             free(cur->L);
             break;
         case T_DICT: case T_TABLE:
             free(cur->_ht);
-            v_free_push(&stk, &n, &cap, cur->keys);
-            v_free_push(&stk, &n, &cap, cur->vals);
+            v_free_push(&stk, &n, &cap, cur->keys, &heaped);
+            v_free_push(&stk, &n, &cap, cur->vals, &heaped);
             break;
         case T_FN:
             if (cur->n == -1) free(cur->s);
             else {
-                v_free_push(&stk, &n, &cap, cur->params);
-                v_free_push(&stk, &n, &cap, cur->defaults);
+                v_free_push(&stk, &n, &cap, cur->params, &heaped);
+                v_free_push(&stk, &n, &cap, cur->defaults, &heaped);
                 if (cur->closure) env_free(cur->closure);
                 fn_ast_release((int)cur->j);
             }
@@ -654,7 +765,7 @@ void v_free(V *v) {
 #endif
         free(cur);
     }
-    free(stk);
+    if (heaped) free(stk);
 }
 
 int v_ensure_writable(V *v) {
@@ -1235,14 +1346,30 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
         break;
     }
     case T_FLOAT:{
-        if(v->f < 1e15 && v->f > -1e15 && v->f == (int64_t)v->f)
-            fprintf(fp, "%.1f", v->f);
-        else fprintf(fp, "%g", nan_unsigned(v->f));
+        double d = nan_unsigned(v->f);
+        if (repr_mode) {
+            char tmp[64];
+            snprintf(tmp, sizeof tmp, "%.17g", d);
+            fprintf(fp, "%s", tmp);
+            if (!strchr(tmp, '.') && !strchr(tmp, 'e') && !strchr(tmp, 'E') && strcmp(tmp, "nan") && strcmp(tmp, "inf") && strcmp(tmp, "-inf"))
+                fprintf(fp, ".0");
+        } else if(d < 1e15 && d > -1e15 && d == (int64_t)d)
+            fprintf(fp, "%.1f", d);
+        else fprintf(fp, "%.17g", d);
         break;
     }
     case T_STR:
-        if(repr_mode) fprintf(fp, "\"%s\"", v->s);
-        else fprintf(fp, "%s", v->s);
+        if(repr_mode) {
+            fputc('"', fp);
+            for (const unsigned char *p = (const unsigned char *)v->s; *p; p++) {
+                if (*p == '"' || *p == '\\') fprintf(fp, "\\%c", *p);
+                else if (*p == '\n') fputs("\\n", fp);
+                else if (*p == '\r') fputs("\\r", fp);
+                else if (*p == '\t') fputs("\\t", fp);
+                else fputc(*p, fp);
+            }
+            fputc('"', fp);
+        } else fprintf(fp, "%s", v->s);
         break;
     case T_ERR: fprintf(fp, "Error: %s", v->s); break;
     case T_IVEC:
@@ -1387,6 +1514,7 @@ static int64_t repr_ivec_at(void *ctx, int64_t i) { return ((V *)ctx)->J[i]; }
 static int64_t repr_list_int_at(void *ctx, int64_t i) { return ((V *)ctx)->L[i]->j; }
 
 char *v_repr(V *v) {
+    if (v && v->t == T_IVEC && v->n == 0) return strdup("list[int]()");
     if (v && v->t == T_IVEC) {
         char *r = v_repr_int_seq(v->n, repr_ivec_at, v);
         if (r) return r;

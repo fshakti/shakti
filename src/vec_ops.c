@@ -4,6 +4,43 @@
 #include "mat_simd.h"
 #include "i64bin.h"
 
+/* A byte result that does not fit 0..255 becomes list[int]. A result that
+ * does not fit in an int becomes list[float], matching char + int. */
+static int c_bin(int64_t x, int64_t y, int op, int64_t *z) {
+    if (op == OP_ADD) return __builtin_add_overflow(x, y, z);
+    if (op == OP_SUB) return __builtin_sub_overflow(x, y, z);
+    return __builtin_mul_overflow(x, y, z);
+}
+static double c_bin_f(int64_t x, int64_t y, int op) {
+    if (op == OP_ADD) return (double)x + (double)y;
+    if (op == OP_SUB) return (double)x - (double)y;
+    return (double)x * (double)y;
+}
+static V *cvec_arith(const unsigned char *a, const unsigned char *b, int64_t n,
+                     int64_t scalar, int has_scalar, int scalar_left, int op) {
+    int kind = 0;
+    for (int64_t i = 0; i < n; i++) {
+        int64_t x = has_scalar && scalar_left ? scalar : (int64_t)a[i];
+        int64_t y = has_scalar && !scalar_left ? scalar : (int64_t)b[i];
+        int64_t z = 0;
+        if (c_bin(x, y, op, &z) ) kind = 2;
+        else if ((z < 0 || z > 255) && kind < 1) kind = 1;
+        if (kind == 2) break;
+    }
+    V *r = kind == 2 ? v_fvec(n) : kind == 1 ? v_ivec(n) : v_cvec(n);
+    if (!r) return v_err("out of memory");
+    for (int64_t i = 0; i < n; i++) {
+        int64_t x = has_scalar && scalar_left ? scalar : (int64_t)a[i];
+        int64_t y = has_scalar && !scalar_left ? scalar : (int64_t)b[i];
+        int64_t z = 0;
+        int ov = c_bin(x, y, op, &z);
+        if (kind == 2) r->F[i] = ov ? c_bin_f(x, y, op) : (double)z;
+        else if (kind == 1) r->J[i] = z;
+        else r->B[i] = (unsigned char)z;
+    }
+    return r;
+}
+
 int is_truthy(V *v) {
     P(!v,0)
     switch(v->t) {
@@ -64,6 +101,13 @@ double to_float(V *v) {
  * kernels flag a zero divisor as they go; the error comes after the loop, so the operands' other
  * errors (length, shape, type) come first. */
 static int is_div_op(int op) { return op == OP_DIV || op == OP_FLOORDIV || op == OP_MOD; }
+/* Remainder of floor division: x - floor(x/y)*y, same sign as y. */
+static double floor_mod(double x, double y) {
+    double q;
+    if (y == 0.0) return 0.0;
+    q = floor(x / y);
+    return x - q * y;
+}
 static V *div_by_zero(int op) { return v_err(op == OP_MOD ? "modulo by zero" : "division by zero"); }
 static int is_zero_num(V *v) {
     return (v->t == T_INT || v->t == T_CHAR) ? v->j == 0 : v->t == T_FLOAT && v->f == 0;
@@ -162,7 +206,7 @@ V *mat_binop(V *a, V *b, int op) {
                 case OP_MUL: r->F[i] = x * y; break;
                 case OP_DIV: r->F[i] = y != 0 ? x / y : 0; break;
                 case OP_FLOORDIV: r->F[i] = y != 0 ? floor(x / y) : 0; break;
-                case OP_MOD: r->F[i] = y != 0 ? fmod(x, y) : 0; break;
+                case OP_MOD: r->F[i] = y != 0 ? floor_mod(x, y) : 0; break;
                 case OP_POW: r->F[i] = pow(x, y); break;
                 default: break;
                 }
@@ -189,7 +233,7 @@ V *mat_binop(V *a, V *b, int op) {
                         if (op == OP_SUB) out->F[i] = x - yv;
                         else if (op == OP_DIV) out->F[i] = yv != 0 ? x / yv : 0;
                         else if (op == OP_FLOORDIV) out->F[i] = yv != 0 ? floor(x / yv) : 0;
-                        else if (op == OP_MOD) out->F[i] = yv != 0 ? fmod(x, yv) : 0;
+                        else if (op == OP_MOD) out->F[i] = yv != 0 ? floor_mod(x, yv) : 0;
                         else out->F[i] = pow(x, yv);
                     }
                 }
@@ -259,7 +303,7 @@ V *mat_binop(V *a, V *b, int op) {
                 case OP_MUL: r->F[i] = x * y; break;
                 case OP_DIV: zero |= y == 0; r->F[i] = y != 0 ? x / y : 0; break;
                 case OP_FLOORDIV: zero |= y == 0; r->F[i] = y != 0 ? floor(x / y) : 0; break;
-                case OP_MOD: zero |= y == 0; r->F[i] = y != 0 ? fmod(x, y) : 0; break;
+                case OP_MOD: zero |= y == 0; r->F[i] = y != 0 ? floor_mod(x, y) : 0; break;
                 case OP_POW: r->F[i] = pow(x, y); break;
                 default: break;
                 }
@@ -326,14 +370,13 @@ V *vec_binop(V *a, V *b, int op) {
     }
     if (a->t == T_CVEC && b->t == T_CVEC && op != OP_DIV && op != OP_POW) {
         int64_t n = a->n;
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL)
+            return cvec_arith(a->B, b->B, n, 0, 0, 0, op);
         V *r = v_cvec(n);
         const unsigned char *ac = a->B, *bc = b->B;
         unsigned char *rc = r->B;
         int zero = 0;
         switch (op) {
-        case OP_ADD: for (int64_t i = 0; i < n; i++) rc[i] = ac[i] + bc[i]; break;
-        case OP_SUB: for (int64_t i = 0; i < n; i++) rc[i] = ac[i] - bc[i]; break;
-        case OP_MUL: for (int64_t i = 0; i < n; i++) rc[i] = ac[i] * bc[i]; break;
         case OP_FLOORDIV: for (int64_t i = 0; i < n; i++) { zero |= !bc[i]; rc[i] = bc[i] ? ac[i] / bc[i] : 0; } break;
         case OP_MOD: for (int64_t i = 0; i < n; i++) { zero |= !bc[i]; rc[i] = bc[i] ? ac[i] % bc[i] : 0; } break;
         default: break;
@@ -374,13 +417,12 @@ V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_CVEC && (b->t == T_INT || b->t == T_CHAR) && op != OP_DIV && op != OP_POW) {
         int64_t n = a->n, y = b->j;
         if (!y && is_div_op(op)) return div_by_zero(op);
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL)
+            return cvec_arith(a->B, NULL, n, y, 1, 0, op);
         V *r = v_cvec(n);
         const unsigned char *ac = a->B;
         unsigned char *rc = r->B;
         switch (op) {
-        case OP_ADD: for (int64_t i = 0; i < n; i++) rc[i] = ac[i] + (uint64_t)y; break;
-        case OP_SUB: for (int64_t i = 0; i < n; i++) rc[i] = ac[i] - (uint64_t)y; break;
-        case OP_MUL: for (int64_t i = 0; i < n; i++) rc[i] = ac[i] * (uint64_t)y; break;
         case OP_FLOORDIV: for (int64_t i = 0; i < n; i++) rc[i] = y ? ac[i] / y : 0; break;
         case OP_MOD: for (int64_t i = 0; i < n; i++) rc[i] = y ? ac[i] % y : 0; break;
         default: break;
@@ -420,14 +462,13 @@ V *vec_binop(V *a, V *b, int op) {
     }
     if ((a->t == T_INT || a->t == T_CHAR) && b->t == T_CVEC && op != OP_DIV && op != OP_POW) {
         int64_t n = b->n, x = a->j;
+        if (op == OP_ADD || op == OP_SUB || op == OP_MUL)
+            return cvec_arith(NULL, b->B, n, x, 1, 1, op);
         V *r = v_cvec(n);
         const unsigned char *bc = b->B;
         unsigned char *rc = r->B;
         int zero = 0;
         switch (op) {
-        case OP_ADD: for (int64_t i = 0; i < n; i++) rc[i] = (uint64_t)x + bc[i]; break;
-        case OP_SUB: for (int64_t i = 0; i < n; i++) rc[i] = (uint64_t)x - bc[i]; break;
-        case OP_MUL: for (int64_t i = 0; i < n; i++) rc[i] = (uint64_t)x * bc[i]; break;
         case OP_FLOORDIV: for (int64_t i = 0; i < n; i++) { zero |= !bc[i]; rc[i] = bc[i] ? x / bc[i] : 0; } break;
         case OP_MOD: for (int64_t i = 0; i < n; i++) { zero |= !bc[i]; rc[i] = bc[i] ? x % bc[i] : 0; } break;
         default: break;
@@ -458,11 +499,11 @@ V *vec_binop(V *a, V *b, int op) {
                 if(!y) return v_err("division by zero");
                 /* INT64_MIN / -1 overflows int64 (UB in C); promote to float. */
                 if(x==INT64_MIN && y==-1) return v_float(-(double)INT64_MIN);
-                return v_int(x/y);
+                return v_int(i64_floordiv(x, y));
             case OP_MOD:
                 if(!y) return v_err("modulo by zero");
                 if(x==INT64_MIN && y==-1) return v_int(0);
-                return v_int(x%y);
+                return v_int(i64_mod(x, y));
             case OP_POW: {
                 int64_t z;
                 if(i64_pow(x, y, &z)) return v_int(z);
@@ -477,7 +518,7 @@ V *vec_binop(V *a, V *b, int op) {
         case OP_MUL: return v_float(x*y);
         case OP_DIV: return y!=0?v_float(x/y):v_err("division by zero");
         case OP_FLOORDIV: return y!=0?v_float(floor(x/y)):v_err("division by zero");
-        case OP_MOD: return y!=0?v_float(fmod(x,y)):v_err("modulo by zero");
+        case OP_MOD: return y!=0?v_float(floor_mod(x,y)):v_err("modulo by zero");
         case OP_POW: return v_float(pow(x,y));
         default: break;
         }
@@ -551,7 +592,7 @@ V *vec_binop(V *a, V *b, int op) {
             y=BT==T_IVEC?(double)b->J[i]:b->F[i]; \
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break; \
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:zero|=y==0;r->F[i]=y!=0?x/y:0;break; \
-            case OP_FLOORDIV:zero|=y==0;r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:zero|=y==0;r->F[i]=y!=0?fmod(x,y):0;break; \
+            case OP_FLOORDIV:zero|=y==0;r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:zero|=y==0;r->F[i]=y!=0?floor_mod(x,y):0;break; \
             case OP_POW:r->F[i]=pow(x,y);break;default:break;}} return div_result(r,zero,op); }
     if((a->t==T_IVEC||a->t==T_FVEC) && (b->t==T_IVEC||b->t==T_FVEC)) {
         VEC_BIN(a->t, b->t, a->J, b->J)
@@ -567,7 +608,7 @@ V *vec_binop(V *a, V *b, int op) {
         for(int64_t i=0;i<n;i++){double y=b->t==T_IVEC?(double)b->J[i]:b->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:zero|=y==0;r->F[i]=y!=0?x/y:0;break;
-            case OP_FLOORDIV:zero|=y==0;r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:zero|=y==0;r->F[i]=y!=0?fmod(x,y):0;break;
+            case OP_FLOORDIV:zero|=y==0;r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:zero|=y==0;r->F[i]=y!=0?floor_mod(x,y):0;break;
             case OP_POW:r->F[i]=pow(x,y);break;default:break;}} return div_result(r,zero,op);
     }
     if((a->t==T_IVEC||a->t==T_FVEC) && (b->t==T_INT||b->t==T_FLOAT)) {
@@ -582,7 +623,7 @@ V *vec_binop(V *a, V *b, int op) {
         for(int64_t i=0;i<n;i++){double x=a->t==T_IVEC?(double)a->J[i]:a->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:r->F[i]=y!=0?x/y:0;break;
-            case OP_FLOORDIV:r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:r->F[i]=y!=0?fmod(x,y):0;break;
+            case OP_FLOORDIV:r->F[i]=y!=0?floor(x/y):0;break;case OP_MOD:r->F[i]=y!=0?floor_mod(x,y):0;break;
             case OP_POW:r->F[i]=pow(x,y);break;default:break;}} return r;
     }
     if(a->t==T_LIST && b->t==T_LIST && op==OP_ADD) {
@@ -769,6 +810,20 @@ int nums_have_row(V *m, V *a) {
 static int cmp_depth;
 static void cmp_depth_leave(int *p) { (void)p; if (cmp_depth > 0) cmp_depth--; }
 V *vec_cmp(V *a, V *b, int op) {
+    /* Scalars cannot recurse, so they skip the depth counter. Ints compare as ints. */
+    if ((a->t==T_INT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_BOOL||b->t==T_CHAR)) {
+        int64_t x = a->j, y = b->j;
+        int r;
+        switch (op) {
+        case OP_EQ: r = x==y; break; case OP_NE: r = x!=y; break;
+        case OP_LT: r = x<y; break;  case OP_GT: r = x>y; break;
+        case OP_LE: r = x<=y; break; case OP_GE: r = x>=y; break;
+        default: r = 0;
+        }
+        return v_bool(r);
+    }
+    if ((a->t==T_INT||a->t==T_FLOAT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_BOOL||b->t==T_CHAR))
+        return v_bool(num_cmp(a, 0, b, 0, op));
     if (cmp_depth >= 2048) return v_err("comparison too deep");
     cmp_depth++;
     int cmp_guard __attribute__((cleanup(cmp_depth_leave))) = 1;
@@ -776,9 +831,6 @@ V *vec_cmp(V *a, V *b, int op) {
     if (a == b) {
         if (op == OP_EQ) return v_bool(1);
         if (op == OP_NE) return v_bool(0);
-    }
-    if((a->t==T_INT||a->t==T_FLOAT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_BOOL||b->t==T_CHAR)) {
-        return v_bool(num_cmp(a, 0, b, 0, op));
     }
     if(a->t==T_STR && b->t==T_STR) {
         int c = strcmp(a->s, b->s);
@@ -818,8 +870,12 @@ V *vec_cmp(V *a, V *b, int op) {
     }
     if(a->t==T_NIL || b->t==T_NIL) {
         int both_nil = (a->t==T_NIL && b->t==T_NIL);
-        P(op==OP_EQ,v_bool(both_nil))
-        P(op==OP_NE,v_bool(!both_nil))
+        if (both_nil) {
+            int yes = op==OP_EQ || op==OP_LE || op==OP_GE;
+            return v_bool(yes);
+        }
+        P(op==OP_EQ,v_bool(0))
+        P(op==OP_NE,v_bool(1))
         return v_bool(0);
     }
     if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_CHAR)) {
@@ -832,7 +888,7 @@ V *vec_cmp(V *a, V *b, int op) {
         nums_cmp_num(r->B, b, b->n, a, cmp_mirror(op));
         return r;
     }
-    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC) && (op==OP_EQ||op==OP_NE)) {
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC||a->t==T_BVEC) && (b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC||b->t==T_BVEC) && a->t==b->t && (op==OP_EQ||op==OP_NE)) {
         P(a->n != b->n,v_bool(op==OP_NE))
         return v_bool(nums_equal(a, b, a->n) == (op==OP_EQ));
     }
@@ -860,8 +916,14 @@ V *vec_cmp(V *a, V *b, int op) {
         V *r = v_bvec(n);
         for(int64_t i = 0; i < n; i++) {
             V *c = vec_cmp(a->L[i], b, op);
-            r->B[i] = (c->t == T_BOOL && c->j) ? 1 : 0;
-            v_free(c);
+            if (c->t == T_ERR) {
+                v_free(c);
+                r->B[i] = (op == OP_NE) ? 1 : 0;
+                if (op != OP_EQ && op != OP_NE) { v_free(r); return v_errf("cannot compare types %s and %s", type_name(a->L[i]->t), type_name(b->t)); }
+            } else {
+                r->B[i] = (c->t == T_BOOL && c->j) ? 1 : 0;
+                v_free(c);
+            }
         }
         return r;
     }
@@ -911,12 +973,8 @@ V *vec_cmp(V *a, V *b, int op) {
         P(a->n != b->n || mat_cols(a) != mat_cols(b), v_bool(op == OP_NE))
         return v_bool(nums_equal(a, b, a->n * mat_cols(a)) == (op == OP_EQ));
     }
-    if (is_mat_t(a->t) && is_mat_t(b->t) && a->n == b->n && mat_cols(a) == mat_cols(b)) {
-        int64_t ne = a->n * mat_cols(a);
-        V *r = v_bmat(a->n, mat_cols(a));
-        nums_cmp_nums(r->B, a, b, ne, op);
-        return r;
-    }
+    if (is_mat_t(a->t) && is_mat_t(b->t))
+        return v_errf("cannot compare types %s and %s", type_name(a->t), type_name(b->t));
     return v_errf("cannot compare types %s and %s", type_name(a->t), type_name(b->t));
 }
 /* Dict keys other than strings match by `=`, as vec_cmp decides it. A string or number key

@@ -87,6 +87,7 @@ void v_dict_push(V *d, V *k, V *val);
 
 V *v_alloc(int t);
 V *try_promote_matrix(V **elems, int nch);
+void v_specialize(V *v);
 void print_val(V *v, FILE *fp, int repr_mode);
 void v_serialize(V *v, FILE *fp);
 V *v_deserialize(FILE *fp);
@@ -105,6 +106,8 @@ void parse_fail(const char *fmt, ...);
 
 void node_sprint(Node *n, FILE *fp);
 
+/* Set when a user function is bound over a builtin name. Builtin calls skip the shadow lookup until then. */
+extern int shakti_builtin_fn_shadow;
 Env *env_acquire(Env *parent);
 void env_release(Env *e);
 void env_leave(Env *e);

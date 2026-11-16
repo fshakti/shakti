@@ -137,7 +137,7 @@ static V*parse_array(const char*s,const char**end_out,int depth){
   v_free(item);
   if(++count>SHAKTI_JSON_MAX_ELEMS){v_free(r);return v_err("json: too many array elements");}
   s=skip_ws(e);
-  if(*s==']'){*end_out=s+1;return r;}
+  if(*s==']'){*end_out=s+1;v_specialize(r);return r;}
   if(*s!=','){v_free(r);return v_err("json: expected , or ]");}s=skip_ws(s+1);}}
 static V*parse_object(const char*s,const char**end_out,int depth){
  P(depth>=SHAKTI_JSON_MAX_DEPTH,v_err("json: nesting too deep"))
