@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifdef SHAKTI_HAVE_TLS
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 #endif
+#include "tls.h"
 #include "ipc_internal.h"
 #include "shakti_internal.h"
 
@@ -22,6 +24,7 @@ static IpcShmSlot g_shm[IPC_MAX_HANDLES];
 
 static void ipc_conn_poison(IpcHandle *s) {
     if (!s) return;
+    if (s->ssl) { shakti_tls_free(s->ssl); s->ssl = NULL; }
     if (s->fd >= 0) {
         close(s->fd);
         s->fd = -1;
@@ -282,6 +285,8 @@ void ipc_free_handle(int h) {
         close(s->reply_fd);
         s->reply_fd = -1;
     }
+    if (s->ssl) { shakti_tls_free(s->ssl); s->ssl = NULL; }
+    if (s->ssl_ctx) { shakti_tls_server_ctx_free(s->ssl_ctx); s->ssl_ctx = NULL; }
     if (s->kind == IPC_KIND_SOCK_LISTEN && s->uds_path[0]) {
         uds_release(s->uds_path, s->lock_fd);
         s->lock_fd = -1;
@@ -587,6 +592,38 @@ static int ipc_auth_send(IpcHandle *s, const unsigned char *a, size_t na, const 
     return ipc_raw_send(s, buf, IPC_AUTH_MAGIC_LEN + na + nb, err, err_cap);
 }
 
+static int ipc_hmac_bytes(const unsigned char *key, size_t klen, const unsigned char *data,
+                          size_t len, unsigned char out[IPC_MAC_LEN]) {
+#ifdef SHAKTI_HAVE_TLS
+    unsigned int olen = 0;
+    if (klen > INT_MAX) return -1;
+    if (!HMAC(EVP_sha256(), key, (int)klen, data, len, out, &olen) || olen != IPC_MAC_LEN)
+        return -1;
+    return 0;
+#else
+    (void)key; (void)klen; (void)data; (void)len; (void)out;
+    return -1;
+#endif
+}
+
+static void ipc_session_derive(IpcHandle *s, const char *token,
+                               const unsigned char *ns, const unsigned char *nc) {
+    unsigned char buf[8 + 2 * IPC_AUTH_NONCE];
+    memcpy(buf, "SHKSESS1", 8);
+    memcpy(buf + 8, ns, IPC_AUTH_NONCE);
+    memcpy(buf + 8 + IPC_AUTH_NONCE, nc, IPC_AUTH_NONCE);
+    if (ipc_hmac(token, buf, sizeof buf, s->session_key) == 0) {
+        s->session_set = 1;
+        s->tx_seq = 0;
+        s->rx_seq = 0;
+    }
+}
+
+static int ipc_tls_plaintext_allowed(void) {
+    const char *v = getenv("SHAKTI_IPC_ALLOW_PLAINTEXT");
+    return v && !strcmp(v, "1");
+}
+
 static int ipc_auth_server(IpcHandle *s, const char *token, char *err, size_t err_cap) {
     unsigned char ns[IPC_AUTH_NONCE], nc[IPC_AUTH_NONCE];
     unsigned char got[IPC_AUTH_NONCE + IPC_MAC_LEN], mac[IPC_MAC_LEN];
@@ -606,7 +643,9 @@ static int ipc_auth_server(IpcHandle *s, const char *token, char *err, size_t er
         snprintf(err, err_cap, "ipc: auth: hmac failed");
         return -1;
     }
-    return ipc_auth_send(s, mac, sizeof mac, NULL, 0, err, err_cap);
+    if (ipc_auth_send(s, mac, sizeof mac, NULL, 0, err, err_cap) != 0) return -1;
+    ipc_session_derive(s, token, ns, nc);
+    return 0;
 }
 
 static int ipc_auth_client(IpcHandle *s, const char *token, char *err, size_t err_cap) {
@@ -630,6 +669,7 @@ static int ipc_auth_client(IpcHandle *s, const char *token, char *err, size_t er
         snprintf(err, err_cap, "ipc_connect: server failed auth (SHAKTI_IPC_TOKEN mismatch)");
         return -1;
     }
+    ipc_session_derive(s, token, ns, nc);
     return 0;
 }
 
@@ -943,6 +983,96 @@ static IpcTransport ipc_resolve_connect(const char *host, IpcTransport tr) {
     return IPC_TR_TCP;
 }
 
+static int ipc_read_some(IpcHandle *s, void *buf, size_t n, int block, size_t *got) {
+    if (!s->ssl) return sock_read_some(s->fd, buf, n, block, got);
+    size_t off = 0;
+    *got = 0;
+    while (off < n) {
+        if (!block && off == 0) {
+            if (shakti_tls_pending(s->ssl) <= 0) {
+                struct pollfd pfd = {.fd = s->fd, .events = POLLIN, .revents = 0};
+                if (poll(&pfd, 1, 0) <= 0) return -2;
+            }
+        }
+        ssize_t r = shakti_tls_read(s->ssl, (char *)buf + off, n - off);
+        if (r < 0) {
+            if (!block && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                *got = off;
+                return off ? 0 : -2;
+            }
+            return -1;
+        }
+        if (r == 0) return -1;
+        off += (size_t)r;
+    }
+    *got = off;
+    return 0;
+}
+
+static int ipc_write_all(IpcHandle *s, const void *buf, size_t n) {
+    if (!s->ssl) {
+        size_t off0 = 0;
+        while (off0 < n) {
+            ssize_t w = write(s->fd, (const char *)buf + off0, n - off0);
+            if (w <= 0) return -1;
+            off0 += (size_t)w;
+        }
+        return 0;
+    }
+    size_t off = 0;
+    while (off < n) {
+        ssize_t w = shakti_tls_write(s->ssl, (const char *)buf + off, n - off);
+        if (w <= 0) return -1;
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+/* Per-frame integrity for authenticated socket connections (M3). */
+static int ipc_frame_seal(IpcHandle *s, const void *data, size_t len,
+                          unsigned char **out, size_t *out_len) {
+    size_t total = len + IPC_ENV_TRAILER;
+    unsigned char *buf = malloc(total);
+    if (!buf) return -1;
+    if (len) memcpy(buf, data, len);
+    uint64_t seq = ++s->tx_seq;
+    unsigned char seqbe[8];
+    for (int i = 0; i < 8; i++) seqbe[i] = (unsigned char)(seq >> (56 - 8 * i));
+    memcpy(buf + len, seqbe, 8);
+    unsigned char *cov = malloc(8 + len);
+    if (!cov) { free(buf); return -1; }
+    memcpy(cov, seqbe, 8);
+    if (len) memcpy(cov + 8, data, len);
+    int rc = ipc_hmac_bytes(s->session_key, IPC_MAC_LEN, cov, 8 + len, buf + len + 8);
+    free(cov);
+    if (rc != 0) { free(buf); return -1; }
+    *out = buf;
+    *out_len = total;
+    return 0;
+}
+
+static int ipc_frame_open(IpcHandle *s, char *msg, size_t *len_io) {
+    size_t len = *len_io;
+    if (len < IPC_ENV_TRAILER) return -1;
+    size_t body = len - IPC_ENV_TRAILER;
+    const unsigned char *tr = (const unsigned char *)msg + body;
+    uint64_t seq = 0;
+    for (int i = 0; i < 8; i++) seq = (seq << 8) | tr[i];
+    unsigned char *cov = malloc(8 + body);
+    if (!cov) return -1;
+    memcpy(cov, tr, 8);
+    if (body) memcpy(cov + 8, msg, body);
+    unsigned char mac[IPC_MAC_LEN];
+    int rc = ipc_hmac_bytes(s->session_key, IPC_MAC_LEN, cov, 8 + body, mac);
+    free(cov);
+    if (rc != 0 || seq != s->rx_seq + 1 || !ipc_mac_equal(mac, tr + 8, IPC_MAC_LEN))
+        return -1;
+    s->rx_seq = seq;
+    msg[body] = 0;
+    *len_io = body;
+    return 0;
+}
+
 int ipc_sock_send(IpcHandle *s, const char *data, size_t len, char *err, size_t err_cap) {
     if (s->closed) {
         snprintf(err, err_cap, "ipc: send: connection closed");
@@ -952,8 +1082,26 @@ int ipc_sock_send(IpcHandle *s, const char *data, size_t len, char *err, size_t 
         snprintf(err, err_cap, "ipc: message too large (%zu)", len);
         return -1;
     }
-    uint32_t be = htonl((uint32_t)len);
-    if (sock_write_frame(s->fd, &be, 4, data, len) < 0) {
+    const char *payload = data;
+    size_t payload_len = len;
+    unsigned char *sealed = NULL;
+    if (s->session_set) {
+        if (ipc_frame_seal(s, data, len, &sealed, &payload_len) != 0) {
+            snprintf(err, err_cap, "ipc: hmac failed");
+            return -1;
+        }
+        payload = (const char *)sealed;
+    }
+    uint32_t be = htonl((uint32_t)payload_len);
+    int rc = 0;
+    if (s->ssl) {
+        if (ipc_write_all(s, &be, 4) != 0 || (payload_len && ipc_write_all(s, payload, payload_len) != 0))
+            rc = -1;
+    } else if (sock_write_frame(s->fd, &be, 4, payload, payload_len) < 0) {
+        rc = -1;
+    }
+    free(sealed);
+    if (rc != 0) {
         snprintf(err, err_cap, "ipc: send: %s", strerror(errno));
         return -1;
     }
@@ -974,7 +1122,28 @@ int ipc_sock_send_parts(IpcHandle *s,
         snprintf(err, err_cap, "ipc: message too large (%zu)", total);
         return -1;
     }
+    if (s->session_set) {
+        unsigned char *buf = malloc(total + 1);
+        if (!buf) { snprintf(err, err_cap, "ipc: oom"); return -1; }
+        size_t off = 0;
+        if (n0) { memcpy(buf + off, p0, n0); off += n0; }
+        if (n1) { memcpy(buf + off, p1, n1); off += n1; }
+        if (n2) { memcpy(buf + off, p2, n2); off += n2; }
+        int rc2 = ipc_sock_send(s, (const char *)buf, total, err, err_cap);
+        free(buf);
+        return rc2;
+    }
     uint32_t be = htonl((uint32_t)total);
+    if (s->ssl) {
+        if (ipc_write_all(s, &be, 4) != 0 ||
+            (n0 && ipc_write_all(s, p0, n0) != 0) ||
+            (n1 && ipc_write_all(s, p1, n1) != 0) ||
+            (n2 && ipc_write_all(s, p2, n2) != 0)) {
+            snprintf(err, err_cap, "ipc: send: %s", strerror(errno));
+            return -1;
+        }
+        return 0;
+    }
 #if !defined(_WIN32)
     struct iovec iov[4];
     int iovcnt = 0;
@@ -1019,7 +1188,7 @@ int ipc_sock_recv_msg(IpcHandle *s, int block, char **out, size_t *out_len, char
         }
         while (rx->len < 4) {
             size_t got;
-            int rc = sock_read_some(s->fd, rx->data + rx->len, 4 - rx->len, block, &got);
+            int rc = ipc_read_some(s, rx->data + rx->len, 4 - rx->len, block, &got);
             if (rc == -2) return -2;
             if (rc < 0) {
                 snprintf(err, err_cap, "ipc: recv: disconnected");
@@ -1049,7 +1218,7 @@ int ipc_sock_recv_msg(IpcHandle *s, int block, char **out, size_t *out_len, char
     }
     while (rx->len < rx->msg_len) {
         size_t got;
-        int rc = sock_read_some(s->fd, rx->data + rx->len, rx->msg_len - rx->len, block, &got);
+        int rc = ipc_read_some(s, rx->data + rx->len, rx->msg_len - rx->len, block, &got);
         if (rc == -2) return -2;
         if (rc < 0) {
             ipc_conn_poison(s);
@@ -1071,6 +1240,14 @@ int ipc_sock_recv_msg(IpcHandle *s, int block, char **out, size_t *out_len, char
     msg[rx->msg_len] = 0;
     *out = msg;
     *out_len = rx->msg_len;
+    if (s->session_set && ipc_frame_open(s, msg, out_len) != 0) {
+        free(msg);
+        *out = NULL;
+        *out_len = 0;
+        ipc_conn_poison(s);
+        snprintf(err, err_cap, "ipc: message authentication failed");
+        return -1;
+    }
     rx->have_len = 0;
     rx->len = 0;
     rx->msg_len = 0;
@@ -1411,6 +1588,25 @@ V *bi_ipc_listen(V **a, int n) {
         return v_err("ipc_listen: uds path too long");
     }
     g_handles[h].lock_fd = lock_fd;
+    if (!uds_path[0] && !ipc_is_localhost(host) && !ipc_tls_plaintext_allowed()) {
+#ifdef SHAKTI_HAVE_TLS
+        const char *cert = getenv("SHAKTI_TLS_CERT");
+        const char *key = getenv("SHAKTI_TLS_KEY");
+        if (!cert || !cert[0] || !key || !key[0]) {
+            ipc_free_handle(h);
+            return v_err("ipc: non-loopback bind requires TLS (SHAKTI_TLS_CERT/SHAKTI_TLS_KEY) or SHAKTI_IPC_ALLOW_PLAINTEXT=1");
+        }
+        g_handles[h].ssl_ctx = shakti_tls_server_ctx(cert, key);
+        if (!g_handles[h].ssl_ctx) {
+            ipc_free_handle(h);
+            return v_err("ipc: TLS cert/key failed");
+        }
+        g_handles[h].require_tls = 1;
+#else
+        ipc_free_handle(h);
+        return v_err("ipc: non-loopback bind requires a TLS build or SHAKTI_IPC_ALLOW_PLAINTEXT=1");
+#endif
+    }
     return v_int(h);
 }
 
@@ -1466,6 +1662,18 @@ V *bi_ipc_accept(V **a, int n) {
     }
     g_handles[h].kind = IPC_KIND_SOCK_CONN;
     g_handles[h].fd = cfd;
+    if (ls->require_tls) {
+#ifdef SHAKTI_HAVE_TLS
+        g_handles[h].ssl = shakti_tls_accept(cfd, ls->ssl_ctx);
+        if (!g_handles[h].ssl) {
+            ipc_free_handle(h);
+            return v_err("ipc_accept: TLS handshake failed");
+        }
+#else
+        ipc_free_handle(h);
+        return v_err("ipc_accept: TLS required but not built");
+#endif
+    }
     if (!ls->uds_path[0]) {
         const char *token = ipc_token();
         char aerr[512];
@@ -1532,6 +1740,19 @@ static V *ipc_do_connect(const char *host, int port, IpcTransport req) {
     }
     g_handles[h].kind = IPC_KIND_SOCK_CONN;
     g_handles[h].fd = fd;
+    if (tr != IPC_TR_UDS && !ipc_is_localhost(host) && !ipc_tls_plaintext_allowed()) {
+#ifdef SHAKTI_HAVE_TLS
+        const char *insec = getenv("SHAKTI_IPC_TLS_INSECURE");
+        g_handles[h].ssl = shakti_tls_connect(fd, host, (insec && !strcmp(insec, "1")) ? 1 : 0);
+        if (!g_handles[h].ssl) {
+            ipc_free_handle(h);
+            return v_err("ipc_connect: TLS handshake failed");
+        }
+#else
+        ipc_free_handle(h);
+        return v_err("ipc_connect: TLS required but not built");
+#endif
+    }
     if (tr != IPC_TR_UDS && token && ipc_auth_client(&g_handles[h], token, err, sizeof err) != 0) {
         ipc_free_handle(h);
         return v_err(err[0] ? err : "ipc_connect: auth failed");

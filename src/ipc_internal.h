@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef SHAKTI_IPC_INTERNAL_H
 #define SHAKTI_IPC_INTERNAL_H
 
@@ -61,6 +62,8 @@
 #define IPC_MAC_LEN 32u
 #define IPC_MCAST_TRAILER (8u + 8u + IPC_MAC_LEN)
 #define IPC_MCAST_SEEN 512
+/* Authenticated socket envelope trailer: seq (8, BE) + HMAC-SHA256 (32). */
+#define IPC_ENV_TRAILER (8u + IPC_MAC_LEN)
 #define IPC_REPLY_RATE_SLOTS 16
 
 typedef enum {
@@ -179,6 +182,13 @@ typedef struct {
     int shm_owner;
     int shm_side;
     int shm_bcast;
+    void *ssl;
+    void *ssl_ctx;
+    int require_tls;
+    unsigned char session_key[IPC_MAC_LEN];
+    int session_set;
+    uint64_t tx_seq;
+    uint64_t rx_seq;
 #ifdef SHAKTI_HAVE_RDMA
     IpcRdmaConn *rdma;
 #endif

@@ -1,0 +1,20 @@
+# M3: SHAKTI_IPC_TOKEN mutual auth + per-frame HMAC over TCP.
+# Peer: tests/ipc/ipc_secure_peer.ie (inherits SHAKTI_IPC_TOKEN from env).
+import ipc
+
+port : 19271
+srv : ipc.listen(port, "127.0.0.1", "tcp")
+sh("./shakti tests/peers/ipc_secure_peer.ie &")
+conn : ipc.accept(srv)
+
+# authenticated raw + envelope roundtrips
+a : ipc.recv(conn)
+assert a = "hello-secure"
+ipc.send(conn, "pong")
+
+req : ipc.recv_req(conn)
+ipc.reply(conn, req[0], "ok-secure")
+
+ipc.close(conn)
+ipc.close(srv)
+print("ipc_secure ok")
