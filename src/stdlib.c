@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti_internal.h"
 #include "json_parse.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -116,14 +118,27 @@ V *bi_fread(V **a, in) {
 V *bi_fwrite(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("write(path, data)"))
     FS_GUARD("write", a[0]->s, 1);
-    FILE *f = fopen(a[0]->s, "wb");
-    P(!f,v_errf("write: %s", strerror(errno)))
+    /* L-a: open without O_TRUNC (and without following symlinks), check the
+     * fd, and only then truncate — a symlink swapped in after FS_GUARD
+     * cannot cause a file outside the root to be truncated. */
+    int wfd = open(a[0]->s, O_WRONLY | O_CREAT | O_NOFOLLOW, 0666);
+    P(wfd < 0, v_errf("write: %s", strerror(errno)))
     {
         char ferr[512];
-        if (shakti_fs_check_fd(fileno(f), 1, ferr, sizeof ferr) != 0) {
-            fclose(f);
+        if (shakti_fs_check_fd(wfd, 1, ferr, sizeof ferr) != 0) {
+            close(wfd);
             return v_errf("write: %s", ferr);
         }
+    }
+    if (ftruncate(wfd, 0) != 0) {
+        int e = errno;
+        close(wfd);
+        return v_errf("write: %s", strerror(e));
+    }
+    FILE *f = fdopen(wfd, "wb");
+    if (!f) {
+        close(wfd);
+        return v_errf("write: %s", strerror(errno));
     }
     size_t w = fwrite(a[1]->s, 1, strlen(a[1]->s), f);
     fclose(f);

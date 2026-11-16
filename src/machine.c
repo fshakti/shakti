@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "machine.h"
 #include "shakti_internal.h"
 #include <errno.h>
@@ -206,8 +207,10 @@ static void fill_os(V *root) {
     struct utsname uts;
     if (uname(&uts) == 0) {
         mput_out(os, "name", "Operating system", uts.sysname);
-        mput_out(os, "release", "Kernel release", uts.release);
-        mput_out(os, "version", "Kernel version", uts.version);
+        if (!shakti_safe_mode()) {
+            mput_out(os, "release", "Kernel release", uts.release);
+            mput_out(os, "version", "Kernel version", uts.version);
+        }
         mput_out(os, "arch", "Architecture", uts.machine);
     }
     char host[256];

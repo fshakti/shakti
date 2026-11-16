@@ -1,0 +1,6 @@
+# JSON round-trip subset
+s: json_dumps(dict(x:1, y:[1, 2]))
+v: json_loads(s)
+assert v["x"] = 1
+assert len(v["y"]) = 2
+print("json ok")

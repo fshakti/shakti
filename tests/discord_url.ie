@@ -1,0 +1,116 @@
+# Property tests for discord._url / _urlencode (no live HTTP).
+import discord
+
+TRIALS : 64
+API : "https://discord.com/api/v10"
+UNRESERVED : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+
+def lcg(s):
+    return band(s * 1103515245 + 12345, 2147483647)
+
+def is_unreserved(c):
+    o : ord(c)
+    if o >= 48:
+        if o <= 57:
+            return 1
+    if o >= 65:
+        if o <= 90:
+            return 1
+    if o >= 97:
+        if o <= 122:
+            return 1
+    if c = "-" or c = "_" or c = "." or c = "~":
+        return 1
+    return 0
+
+def raises_url(path):
+    hit : 0
+    try:
+        discord._url(path)
+        hit : 0
+    except:
+        hit : 1
+    return hit
+
+# Fixed guards
+assert discord._url("/users/@me") = API + "/users/@me"
+assert discord._url("/guilds/123/members?limit=100") = API + "/guilds/123/members?limit=100"
+assert raises_url("") = 1
+assert raises_url("guilds/1") = 1
+assert raises_url("http://evil.example/x") = 1
+assert raises_url("/guilds/http://evil") = 1
+assert raises_url("://") = 1
+
+# Generated absolute paths without :// join onto the API root.
+s : 1
+i : 0
+while i < TRIALS:
+    s : lcg(s)
+    n : 1 + (s % 12)
+    p : "/"
+    j : 0
+    while j < n:
+        s : lcg(s)
+        p : p + UNRESERVED[s % len(UNRESERVED)]
+        j : j + 1
+    if (s % 3) = 0:
+        p : p + "?limit=10"
+    assert p[0] = "/"
+    assert raises_url(p) = 0
+    u : discord._url(p)
+    assert u = API + p
+    assert re_match("://", u)
+    i : i + 1
+
+# Generated non-absolute paths and scheme injections are rejected.
+s : 99
+i : 0
+while i < TRIALS:
+    s : lcg(s)
+    n : 1 + (s % 8)
+    rest : ""
+    j : 0
+    while j < n:
+        s : lcg(s)
+        rest : rest + UNRESERVED[s % len(UNRESERVED)]
+        j : j + 1
+    assert raises_url(rest) = 1
+    assert raises_url("https://" + rest) = 1
+    assert raises_url("/" + rest + "://x") = 1
+    i : i + 1
+
+# _urlencode: unreserved identity; everything else is %XX.
+assert discord._urlencode("hello-world_09.~") = "hello-world_09.~"
+assert discord._urlencode(" ") = "%20"
+assert discord._urlencode("%") = "%25"
+assert discord._urlencode("q=1") = "q%3D1"
+
+s : 7
+i : 0
+while i < TRIALS:
+    s : lcg(s)
+    n : 1 + (s % 16)
+    raw : ""
+    j : 0
+    while j < n:
+        s : lcg(s)
+        raw : raw + UNRESERVED[s % len(UNRESERVED)]
+        j : j + 1
+    assert discord._urlencode(raw) = raw
+    i : i + 1
+
+s : 13
+i : 0
+hexd : "0123456789ABCDEF"
+while i < TRIALS:
+    s : lcg(s)
+    o : 1 + (s % 126)
+    c : chr(o)
+    enc : discord._urlencode(c)
+    if is_unreserved(c):
+        assert enc = c
+    else:
+        assert enc = "%" + hexd[o // 16] + hexd[o % 16]
+    i : i + 1
+
+print("discord_url ok")

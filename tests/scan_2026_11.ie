@@ -1,0 +1,31 @@
+# Regressions for the 2026-11-15 scan Low batch (L-a, L-c, L-e).
+import ipc
+
+def assert_eq(a, b, msg):
+    if a != b:
+        print("FAIL:", msg, "got", a, "want", b)
+        raise msg
+
+# --- L-e: integer literal overflow is an error, -2^63 is an int ---
+big : eval("9223372036854775808")
+assert_eq(type(big), "error", "L-e 2^63 literal must error, not become float")
+minv : eval("-9223372036854775808")
+assert_eq(type(minv), "int", "L-e -2^63 must be int")
+assert_eq(minv, -9223372036854775808, "L-e -2^63 value")
+maxv : eval("9223372036854775807")
+assert_eq(type(maxv), "int", "L-e 2^63-1 must be int")
+
+# --- L-a: write() must refuse a symlink target instead of truncating it ---
+write("/tmp/shakti-l-a-target.txt", "original")
+sh("ln -sf /tmp/shakti-l-a-target.txt /tmp/shakti-l-a-link.txt")
+werr : write("/tmp/shakti-l-a-link.txt", "pwned")
+assert_eq(type(werr), "error", "L-a write through symlink must error")
+assert_eq(read("/tmp/shakti-l-a-target.txt"), "original", "L-a target must be untouched")
+wok : write("/tmp/shakti-l-a-direct.txt", "fine")
+assert_eq(read("/tmp/shakti-l-a-direct.txt"), "fine", "L-a plain write still works")
+
+# --- L-c: refused server_serve returns an error, not None/success ---
+serr : server_serve(0)
+assert_eq(type(serr), "error", "L-c server_serve(0) must error")
+
+print("scan_2026_11 ok")

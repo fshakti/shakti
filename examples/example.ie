@@ -494,7 +494,10 @@ print("Out:", jupyter.get_out())
 print("execution_count:", jupyter.execution_count(), "cells:", jupyter.ncells())
 
 # Persist a clean notebook BEFORE error / one-shot demos (round-trip should stay green).
-path : "/tmp/shakti_jupyter_demo.ipynb"
+tmpdir : getenv("TMPDIR")
+if tmpdir = None:
+    tmpdir : "/tmp"
+path : tmpdir + "/shakti_jupyter_demo_" + str(int(clock() * 1000000)) + ".ipynb"
 nbytes : jupyter.save(path)
 print("wrote", path, nbytes, "bytes")
 

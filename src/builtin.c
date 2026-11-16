@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 #include "shakti_internal.h"
 #include "vec_kernels.h"
@@ -433,6 +434,7 @@ static V *bi_range(V**a,in){
     }
     if(cnt<0)cnt=0;
     V*r=v_ivec(cnt);
+    if(r->t==T_ERR) return r;
     if(step==1 && cnt>0){
         if(start==0)
             for(int64_t i=0;i<cnt;i++)r->J[i]=i;

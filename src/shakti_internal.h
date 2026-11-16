@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/shakti_internal.h — private cross-TU helpers (not public API) */
 #ifndef SHAKTI_INTERNAL_H
 #define SHAKTI_INTERNAL_H
@@ -68,6 +69,8 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
 void shakti_oom(const char *where);
 void *x_malloc(size_t sz, const char *where);
 void *x_calloc(size_t nmemb, size_t sz, const char *where);
+void *try_malloc(size_t sz);
+void *try_calloc(size_t nmemb, size_t sz);
 void *x_realloc(void *ptr, size_t sz, const char *where);
 char *x_strdup(const char *s, const char *where);
 size_t x_mul(size_t a, size_t b, const char *where);

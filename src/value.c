@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/value.c — V constructors, copy/free, print, serialize */
 #include "shakti_internal.h"
 #include "mat_simd.h"
@@ -74,24 +75,32 @@ V *v_errf(const char *fmt, ...) {
 }
 V *v_ivec(int64_t n) {
     V *v=v_alloc(T_IVEC); v->n=n; v->bits = 64;
-    if (n > (int64_t)UINT32_MAX) shakti_oom("v_ivec");
+    if (n > (int64_t)UINT32_MAX) { v_free(v); return v_err("v_ivec: too large"); }
     v->_ht_cap = n > 0 ? (uint32_t)n : 0;
-    v->J = x_malloc(x_mul((size_t)(n > 0 ? n : 1), sizeof(int64_t), "v_ivec"), "v_ivec");
+    {
+        size_t bytes;
+        if (__builtin_mul_overflow((size_t)(n > 0 ? n : 1), sizeof(int64_t), &bytes)) { v_free(v); return v_err("v_ivec: out of memory"); }
+        v->J = try_malloc(bytes);
+        if (!v->J) { v_free(v); return v_err("v_ivec: out of memory"); }
+    }
     return v;
 }
 V *v_fvec(int64_t n) {
     V *v=v_alloc(T_FVEC); v->n=n; v->bits = 64;
-    v->F = x_calloc(n?n:1, sizeof(double), "v_fvec");
+    v->F = try_calloc(n?n:1, sizeof(double));
+    if (!v->F) { v_free(v); return v_err("v_fvec: out of memory"); }
     return v;
 }
 V *v_bvec(int64_t n) {
     V *v=v_alloc(T_BVEC); v->n=n; v->bits = 1;
-    v->B = x_calloc(n?n:1, 1, "v_bvec");
+    v->B = try_calloc(n?n:1, 1);
+    if (!v->B) { v_free(v); return v_err("v_bvec: out of memory"); }
     return v;
 }
 V *v_cvec(int64_t n) {
     V *v=v_alloc(T_CVEC); v->n=n; v->bits = 8;
-    v->B = x_calloc(n?n:1, 1, "v_cvec");
+    v->B = try_calloc(n?n:1, 1);
+    if (!v->B) { v_free(v); return v_err("v_cvec: out of memory"); }
     return v;
 }
 V *v_char(unsigned char b) {
@@ -111,8 +120,9 @@ V *v_imat(int64_t rows, int64_t cols) {
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz;
     if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
-        shakti_oom("v_imat");
-    v->J = x_calloc((size_t)sz, sizeof(int64_t), "v_imat");
+        { v_free(v); return v_err("v_imat: too large"); }
+    v->J = try_calloc((size_t)sz, sizeof(int64_t));
+    if (!v->J) { v_free(v); return v_err("v_imat: out of memory"); }
     return v;
 }
 V *v_fmat(int64_t rows, int64_t cols) {
@@ -122,8 +132,9 @@ V *v_fmat(int64_t rows, int64_t cols) {
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz;
     if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
-        shakti_oom("v_fmat");
-    v->F = x_calloc((size_t)sz, sizeof(double), "v_fmat");
+        { v_free(v); return v_err("v_fmat: too large"); }
+    v->F = try_calloc((size_t)sz, sizeof(double));
+    if (!v->F) { v_free(v); return v_err("v_fmat: out of memory"); }
     return v;
 }
 V *v_bmat(int64_t rows, int64_t cols) {
@@ -133,8 +144,9 @@ V *v_bmat(int64_t rows, int64_t cols) {
     v->_ht_cap = (uint32_t)(cols > 0 ? cols : 0);
     int64_t sz;
     if (__builtin_mul_overflow(rows, (cols > 0 ? cols : 1), &sz) || sz < 0)
-        shakti_oom("v_bmat");
-    v->B = x_calloc((size_t)sz, 1, "v_bmat");
+        { v_free(v); return v_err("v_bmat: too large"); }
+    v->B = try_calloc((size_t)sz, 1);
+    if (!v->B) { v_free(v); return v_err("v_bmat: out of memory"); }
     return v;
 }
 V *v_cmat(int64_t rows, int64_t cols) {
@@ -189,6 +201,7 @@ static void print_mat_pretty(V *v, FILE *fp) {
         return;
     }
     int *widths = calloc((size_t)cols, sizeof(int));
+    if (!widths) { fprintf(fp, "[...]"); return; }
     if (!widths) {
         print_mat_compact(v, fp);
         return;
@@ -1305,6 +1318,7 @@ static void print_val_depth(V *v, FILE *fp, int repr_mode, int depth) {
         int nc = cols->n;
         int64_t nr = v->n;
         int *widths = calloc(nc, sizeof(int));
+        if (!widths) { fprintf(fp, "[table]\n"); break; }
         for(int c=0;c<nc;c++) {
             int w = strlen(cols->L[c]->s);
             V *col = data->L[c];

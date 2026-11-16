@@ -1,0 +1,23 @@
+# SQL table filter (exercises mat_compress_* in table_sql.c)
+import sql
+
+t: table(id:[1, 2, 3, 4, 5], val:[10.0, 20.0, 30.0, 40.0, 50.0], tag:[1, 2, 1, 2, 1])
+r: select id, val from t where val > 25.0
+assert len(r) = 3
+assert r["id"][0] = 3
+assert r["val"][2] = 50.0
+
+f : list[char](5)
+f[0]:10
+f[1]:20
+f[2]:30
+f[3]:40
+f[4]:50
+tc : table(id:[1, 2, 3, 4, 5], flags: f)
+rc : select id, flags from tc where id = 3
+assert len(rc) = 1
+assert type(rc.flags) = "list[char]"
+assert rc.flags[0] = 30
+assert rc.id[0] = 3
+
+print("sql_filter ok")

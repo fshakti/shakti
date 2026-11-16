@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/lex.c — tokenizer */
 #include "shakti_internal.h"
 #include <errno.h>
@@ -458,15 +459,24 @@ static Token lex_raw(Lexer *l) {
                     t.fval=strtod(lit,NULL);
                     if (neg_lit) t.fval = -t.fval;
                 } else {
-                    errno = 0;
-                    t.ival = strtoll(lit, NULL, 10);
-                    if (errno == ERANGE) {
-                        t.type = T_FLOAT_;
-                        t.fval = strtod(lit, NULL);
-                        if (neg_lit) t.fval = -t.fval;
-                    } else if (neg_lit) {
-                        t.ival = -t.ival;
+                    /* L-e: literals at/above 2^63 raise instead of silently
+                     * becoming floats; -2^63 lexes as INT64_MIN. lit holds
+                     * the unsigned magnitude text (sign is neg_lit). */
+                    unsigned __int128 mag = 0;
+                    int of = 0;
+                    const char *lend = under ? lit + strlen(lit) : s + p;
+                    for (const char *q = lit; q < lend; q++) {
+                        if (*q < '0' || *q > '9') continue;
+                        mag = mag * 10 + (unsigned)(*q - '0');
+                        if (mag > (unsigned __int128)9223372036854775808ULL) of = 1;
                     }
+                    unsigned __int128 lim = neg_lit ? (unsigned __int128)9223372036854775808ULL
+                                                    : (unsigned __int128)9223372036854775807ULL;
+                    if (of || mag > lim) {
+                        lex_fail(l, "integer literal out of range");
+                        return make_tok(T_EOF_);
+                    }
+                    t.ival = neg_lit ? (mag == lim ? INT64_MIN : -(int64_t)mag) : (int64_t)mag;
                 }
             }
             l->pos = p;

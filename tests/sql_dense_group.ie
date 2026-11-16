@@ -1,0 +1,38 @@
+# sql_dense_group.ie — exercise try_dense_ivec_group / dense_to_slots
+# (bounds guard on nby and dims[b] before flat % dims[b])
+import sql
+
+# Single non-negative ivec key → dense 1-d slot table
+t1: table(k:[0, 1, 0, 1, 2], v:[10, 20, 30, 40, 50])
+r1: select sum v by k from t1
+assert(len(r1) = 3)
+assert(r1["k"][0] = 0)
+assert(r1["v"][0] = 40)
+assert(r1["k"][1] = 1)
+assert(r1["v"][1] = 60)
+assert(r1["k"][2] = 2)
+assert(r1["v"][2] = 50)
+
+# Two-key dense product (dims 2×2) — walks nby loop in dense_to_slots
+t2: table(a:[0, 0, 1, 1, 0], b:[0, 1, 0, 1, 0], v:[1, 2, 3, 4, 5])
+r2: select sum v by a, b from t2
+assert(len(r2) = 4)
+assert(r2["v"][0] = 6)
+assert(r2["a"][0] = 0)
+assert(r2["b"][0] = 0)
+assert(r2["v"][3] = 4)
+assert(r2["a"][3] = 1)
+assert(r2["b"][3] = 1)
+
+# Same path with a where-mask (MB != NULL in try_dense_ivec_group)
+r3: select sum v by a, b from t2 where v > 2
+assert(len(r3) = 3)
+assert(r3["v"][0] = 5)
+
+# min/max aggregates on dense slots
+r4: select min v, max v by k from t1
+assert(len(r4) = 3)
+assert(r4["min_v"][0] = 10)
+assert(r4["max_v"][0] = 30)
+
+print("sql_dense_group ok")

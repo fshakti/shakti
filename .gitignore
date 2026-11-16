@@ -59,8 +59,6 @@ CONTEXT.md
 # local-only workspace trees (not in published repo)
 local/
 qa/
-tests
-tests/
 /scripts/
 samples/
 benchmarks/

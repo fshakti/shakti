@@ -1,0 +1,12 @@
+# Basic smoke test — arithmetic, lists, dicts, assert
+x: 1 2 3
+assert sum(x) = 6
+d: dict(a:1, b:2)
+assert d["a"] = 1
+assert abs -1.5 = 1.5
+assert 0x10 = 16
+assert type(0x10) = "char"
+assert type(0x0a) = "char"
+assert type(0x0) = "int"
+assert type(0x100) = "int"
+print("smoke ok")

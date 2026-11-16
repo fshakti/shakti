@@ -1,0 +1,53 @@
+# Regression tests for language/runtime bugs that still apply on 0.14.0.
+
+# 1. Lexer: tight binary minus after a name must be subtraction,
+#    while k/q signed-literal forms stay intact.
+n: 5
+assert((n-1) = 4, "n-1 must be subtraction")
+assert((n - 1) = 4, "n - 1 must be subtraction")
+v: 1 -2 3
+assert(len(v) = 3, "1 -2 3 must lex as a 3-vector")
+assert(v[1] = -2, "vector signed literal")
+a: abs -1.2
+assert(a = 1.2, "jux with signed literal")
+
+# Recursion regressions caused by the lexer bug.
+def fib(k):
+    if k < 2:
+        return k
+    return fib(k-1) + fib(k-2)
+assert(fib(15) = 610, "fib recursion with tight minus")
+
+# 2. Index/dot assignment on an undefined name must return T_ERR
+#    (not silently bind nil and continue).
+hit : 0
+try:
+    nosuch[0] : 1
+except:
+    hit : 1
+assert(hit = 1, "index assign on undefined name must error")
+
+hit : 0
+try:
+    nosuch.f : 1
+except:
+    hit : 1
+assert(hit = 1, "dot assign on undefined name must error")
+
+# 3. gfx: drawing into a never-opened / failed-open window must not crash.
+#    0xFFFFFF is a packed RGB int (hex literal), not a char vector.
+import gfx
+assert(type(0xFFFFFF) = "int")
+assert(0xFFFFFF = 16777215)
+gfx.line(0, 0, 100, 100, 0xFFFFFF)
+
+# 4. gfx: second open must not double-free / segfault (github issue #2).
+#    Skip when the platform cannot create a window (headless CI).
+gfx.open("issue2")
+if gfx.alive():
+    gfx.open("issue2")
+    assert(gfx.alive() = 1, "gfx.open reopen must keep window alive")
+    gfx.close()
+    assert(gfx.alive() = 0, "gfx.close after reopen")
+
+print("bugscan: all checks passed")
