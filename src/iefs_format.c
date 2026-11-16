@@ -120,7 +120,59 @@ static uint32_t crc32_load_u32le(const unsigned char *p) {
     return v;
 }
 
+#if defined(__aarch64__)
+#include <arm_acle.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#elif defined(__linux__)
+#include <sys/auxv.h>
+#ifndef HWCAP_CRC32
+#define HWCAP_CRC32 (1u << 7)
+#endif
+#endif
+static int crc32_hw_available(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = 0;
+#if defined(__APPLE__)
+        int v = 0;
+        size_t sz = sizeof v;
+        if (sysctlbyname("hw.optional.arm.FEAT_CRC32", &v, &sz, NULL, 0) == 0 && v)
+            cached = 1;
+#elif defined(__linux__)
+        if (getauxval(AT_HWCAP) & HWCAP_CRC32)
+            cached = 1;
+#endif
+    }
+    return cached;
+}
+#if defined(__clang__)
+__attribute__((target("+crc")))
+#elif defined(__GNUC__)
+__attribute__((target("arch=armv8-a+crc")))
+#endif
+static uint32_t crc32_update_hw(uint32_t crc, const unsigned char *p, size_t n) {
+    /* Same convention as the software path: pre/post-inverted, chainable. */
+    crc = ~crc;
+    while (n >= 8) {
+        uint64_t v;
+        memcpy(&v, p, 8);
+        crc = __crc32d(crc, v);
+        p += 8;
+        n -= 8;
+    }
+    while (n--)
+        crc = __crc32b(crc, *p++);
+    return ~crc;
+}
+#endif
+
 static uint32_t crc32_update(uint32_t crc, const unsigned char *p, size_t n) {
+#if defined(__aarch64__)
+    if (crc32_hw_available())
+        return crc32_update_hw(crc, p, n);
+#endif
     crc32_init();
     crc = ~crc;
     while (n && ((uintptr_t)p & 7u)) {
