@@ -485,7 +485,7 @@ V *bi_hdb_create(V **a, int n) {
     /* hdb_create(h, name, schema[, part_key]) */
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_DICT)
         return v_err("hdb_create(h, name, schema[, part])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_create", &root);
         if (e) return e;
@@ -535,7 +535,7 @@ V *bi_hdb_write(V **a, int n) {
     if (n < 4 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR || !a[3] ||
         a[3]->t != T_TABLE)
         return v_err("hdb_write(h, name, part, table[, codecs])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_write", &root);
         if (e) return e;
@@ -588,7 +588,7 @@ V *bi_hdb_write(V **a, int n) {
 V *bi_hdb_parts(V **a, int n) {
     /* hdb_parts(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_parts(h, name[, from[, to[, eq]]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_parts", &root);
         if (e) return e;
@@ -606,7 +606,7 @@ V *bi_hdb_map(V **a, int n) {
     /* hdb_map(h, name, part[, pages[, device]]) */
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR)
         return v_err("hdb_map(h, name, part[, pages[, device]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_map", &root);
         if (e) return e;
@@ -641,7 +641,7 @@ V *bi_hdb_map(V **a, int n) {
 V *bi_hdb_load_part(V **a, int n) {
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR)
         return v_err("hdb_load_part(h, name, part)");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_load_part", &root);
         if (e) return e;
@@ -658,7 +658,7 @@ V *bi_hdb_load_part(V **a, int n) {
 V *bi_hdb_load(V **a, int n) {
     /* hdb_load(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_load(h, name[, from[, to[, eq]]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_load", &root);
         if (e) return e;
@@ -717,7 +717,7 @@ V *bi_hdb_load(V **a, int n) {
 V *bi_hdb_scan(V **a, int n) {
     /* hdb_scan(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_scan(h, name[, from[, to[, eq]]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_scan", &root);
         if (e) return e;

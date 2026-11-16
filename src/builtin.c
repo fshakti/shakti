@@ -1939,7 +1939,7 @@ static V *bi_append(V**a,in){
         a[0]->B[a[0]->n++] = (unsigned char)a[1]->j;
         return v_nil();
     }
-    P(n<2||a[0]->t!=T_LIST,v_err("append(list,val)"))
+    P(n<2||!a[0]||a[0]->t!=T_LIST,v_err("append(list,val)"))
     v_list_append(a[0], a[1]); return v_nil();}
 static V *bi_pop(V**a,in){
     if (n >= 1 && a[0] && a[0]->t == T_IVEC) {
@@ -1958,7 +1958,7 @@ static V *bi_pop(V**a,in){
         if (a[0]->n <= 0) return v_err("pop");
         return v_char(a[0]->B[--a[0]->n]);
     }
-    P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
+    P(n<1||!a[0]||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
     V *popped = a[0]->L[--a[0]->n];
     a[0]->L[a[0]->n] = NULL;
     v_specialize(a[0]);

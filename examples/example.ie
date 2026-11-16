@@ -218,7 +218,8 @@ print("sum(u * v):", sum(u * v))
 # =============================================================================
 # table_csv.ie
 # =============================================================================
-# CSV/TSV table save/load. String columns save as text; load is numeric-only.
+# CSV/TSV table save/load. Columns load as ints, floats, or strings, from
+# the fields they hold; string columns save as text and reload as strings.
 # Normal-sized files use a buffered read; oversized files stream when
 # SHAKTI_CSV_MAX_BYTES is exceeded (default 1 GiB).
 #   ./shakti examples/example.ie   # or copy this section to its own file
@@ -228,22 +229,23 @@ r : save(people, "/tmp/shakti_people.csv")
 print("save returned:", r)
 print("csv bytes:", read("/tmp/shakti_people.csv"))
 
-# Missing fields pad as 0
+# A missing field pads as 0 in a numeric column; a column with no field
+# present at all (val, here) loads as strings
 write("/tmp/shakti_short.csv", "id,val\n1,\n")
 short : load("/tmp/shakti_short.csv")
 print("short-row load:")
 print(short)
 
-# Reload of a string CSV is numeric
+# Reload keeps each column's kind: ids as ints, names as strings
 reloaded : load("/tmp/shakti_people.csv")
-print("reloaded (numeric columns only):")
+print("reloaded:")
 print(reloaded)
 
 # TSV round-trip (same table API; tab delimiter)
 save(people, "/tmp/shakti_people.tsv")
 print("tsv bytes:", read("/tmp/shakti_people.tsv"))
 tsv_reloaded : load("/tmp/shakti_people.tsv")
-print("tsv reloaded (numeric columns only):")
+print("tsv reloaded:")
 print(tsv_reloaded)
 
 # TSV empty leading / trailing fields pad as 0

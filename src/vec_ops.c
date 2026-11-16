@@ -810,6 +810,11 @@ int nums_have_row(V *m, V *a) {
 static int cmp_depth;
 static void cmp_depth_leave(int *p) { (void)p; if (cmp_depth > 0) cmp_depth--; }
 V *vec_cmp(V *a, V *b, int op) {
+    if (!a || !b) {
+        if (op == OP_EQ) return v_bool(a == b);
+        if (op == OP_NE) return v_bool(a != b);
+        return v_err("comparison with missing value");
+    }
     /* Scalars cannot recurse, so they skip the depth counter. Ints compare as ints. */
     if ((a->t==T_INT||a->t==T_BOOL||a->t==T_CHAR) && (b->t==T_INT||b->t==T_BOOL||b->t==T_CHAR)) {
         int64_t x = a->j, y = b->j;
@@ -902,7 +907,7 @@ V *vec_cmp(V *a, V *b, int op) {
             else belem = v_float(b->F[i]);
             V *c = vec_cmp(a->L[i], belem, OP_EQ);
             if (c && c->t == T_ERR) { if (b->t != T_LIST) v_free(belem); return c; }
-            int eq = c->t==T_BOOL && c->j;
+            int eq = c && c->t==T_BOOL && c->j;
             v_free(c); if(b->t != T_LIST) v_free(belem);
             P(!eq,v_bool(op==OP_NE))
         }
@@ -945,12 +950,12 @@ V *vec_cmp(V *a, V *b, int op) {
             for(int64_t j=0;j<b->n;j++) {
                 V *kc = vec_cmp(ak, b->keys->L[j], OP_EQ);
                 if (kc && kc->t == T_ERR) return kc;
-                int keq = kc->t==T_BOOL && kc->j;
+                int keq = kc && kc->t==T_BOOL && kc->j;
                 v_free(kc);
                 if(!keq) continue;
                 V *vc = vec_cmp(av, b->vals->L[j], OP_EQ);
                 if (vc && vc->t == T_ERR) return vc;
-                int veq = vc->t==T_BOOL && vc->j;
+                int veq = vc && vc->t==T_BOOL && vc->j;
                 v_free(vc);
                 P(!veq,v_bool(op==OP_NE))
                 found = 1;

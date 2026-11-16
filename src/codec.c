@@ -125,7 +125,7 @@ typedef struct {
 
 static int bitw_ensure(BitW *w, size_t extra_bytes) {
     size_t need = w->byte_i + extra_bytes + 8;
-    if (need <= w->cap)
+    if (w->data && need <= w->cap)
         return 0;
     size_t ncap = w->cap ? w->cap : 64;
     while (ncap < need)
@@ -582,9 +582,6 @@ static int compress_gorilla_f64(const unsigned char *src, size_t src_len, unsign
             tz++;
             t >>= 1;
         }
-        int meaningful = 64 - lz - tz;
-        if (meaningful <= 0)
-            meaningful = 1;
         if (have_window && lz >= prev_lz && tz >= prev_tz) {
             /* reuse window */
             if (bitw_put(&w, 0, 1) != 0) {
@@ -1115,7 +1112,7 @@ static int decompress_datetime(const unsigned char *src, size_t src_len, unsigne
     int64_t x0 = (int64_t)get_u64_le(src + 16);
     int64_t d0, t0;
     split_ms(x0, &d0, &t0);
-    int64_t *days = malloc(n * sizeof(int64_t));
+    int64_t *days = calloc(n ? n : 1, sizeof(int64_t));
     if (!days) {
         free(buf);
         set_err(err, err_cap, "decompress: out of memory");
@@ -1261,7 +1258,7 @@ size_t shakti_decode_limit(void) {
         if (end && (*end == 'k' || *end == 'K')) { shift = 10; end++; }
         else if (end && (*end == 'm' || *end == 'M')) { shift = 20; end++; }
         else if (end && (*end == 'g' || *end == 'G')) { shift = 30; end++; }
-        if (errno == 0 && end != ev && *end == 0 && v > 0) {
+        if (errno == 0 && end && end != ev && *end == 0 && v > 0) {
             if (v > (SHAKTI_CODEC_MAX_PLAIN >> shift))
                 lim = SHAKTI_CODEC_MAX_PLAIN;
             else

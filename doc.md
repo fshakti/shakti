@@ -571,19 +571,28 @@ Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TS
   for value. A whole float below 10^15 is written with all its digits and `.0` (`2.0`,
   `100000000000000.0`); infinities and NaN as `inf`, `-inf` and `nan`.
 - String columns: list-of-string columns write each cell as text; `None` / unsupported cell types emit an empty field.
+  A string cell that would read back as a number (such as `007` or `1e3`) is written in double quotes, so
+  the column reloads as strings, not as numbers.
 - Matrix columns are not supported (save fails).
 - Delimiter is `,` for `.csv` and tab for `.tsv`. A field holding the delimiter, a `"` or a line break is
   written in double quotes, with each `"` in it doubled.
 
 ### CSV / TSV load
 
-- Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0.0`
-  and makes that column an `fvec`.
-  A column loads as an `ivec` when every field is digits with an optional sign, once
-  the spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off, inside quotes too:
-  `1, 2` and `1," 2 "` are ints; `2.0`, `1e3`, or any text such as `x` make the column float.
-- Empty fields (e.g. CSV `1,` or TSV `1\t`) pad as `0`. Leading/trailing empty fields are preserved.
-- String columns written by `save` do **not** round-trip as strings — reload yields numerics (often `0` for labels).
+- Header required. Each column loads as an `ivec`, an `fvec`, or a list of strings, from the fields
+  it holds: an `ivec` when every field that is present is digits with an optional sign, once the
+  spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off (`1, 2` are ints); an
+  `fvec` when the fields present are numeric but some are not whole (`2.0`, `1e3`); a list of strings
+  when any field is other text (such as `x`), or is written in double quotes — `1," 2 "` is a string
+  column (`"2"`), while `1, 2` is an `ivec`. An integer too large for an `ivec` makes its column an
+  `fvec` holding that value as a float, rather than the largest int.
+- A field that is empty, or reads `NA`, `NAN`, `NR` or `NULL` in any letter case, is missing: it does
+  not decide the column's kind. In a numeric column it pads as `0`; in a string column the text is
+  kept as written. A column in which every field is missing loads as a list of those strings.
+  So a float written as `nan` by `save` reloads as the missing pad `0.0`, not as a NaN.
+  Empty fields (e.g. CSV `1,` or TSV `1\t`) are preserved, leading and trailing included.
+- String columns written by `save` round-trip as strings: labels reload as the same text, and a
+  string that looks numeric is quoted on save (above) so it reloads as a string too.
 - A field in double quotes may hold the delimiter, line breaks (anywhere in it, at its end too) and `""`
   (one `"`), as `save` writes them; a quoted field still open at the end of the file is an error. A
   field is quoted only when `"` is its first character (for a record's first field, its first after

@@ -256,15 +256,27 @@ static int field_needs_quote(const char *s, char delim) {
         if (*s == delim || *s == '"' || *s == '\n' || *s == '\r') return 1;
     return 0;
 }
-static int fputs_field(FILE *f, const char *s, char delim) {
+static int all_int_span(const char *s, size_t n);
+static int all_float_span(const char *s, size_t n);
+
+static int fputs_field_quoted(FILE *f, const char *s, char delim, int force_quote) {
     if (!s) s = "";
-    if (!field_needs_quote(s, delim)) return fputs(s, f) == EOF ? -1 : 0;
+    if (!force_quote && !field_needs_quote(s, delim)) return fputs(s, f) == EOF ? -1 : 0;
     if (fputc('"', f) == EOF) return -1;
     for (; *s; s++) {
         if (*s == '"' && fputc('"', f) == EOF) return -1;
         if (fputc(*s, f) == EOF) return -1;
     }
     return fputc('"', f) == EOF ? -1 : 0;
+}
+static int fputs_field(FILE *f, const char *s, char delim) {
+    return fputs_field_quoted(f, s, delim, 0);
+}
+/* Text that reads back as a number is quoted, so a string column stays a string column. */
+static int fputs_string_field(FILE *f, const char *s, char delim) {
+    if (!s) s = "";
+    size_t n = strlen(s);
+    return fputs_field_quoted(f, s, delim, all_int_span(s, n) || all_float_span(s, n));
 }
 /* A float as saved: rounded to 15 significant digits, or to 16 or 17 when fewer don't read back as
    the same float (a whole float below 1e15 in full), always with a '.' or an exponent so that load
@@ -304,7 +316,7 @@ static int table_delim_save(V *table, const char *path, char c) {
         if (j && fputc(c, f) == EOF) goto fail;
         V *cn = table->keys->L[j];
         const char *nm = (cn && cn->t == T_STR) ? cn->s : "col";
-        if (fputs_field(f, nm, c) != 0) goto fail;
+        if (fputs_string_field(f, nm, c) != 0) goto fail;
     }
     if (fputc('\n', f) == EOF) goto fail;
     for (int64_t r = 0; r < nrows; r++) {
@@ -313,6 +325,7 @@ static int table_delim_save(V *table, const char *path, char c) {
             V *col = table->vals->L[j];
             char buf[128];
             const char *out = "";
+            int string_cell = 0;
             if (!col || r >= col->n) goto fail;
             if (col->t == T_FVEC) {
                 save_float_format(col->F[r], buf, sizeof buf);
@@ -327,7 +340,7 @@ static int table_delim_save(V *table, const char *path, char c) {
                 out = buf;
             } else if (col->t == T_LIST) {
                 V *cell = col->L[r];
-                if (cell && cell->t == T_STR) out = cell->s ? cell->s : "";
+                if (cell && cell->t == T_STR) { out = cell->s ? cell->s : ""; string_cell = 1; }
                 else if (cell && cell->t == T_INT) {
                     snprintf(buf, sizeof buf, "%lld", (long long)cell->j);
                     out = buf;
@@ -336,7 +349,7 @@ static int table_delim_save(V *table, const char *path, char c) {
                     out = buf;
                 }
             } else goto fail;
-            if (fputs_field(f, out, c) != 0) goto fail;
+            if ((string_cell ? fputs_string_field(f, out, c) : fputs_field(f, out, c)) != 0) goto fail;
         }
         if (fputc('\n', f) == EOF) goto fail;
     }
@@ -370,41 +383,6 @@ static int count_delim_fields(const char *line, char c) {
     return n;
 }
 
-static V *table_keep_columns(V *t, V *columns_opt) {
-    V *kl, *dl;
-    int64_t i, n;
-    if (!columns_opt || columns_opt->t == T_NIL) return t;
-    if (columns_opt->t != T_LIST) { v_free(t); return v_err("load: columns must be a list of names"); }
-    n = columns_opt->n;
-    kl = v_list(n);
-    dl = v_list(n);
-    for (i = 0; i < n; i++) {
-        V *name = columns_opt->L[i];
-        int found = 0;
-        int64_t c;
-        if (!name || name->t != T_STR) {
-            v_free(kl); v_free(dl); v_free(t);
-            return v_err("load: column name must be a string");
-        }
-        for (c = 0; c < t->keys->n; c++) {
-            if (t->keys->L[c] && t->keys->L[c]->t == T_STR && !strcmp(t->keys->L[c]->s, name->s)) {
-                kl->L[i] = v_ref(t->keys->L[c]);
-                dl->L[i] = v_ref(t->vals->L[c]);
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
-            v_free(kl); v_free(dl); v_free(t);
-            return v_errf("load: unknown column '%s'", name->s);
-        }
-    }
-    {
-        V *out = v_table(kl, dl);
-        v_free(kl); v_free(dl); v_free(t);
-        return out;
-    }
-}
 /* Column kinds inferred from the fields of a delimited file. */
 enum { KIND_INT = 0, KIND_FLOAT = 1, KIND_STR = 2 };
 
@@ -543,7 +521,7 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
         while (i < n && s[i] == '0') i++;
         size_t sig = n - i;
         if (sig > 19) return KIND_FLOAT;
-        if (sig > 0) {
+        if (sig == 19) { /* fewer digits always fit; more never do */
             char buf[32];
             size_t lead = (s[0] == '-' || s[0] == '+') ? 1 : 0;
             size_t total = lead + sig;
@@ -560,9 +538,9 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
     return KIND_STR;
 }
 
-/* Advance past one field without copying: *start/*len give its text (padding off, as
- * strip_pad takes it), *quoted whether it was quoted, *ate_delim whether a delimiter
- * followed it. The text is not NUL-terminated at *start + *len. */
+/* Advance past one field without copying: start/len give its text (padding off, as
+ * strip_pad takes it), quoted whether it was quoted, ate_delim whether a delimiter
+ * followed it. The text is not NUL-terminated at start + len. */
 static void next_field_view(const char **pp, char delim, const char **start, size_t *len,
                             int *quoted, int *ate_delim) {
     const char *p = *pp;
@@ -695,6 +673,7 @@ static int csv_parse_f64_span(const char *s, const char *e, double *out) {
         frac_digits = ndig - int_digits;
     }
     if (p != e || ndig == 0 || ndig > 18) return 0;
+    if (mant > 9007199254740991ULL) return 0; /* mantissa must be exact in a double */
     if (frac_digits >= (int)(sizeof csv_p10 / sizeof csv_p10[0])) return 0;
     double v = (double)mant;
     if (frac_digits > 0) v /= csv_p10[frac_digits];
@@ -973,13 +952,13 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         free(line);
         return record_error(got, fmt, path);
     }
-    V *t = delim_finish_table(&plan, cols, row);
-    free(cols);
     free(cells);
-    delim_plan_free(&plan);
     fclose(f);
     free(line);
-    return table_keep_columns(t, columns_opt);
+    V *t = delim_finish_table(&plan, cols, row);
+    free(cols);
+    delim_plan_free(&plan);
+    return t;
 }
 
 static V *table_csv_load(const char *path, V *columns_opt) {

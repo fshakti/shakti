@@ -433,14 +433,15 @@ static char *read_all_file(const char *path, size_t *out_len, size_t max_len) {
             }
             buf = n;
         }
-        size_t n = fread(buf + len, 1, cap - len, f);
+        size_t want = cap - len;
+        size_t n = fread(buf + len, 1, want, f);
         len += n;
         if (max_len && len > max_len) {
             free(buf);
             fclose(f);
             return NULL;
         }
-        if (n == 0) break;
+        if (n < want) break;
     }
     fclose(f);
     buf[len] = 0;
@@ -1407,7 +1408,7 @@ static V *rest_do_read_inner(RestHandle *conn) {
     size_t content_len = 0;
     for (int64_t i = 0; i < hdrs->keys->n; i++) {
         V *k = hdrs->keys->L[i];
-        if (k->t == T_STR && !strcasecmp(k->s, "Content-Length")) {
+        if (k && k->t == T_STR && !strcasecmp(k->s, "Content-Length")) {
             V *v = hdrs->vals->L[i];
             if (v->t == T_STR) {
                 char *end = NULL;

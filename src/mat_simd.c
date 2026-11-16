@@ -465,6 +465,7 @@ static inline __attribute__((always_inline)) int imat_arith(int64_t *r, const in
 #endif
     if (op == 0) {
         int nt = isl_vec_omp_threads(ne - i);
+        (void)nt;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(|:ovf) if (ne - i >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
@@ -475,6 +476,7 @@ static inline __attribute__((always_inline)) int imat_arith(int64_t *r, const in
         }
     } else if (op == 18) {
         int nt = isl_vec_omp_threads(ne - i);
+        (void)nt;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(|:ovf) if (ne - i >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
@@ -485,6 +487,7 @@ static inline __attribute__((always_inline)) int imat_arith(int64_t *r, const in
         }
     } else {
         int nt = isl_vec_omp_threads(ne - i);
+        (void)nt;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(|:ovf) if (ne - i >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif

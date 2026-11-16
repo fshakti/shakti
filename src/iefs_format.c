@@ -2144,6 +2144,7 @@ static V *iefs_decode_v3(const unsigned char *buf, size_t len, IefsMapRegion *re
         uint32_t n_pick = 0;
         V *err = (pcols && pkeys) ? NULL : v_err("iefs: out of memory");
         for (int64_t ci = 0; !err && ci < colnames->n; ci++) {
+            if (!pcols || !pkeys) { err = v_err("iefs: out of memory"); break; }
             V *want = colnames->L[ci];
             const char *wn = (want && want->t == T_STR) ? want->s : NULL;
             if (!wn) {
@@ -2397,7 +2398,7 @@ V *iefs_map_v3_cols_pread(int fd, size_t file_len, V *colnames) {
         free(compact);
         return v_err(err[0] ? err : "iefs.map: prefix pread");
     }
-    unsigned char *body = compact + IEFS_HEADER_SIZE;
+    unsigned char *body;
     size_t cursor = prefix_len;
     for (uint32_t i = 0; i < n_ext; i++) {
         /* realloc below can move compact; always recompute TOC pointers. */
@@ -2450,7 +2451,6 @@ V *iefs_map_v3_cols_pread(int fd, size_t file_len, V *colnames) {
         compact = grown;
         body = compact + IEFS_HEADER_SIZE;
         er = body + 8 + (size_t)i * IEFS_V3_EXTENT_SIZE;
-        names = body + 8 + (size_t)n_ext * IEFS_V3_EXTENT_SIZE;
         if (iefs_io_pread(fd, compact + cursor, (size_t)elen, (off_t)file_off, err, sizeof err) != 0) {
             free(compact);
             return v_err(err[0] ? err : "iefs.map: extent pread");

@@ -1127,7 +1127,7 @@ int ipc_sock_send_parts(IpcHandle *s,
         size_t off = 0;
         if (n0) { memcpy(buf + off, p0, n0); off += n0; }
         if (n1) { memcpy(buf + off, p1, n1); off += n1; }
-        if (n2) { memcpy(buf + off, p2, n2); off += n2; }
+        if (n2) { memcpy(buf + off, p2, n2); }
         int rc2 = ipc_sock_send(s, (const char *)buf, total, err, err_cap);
         free(buf);
         return rc2;

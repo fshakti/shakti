@@ -117,6 +117,7 @@ int ipc_shm_pop(IpcShmHdr *hdr, int which, int block, int timeout_ms, uint32_t c
     atomic_uint *headp = which ? &hdr->head1 : &hdr->head0;
     atomic_uint *tailp = which ? &hdr->tail1 : &hdr->tail0;
     atomic_uint *genp = which ? &hdr->gen1 : &hdr->gen0;
+    (void)genp; /* read on the futex wait path only */
     uint8_t *ring = (uint8_t *)hdr + IPC_SHM_HDR + (size_t)which * (size_t)cap;
 
     struct timespec start, now;

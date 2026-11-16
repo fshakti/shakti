@@ -557,7 +557,7 @@ int run_repl(Env *e) {
             if (inlen + ll + 1 >= REPL_INPUT_CAP) {
                 fprintf(stderr, "REPL input too long (max %d bytes)\n", REPL_INPUT_CAP - 1);
                 inlen = 0;
-                input[0] = 0;
+                input[inlen] = 0;
                 break;
             }
             memcpy(input + inlen, line, ll);

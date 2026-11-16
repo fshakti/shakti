@@ -99,24 +99,24 @@ static V*tbl_filter_mask(V*tbl,V*mask){
     for (int c0 = 0; c0 < nc; c0++) {
         if (tbl->vals->L[c0] && tbl->vals->L[c0]->t == T_LIST) has_list = 1;
     }
+    (void)has_list;
 #ifdef _OPENMP
     #pragma omp parallel for if(nr >= 1000000 && !has_list)
 #endif
     for (int c = 0; c < nc; c++) {
         V *col = tbl->vals->L[c];
+        if (!col) { new_data->L[c] = v_list(count); continue; }
         if (col->t == T_IVEC) {
             V *nc2 = v_ivec(count);
-            int64_t j = 0;
             const int64_t *src = col->J;
             int64_t *dst = nc2->J;
-            j = mat_compress_i64_masked(dst, j, src, B, nr);
+            mat_compress_i64_masked(dst, 0, src, B, nr);
             new_data->L[c] = nc2;
         } else if (col->t == T_FVEC) {
             V *nc2 = v_fvec(count);
-            int64_t j = 0;
             const double *src = col->F;
             double *dst = nc2->F;
-            j = mat_compress_f64_masked(dst, j, src, B, nr);
+            mat_compress_f64_masked(dst, 0, src, B, nr);
             new_data->L[c] = nc2;
         } else if (col->t == T_BVEC || col->t == T_CVEC) {
             V *nc2 = col->t == T_CVEC ? v_cvec(count) : v_bvec(count);
@@ -1446,6 +1446,7 @@ static int group_rows(GroupRows *gr, const int64_t *gid, int64_t nr, int64_t ng)
    folded here, exactly, as the builtins fold one; any other is gathered by group and given to the
    builtin. */
 static V *group_agg_col(V *col, const int64_t *gid, int64_t nr, int64_t ng, int kind, GroupRows *gr) {
+    if (!col) return NULL;
     int is_min = kind == COL_MIN;
     if (col->t == T_IVEC && (kind == COL_MIN || kind == COL_MAX)) {
         V *r = v_ivec(ng);
@@ -2275,7 +2276,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
     }
     V *new_data = v_list(table->keys->n);
     for (int64_t c = 0; c < table->keys->n; c++) {
-        new_data->L[c] = v_ref(table->vals->L[c]);
+        new_data->L[c] = (table->vals && c < table->vals->n) ? v_ref(table->vals->L[c]) : NULL;
     }
     for (int64_t i = 0; i < ncols; i++) {
         const char *name = use_all_cols ? table->keys->L[i]->s : cols->L[i]->s;

@@ -957,6 +957,7 @@ V *eval(Node *n, Env *e) {
         V *from;
         if (from0->t == T_STR) {
             size_t plen = strlen(from0->s);
+            (void)plen;
 #ifdef SHAKTI_HAVE_IEFS
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
                 from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);

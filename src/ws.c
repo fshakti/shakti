@@ -1012,7 +1012,7 @@ V *bi_ws_send_bin(V **a, int n) {
     P(n < 2 || a[0]->t != T_INT, v_err("ws_send_bin(h, data)"))
     WsHandle *s = ws_slot((int)a[0]->j);
     if (!s) return v_err("ws_send_bin: invalid handle");
-    const unsigned char *data = (const unsigned char *)"";
+    const unsigned char *data;
     size_t len = 0;
     if (a[1]->t == T_STR) {
         data = (const unsigned char *)(a[1]->s ? a[1]->s : "");

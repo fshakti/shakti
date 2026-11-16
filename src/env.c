@@ -443,6 +443,7 @@ static void note_builtin_fn(const char *name, V *val) {
     if (val && val->t == T_FN && name && is_builtin(name)) shakti_builtin_fn_shadow = 1;
 }
 void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
+    if (!e) return;
     uint32_t h = fnv1a(name);
     for(int i=0; i<e->len; i++) {
         if(e->hashes[i] == h && strcmp(e->names[i], name)==0) {

@@ -780,6 +780,7 @@ static int pdf_parse_xref(PdfDoc *d, char *err, size_t errcap) {
                     if (xp.pos < xp.len && xp.data[xp.pos] == '\n') xp.pos++;
                 }
                 int64_t idx = (int64_t)start + i;
+                if (!tmp_xref || idx < 0 || idx >= tmp_n) { section_bad = 1; break; }
                 if (use == 'n') {
                     if (!fill_empty || tmp_xref[idx] == 0)
                         tmp_xref[idx] = off;
