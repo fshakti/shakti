@@ -247,6 +247,7 @@ static int json_encode(JsonBuf *b, V *v) {
     }
     if (v->t == T_FLOAT) {
         char tmp[64];
+        if (!isfinite(v->f)) return jb_cstr(b, "null");
         snprintf(tmp, sizeof tmp, "%.17g", v->f);
         return jb_cstr(b, tmp);
     }
@@ -266,8 +267,12 @@ static int json_encode(JsonBuf *b, V *v) {
                 if (jb_cstr(b, v->B[i] ? "true" : "false") != 0) return -1;
             } else {
                 char tmp[64];
-                snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
-                if (jb_cstr(b, tmp) != 0) return -1;
+                if (!isfinite(v->F[i])) {
+                    if (jb_cstr(b, "null") != 0) return -1;
+                } else {
+                    snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                    if (jb_cstr(b, tmp) != 0) return -1;
+                }
             }
         }
         return jb_cstr(b, "]");
@@ -283,7 +288,10 @@ static int json_encode(JsonBuf *b, V *v) {
                 char tmp[64];
                 int64_t i = mat_idx(v, r, c);
                 if (v->t == T_IMAT) snprintf(tmp, sizeof tmp, "%lld", (long long)v->J[i]);
-                else if (v->t == T_FMAT) snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                else if (v->t == T_FMAT) {
+                    if (!isfinite(v->F[i])) snprintf(tmp, sizeof tmp, "null");
+                    else snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                }
                 else if (v->t == T_BMAT) snprintf(tmp, sizeof tmp, "%s", v->B[i] ? "true" : "false");
                 else snprintf(tmp, sizeof tmp, "%lld", (long long)v->B[i]);
                 if (jb_cstr(b, tmp) != 0) return -1;
@@ -292,12 +300,36 @@ static int json_encode(JsonBuf *b, V *v) {
         }
         return jb_cstr(b, "]");
     }
+    if (v->t == T_TABLE && v->keys && v->vals) {
+        if (jb_cstr(b, "[") != 0) return -1;
+        for (int64_t r = 0; r < v->n; r++) {
+            int first = 1;
+            if (r && jb_cstr(b, ",") != 0) return -1;
+            if (jb_cstr(b, "{") != 0) return -1;
+            for (int64_t c = 0; c < v->keys->n; c++) {
+                V *name = v->keys->L[c];
+                V *cell;
+                int rc;
+                if (!name || name->t != T_STR) continue;
+                if (!first && jb_cstr(b, ",") != 0) return -1;
+                first = 0;
+                if (jb_quoted(b, name->s ? name->s : "") != 0) return -1;
+                if (jb_cstr(b, ":") != 0) return -1;
+                cell = col_get(v->vals->L[c], r);
+                rc = json_encode(b, cell);
+                v_free(cell);
+                if (rc != 0) return -1;
+            }
+            if (jb_cstr(b, "}") != 0) return -1;
+        }
+        return jb_cstr(b, "]");
+    }
     if (v->t == T_DICT) {
         if (jb_cstr(b, "{") != 0) return -1;
         int first = 1;
         for (int64_t i = 0; i < v->keys->n; i++) {
             V *k = v->keys->L[i];
-            if (!k || k->t != T_STR) continue;
+            if (!k || k->t != T_STR) return -1;
             if (!first && jb_cstr(b, ",") != 0) return -1;
             first = 0;
             if (jb_quoted(b, k->s) != 0) return -1;
@@ -404,15 +436,6 @@ static V *dispatch_rpc(Env *global, const char *body) {
                         (r && r->t == T_ERR && r->s) ? r->s : "internal error");
             V *http = rpc_error_http(-32603, "internal error", id);
             v_free(r);
-            v_free(req);
-            return http;
-        }
-        if (r->t == T_DICT) {
-            char *js = json_dumps_val(r);
-            v_free(r);
-            V *http = http_result(200, "application/json",
-                js ? js : "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"dumps\"},\"id\":null}");
-            free(js);
             v_free(req);
             return http;
         }

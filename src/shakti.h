@@ -113,7 +113,9 @@ struct Env {
 /* Buffer ownership for vector/matrix payloads (J/F/B). */
 enum {
     V_OWNER_MALLOC = 0,   /* free() buffers in v_free (default) */
-    V_OWNER_MAP_ALIAS     /* buffers alias an IefsMapRegion; munmap via map_reg */
+    V_OWNER_MAP_ALIAS,    /* buffers alias an IefsMapRegion; munmap via map_reg */
+    V_OWNER_TABLE,        /* malloc-owned table column; append and pop cannot change its length */
+    V_OWNER_MODULE        /* dict whose map_reg is the Env* its functions close over */
 };
 
 /* Tagged-union value: common fields on every V; payload exclusive by ->t.
@@ -443,6 +445,8 @@ extern V *g_error_val;
 int fn_ast_store(Node *n);
 void fn_ast_release(int idx);
 V *col_get(V *col, int64_t row);
+/* A malloc-owned value installed as a table column. append and pop then refuse. */
+void v_mark_table_col(V *c);
 V *col_copy(V *col);
 V *table_copy_cols(V *t);
 V *table_row(V *t, int64_t row);

@@ -71,6 +71,8 @@ int iefs_store_write_ex(V *v, const char *path, int io_mode, int codec, int leve
                         char *err, size_t err_cap);
 int iefs_store_write_full(V *v, const char *path, int io_mode, int codec, int outer, int level,
                           unsigned ver, V *codecs, char *err, size_t err_cap);
+/* Rewrite path, keeping its version and codecs. Version 1 is rewritten as version 2. */
+int iefs_store_replace(V *v, const char *path, char *err, size_t err_cap);
 int iefs_store_write_full_sync(V *v, const char *path, int io_mode, int codec, int outer, int level,
                                unsigned ver, V *codecs, int sync, char *err, size_t err_cap);
 V *iefs_store_read(const char *path);

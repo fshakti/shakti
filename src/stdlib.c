@@ -703,7 +703,7 @@ static int json_emit(V *v, char **b, size_t *n, size_t *cap, int depth) {
         for (i = 0; i < v->n; i++) {
             V *k = v->keys ? v->keys->L[i] : NULL;
             V *val = v->vals ? v->vals->L[i] : NULL;
-            if (!k || k->t != T_STR) continue;
+            if (!k || k->t != T_STR) return -2;
             if (!first && json_putc(b, n, cap, ',') < 0) return -1;
             first = 0;
             if (json_emit(k, b, n, cap, depth + 1) < 0) return -1;
@@ -711,6 +711,30 @@ static int json_emit(V *v, char **b, size_t *n, size_t *cap, int depth) {
             if (json_emit(val, b, n, cap, depth + 1) < 0) return -1;
         }
         return json_putc(b, n, cap, '}');
+    }
+    case T_TABLE: {
+        int64_t r, c;
+        if (!v->keys || !v->vals) return json_puts(b, n, cap, "[]");
+        if (json_putc(b, n, cap, '[') < 0) return -1;
+        for (r = 0; r < v->n; r++) {
+            int first = 1;
+            if (r && json_putc(b, n, cap, ',') < 0) return -1;
+            if (json_putc(b, n, cap, '{') < 0) return -1;
+            for (c = 0; c < v->keys->n; c++) {
+                V *name = v->keys->L[c];
+                V *cell;
+                if (!name || name->t != T_STR) continue;
+                if (!first && json_putc(b, n, cap, ',') < 0) return -1;
+                first = 0;
+                if (json_emit(name, b, n, cap, depth + 1) < 0) return -1;
+                if (json_putc(b, n, cap, ':') < 0) return -1;
+                cell = col_get(v->vals->L[c], r);
+                if (json_emit(cell, b, n, cap, depth + 1) < 0) { v_free(cell); return -1; }
+                v_free(cell);
+            }
+            if (json_putc(b, n, cap, '}') < 0) return -1;
+        }
+        return json_putc(b, n, cap, ']');
     }
     default:
         return json_puts(b, n, cap, "null");
@@ -720,7 +744,13 @@ V *bi_json_dumps(V **a, in) {
     char *buf = NULL;
     size_t nch = 0, cap = 0;
     P(n < 1,v_str(""))
-    if (json_emit(a[0], &buf, &nch, &cap, 0) < 0) { free(buf); return v_err("json_dumps: out of memory"); }
+    {
+        int rc = json_emit(a[0], &buf, &nch, &cap, 0);
+        if (rc < 0) {
+            free(buf);
+            return v_err(rc == -2 ? "json_dumps: key must be str" : "json_dumps: out of memory");
+        }
+    }
     if (!buf) return v_str("");
     return v_str_take(buf);
 }

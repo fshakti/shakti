@@ -32,6 +32,18 @@ static int g_call_depth_limit = -1;
 static uintptr_t g_stack_floor;   /* eval_fn refuses a call whose frame is below this address; 0: none */
 static uintptr_t g_stack_limit;   /* eval raises an error once its frame is below this address; 0: none */
 
+#ifdef SHAKTI_HAVE_IEFS
+/* Map a .iefs path. A compressed file cannot be mapped; load it instead. */
+static V *sql_open_iefs(const char *path) {
+    V *t = iefs_store_map(path, IEFS_MAP_PAGES_THP);
+    if (t && t->t == T_ERR && t->s && strstr(t->s, "requires iefs.load")) {
+        v_free(t);
+        t = iefs_store_read(path);
+    }
+    return t;
+}
+#endif
+
 /* Raise g_error and free assign temps when materializing a mapped column fails. */
 static V *assign_map_oom(V *a, V *b, V *c, V *d) {
     g_error = 1;
@@ -960,7 +972,7 @@ V *eval(Node *n, Env *e) {
             (void)plen;
 #ifdef SHAKTI_HAVE_IEFS
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
-                from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                from = sql_open_iefs(from0->s);
             } else
 #endif
             {
@@ -998,7 +1010,7 @@ V *eval(Node *n, Env *e) {
             size_t plen = strlen(from0->s);
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
                 iefs_path = strdup(from0->s);
-                from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                from = sql_open_iefs(from0->s);
                 v_free(from0);
                 if (from->t == T_ERR) {
                     free(iefs_path);
@@ -1031,7 +1043,7 @@ V *eval(Node *n, Env *e) {
         if (r && r->t != T_ERR && iefs_path) {
             char err[256];
             err[0] = 0;
-            if (iefs_store_write(r, iefs_path, IEFS_IO_AUTO, err, sizeof err) != 0) {
+            if (iefs_store_replace(r, iefs_path, err, sizeof err) != 0) {
                 const char *e_msg = iefs_last_error();
                 v_free(r);
                 r = v_err(e_msg && e_msg[0] ? e_msg : (err[0] ? err : "iefs save failed"));
@@ -1058,7 +1070,7 @@ V *eval(Node *n, Env *e) {
             size_t plen = strlen(from0->s);
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
                 iefs_path = strdup(from0->s);
-                from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                from = sql_open_iefs(from0->s);
                 v_free(from0);
                 if (from->t == T_ERR) {
                     free(iefs_path);
@@ -1079,7 +1091,7 @@ V *eval(Node *n, Env *e) {
         if (r && r->t != T_ERR && iefs_path) {
             char err[256];
             err[0] = 0;
-            if (iefs_store_write(r, iefs_path, IEFS_IO_AUTO, err, sizeof err) != 0) {
+            if (iefs_store_replace(r, iefs_path, err, sizeof err) != 0) {
                 const char *e_msg = iefs_last_error();
                 v_free(r);
                 r = v_err(e_msg && e_msg[0] ? e_msg : (err[0] ? err : "iefs save failed"));
@@ -1713,9 +1725,11 @@ V *eval(Node *n, Env *e) {
                 if (found >= 0) {
                     v_free(obj->vals->L[found]);
                     obj->vals->L[found] = v_ref(val);
+                    v_mark_table_col(obj->vals->L[found]);
                 } else {
                     if (obj->keys->n == 0) obj->n = val->n;
                     V *k = v_str(idx->s);
+                    v_mark_table_col(val);
                     v_list_append(obj->keys, k);
                     v_list_append(obj->vals, val);
                     v_free(k);
@@ -1752,9 +1766,11 @@ V *eval(Node *n, Env *e) {
                 if(found >= 0) {
                     v_free(obj->vals->L[found]);
                     obj->vals->L[found] = v_ref(val);
+                    v_mark_table_col(obj->vals->L[found]);
                 } else {
                     if (obj->keys->n == 0) obj->n = val->n;
                     V *k = v_str(target->sval);
+                    v_mark_table_col(val);
                     v_list_append(obj->keys, k);
                     v_list_append(obj->vals, val);
                     v_free(k);
@@ -1823,6 +1839,7 @@ V *eval(Node *n, Env *e) {
                     if (obj->keys->L[i] && obj->keys->L[i]->t == T_STR && !strcmp(obj->keys->L[i]->s, target->sval)) {
                         v_free(obj->vals->L[i]);
                         obj->vals->L[i] = v_ref(newval);
+                        v_mark_table_col(obj->vals->L[i]);
                     }
             }
             v_free(obj); v_free(delta); v_free(newval);

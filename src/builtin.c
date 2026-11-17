@@ -1460,9 +1460,9 @@ static int join_is_asof_shape(V *left,V *right){
     V *lk=left->keys->L[0],*rk=right->keys->L[0];
     if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))return 0;
     V *lt=left->vals->L[0],*rt=right->vals->L[0];
-    /* Docs: asof only for matching *sorted* time/time_ns; otherwise equi. */
-    return lt->t==T_IVEC&&rt->t==T_IVEC
-        &&asof_ascending_i64(lt)&&asof_ascending_i64(rt);
+    /* Matching time/time_ns ivec columns are asof. Unsorted keys are an error
+     * from table_asof_comma_join, not a silent equi join. */
+    return lt->t==T_IVEC&&rt->t==T_IVEC;
 }
 V *table_asof_comma_join(V *left,V *right){
     if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
@@ -1911,6 +1911,8 @@ static void numvec_grow(V *v, size_t el) {
     v->_ht_cap = cap;
 }
 static V *bi_append(V**a,in){
+    if (n >= 1 && a[0] && a[0]->owner_kind == V_OWNER_TABLE)
+        return v_err("append: table column");
     if (n >= 2 && a[0] && a[0]->t == T_IVEC) {
         if (ivec_own(a[0]) != 0) return v_err("append: read-only vector");
         if (a[1] && (a[1]->t == T_INT || a[1]->t == T_CHAR)) {
@@ -1942,6 +1944,8 @@ static V *bi_append(V**a,in){
     P(n<2||!a[0]||a[0]->t!=T_LIST,v_err("append(list,val)"))
     v_list_append(a[0], a[1]); return v_nil();}
 static V *bi_pop(V**a,in){
+    if (n >= 1 && a[0] && a[0]->owner_kind == V_OWNER_TABLE)
+        return v_err("pop: table column");
     if (n >= 1 && a[0] && a[0]->t == T_IVEC) {
         if (a[0]->n <= 0) return v_err("pop");
         return v_int(a[0]->J[--a[0]->n]);

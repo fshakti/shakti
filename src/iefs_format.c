@@ -207,6 +207,14 @@ static uint32_t crc32_iefs_layout(const unsigned char *hdr, const unsigned char 
     return c;
 }
 
+/* Version 1 checksums the payload only. Version 2 and later bind the header too. */
+static uint32_t iefs_crc_for_ver(uint16_t ver, const unsigned char *hdr,
+                                 const unsigned char *body, size_t body_len) {
+    if (ver == 1)
+        return crc32_buf(body, body_len);
+    return crc32_iefs_layout(hdr, body, body_len);
+}
+
 static uint32_t crc32_update_zeros(uint32_t crc, size_t n) {
     static const unsigned char z[4096];
     while (n) {
@@ -1104,6 +1112,15 @@ static int iefs_v3_prepare(V *v, int codec, int outer, int level, V *codecs, Ief
         }
     }
     if (!ext) {
+        if (codecs && codecs->t == T_DICT && codecs->n > 0 && codecs->keys && codecs->keys->n > 0) {
+            const char *nm = "?";
+            V *k0 = codecs->keys->L[0];
+            char msg[160];
+            if (k0 && k0->t == T_STR && k0->s) nm = k0->s;
+            snprintf(msg, sizeof msg, "iefs: codecs cannot apply to column '%s' stored whole", nm);
+            set_err(err, err_cap, msg);
+            return -1;
+        }
         n_ext = 1;
         ext = calloc(1, sizeof(*ext));
         if (!ext) { set_err(err, err_cap, "iefs: out of memory"); return -1; }
@@ -1719,9 +1736,8 @@ static V *decode_value_inner(IefsR *r) {
         r->off += 16;
         if (rows >= IEFS_MAX_ELEMS || cols >= IEFS_MAX_ELEMS)
             return v_err("iefs: matrix too large");
-        if (cols == 0) {
-            if (rows != 0) return v_err("iefs: matrix too large");
-        } else if (rows > IEFS_MAX_ELEMS / cols) {
+        /* A zero-column matrix has no cells, whatever its row count. */
+        if (cols != 0 && rows > IEFS_MAX_ELEMS / cols) {
             return v_err("iefs: matrix too large");
         }
         uint64_t cells = rows * cols;
@@ -1787,6 +1803,31 @@ static V *decode_value_inner(IefsR *r) {
         if (vals->t == T_ERR) {
             v_free(keys);
             return vals;
+        }
+        if (t == T_DICT && keys->t == T_LIST) {
+            for (int64_t i = 0; i < keys->n; i++) {
+                V *ki = keys->L[i];
+                if (!ki || ki->t != T_STR || !ki->s) continue;
+                for (int64_t j = 0; j < i; j++) {
+                    V *kj = keys->L[j];
+                    if (kj && kj->t == T_STR && kj->s && !strcmp(kj->s, ki->s)) {
+                        v_free(keys);
+                        v_free(vals);
+                        return v_err("iefs: repeated dict key");
+                    }
+                }
+            }
+        }
+        if (t == T_TABLE && vals->t == T_LIST) {
+            for (int64_t i = 0; i < vals->n; i++) {
+                V *c = vals->L[i];
+                if (!c || (!is_vec_t(c->t) && c->t != T_LIST && !is_mat_t(c->t))) {
+                    v_free(keys);
+                    v_free(vals);
+                    return v_errf("iefs: table column must be a vector, list or matrix, not %s",
+                                  c ? type_name(c->t) : "none");
+                }
+            }
         }
         V *out = (t == T_DICT) ? v_dict(keys, vals) : v_table(keys, vals);
         v_free(keys);
@@ -2251,7 +2292,7 @@ V *iefs_decode_max(const unsigned char *buf, size_t len, size_t max_plain) {
     if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
         return v_err("iefs: truncated file");
     const unsigned char *payload = buf + IEFS_HEADER_SIZE;
-    uint32_t got_crc = crc32_iefs_layout(buf, payload, (size_t)payload_len);
+    uint32_t got_crc = iefs_crc_for_ver(ver, buf, payload, (size_t)payload_len);
     if (got_crc != expect_crc)
         return v_err("iefs: checksum mismatch");
 
@@ -2498,7 +2539,7 @@ static V *iefs_decode_mapped_cols_names(const unsigned char *buf, size_t len, Ie
      * optional: verify the whole-file checksum at open like load does. */
     {
         uint32_t expect_crc = get_u32(buf + 16);
-        if (crc32_iefs_layout(buf, payload, (size_t)payload_len) != expect_crc)
+        if (iefs_crc_for_ver(ver, buf, payload, (size_t)payload_len) != expect_crc)
             return v_err("iefs: checksum mismatch");
     }
     IefsR r = {.p = payload, .n = (size_t)payload_len, .off = 0, .ver = ver, .depth = 0, .err = {0}, .map_reg = reg};
@@ -2592,6 +2633,129 @@ int iefs_store_write_codec(V *v, const char *path, int io_mode, int codec, int l
 
 int iefs_store_write(V *v, const char *path, int io_mode, char *err, size_t err_cap) {
     return iefs_store_write_codec(v, path, io_mode, SHAKTI_CODEC_NONE, 0, err, err_cap);
+}
+
+static const char *iefs_codec_id_name(int c) {
+    switch (c) {
+    case SHAKTI_CODEC_ZSTD: return "zstd";
+    case SHAKTI_CODEC_SNAPPY: return "snappy";
+    case SHAKTI_CODEC_DELTA_I64: return "delta_i64";
+    case SHAKTI_CODEC_FIRE_I64: return "fire_i64";
+    case SHAKTI_CODEC_GORILLA_F64: return "gorilla_f64";
+    case SHAKTI_CODEC_DATE: return "date";
+    case SHAKTI_CODEC_TIME: return "time";
+    case SHAKTI_CODEC_DATETIME: return "datetime";
+    default: return NULL;
+    }
+}
+
+/* Read the file's version and per-column codecs, then write v back in that form.
+ * Version 1 has no codec and is rewritten as version 2. */
+int iefs_store_replace(V *v, const char *path, char *err, size_t err_cap) {
+    FILE *f;
+    unsigned char hdr[IEFS_HEADER_SIZE];
+    uint16_t ver, flags;
+    if (!path) {
+        set_err(err, err_cap, "iefs: missing path");
+        return -1;
+    }
+    f = fopen(path, "rb");
+    if (!f) {
+        set_err(err, err_cap, "iefs: cannot open file");
+        return -1;
+    }
+    if (fread(hdr, 1, IEFS_HEADER_SIZE, f) != IEFS_HEADER_SIZE) {
+        fclose(f);
+        set_err(err, err_cap, "iefs: truncated header");
+        return -1;
+    }
+    if (memcmp(hdr, IEFS_MAGIC, 4) != 0) {
+        fclose(f);
+        set_err(err, err_cap, "iefs: bad magic");
+        return -1;
+    }
+    ver = get_u16(hdr + 4);
+    flags = get_u16(hdr + 6);
+    if (ver == 3) {
+        unsigned char head[8];
+        uint32_t n_ext, names_len;
+        size_t recs_n;
+        unsigned char *recs = NULL, *names = NULL;
+        V *codecs = NULL;
+        int rc;
+        if (fread(head, 1, 8, f) != 8) {
+            fclose(f);
+            set_err(err, err_cap, "iefs: truncated file");
+            return -1;
+        }
+        n_ext = get_u32(head);
+        names_len = get_u32(head + 4);
+        if (n_ext > 100000u || names_len > (16u << 20)) {
+            fclose(f);
+            set_err(err, err_cap, "iefs: table too large");
+            return -1;
+        }
+        recs_n = (size_t)n_ext * IEFS_V3_EXTENT_SIZE;
+        recs = malloc(recs_n ? recs_n : 1);
+        names = malloc(names_len ? names_len : 1);
+        if (!recs || !names ||
+            (recs_n && fread(recs, 1, recs_n, f) != recs_n) ||
+            (names_len && fread(names, 1, names_len, f) != names_len)) {
+            free(recs);
+            free(names);
+            fclose(f);
+            set_err(err, err_cap, "iefs: truncated file");
+            return -1;
+        }
+        fclose(f);
+        codecs = v_dict_empty();
+        for (uint32_t i = 0; i < n_ext; i++) {
+            unsigned char *er = recs + (size_t)i * IEFS_V3_EXTENT_SIZE;
+            uint32_t name_off = get_u32(er + 40);
+            int codec = er[2];
+            int outer = er[3];
+            const char *cn, *on, *nm;
+            char spec[64];
+            if (name_off == 0xffffffffu || name_off >= names_len) continue;
+            if (codec == SHAKTI_CODEC_NONE && outer == SHAKTI_CODEC_NONE) continue;
+            nm = (const char *)(names + name_off);
+            if (memchr(nm, 0, (size_t)names_len - name_off) == NULL) continue;
+            cn = iefs_codec_id_name(codec);
+            on = iefs_codec_id_name(outer);
+            if (!cn && codec != SHAKTI_CODEC_NONE) continue;
+            if (outer != SHAKTI_CODEC_NONE && on && cn)
+                snprintf(spec, sizeof spec, "%s+%s", cn, on);
+            else if (cn)
+                snprintf(spec, sizeof spec, "%s", cn);
+            else
+                continue;
+            {
+                V *sv = v_str(spec);
+                v_dict_set(codecs, nm, sv);
+                v_free(sv);
+            }
+        }
+        free(recs);
+        free(names);
+        rc = iefs_store_write_full(v, path, IEFS_IO_AUTO, SHAKTI_CODEC_NONE, SHAKTI_CODEC_NONE,
+                                   0, 3, codecs->n ? codecs : NULL, err, err_cap);
+        v_free(codecs);
+        return rc;
+    }
+    fclose(f);
+    if (ver != 1 && ver != 2) {
+        set_err(err, err_cap, "iefs: unsupported version");
+        return -1;
+    }
+    {
+        int codec = iefs_codec_from_flags(flags);
+        if (codec < 0) {
+            set_err(err, err_cap, "iefs: unknown compression flags");
+            return -1;
+        }
+        return iefs_store_write_full(v, path, IEFS_IO_AUTO, codec, SHAKTI_CODEC_NONE, 0,
+                                     ver == 1 ? 2u : 2u, NULL, err, err_cap);
+    }
 }
 
 V *iefs_store_read(const char *path) {

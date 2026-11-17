@@ -125,16 +125,6 @@ static const char *delim_skip_field(const char *p, char c, int *ate_delim) {
     if (*p == c) { p++; *ate_delim = 1; }
     return p;
 }
-/* Trim the padding of a quoted field: spaces, and tabs unless the tab is the delimiter, as strip_pad
-   does, but not a \r or \n at the end: a line break inside the quotes is part of the field. */
-static void strip_quoted_pad(char *s, char delim) {
-    char *a = s;
-    W(*a == ' ' || (*a == '\t' && delim != '\t'), a++)
-    if (a != s)
-        memmove(s, a, strlen(a) + 1);
-    size_t n = strlen(s);
-    W(n && (s[n - 1] == ' ' || (s[n - 1] == '\t' && delim != '\t')), s[--n] = 0)
-}
 static int split_delim_line(char *line, char **out, int max, char c) {
     int n = 0;
     char *p = line;
@@ -154,7 +144,6 @@ static int split_delim_line(char *line, char **out, int max, char c) {
             }
             *w = 0;
             if (*r == c) { r++; ate = 1; }
-            strip_quoted_pad(out[n - 1], c);
             p = r;
         } else {
             char *start = p;
@@ -253,8 +242,15 @@ static ssize_t get_record(char **line, size_t *cap, FILE *f, char c, int bom) {
     return got;
 }
 
+static int edge_pad(const char *s) {
+    size_t n;
+    if (!s || !*s) return 0;
+    n = strlen(s);
+    return s[0] == ' ' || s[0] == '\t' || s[n - 1] == ' ' || s[n - 1] == '\t';
+}
 static int field_needs_quote(const char *s, char delim) {
     if (!s) return 0;
+    if (edge_pad(s)) return 1;
     for (; *s; s++)
         if (*s == delim || *s == '"' || *s == '\n' || *s == '\r') return 1;
     return 0;
@@ -281,7 +277,8 @@ static int fputs_field(FILE *f, const char *s, char delim) {
 static int fputs_string_field(FILE *f, const char *s, char delim) {
     if (!s) s = "";
     size_t n = strlen(s);
-    return fputs_field_quoted(f, s, delim, all_int_span(s, n) || all_float_span(s, n));
+    return fputs_field_quoted(f, s, delim,
+                              edge_pad(s) || all_int_span(s, n) || all_float_span(s, n));
 }
 /* A float as saved: rounded to 15 significant digits, or to 16 or 17 when fewer don't read back as
    the same float (a whole float below 1e15 in full), always with a '.' or an exponent so that load

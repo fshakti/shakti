@@ -480,7 +480,15 @@ V *v_table(V *cols, V *data) {
     v->n = n;
     v->keys = v_ref(cols);
     v->vals = v_ref(data);
+    if (v->vals) {
+        for (int64_t i = 0; i < v->vals->n; i++)
+            v_mark_table_col(v->vals->L[i]);
+    }
     return v;
+}
+void v_mark_table_col(V *c) {
+    if (c && c->owner_kind == V_OWNER_MALLOC)
+        c->owner_kind = V_OWNER_TABLE;
 }
 /* Like v_table, but drops the caller's refs on cols/data (for fresh construction). */
 V *v_table_own(V *cols, V *data) {
@@ -669,7 +677,7 @@ static int v_free_leaf(V *v) {
         v->rc = 1;
         return 1;
     }
-    int owned = (v->owner_kind == V_OWNER_MALLOC);
+    int owned = (v->owner_kind == V_OWNER_MALLOC || v->owner_kind == V_OWNER_TABLE);
 #ifdef SHAKTI_HAVE_IEFS
     int mapped = (v->owner_kind == V_OWNER_MAP_ALIAS);
 #endif
@@ -717,7 +725,7 @@ void v_free(V *v) {
 #ifdef SHAKTI_HAVE_IEFS
         int mapped = (cur->owner_kind == V_OWNER_MAP_ALIAS);
 #endif
-        int owned = (cur->owner_kind == V_OWNER_MALLOC);
+        int owned = (cur->owner_kind == V_OWNER_MALLOC || cur->owner_kind == V_OWNER_TABLE);
         switch (cur->t) {
         case T_STR: case T_ERR: free(cur->s); break;
         case T_IVEC: if (owned) free(cur->J); break;
@@ -732,6 +740,11 @@ void v_free(V *v) {
             free(cur->L);
             break;
         case T_DICT: case T_TABLE:
+            if (cur->t == T_DICT && cur->owner_kind == V_OWNER_MODULE && cur->map_reg) {
+                Env *menv = (Env *)cur->map_reg;
+                cur->map_reg = NULL;
+                env_free(menv);
+            }
             free(cur->_ht);
             v_free_push(&stk, &n, &cap, cur->keys, &heaped);
             v_free_push(&stk, &n, &cap, cur->vals, &heaped);
@@ -904,6 +917,10 @@ static void dict_side_reserve(V *lst) {
     lst->L = x_realloc(lst->L, (size_t)cap * sizeof(V*), "v_dict_set");
     lst->_ht_cap = cap;
 }
+static void module_env_set(V *d, const char *key, V *val) {
+    if (!d || d->owner_kind != V_OWNER_MODULE || !d->map_reg || !key) return;
+    env_set((Env *)d->map_reg, key, val);
+}
 void v_dict_set(V *d, const char *key, V *val) {
     Pv(d->t != T_DICT)
     v_list_unshare(&d->keys);
@@ -917,6 +934,7 @@ void v_dict_set(V *d, const char *key, V *val) {
             if (d->keys->L[idx]->t == T_STR && strcmp(d->keys->L[idx]->s, key) == 0) {
                 v_free(d->vals->L[idx]);
                 d->vals->L[idx] = v_ref(val);
+                module_env_set(d, key, val);
                 return;
             }
             slot = (slot + 1) & mask;
@@ -932,12 +950,14 @@ void v_dict_set(V *d, const char *key, V *val) {
         } else {
             d->_ht[slot] = new_idx;
         }
+        module_env_set(d, key, val);
         return;
     }
     for (int64_t i = 0; i < d->n; i++) {
         if (d->keys->L[i]->t == T_STR && strcmp(d->keys->L[i]->s, key) == 0) {
             v_free(d->vals->L[i]);
             d->vals->L[i] = v_ref(val);
+            module_env_set(d, key, val);
             return;
         }
     }
@@ -947,6 +967,7 @@ void v_dict_set(V *d, const char *key, V *val) {
     d->vals->L[d->n] = v_ref(val);
     d->n++; d->keys->n++; d->vals->n++;
     if (d->n > DICT_HT_MIN) dict_ht_rebuild(d);
+    module_env_set(d, key, val);
 }
 /* Append the pair k: val to d, adding k to the hash table; the caller has checked that k is not
    in d. The keys and vals are unshared first, as in v_dict_set: a dict can share them with another

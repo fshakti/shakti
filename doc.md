@@ -207,7 +207,12 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
 - An integer literal that does not fit in a signed 64-bit int is a parse error. `abs` of the minimum int is that positive float
 - `//` and `%` are floor division: `x = (x // y) * y + (x % y)`, for ints and for floats
-- A float `sum` adds in one order on a given build, so one vector sums to the same bits every run. Accelerate, NEON and a plain loop can still disagree with each other
+- A float `sum` adds in one order on a given build, so one vector sums to the same bits every run. Accelerate, NEON and a plain loop can still disagree with each other, and a sum is not promised bit-identical across platforms or thread counts
+- A bool is not a number: `True + 1` is an error
+- A list is indexed by one int. Indexing a list by a mask or by a list of indices is an error
+- Storing an int into a `list[char]` wraps modulo 256
+- `union` and `outer` join tables. They are not arithmetic
+- A string escape is `\n`, `\t`, `\\`, `\'` or `\"`. Any other backslash keeps the character that follows it
 - `global name` inside a function assigns that name in the root environment
 - A function with no `return` yields the value of its last statement. A binding's value is `None`
 - `len` of a `str` is its length in bytes. `repr` of a string escapes quotes, backslashes and newlines, and writes enough digits that a float reads back
@@ -303,7 +308,8 @@ Leading `@` decorates. Expression `@` is each. Matrix multiply is `mmul(a, b)`.
 ## Each (`@`)
 
 `@` applies a callable over finite containers. The callable may be a name,
-dotted path, lambda, or call result. `+@` is invalid.
+dotted path, lambda, or call result. `+@` is invalid. An empty input keeps its
+type: `str @ range(0)` is `list[int]`.
 
 ### Unary each
 
@@ -700,6 +706,7 @@ Dyadic `,` joins two tables on the **first column** when names and types match:
 | Shape | Behavior |
 |-------|----------|
 | First cols are matching sorted `time` / `time_ns` `ivec` | Asof (left-preserving; miss → `None`) |
+| First cols are matching `time` / `time_ns` `ivec`, either not sorted ascending | Error |
 | Right first-column values are unique | Left equi-join |
 | Right first-column has duplicates | Inner equi-join (1:N expands) |
 
@@ -809,7 +816,9 @@ for a group whose items don't compare, as `min([1, None])` is). Of a matrix colu
 items: rows `[1, 10]` and `[2, 20]` have `sum` 33 and `avg` 8.25.
 
 The aggregates are `count`, `sum`, `avg`, `min` and `max`; any other word in a select is a column's
-name. A column the table doesn't have is an error value, with or without `by`:
+name. A grouped aggregate is named from the aggregate and the column, `min_i` for `select min i`,
+and the same when it is the only aggregate. A bare `count` stays `count`; `count i` is `count_i`.
+A bare column under `by` is a grouping key, not an aggregate. A column the table doesn't have is an error value, with or without `by`:
 `select sum nosuch by k from t` and `select last n by k from t` are `select: unknown column 'nosuch'`
 and `select: unknown column 'last'`, and `update nosuch : 1 from t` is `update: unknown column 'nosuch'`.
 
@@ -849,7 +858,7 @@ print(graph.path("Ada", "Carol", 4))
 
 Each fact is a **triple** `(subject, predicate, object)` — the same RDF-style pattern used in enterprise knowledge graphs (e.g. Cambridge Semantics Anzo). Triples live in memory with indexes on subject, predicate, and object for fast pattern lookup.
 
-Use `"*"` (or `""`) as a wildcard in queries.
+Use `"*"` (or `""`) as a wildcard in queries. A query of a name that is not in the graph is an empty table.
 
 ## API
 
@@ -1565,7 +1574,7 @@ Blocking HTTP daemon: `server_serve(port)` (default 8080). Loopback bind unless 
 
 Routes:
 
-- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**)
+- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**). A batch (a JSON array of requests) is not accepted. A successful result is always a JSON-RPC object, including when `handle_rpc` returns a dict.
   - `handle_rpc(method, params, id)` if defined in the calling environment
   - else built-in `ping` → `"pong"`
 - other methods/paths — `handle_request(method, path, body, content_type)` if defined (must return a dict with `status` / `content_type` / `body`)
@@ -1960,7 +1969,7 @@ print(iefs.direct_available(), iefs.uring_available(), iefs.libaio_available())
 ```
 
 - `iefs.load` / global `load("….iefs")` — full read + CRC + malloc copy.
-- `iefs.map` — `mmap` the file, skip CRC, alias contiguous vector/matrix payloads. Compressed files require `load` / `loads`. When the file of a format-3 dict whose values are all vectors or matrices has a key name missing, not NUL-terminated, or repeated, its header, table of contents and the padding before its first value are checked against its CRC (each value counted by the CRC the table stores for it, so no value is read), so a damaged name is `iefs: checksum mismatch`, as from `load`; damage to a value, or to a name that leaves every name present and distinct, is not checked. Looking for a repeat sorts a dict's key names on each map (about 60 µs for 1000 keys), and a dict that repeats a key is checked on each map (about 0.11 ms, 0.36 ms for 1000 keys). `iefs.map(path, columns: ["b", "a"])` gives only those columns of a table, in the order named, and a name given twice gives the column twice; a format-3 dict whose values are all vectors or matrices takes `columns:` too and keeps each key once. A name not in the file is an error. A `select` from a mapped table held in a variable (`m : iefs.map("….iefs")`, then `select from m`) copies the columns it selects into memory, as a select from any table variable does (see [`sql` module](#sql-module)); `select … from "….iefs"` reads them from the mapping when it keeps every row.
+- `iefs.map` — `mmap` the file, skip CRC, alias contiguous vector/matrix payloads. The mapping aliases the file, so an in-place rewrite of those bytes is visible on Linux. Compressed files require `load` / `loads`. When the file of a format-3 dict whose values are all vectors or matrices has a key name missing, not NUL-terminated, or repeated, its header, table of contents and the padding before its first value are checked against its CRC (each value counted by the CRC the table stores for it, so no value is read), so a damaged name is `iefs: checksum mismatch`, as from `load`; damage to a value, or to a name that leaves every name present and distinct, is not checked. Looking for a repeat sorts a dict's key names on each map (about 60 µs for 1000 keys), and a dict that repeats a key is checked on each map (about 0.11 ms, 0.36 ms for 1000 keys). `iefs.map(path, columns: ["b", "a"])` gives only those columns of a table, in the order named, and a name given twice gives the column twice; a format-3 dict whose values are all vectors or matrices takes `columns:` too and keeps each key once. A name not in the file is an error. A `select` from a mapped table held in a variable (`m : iefs.map("….iefs")`, then `select from m`) copies the columns it selects into memory, as a select from any table variable does (see [`sql` module](#sql-module)); `select … from "….iefs"` reads them from the mapping when it keeps every row.
 - `iefs.dumps` / `iefs.loads` — in-memory frames as `list[char]`.
 - Host codecs: `zstd`, `snappy`, plus residual `delta_i64` / `fire_i64` / `gorilla_f64` / `date` / `time` / `datetime` (v3 extents; compounds like `fire_i64+zstd`). Also interned as `compress` / `decompress`.
 - SQL `select … from "….iefs"` opens via **map**. `update … from` and `delete from` a `.iefs` path write their result back to the file; a variable holding the path keeps the path.
@@ -1991,6 +2000,8 @@ c  : hdb.scan(h, "trade", lo:"2026.07.01", hi:"2026.07.31")
 while hdb.next(c):
     part : hdb.current(c)
 ```
+
+Assigning a scan cursor aliases it: `d : c` then `hdb.next(c)` advances `d` as well. `hdb.write` requires the table's columns in the schema's order, and each column's kind must match the schema default (`0` an int column, `0.0` a float, `""` a list of strings). A mismatch is an error that names the column, and the partition is not stored.
 
 Range prune uses inclusive `lo`/`hi` (`strcmp`); `eq` selects one partition. Vertical concat on `list[int]` / `list[float]` / `list[char]` / string lists / matrices.
 

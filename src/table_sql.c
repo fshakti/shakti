@@ -224,7 +224,7 @@ static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
             specs[n].src[0] = 0;
             if (i + 1 < cols->n && cols->L[i + 1]->t == T_STR && !is_agg_kw(cols->L[i + 1]->s)) {
                 snprintf(specs[n].src, sizeof specs[n].src, "%s", cols->L[i + 1]->s);
-                snprintf(specs[n].name, sizeof specs[n].name, "%s", cols->L[i + 1]->s);
+                snprintf(specs[n].name, sizeof specs[n].name, "count_%s", cols->L[i + 1]->s);
                 i += 2;
             } else {
                 i += 1;
@@ -240,7 +240,12 @@ static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
                              !strcmp(s, "avg") ? COL_AVG :
                              !strcmp(s, "min") ? COL_MIN : COL_MAX;
             snprintf(specs[n].src, sizeof specs[n].src, "%s", cols->L[i + 1]->s);
-            snprintf(specs[n].name, sizeof specs[n].name, "%s", cols->L[i + 1]->s);
+            {
+                const char *pfx = specs[n].kind == COL_SUM ? "sum" :
+                                  specs[n].kind == COL_AVG ? "avg" :
+                                  specs[n].kind == COL_MIN ? "min" : "max";
+                snprintf(specs[n].name, sizeof specs[n].name, "%s_%s", pfx, cols->L[i + 1]->s);
+            }
             i += 2;
             n++;
             continue;

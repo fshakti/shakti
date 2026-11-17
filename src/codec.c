@@ -1030,8 +1030,21 @@ static int compress_datetime(const unsigned char *src, size_t src_len, unsigned 
             set_err(err, err_cap, "compress: out of memory");
             return -1;
         }
-        for (size_t i = 0; i < n; i++)
+        int64_t lim = INT64_MAX / MS_PER_DAY;
+        for (size_t i = 0; i < n; i++) {
+            int64_t ms = 0;
             split_ms(x[i], &days[i], &tod[i]);
+            /* The decoder rebuilds the int as days * MS_PER_DAY + time-of-day. Refuse a
+             * value that split would not read back, so a saved file cannot fail to load. */
+            if (days[i] > lim || days[i] < -lim ||
+                __builtin_mul_overflow(days[i], MS_PER_DAY, &ms) ||
+                __builtin_add_overflow(ms, tod[i], &ms)) {
+                free(days);
+                free(tod);
+                set_err(err, err_cap, "codec: datetime overflow");
+                return -1;
+            }
+        }
     }
     BitW w = {0};
     if (bitw_ensure(&w, 24 + n * 9 + (n * TOD_BITS + 7) / 8 + 64) != 0) {
