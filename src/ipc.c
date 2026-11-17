@@ -1077,7 +1077,10 @@ int ipc_sock_send(IpcHandle *s, const char *data, size_t len, char *err, size_t 
         snprintf(err, err_cap, "ipc: send: connection closed");
         return -1;
     }
-    if (len > IPC_MAX_MSG) {
+    size_t max_len = IPC_MAX_MSG;
+    if (s->session_set)
+        max_len -= IPC_ENV_TRAILER;
+    if (len > max_len) {
         snprintf(err, err_cap, "ipc: message too large (%zu)", len);
         return -1;
     }
@@ -1117,7 +1120,10 @@ int ipc_sock_send_parts(IpcHandle *s,
         return -1;
     }
     size_t total = n0 + n1 + n2;
-    if (total > IPC_MAX_MSG) {
+    size_t max_total = IPC_MAX_MSG;
+    if (s->session_set)
+        max_total -= IPC_ENV_TRAILER;
+    if (total > max_total) {
         snprintf(err, err_cap, "ipc: message too large (%zu)", total);
         return -1;
     }
@@ -1291,6 +1297,19 @@ V *ipc_u8vec_take(unsigned char *p, size_t n) {
         v->B = p;
     }
     return v;
+}
+
+/* Decode a received byte buffer as a NUL-terminated str (scan remediation). */
+static V *ipc_str_take(unsigned char *p, size_t n) {
+    char *s = malloc(n + 1);
+    if (!s) {
+        free(p);
+        return v_err("ipc: out of memory");
+    }
+    if (n && p) memcpy(s, p, n);
+    s[n] = 0;
+    free(p);
+    return v_str_take(s);
 }
 
 int ipc_payload_bytes(V *v, const unsigned char **out, size_t *out_len) {
@@ -1908,7 +1927,7 @@ V *bi_ipc_send_sync(V **a, int n) {
     int rc = ipc_env_recv(s, 1, timeout_ms, 1, corr, &kind, &got_corr, &rep, &rep_len, err, sizeof err);
     if (rc == -2) return v_err("ipc_send_sync: timeout");
     if (rc != 0) return v_err(err[0] ? err : "ipc_send_sync: recv failed");
-    return ipc_u8vec_take(rep, rep_len);
+    return ipc_str_take(rep, rep_len);
 }
 
 V *bi_ipc_reply(V **a, int n) {
@@ -2023,7 +2042,7 @@ static V *ipc_do_recv_req(IpcHandle *s, int block) {
                 box->n--;
                 V *lst = v_list(2);
                 lst->L[0] = v_int((int64_t)corr);
-                lst->L[1] = ipc_u8vec_take(data, len);
+                lst->L[1] = ipc_str_take(data, len);
                 return lst;
             }
         }
@@ -2037,7 +2056,7 @@ static V *ipc_do_recv_req(IpcHandle *s, int block) {
         if (kind == IPC_ENV_REQ) {
             V *lst = v_list(2);
             lst->L[0] = v_int((int64_t)corr);
-            lst->L[1] = ipc_u8vec_take(data, len);
+            lst->L[1] = ipc_str_take(data, len);
             return lst;
         }
         if (kind == IPC_ENV_ASYNC) {

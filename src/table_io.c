@@ -552,9 +552,10 @@ static int all_float_span(const char *s, size_t n) {
     char buf[128];
     memcpy(buf, s, n);
     buf[n] = 0;
+    if (n >= 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) return 0;
     char *end = NULL;
-    (void)strtod(buf, &end);
-    return end && end != buf && *end == 0;
+    double x = strtod(buf, &end);
+    return end && end != buf && *end == 0 && isfinite(x);
 }
 
 static int cell_kind_span(const char *s, size_t n, int was_quoted) {
@@ -565,7 +566,7 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
         size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
         while (i < n && s[i] == '0') i++;
         size_t sig = n - i;
-        if (sig > 19) return KIND_FLOAT;
+        if (sig > 19) return KIND_STR;
         if (sig == 19) { /* fewer digits always fit; more never do */
             char buf[32];
             size_t lead = (s[0] == '-' || s[0] == '+') ? 1 : 0;
@@ -575,7 +576,7 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
             buf[total] = 0;
             errno = 0;
             (void)strtoll(buf, NULL, 10);
-            if (errno == ERANGE) return KIND_FLOAT;
+            if (errno == ERANGE) return KIND_STR;
         }
         return KIND_INT;
     }
@@ -634,9 +635,10 @@ static int schemed_span_ok(int kind, const char *s, size_t n) {
     char buf[256];
     memcpy(buf, s, n);
     buf[n] = 0;
+    if (n >= 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) return 0;
     char *end = NULL;
-    (void)strtod(buf, &end);
-    return end && end != buf && *end == 0;
+    x = strtod(buf, &end);
+    return end && end != buf && *end == 0 && isfinite(x);
 }
 
 /* Fold one record into the plan's inferred kinds. Returns the field count, or -2 when a
