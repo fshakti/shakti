@@ -41,15 +41,13 @@ def playable(r, c):
     return 1
 
 def copy_board(b):
-    out : []
+    out : empty_board()
     r : 0
     while r < 8:
-        row : []
         c : 0
         while c < 8:
-            row.append(b[r, c])
+            out[r, c] : b[r, c]
             c : c + 1
-        out.append(row)
         r : r + 1
     return out
 

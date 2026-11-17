@@ -430,7 +430,10 @@ static void repl_print_hl_doc(const char *name) {
     FILE *f = repl_open_doc(name);
     if (!f) {
         if (name && !strcmp(name, "IE.txt")) {
-            fputs(IE_CARD_TEXT, stdout);
+            /* Rewrite the version header live, as for a card read from disk. */
+            const char *nl = strchr(IE_CARD_TEXT, '\n');
+            if (nl) printf("shakti %s%s", SHAKTI_PKG_VERSION, nl);
+            else fputs(IE_CARD_TEXT, stdout);
             fflush(stdout);
             return;
         }
