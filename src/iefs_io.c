@@ -998,6 +998,29 @@ int iefs_io_write_atomic_ex(const char *path, const unsigned char *buf, size_t l
     }
     if (shakti_fs_check(path, 1, err, err_cap) != 0)
         return -1;
+    /* sync none is scratch durability. Rewriting a same-length file in place
+     * skips the temp name and the directory rename, which dominate short saves.
+     * A size change still goes through the atomic temp path below. */
+    if (sync == IEFS_IO_SYNC_NONE && !iefs_io_want_direct(len, mode)) {
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
+            (size_t)st.st_size == len) {
+            int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+            if (fd >= 0) {
+                int rc = write_all_fd(fd, buf ? buf : (const unsigned char *)"", len);
+                if (rc != 0) {
+                    set_errf(err, err_cap, "iefs write", errno);
+                    close(fd);
+                    return -1;
+                }
+                if (close(fd) != 0) {
+                    set_errf(err, err_cap, "iefs close", errno);
+                    return -1;
+                }
+                return 0;
+            }
+        }
+    }
     char tmp[4096];
     if (make_temp_path(path, tmp, sizeof tmp) != 0) {
         set_err(err, err_cap, "iefs: path too long");
@@ -1079,6 +1102,35 @@ int iefs_io_write_atomic_regions(const char *path, uint64_t file_len, const Iefs
         if (regs[i].off > file_len || regs[i].len > file_len - regs[i].off) {
             set_err(err, err_cap, "iefs_io_write_atomic_regions: region past EOF");
             return -1;
+        }
+    }
+
+    if (sync == IEFS_IO_SYNC_NONE) {
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
+            (uint64_t)st.st_size == file_len) {
+            int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+            if (fd >= 0) {
+                int rc = 0;
+                for (uint32_t i = 0; i < n_reg; i++) {
+                    if (regs[i].len == 0)
+                        continue;
+                    if (pwrite_all(fd, regs[i].buf, regs[i].len, (off_t)regs[i].off) != 0) {
+                        rc = -1;
+                        break;
+                    }
+                }
+                if (rc != 0) {
+                    set_errf(err, err_cap, "iefs pwrite", errno);
+                    close(fd);
+                    return -1;
+                }
+                if (close(fd) != 0) {
+                    set_errf(err, err_cap, "iefs close", errno);
+                    return -1;
+                }
+                return 0;
+            }
         }
     }
 

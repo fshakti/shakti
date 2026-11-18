@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /* shakti/src/env.c — environments, fn_ast, interpreter globals */
 #include "shakti_internal.h"
+#include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -651,16 +653,10 @@ int env_save(Env *e, const char *path) {
     P(!e || !path,0)
     for (int i = 0; i < e->len; i++)
         if (!ctx_data_ok(e->vals[i])) return 0;
-    char tmp[8192];
-    int nw = snprintf(tmp, sizeof tmp, "%s.ctx.tmp.%d", path, (int)getpid());
-    if (nw < 0 || (size_t)nw >= sizeof tmp) return 0;
-    char ferr[128];
-    ferr[0] = 0;
-    if (shakti_fs_check(tmp, 1, ferr, sizeof ferr) != 0) return 0;
-    int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
-    if (fd < 0) return 0;
-    FILE *fp = fdopen(fd, "wb");
-    if (!fp) { close(fd); unlink(tmp); return 0; }
+    char *mem = NULL;
+    size_t memlen = 0;
+    FILE *fp = open_memstream(&mem, &memlen);
+    if (!fp) return 0;
     int ok = ctx_write(fp, "KAIO_MCP", 8) && ctx_write(fp, &e->len, 4);
     for (int i = 0; ok && i < e->len; i++) {
         int nlen = (int)strlen(e->names[i]);
@@ -670,8 +666,58 @@ int env_save(Env *e, const char *path) {
     }
     if (ok && fflush(fp) != 0) ok = 0;
     if (fclose(fp) != 0) ok = 0;
-    if (!ok) { unlink(tmp); return 0; }
-    if (rename(tmp, path) != 0) { unlink(tmp); return 0; }
+    if (!ok) { free(mem); return 0; }
+    struct stat sb;
+    int placed = 0;
+    if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
+        int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) {
+            size_t off = 0;
+            int wok = 1;
+            while (off < memlen) {
+                ssize_t w = write(fd, mem + off, memlen - off);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    wok = 0;
+                    break;
+                }
+                if (w == 0) { wok = 0; break; }
+                off += (size_t)w;
+            }
+            if (wok && close(fd) == 0) placed = 1;
+            else if (!wok) close(fd);
+        }
+    }
+    if (!placed) {
+        char tmp[8192];
+        int nw = snprintf(tmp, sizeof tmp, "%s.ctx.tmp.%d", path, (int)getpid());
+        if (nw < 0 || (size_t)nw >= sizeof tmp) { free(mem); return 0; }
+        char ferr[128];
+        ferr[0] = 0;
+        if (shakti_fs_check(tmp, 1, ferr, sizeof ferr) != 0) { free(mem); return 0; }
+        int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0) { free(mem); return 0; }
+        size_t off = 0;
+        int wok = 1;
+        while (off < memlen) {
+            ssize_t w = write(fd, mem + off, memlen - off);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                wok = 0;
+                break;
+            }
+            if (w == 0) { wok = 0; break; }
+            off += (size_t)w;
+        }
+        if (!wok || close(fd) != 0) {
+            if (!wok) close(fd);
+            unlink(tmp);
+            free(mem);
+            return 0;
+        }
+        if (rename(tmp, path) != 0) { unlink(tmp); free(mem); return 0; }
+    }
+    free(mem);
     return 1;
 }
 int env_load(Env *e, const char *path) {

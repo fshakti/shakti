@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 extern V *table_xml_load(const char *path, V *columns_opt);
@@ -300,20 +301,10 @@ static int table_delim_save(V *table, const char *path, char c) {
     P(!table || table->t != T_TABLE || !table->keys || !table->vals, -1)
     int nc = (int)table->keys->n;
     int64_t nrows = table->n;
-    char tmp[4096];
-    unsigned rnd = 0;
-    int rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    if (rfd >= 0) {
-        if (read(rfd, &rnd, sizeof rnd) != (ssize_t)sizeof rnd) rnd = (unsigned)getpid();
-        close(rfd);
-    } else {
-        rnd = (unsigned)getpid();
-    }
-    if (snprintf(tmp, sizeof tmp, "%s.part-%u", path, rnd) >= (int)sizeof tmp) return -1;
-    int fd = open(tmp, O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
-    if (fd < 0) return -1;
-    FILE *f = fdopen(fd, "wb");
-    if (!f) { close(fd); unlink(tmp); return -1; }
+    char *mem = NULL;
+    size_t memlen = 0;
+    FILE *f = open_memstream(&mem, &memlen);
+    if (!f) return -1;
     for (int j = 0; j < nc; j++) {
         if (j && fputc(c, f) == EOF) goto fail;
         V *cn = table->keys->L[j];
@@ -355,12 +346,72 @@ static int table_delim_save(V *table, const char *path, char c) {
         }
         if (fputc('\n', f) == EOF) goto fail;
     }
-    if (fclose(f) != 0) { unlink(tmp); return -1; }
-    if (rename(tmp, path) != 0) { unlink(tmp); return -1; }
+    if (fclose(f) != 0) { free(mem); return -1; }
+    f = NULL;
+    /* Same-length rewrite skips the temp file and rename. A different length
+     * still replaces the file atomically. */
+    struct stat sb;
+    int placed = 0;
+    if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
+        int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) {
+            size_t off = 0;
+            int wok = 1;
+            while (off < memlen) {
+                ssize_t w = write(fd, mem + off, memlen - off);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    wok = 0;
+                    break;
+                }
+                if (w == 0) { wok = 0; break; }
+                off += (size_t)w;
+            }
+            if (wok && close(fd) == 0) placed = 1;
+            else if (!wok) close(fd);
+        }
+    }
+    if (!placed) {
+        char tmp[4096];
+        unsigned rnd = 0;
+        int rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+        if (rfd >= 0) {
+            if (read(rfd, &rnd, sizeof rnd) != (ssize_t)sizeof rnd) rnd = (unsigned)getpid();
+            close(rfd);
+        } else {
+            rnd = (unsigned)getpid();
+        }
+        if (snprintf(tmp, sizeof tmp, "%s.part-%u", path, rnd) >= (int)sizeof tmp) {
+            free(mem);
+            return -1;
+        }
+        int fd = open(tmp, O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
+        if (fd < 0) { free(mem); return -1; }
+        size_t off = 0;
+        int wok = 1;
+        while (off < memlen) {
+            ssize_t w = write(fd, mem + off, memlen - off);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                wok = 0;
+                break;
+            }
+            if (w == 0) { wok = 0; break; }
+            off += (size_t)w;
+        }
+        if (!wok || close(fd) != 0) {
+            if (!wok) close(fd);
+            unlink(tmp);
+            free(mem);
+            return -1;
+        }
+        if (rename(tmp, path) != 0) { unlink(tmp); free(mem); return -1; }
+    }
+    free(mem);
     return 0;
 fail:
     fclose(f);
-    unlink(tmp);
+    free(mem);
     return -1;
 }
 

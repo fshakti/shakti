@@ -675,7 +675,10 @@ static int iefs_codec_from_flags(uint16_t flags) {
 }
 
 
-/* ---- IEFS v3: TOC + 2MiB-aligned extents ---- */
+/* ---- IEFS v3: TOC + aligned extents ----
+ * Extents at least 2 MiB stay 2MiB-aligned for huge-page maps. A smaller
+ * extent is only page-aligned: padding it out to 2 MiB makes rename and
+ * fsync of a short column dominate the write. */
 static size_t iefs_align_up(size_t x, size_t a) {
     return (x + a - 1) & ~(a - 1);
 }
@@ -1231,7 +1234,8 @@ static int iefs_v3_prepare(V *v, int codec, int outer, int level, V *codecs, Ief
     size_t *file_offs = calloc((size_t)n_ext, sizeof(size_t));
     if (!file_offs) { free(names); free(name_offs); set_err(err, err_cap, "iefs: out of memory"); goto fail; }
     for (int i = 0; i < n_ext; i++) {
-        cursor = iefs_align_up(cursor, IEFS_V3_ALIGN);
+        size_t align = ext[i].stored_len >= (size_t)IEFS_V3_ALIGN ? (size_t)IEFS_V3_ALIGN : 4096u;
+        cursor = iefs_align_up(cursor, align);
         file_offs[i] = cursor;
         cursor += ext[i].stored_len;
     }
