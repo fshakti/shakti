@@ -454,13 +454,6 @@ static V *try_fast_counting_while(Node *n, Env *e) {
     return v_nil();
 }
 
-static V *list_shallow(V *src) {
-    V *c = v_list(src->n);
-    int64_t i;
-    for (i = 0; i < src->n; i++)
-        c->L[i] = src->L[i] ? v_ref(src->L[i]) : v_nil();
-    return c;
-}
 /* Lists passed into a call stay one object so append/pop inside the callee
  * updates the caller's list. Top-level aliases still copy on write. */
 static V **g_list_arg_stack;
@@ -488,12 +481,6 @@ static int push_list_vals(V **vals, int n) {
 static void pop_list_vals(int pushed) {
     if (pushed > g_list_arg_n) pushed = g_list_arg_n;
     g_list_arg_n -= pushed;
-}
-static int list_is_call_arg(V *obj) {
-    int i;
-    for (i = 0; i < g_list_arg_n; i++)
-        if (g_list_arg_stack[i] == obj) return 1;
-    return 0;
 }
 /* Append and pop change the list in place, including through another name. */
 static int cow_list_arg(Env *e, Node *slot, V **objp) {

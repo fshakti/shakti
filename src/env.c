@@ -846,7 +846,7 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
     if (err && err_cap) snprintf(err, err_cap, "safe mode: filesystem confinement unavailable on this platform");
     return -1;
 #else
-    char proc[64], full[8192];
+    char full[8192];
     if (fd < 0) {
         if (err && err_cap) snprintf(err, err_cap, "safe mode: bad fd");
         return -1;
@@ -867,6 +867,7 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
         free(rp);
     }
 #else
+    char proc[64];
     snprintf(proc, sizeof proc, "/proc/self/fd/%d", fd);
     char *rp = realpath(proc, NULL);
     if (!rp) {

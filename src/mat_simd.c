@@ -138,13 +138,6 @@ static inline float64x2_t fmat_binop_vec_neon(float64x2_t x, float64x2_t y, int 
     }
 }
 
-static inline int64x2_t imat_mul_vec_neon(int64x2_t x, int64x2_t y) {
-    int64x2_t z = vdupq_n_s64(0);
-    z = vsetq_lane_s64(i64_wmul(vgetq_lane_s64(x, 0), vgetq_lane_s64(y, 0)), z, 0);
-    z = vsetq_lane_s64(i64_wmul(vgetq_lane_s64(x, 1), vgetq_lane_s64(y, 1)), z, 1);
-    return z;
-}
-
 static void dot_row_col_fmat_neon(double *cr, const double *ar, const double *B, int64_t k, int64_t n) {
     for (int64_t j = 0; j < n; j++) {
         float64x2_t sum = vdupq_n_f64(0.0);
@@ -160,24 +153,6 @@ static void dot_row_col_fmat_neon(double *cr, const double *ar, const double *B,
         for (; t < k; t++)
             s += ar[t] * B[t * n + j];
         cr[j] = s;
-    }
-}
-
-static void dot_row_col_imat_neon(int64_t *cr, const int64_t *ar, const int64_t *B, int64_t k, int64_t n) {
-    for (int64_t j = 0; j < n; j++) {
-        float64x2_t sum = vdupq_n_f64(0.0);
-        int64_t t = 0;
-        for (; t + 2 <= k; t += 2) {
-            float64x2_t va = load_i64_as_pd_neon(ar + t);
-            int64_t b0 = B[(t + 0) * n + j];
-            int64_t b1 = B[(t + 1) * n + j];
-            float64x2_t vb = vsetq_lane_f64((double)b1, vsetq_lane_f64((double)b0, vdupq_n_f64(0.0), 0), 1);
-            sum = vfmaq_f64(sum, va, vb);
-        }
-        double s = vaddvq_f64(sum);
-        for (; t < k; t++)
-            s += (double)ar[t] * (double)B[t * n + j];
-        cr[j] = (int64_t)s;
     }
 }
 

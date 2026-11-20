@@ -731,14 +731,6 @@ static void nums_cmp_num(unsigned char *r, V *a, int64_t ne, V *b, int op) {
 static int num_kind(int t) {
     return t == T_IVEC || t == T_IMAT ? 'J' : t == T_FVEC || t == T_FMAT ? 'F' : 'B';
 }
-/* Two numeric vectors or matrices of ne items, item by item: same kinds in a plain loop. */
-static void nums_cmp_nums(unsigned char *r, V *a, V *b, int64_t ne, int op) {
-    int ka = num_kind(a->t);
-    if (ka != num_kind(b->t)) { for (int64_t i = 0; i < ne; i++) r[i] = num_cmp(a, i, b, i, op); return; }
-    if (ka == 'J') mat_imat_cmp_bmat_mm(r, a->J, b->J, ne, op);
-    else if (ka == 'F') mat_fmat_cmp_bmat_mm(r, a->F, b->F, ne, op);
-    else { const unsigned char *x = a->B, *y = b->B; CMP_EACH(r, ne, x[i_], y[i_], op); }
-}
 /* whether two numeric vectors or matrices of ne items are equal item by item */
 static int nums_equal(V *a, V *b, int64_t ne) {
     int ka = num_kind(a->t);
@@ -809,6 +801,24 @@ int nums_have_row(V *m, V *a) {
 }
 static int cmp_depth;
 static void cmp_depth_leave(int *p) { (void)p; if (cmp_depth > 0) cmp_depth--; }
+/* An int, float, bool or char against each byte of a str, as that byte's char code. */
+static int cmp_scalar_t(int t) {
+    return t == T_INT || t == T_FLOAT || t == T_BOOL || t == T_CHAR;
+}
+static V *str_cmp_scalar(V *s, V *num, int op) {
+    const unsigned char *p = (const unsigned char *)(s->s ? s->s : "");
+    int64_t n = (int64_t)strlen((const char *)p);
+    V *r = v_bvec(n);
+    if (!r || r->t == T_ERR) return r ? r : v_err("out of memory");
+    V ch = {0};
+    ch.t = T_CHAR;
+    ch.bits = 8;
+    for (int64_t i = 0; i < n; i++) {
+        ch.j = p[i];
+        r->B[i] = (unsigned char)num_cmp(&ch, 0, num, 0, op);
+    }
+    return r;
+}
 V *vec_cmp(V *a, V *b, int op) {
     if (!a || !b) {
         if (op == OP_EQ) return v_bool(a == b);
@@ -883,6 +893,8 @@ V *vec_cmp(V *a, V *b, int op) {
         P(op==OP_NE,v_bool(1))
         return v_bool(0);
     }
+    if (a->t == T_STR && cmp_scalar_t(b->t)) return str_cmp_scalar(a, b, op);
+    if (cmp_scalar_t(a->t) && b->t == T_STR) return str_cmp_scalar(b, a, cmp_mirror(op));
     if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && (b->t==T_INT||b->t==T_FLOAT||b->t==T_CHAR)) {
         V *r=v_bvec(a->n);
         nums_cmp_num(r->B, a, a->n, b, op);

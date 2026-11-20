@@ -197,6 +197,7 @@ void *iefs_io_alloc_buf(size_t logical_len) {
 
 void iefs_io_free_buf(void *p) { free(p); }
 
+#if defined(__linux__) && defined(O_DIRECT)
 static void *aligned_alloc_pages(size_t nbytes) {
     void *p = NULL;
 #if defined(_POSIX_C_SOURCE) || defined(__linux__) || defined(__APPLE__)
@@ -207,6 +208,7 @@ static void *aligned_alloc_pages(size_t nbytes) {
     return malloc(nbytes);
 #endif
 }
+#endif
 
 int iefs_io_pread(int fd, void *buf, size_t len, off_t off, char *err, size_t err_cap) {
     if (fd < 0 || (!buf && len) || off < 0) {
@@ -695,9 +697,9 @@ static int read_all_buffered(int fd, size_t n, unsigned char **out, size_t *out_
     return 0;
 }
 
+#if defined(__linux__) && defined(O_DIRECT)
 static int read_all_direct(int fd, size_t n, unsigned char **out, size_t *out_len, char *err,
                            size_t err_cap) {
-#if defined(__linux__) && defined(O_DIRECT)
     /* Returns: 0 ok, -1 hard fail, -2 retry buffered (EINVAL / unsupported). */
     size_t aligned_n = n & ~(size_t)(IEFS_IO_ALIGN - 1);
     size_t alloc_n = round_up_align(n ? n : 1);
@@ -755,15 +757,8 @@ static int read_all_direct(int fd, size_t n, unsigned char **out, size_t *out_le
     *out = buf;
     *out_len = n;
     return 0;
-#else
-    (void)fd;
-    (void)n;
-    (void)out;
-    (void)out_len;
-    set_err(err, err_cap, "iefs: O_DIRECT not available");
-    return -2;
-#endif
 }
+#endif
 
 int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len, int mode,
                           char *err, size_t err_cap) {
