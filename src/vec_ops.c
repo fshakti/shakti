@@ -681,6 +681,18 @@ static int num_cmp(V *a, int64_t i, V *b, int64_t k, int op) {
 static int cmp_mirror(int op) {
     return op==OP_LT?OP_GT:op==OP_GT?OP_LT:op==OP_LE?OP_GE:op==OP_GE?OP_LE:op;
 }
+/* One list slot against a str. Equality of a number is every byte's char code;
+ * != is that result inverted, so it stays the opposite of =. */
+static int cmp_elem_yes(V *c, int op) {
+    int yes = 0;
+    if (c && c->t == T_BOOL) yes = c->j != 0;
+    else if (c && c->t == T_BVEC && (op == OP_EQ || op == OP_NE)) {
+        yes = c->n > 0;
+        for (int64_t k = 0; k < c->n; k++) if (!c->B[k]) { yes = 0; break; }
+    }
+    if (op == OP_NE) yes = !yes;
+    return yes ? 1 : 0;
+}
 /* r[i] = X op Y for i < n, X and Y written in terms of i_, with the switch outside the loop */
 #define CMP_EACH(r, n, X, Y, op) do { int64_t i_; switch(op) { \
     case OP_EQ: for(i_=0;i_<(n);i_++) (r)[i_] = (X) == (Y); break; \
@@ -932,13 +944,14 @@ V *vec_cmp(V *a, V *b, int op) {
         int64_t n = a->n;
         V *r = v_bvec(n);
         for(int64_t i = 0; i < n; i++) {
-            V *c = vec_cmp(a->L[i], b, op);
+            int inner = (op == OP_EQ || op == OP_NE) ? OP_EQ : op;
+            V *c = vec_cmp(a->L[i], b, inner);
             if (c->t == T_ERR) {
                 v_free(c);
                 r->B[i] = (op == OP_NE) ? 1 : 0;
                 if (op != OP_EQ && op != OP_NE) { v_free(r); return v_errf("cannot compare types %s and %s", type_name(a->L[i]->t), type_name(b->t)); }
             } else {
-                r->B[i] = (c->t == T_BOOL && c->j) ? 1 : 0;
+                r->B[i] = (unsigned char)cmp_elem_yes(c, op);
                 v_free(c);
             }
         }
@@ -948,8 +961,9 @@ V *vec_cmp(V *a, V *b, int op) {
         int64_t n = b->n;
         V *r = v_bvec(n);
         for(int64_t i = 0; i < n; i++) {
-            V *c = vec_cmp(a, b->L[i], op);
-            r->B[i] = (c->t == T_BOOL && c->j) ? 1 : 0;
+            int inner = (op == OP_EQ || op == OP_NE) ? OP_EQ : op;
+            V *c = vec_cmp(a, b->L[i], inner);
+            r->B[i] = c->t == T_ERR ? 0 : (unsigned char)cmp_elem_yes(c, op);
             v_free(c);
         }
         return r;
