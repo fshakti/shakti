@@ -16,26 +16,24 @@ if not PORT:
 
 # Knobs CC12–19 follow on-screen order: LEVEL CUT RES ATT DEC SUS REL REVERB.
 # iRig Keys 2: press the 5-8 button to send CC16–19 from the four physical knobs.
+knobs : {
+    12: synth.set_level,
+    13: synth.set_cutoff,
+    14: synth.set_reso,
+    15: synth.set_attack,
+    16: synth.set_decay,
+    17: synth.set_sustain,
+    18: synth.set_release,
+    19: synth.set_reverb
+}
+
 def apply_cc(cc, val):
     n : val / 127.0
     if cc = 1:
         synth.set_mod(n)
-    elif cc = 12:
-        synth.set_level(n)
-    elif cc = 13:
-        synth.set_cutoff(n)
-    elif cc = 14:
-        synth.set_reso(n)
-    elif cc = 15:
-        synth.set_attack(n)
-    elif cc = 16:
-        synth.set_decay(n)
-    elif cc = 17:
-        synth.set_sustain(n)
-    elif cc = 18:
-        synth.set_release(n)
-    elif cc = 19:
-        synth.set_reverb(n)
+    elif cc in knobs:
+        f : knobs[cc]
+        f(n)
 
 def drain_midi():
     while 1:

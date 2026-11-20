@@ -24,7 +24,7 @@ def pkg_ver():
                 raw : raw[0:n - 1]
         if len(raw) > 0:
             return raw
-    return "0.15.0"
+    return "0.15.1"
 
 def scene_secs():
     s : getenv("SHAKTI_SHOWCASE_SECS")
@@ -58,30 +58,22 @@ def left_ai(st):
         pong_core.move_left(st, pong_core.AISPD)
 
 def tone_block(pos, n, sr):
-    blk : []
+    t : (range(n) + pos) / sr
+    x : (0.22 * sin(TWOPI * 110.0 * t)) + (0.18 * sin(TWOPI * 440.0 * t))
+    x : x + (0.08 * sin(TWOPI * 2000.0 * t))
+    k : (range(n) + pos) % 4410
     i : 0
     while i < n:
-        t : (pos + i) / sr
-        x : 0.22 * sin(TWOPI * 110.0 * t)
-        x : x + 0.18 * sin(TWOPI * 440.0 * t)
-        x : x + 0.08 * sin(TWOPI * 2000.0 * t)
-        if (pos + i) % 4410 < 40:
-            x : x + 0.35
-        append(blk, x)
+        if k[i] < 40:
+            x[i] : x[i] + 0.35
         i : i + 1
-    return blk
+    return x
 
 def stem_energy(s):
     n : len(s)
-    e : 0.0
-    j : 0
-    while j < n:
-        v : s[j]
-        e : e + v * v
-        j : j + 1
     if n <= 0:
         return 0.0
-    return sqrt(e / float(n))
+    return sqrt(sum(s * s) / float(n))
 
 def scene_movie(ver, deadline):
     t0 : clock()

@@ -89,8 +89,8 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
 | `import ipc` | `ipc_echo_client.ie` | Client for `ipc_echo.ie` |
-| `import ipc` | `ipc_sync.ie` | UDS req/rep server (`recv_req` + `reply`) |
-| `import ipc` | `ipc_sync_client.ie` | Client for `ipc_sync.ie` (`send_sync`) |
+| `import ipc` | `ipc_sync.ie` | UDS req/rep server (`recv_req` + `reply`) ([`examples/ipc_sync.ie`](examples/ipc_sync.ie)) |
+| `import ipc` | `ipc_sync_client.ie` | Client for `ipc_sync.ie` (`send_sync`) ([`examples/ipc_sync_client.ie`](examples/ipc_sync_client.ie)) |
 | `import ipc` | `ipc_rdma.ie` | RDMA/RoCE server (Linux + NIC) |
 | `import ipc` | `ipc_rdma_client.ie` | Client for `ipc_rdma.ie` |
 | `import rest` | `rest_demo.ie` | HTTP GET/POST client + local server |
@@ -1392,8 +1392,8 @@ See [examples index](#examples-index). IPC-specific:
 |------|-------------|
 | `ipc_echo.ie` | UDS echo server (raw send/recv) |
 | `ipc_echo_client.ie` | UDS client |
-| `ipc_sync.ie` | UDS req/rep server |
-| `ipc_sync_client.ie` | UDS `send_sync` client |
+| [`examples/ipc_sync.ie`](examples/ipc_sync.ie) | UDS req/rep server (standalone; not a section of `example.ie`) |
+| [`examples/ipc_sync_client.ie`](examples/ipc_sync_client.ie) | UDS `send_sync` client |
 | `ipc_rdma.ie` | RDMA server (raw send/recv) |
 | `ipc_rdma_client.ie` | RDMA client |
 

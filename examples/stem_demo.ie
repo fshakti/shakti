@@ -1,6 +1,8 @@
 # stem demo — separate a short synthetic tone stream and print latency
 import stem
 
+TWOPI : 6.283185307179586
+
 info : stem.info()
 assert(type(info) != "error", "stem not available (build with SHAKTI_STEM=1)")
 print("stem info:", info)
@@ -19,24 +21,11 @@ while pos < n:
     take : block_sz
     if pos + take > n:
         take : n - pos
-    blk : []
-    i : 0
-    while i < take:
-        t : (pos + i) / sr
-        x : 0.2 * sin(6.283185307179586 * 110.0 * t)
-        x : x + 0.15 * sin(6.283185307179586 * 440.0 * t)
-        append(blk, x)
-        i : i + 1
+    t : (range(take) + pos) / sr
+    blk : (0.2 * sin(TWOPI * 110.0 * t)) + (0.15 * sin(TWOPI * 440.0 * t))
     out : stem.process(blk)
     for name in ["drums", "bass", "vocals", "other"]:
-        s : out[name]
-        e : 0.0
-        j : 0
-        while j < len(s):
-            v : s[j]
-            e : e + v * v
-            j : j + 1
-        energy[name] : energy[name] + e
+        energy[name] : energy[name] + sum(out[name] * out[name])
     pos : pos + take
 dt : clock() - t0
 
