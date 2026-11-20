@@ -101,13 +101,6 @@ double to_float(V *v) {
  * kernels flag a zero divisor as they go; the error comes after the loop, so the operands' other
  * errors (length, shape, type) come first. */
 static int is_div_op(int op) { return op == OP_DIV || op == OP_FLOORDIV || op == OP_MOD; }
-/* Remainder of floor division: x - floor(x/y)*y, same sign as y. */
-static double floor_mod(double x, double y) {
-    double q;
-    if (y == 0.0) return 0.0;
-    q = floor(x / y);
-    return x - q * y;
-}
 static V *div_by_zero(int op) { return v_err(op == OP_MOD ? "modulo by zero" : "division by zero"); }
 static int is_zero_num(V *v) {
     return (v->t == T_INT || v->t == T_CHAR) ? v->j == 0 : v->t == T_FLOAT && v->f == 0;
@@ -1098,4 +1091,54 @@ V *table_filter(V *tbl, V *mask) {
         v_free(new_data);
         return r;
     }
+}
+
+/* v[mask]: keep the items where a bool vector of the same length is True. */
+static int64_t mask_count(const unsigned char *B, int64_t n) {
+    int64_t c = 0, i;
+    if (!B || n <= 0) return 0;
+    for (i = 0; i < n; i++) if (B[i]) c++;
+    return c;
+}
+V *vec_filter(V *v, V *mask) {
+    int64_t n, count, i, j;
+    P(!v || !mask || mask->t != T_BVEC, v_err("bad filter"))
+    P(mask->n != v->n, v_err("vector mask length mismatch"))
+    n = v->n;
+    if (n > 0 && !mask->B) return v_err("bad filter");
+    count = mask_count(mask->B, n);
+    if (v->t == T_IVEC) {
+        V *r = v_ivec(count);
+        if (!r || r->t == T_ERR) return r ? r : v_err("bad filter");
+        if (count && !v->J) { v_free(r); return v_err("bad filter"); }
+        for (j = 0, i = 0; i < n; i++) if (mask->B[i]) r->J[j++] = v->J[i];
+        return r;
+    }
+    if (v->t == T_FVEC) {
+        V *r = v_fvec(count);
+        if (!r || r->t == T_ERR) return r ? r : v_err("bad filter");
+        if (count && !v->F) { v_free(r); return v_err("bad filter"); }
+        for (j = 0, i = 0; i < n; i++) if (mask->B[i]) r->F[j++] = v->F[i];
+        return r;
+    }
+    if (v->t == T_CVEC) {
+        V *r = v_cvec(count);
+        if (!r || r->t == T_ERR) return r ? r : v_err("bad filter");
+        if (count && !v->B) { v_free(r); return v_err("bad filter"); }
+        for (j = 0, i = 0; i < n; i++) if (mask->B[i]) r->B[j++] = v->B[i];
+        return r;
+    }
+    if (v->t == T_BVEC) {
+        V *r = v_bvec(count);
+        if (!r || r->t == T_ERR) return r ? r : v_err("bad filter");
+        if (count && !v->B) { v_free(r); return v_err("bad filter"); }
+        for (j = 0, i = 0; i < n; i++) if (mask->B[i]) r->B[j++] = v->B[i] ? 1 : 0;
+        return r;
+    }
+    if (v->t == T_LIST) {
+        V *r = v_list(count);
+        for (j = 0, i = 0; i < n; i++) if (mask->B[i]) r->L[j++] = v_ref(v->L[i]);
+        return r;
+    }
+    return v_errf("cannot index type %s with type %s", type_name(v->t), type_name(mask->t));
 }

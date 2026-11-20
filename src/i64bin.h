@@ -3,6 +3,7 @@
 #define SHAKTI_I64BIN_H
 
 #include <stdint.h>
+#include <math.h>
 
 static inline int i64_pair_promotes(int64_t x, int64_t y) {
     return x == INT64_MIN && y == -1;
@@ -21,6 +22,15 @@ static inline int64_t i64_mod(int64_t x, int64_t y) {
     int64_t r = x % y;
     if (r && ((x < 0) != (y < 0))) r += y;
     return r;
+}
+
+/* Remainder of floor division: x - floor(x/y)*y, same sign as y.
+ * Shared by the scalar, vector and matrix % paths so they agree. */
+static inline double floor_mod(double x, double y) {
+    double q;
+    if (y == 0.0) return 0.0;
+    q = floor(x / y);
+    return x - q * y;
 }
 
 #endif

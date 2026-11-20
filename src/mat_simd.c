@@ -291,7 +291,7 @@ static int fmat_binop_mm_scalar(double *r, const double *a, const double *b, int
         case 11: r[i] = x * y; break;
         case 2: zero |= y == 0; r[i] = y != 0 ? x / y : 0; break;
         case 4: zero |= y == 0; r[i] = y != 0 ? floor(x / y) : 0; break;
-        case 10: zero |= y == 0; r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 10: zero |= y == 0; r[i] = y != 0 ? floor_mod(x, y) : 0; break;
         case 17: r[i] = pow(x, y); break;
         default: r[i] = x; break;
         }
@@ -362,7 +362,7 @@ void mat_fmat_binop_scalar(double *r, const double *a, double y, int64_t ne, int
         case 11: r[i] = x * y; break;
         case 2: r[i] = y != 0 ? x / y : 0; break;
         case 4: r[i] = y != 0 ? floor(x / y) : 0; break;
-        case 10: r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 10: r[i] = y != 0 ? floor_mod(x, y) : 0; break;
         case 17: r[i] = pow(x, y); break;
         default: break;
         }
@@ -405,7 +405,7 @@ int mat_fmat_binop_scalar_rev(double *r, double x, const double *b, int64_t ne, 
         case 11: r[i] = x * y; break;
         case 2: zero |= y == 0; r[i] = y != 0 ? x / y : 0; break;
         case 4: zero |= y == 0; r[i] = y != 0 ? floor(x / y) : 0; break;
-        case 10: zero |= y == 0; r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 10: zero |= y == 0; r[i] = y != 0 ? floor_mod(x, y) : 0; break;
         case 17: r[i] = pow(x, y); break;
         default: break;
         }

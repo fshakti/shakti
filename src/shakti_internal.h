@@ -98,6 +98,7 @@ V *vec_logic(V *a, V *b, int is_and);
 V *vec_binop(V *a, V *b, int op);
 V *mat_binop(V *a, V *b, int op);
 V *table_filter(V *tbl, V *mask);
+V *vec_filter(V *v, V *mask);
 
 void lex_fail(Lexer *l, const char *message);
 int lex_peek_is_signed_literal(Lexer *l);

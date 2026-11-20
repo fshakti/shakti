@@ -1868,6 +1868,8 @@ V *eval(Node *n, Env *e) {
                 if(j < 0) j += obj->n;
                 if(j >= 0 && j < obj->n) next = v_mat_row(obj, j);
                 else next = v_err("index out of range");
+            } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_CVEC||obj->t==T_LIST) && idx->t==T_BVEC) {
+                next = vec_filter(obj, idx);
             } else if((obj->t==T_IVEC||obj->t==T_FVEC||obj->t==T_BVEC||obj->t==T_CVEC||obj->t==T_LIST) && (idx->t==T_INT||idx->t==T_CHAR)) {
                 int64_t j = idx->j;
                 if(j < 0) j += obj->n;

@@ -1811,6 +1811,7 @@ static V *bi_map(V**a,in,Env*e){
             r->L[i]=rv;env_leave(ce);
         }
     }
+    v_specialize(r);   /* list[int] etc., as a comprehension gives */
     return r;
 }
 static V *bi_filter(V**a,in,Env*e){
@@ -1855,7 +1856,9 @@ static V *bi_filter(V**a,in,Env*e){
             v_free(rv);env_leave(ce);if(keep)tmp[out++]=item;else v_free(item);
         }
     }
-    V*r=v_list(out);memcpy(r->L,tmp,out*sizeof(V*));free(tmp);return r;
+    V*r=v_list(out);memcpy(r->L,tmp,out*sizeof(V*));free(tmp);
+    v_specialize(r);
+    return r;
 }
 static void ivec_grow(V *v) {
     uint32_t cap;
