@@ -485,6 +485,15 @@ int table_save(V *table, const char *path);
 int v_ensure_writable(V *v);
 V *method_call(V *obj, const char *method, V **args, int nargs, Env *e);
 V *builtin_call(const char *name, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e);
+/* A full-height column from a select or update expression. A vector, list or matrix must have
+ * nrows items (op: column length mismatch otherwise). Anything else is one value repeated
+ * nrows times, each row its own copy. */
+V *sql_column_value(V *val, int64_t nrows, const char *op);
+/* where as a bool mask of tbl's height, or an error value. */
+V *sql_where_mask(V *tbl, V *where);
+/* The column an update stores for this assignment: current is the previous column, or NULL when
+ * the name is new. mask is a list[bool] of that height. */
+V *sql_assign_stored(V *current, V *rhs, V *mask, const char *name, int64_t nrows);
 V *table_sql_select(V *from, V *cols, V *by, V *where);
 V *table_sql_update(V *from, V *cols, V *where);
 V *table_sql_delete(V *from, V *cols, V *where);

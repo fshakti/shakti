@@ -673,6 +673,17 @@ An error value in `where` is the statement's result (a `from` that isn't a table
 on the right of an `update`, comes first), and a raise in it stops the statement: either way
 `update` and `delete` change nothing (a `.iefs` file is not rewritten).
 
+A column name in `where`, and in `name: expr` on `select` or `update`, is the whole column.
+A function that takes one row's value is applied with `@`. `=` of two columns is one bool
+(whether the two values are the same). A row mask is `a (lambda x,y: x=y)@ b`.
+`numbers`, `lastname` and `encode` below are functions the caller defines.
+
+```ie
+r : select from cust where (numbers@ phone) (lambda a,b: a=b)@ (encode@ lastname@ name)
+s : select enc: encode@ lastname@ name, phone from cust
+c2 : update p: numbers@ phone, n: encode@ lastname@ name from cust
+```
+
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Prefer core `,` / `union` / `outer` table joins (see [Table joins](#table-joins----union--outer)); SQL `t1 join t2 on col` is not yet implemented.
 
 ## Modules
@@ -769,9 +780,9 @@ j : t join u on id
 
 | Statement | Example |
 |-----------|---------|
-| Select | `select col by group from t where expr` |
+| Select | `select col, name: expr from t where expr` |
 | Aggregate | `select sum amount by dept from t` |
-| Update | `update col : expr from t where expr` |
+| Update | `update col: expr, new: expr from t where expr` |
 | Delete | `delete from t where expr` (no column list; `delete from t` deletes every row) |
 | Create | `create table name (col: default, ...)` |
 | Insert | `insert into name (cols...) values (...)` |
@@ -783,6 +794,26 @@ j : t join u on id
 The result of `select` is a new table with its own columns: replacing a cell of it (`r.a[0] : 9`) doesn't change the source table, nor the other way round. `update` and `delete` store their result in the variable they name (after `r : update … from t`, `r` and `t` are the same table), but another name that held the old table (`u : t` beforehand) keeps the old columns: a cell write through `u` doesn't reach `t`, nor the other way round. The items of a list column are still shared, as for a filtered select, so a write inside one (`r.l[2][0] : 9`) reaches the source. A column of a table built in the statement itself stays shared with the value it was built from: after `r : select from table(a: x)`, `r.a[0] : 9` changes `x`. Joins give new tables too ([Table joins](#table-joins)).
 
 `by col1, col2` groups and sorts ascending. There is no separate `group by` / `order by` clause.
+
+A column name in `where`, and on the right of `name: expr`, is the whole column. A function that
+takes one row's value is applied with `@`. `=` of two columns is one bool (whether the two values
+are the same), so a row mask is `a (lambda x,y: x=y)@ b`. `numbers`, `lastname` and `encode` here
+are functions the caller defines:
+
+```ie
+r : select from cust where (numbers@ phone) (lambda a,b: a=b)@ (encode@ lastname@ name)
+s : select enc: encode@ lastname@ name, phone from cust
+c2 : update p: numbers@ phone, n: encode@ lastname@ name from cust
+```
+
+`name: expr` in a select list is a computed column, evaluated on the source table before `where`
+filters, and the result's columns are the select list in that order. A vector, list or matrix
+must have one item per row (`select: column length mismatch`); anything else is one value repeated
+for every row, each row its own copy. `name: expr` with `by` is `select: computed column with by`.
+A name twice in that list is `select: column 'enc' named more than once`. `where` can name a
+computed column from this select; the expression still runs on every source row, then `where`
+filters. `count: expr` is a computed column named `count`; the aggregate is `count expr`, with no
+colon. An error value from an expression is the select's result, and a raise in it stops the select.
 
 `insert` puts each value in its column as it is, or is an error and inserts nothing: a `list[int]`
 column takes an int or a char, a `list[float]` a float, an int or a char (an int becomes a float,
@@ -802,6 +833,12 @@ column is not shared by the rows, or with the variable it came from). A column o
 height is `update: column length mismatch`, and an error value is the update's result (a raise in
 `where` still stops it).
 
+`update new: expr` appends `new` when the table has no such column. Rows `where` does not write are
+the zero of a typed vector (`0`, `0.0`, `false`, `char(0)`) or `None` in a list column. With no
+`where`, or a `where` that keeps every row, the new column is a copy of the expression. Assignments
+run left to right, so a later expression sees a column this statement already added as stored,
+including the rows `where` did not write, and a repeated name writes that column again. A vector, list or matrix still has to match the table's height.
+
 A group's `sum` of an int column is an int, added as `sum` adds a `list[int]`: exact past 2^53,
 and, if any group's int sum in the select doesn't fit in an int, every int sum in it is a
 float column. Of a float or `list[bool]` column it is a float. `avg` of an int, float or
@@ -820,7 +857,7 @@ name. A grouped aggregate is named from the aggregate and the column, `min_i` fo
 and the same when it is the only aggregate. A bare `count` stays `count`; `count i` is `count_i`.
 A bare column under `by` is a grouping key, not an aggregate. A column the table doesn't have is an error value, with or without `by`:
 `select sum nosuch by k from t` and `select last n by k from t` are `select: unknown column 'nosuch'`
-and `select: unknown column 'last'`, and `update nosuch : 1 from t` is `update: unknown column 'nosuch'`.
+and `select: unknown column 'last'`. `update` with a new name adds that column, as above.
 
 `update` and `delete` return the changed table. From a table variable they also rebind it; from a str naming a `.iefs` file (`update … from path`) they write the file and leave the variable as it was (see [iefs module](#iefs-module)).
 

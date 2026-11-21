@@ -265,6 +265,63 @@ static V *eval_select_cols(Node *n, Env *e) {
     i(n->nch,r->L[i] = eval_select_name(n->ch[i], e))
     return r;
 }
+static int select_node_computed(Node *n) {
+    if (!n || n->type == N_NONE) return 0;
+    if (n->type == N_ASSIGN) return 1;
+    if (n->type != N_LIST) return 0;
+    for (int i = 0; i < n->nch; i++)
+        if (n->ch[i] && n->ch[i]->type == N_ASSIGN) return 1;
+    return 0;
+}
+/* Select list with name: expr. Each computed value is a full-height column. An error value is
+ * kept in *errv (the first one) and the rest still run, so a later raise still stops the select. */
+static V *eval_select_computed(Node *n, V *tbl, Env *e, V **errv) {
+    *errv = NULL;
+    P(!n || n->type == N_NONE,v_nil())
+    Node *one = n;
+    Node **items = n->type == N_LIST ? n->ch : &one;
+    int nitems = n->type == N_LIST ? n->nch : 1;
+    Env *inner = env_new(e);
+    if (tbl && tbl->t == T_TABLE) {
+        V *cn = tbl->keys, *dv = tbl->vals;
+        for (int64_t i = 0; i < cn->n; i++)
+            env_set(inner, cn->L[i]->s, dv->L[i]);
+    }
+    V *r = v_list(0);
+    for (int i = 0; i < nitems; i++) {
+        Node *item = items[i];
+        if (item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME) {
+            V *val = eval(item->ch[1], inner);
+            if (g_error) {
+                env_leave(inner);
+                v_free(r);
+                v_free(*errv); *errv = NULL;
+                return val ? val : v_err("select: value error");
+            }
+            if (!val || val->t == T_ERR) {
+                if (!*errv) *errv = val ? val : v_err("select: value error");
+                else v_free(val);
+                continue;
+            }
+            V *col = sql_column_value(val, tbl->n, "select");
+            v_free(val);
+            if (!col || col->t == T_ERR) {
+                if (!*errv) *errv = col ? col : v_err("select: value error");
+                else v_free(col);
+                continue;
+            }
+            V *dk = v_list(1);
+            dk->L[0] = v_str(item->ch[0]->sval);
+            V *dv = v_list(1);
+            dv->L[0] = col;
+            v_list_append_own(r, v_dict_own(dk, dv));
+        } else {
+            v_list_append_own(r, eval_select_name(item, e));
+        }
+    }
+    env_leave(inner);
+    return r;
+}
 static V *eval_with_table_columns(V *tbl, Node *expr, Env *e) {
     P(!expr || expr->type == N_NONE,v_nil())
     Env *inner = env_new(e);
@@ -272,6 +329,27 @@ static V *eval_with_table_columns(V *tbl, Node *expr, Env *e) {
         V *cn = tbl->keys, *dv = tbl->vals;
         for(int64_t i = 0; i < cn->n; i++)
             env_set(inner, cn->L[i]->s, dv->L[i]);
+    }
+    V *r = eval(expr, inner);
+    env_leave(inner);
+    return r;
+}
+/* where of a computed select also sees those projected columns, at full height. */
+static V *eval_select_where(V *tbl, V *cols, Node *expr, Env *e) {
+    P(!expr || expr->type == N_NONE,v_nil())
+    Env *inner = env_new(e);
+    if(tbl && tbl->t == T_TABLE) {
+        V *cn = tbl->keys, *dv = tbl->vals;
+        for(int64_t i = 0; i < cn->n; i++)
+            env_set(inner, cn->L[i]->s, dv->L[i]);
+    }
+    if (cols && cols->t == T_LIST) {
+        for (int64_t i = 0; i < cols->n; i++) {
+            V *item = cols->L[i];
+            if (!item || item->t != T_DICT || item->n != 1) continue;
+            V *k = item->keys->L[0], *val = item->vals->L[0];
+            if (k && k->t == T_STR && val) env_set(inner, k->s, val);
+        }
     }
     V *r = eval(expr, inner);
     env_leave(inner);
@@ -308,15 +386,20 @@ static V *eval_insert_values(Node *n, Env *e) {
 }
 /* The assignments of an update, as a dict. A raise in one stops there and is returned. An error
  * value in one is kept in *errv (the first one) and the rest are still evaluated, so a raise after
- * it, or in where, still stops the update; the caller makes it the update's result after where. */
-static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv) {
+ * it still stops the update; the caller makes the error value the update's result. mask is the
+ * where mask already evaluated; a later assignment sees the column as it will be stored. */
+static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv, V *mask) {
     *errv = NULL;
     P(!n || n->type == N_NONE,v_dict_empty())
     Env *inner = env_new(e);
+    V *wk = v_list(0), *wv = v_list(0);
     if(tbl && tbl->t == T_TABLE) {
         V *cn = tbl->keys, *dv = tbl->vals;
-        for(int64_t i = 0; i < cn->n; i++)
+        for(int64_t i = 0; i < cn->n; i++) {
             env_set(inner, cn->L[i]->s, dv->L[i]);
+            v_list_append_own(wk, v_str(cn->L[i]->s));
+            v_list_append(wv, dv->L[i]);
+        }
     }
     V *keys = v_list(0), *vals = v_list(0);
     Node **items = n->type == N_LIST ? n->ch : &n;
@@ -325,10 +408,9 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv) {
         Node *item = items[i];
         if(item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME) {
             V *val = eval(item->ch[1], inner);
-            if (g_error) {   /* a raise (in from, or here on the right): the update stops */
+            if (g_error) {   /* a raise on the right: the update stops and changes nothing */
                 env_leave(inner);
-                v_free(keys);
-                v_free(vals);
+                v_free(keys); v_free(vals); v_free(wk); v_free(wv);
                 v_free(*errv); *errv = NULL;
                 return val ? val : v_err("update: value error");
             }
@@ -337,17 +419,47 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv) {
                 else v_free(val);
                 continue;
             }
+            /* Bind the column as stored, so a later expression sees rows where did not write. */
+            if (tbl && tbl->t == T_TABLE) {
+                V *current = NULL;
+                for (int64_t k = 0; k < wk->n; k++)
+                    if (wk->L[k] && wk->L[k]->t == T_STR && !strcmp(wk->L[k]->s, item->ch[0]->sval)) {
+                        current = wv->L[k];
+                        break;
+                    }
+                V *col = sql_assign_stored(current, val, mask, item->ch[0]->sval, tbl->n);
+                if (!col || col->t == T_ERR) {
+                    v_free(val);
+                    if (!*errv) *errv = col ? col : v_err("update: value error");
+                    else v_free(col);
+                    continue;
+                }
+                env_set(inner, item->ch[0]->sval, col);
+                int replaced = 0;
+                for (int64_t k = 0; k < wk->n; k++)
+                    if (wk->L[k] && wk->L[k]->t == T_STR && !strcmp(wk->L[k]->s, item->ch[0]->sval)) {
+                        v_free(wv->L[k]);
+                        wv->L[k] = v_ref(col);
+                        replaced = 1;
+                        break;
+                    }
+                if (!replaced) {
+                    v_list_append_own(wk, v_str(item->ch[0]->sval));
+                    v_list_append(wv, col);
+                }
+                v_free(col);
+            }
             v_list_append_own(keys, v_str(item->ch[0]->sval));
             v_list_append_own(vals, val);
         } else {
             env_leave(inner);
-            v_free(keys);
-            v_free(vals);
+            v_free(keys); v_free(vals); v_free(wk); v_free(wv);
             v_free(*errv); *errv = NULL;
             return v_err("update: expected col: expr");
         }
     })
     env_leave(inner);
+    v_free(wk); v_free(wv);
     return v_dict_own(keys, vals);
 }
 /* update and delete give a new table r that may still hold some of the old table's
@@ -970,12 +1082,33 @@ V *eval(Node *n, Env *e) {
         } else {
             from = from0;
         }
-        V *cols = eval_select_cols(n->ch[1], e);
+        int computed = select_node_computed(n->ch[1]);
+        int has_by = n->ch[2] && n->ch[2]->type != N_NONE;
+        if (computed && from->t == T_ERR) return from;
+        if (computed && from->t != T_TABLE) {
+            v_free(from);
+            return v_err("select: need table");
+        }
+        if (computed && has_by) {
+            v_free(from);
+            return v_err("select: computed column with by");
+        }
+        V *rerr = NULL;
+        V *cols = computed ? eval_select_computed(n->ch[1], from, e, &rerr)
+                           : eval_select_cols(n->ch[1], e);
+        if (g_error) {
+            v_free(from); v_free(rerr);
+            return cols ? cols : v_err("select: value error");
+        }
         V *by = eval_select_name(n->ch[2], e);
-        V *where = eval_with_table_columns(from, n->ch[3], e);
+        V *where = eval_select_where(from, cols, n->ch[3], e);
         if (g_error) {   /* a raise (in from or where): the select stops */
-            v_free(from); v_free(cols); v_free(by);
+            v_free(from); v_free(cols); v_free(by); v_free(rerr);
             return where;
+        }
+        if (rerr) {
+            v_free(from); v_free(cols); v_free(by); v_free(where);
+            return rerr;
         }
         V *r = table_sql_select(from, cols, by, where);
         v_free(from);
@@ -1006,19 +1139,29 @@ V *eval(Node *n, Env *e) {
             }
         }
 #endif
-        V *rerr;   /* an error value on the right */
-        V *assignments = eval_update_cols(n->ch[1], from, e, &rerr);
-        /* a raise in from or on the right stops the update here, before where */
-        if (g_error || assignments->t == T_ERR) {
-            free(iefs_path);
-            v_free(from);
-            return assignments;
-        }
         V *where = eval_with_table_columns(from, n->ch[3], e);
         if (g_error) {   /* a raise in where: the update stops, and nothing changes */
             free(iefs_path);
-            v_free(from); v_free(assignments); v_free(rerr);
+            v_free(from);
             return where;
+        }
+        V *mask = NULL;
+        if (from->t == T_TABLE && where && where->t != T_ERR) {
+            mask = sql_where_mask(from, where);
+            if (!mask || mask->t == T_ERR) {
+                v_free(where);
+                where = mask ? mask : v_err("where: need boolean mask");
+                mask = NULL;
+            }
+        }
+        V *rerr;   /* an error value on the right */
+        V *assignments = eval_update_cols(n->ch[1], from, e, &rerr, mask);
+        v_free(mask);
+        if (g_error || assignments->t == T_ERR) {
+            free(iefs_path);
+            v_free(from);
+            v_free(where);
+            return assignments;
         }
         if (rerr) {   /* the update's result, before the table and its columns are looked at */
             free(iefs_path);

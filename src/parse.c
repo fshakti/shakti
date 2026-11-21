@@ -161,6 +161,26 @@ static int peek_each_verb_at(Lexer *l) {
     memcpy(g_parse_err_first, first, sizeof first);
     return r;
 }
+/* `(lambda ...)@` is an each verb. `(args)@` stays a call, then unary each. */
+static int peek_paren_lambda_each(Lexer *l) {
+    if (lex_peek(l).type != T_LPAREN_ || !peek_each_verb_at(l)) return 0;
+    int count = g_parse_error_count, quiet = g_parse_quiet;
+    int after_lex = g_parse_first_after_lex;
+    char msg[sizeof g_parse_err_msg], first[sizeof g_parse_err_first];
+    memcpy(msg, g_parse_err_msg, sizeof msg);
+    memcpy(first, g_parse_err_first, sizeof first);
+    g_parse_quiet = 1;
+    LexMark mark = lex_mark(l);
+    Lexer probe = *l;
+    int lam = lex_next(&probe).type == T_LPAREN_ && lex_peek(&probe).type == T_LAMBDA_;
+    lex_release(&probe, mark);
+    g_parse_quiet = quiet;
+    g_parse_error_count = count;
+    g_parse_first_after_lex = after_lex;
+    memcpy(g_parse_err_msg, msg, sizeof msg);
+    memcpy(g_parse_err_first, first, sizeof first);
+    return lam;
+}
 
 static Node *parse_each_verb(Lexer *l) {
     Node *n = parse_power(l);
@@ -470,6 +490,8 @@ static Node *parse_postfix(Lexer *l) {
     for(;;) {
         Token pk = lex_peek(l);
         if(pk.type == T_LPAREN_) {
+            /* `xs (lambda a,b: a=b)@ ys` is dyadic each, not a call of xs. */
+            if (peek_paren_lambda_each(l)) break;
             int table_call = is_table_callee(n);
             lex_next(l);
             Node *call = node_new(N_CALL);
@@ -816,6 +838,17 @@ static void parse_select_col(Lexer *l, Node *cols) {
         return;
     }
     Token nm = lex_next(l);
+    /* name: expr is a computed column. sum amount has no colon, so it stays an aggregate. */
+    if (lex_peek(l).type == T_COLON_) {
+        lex_next(l);
+        Node *as = node_new(N_ASSIGN);
+        Node *ln = node_new(N_NAME);
+        ln->sval = strdup(nm.sval);
+        node_add(as, ln);
+        node_add(as, parse_expr(l));
+        node_add(cols, as);
+        return;
+    }
     Node *name = node_new(N_NAME);
     name->sval = strdup(nm.sval);
     if (is_sql_agg_kw(nm.sval) && lex_peek(l).type == T_NAME_) {
