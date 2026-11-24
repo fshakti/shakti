@@ -841,6 +841,11 @@ static void parse_select_col(Lexer *l, Node *cols) {
     /* name: expr is a computed column. sum amount has no colon, so it stays an aggregate. */
     if (lex_peek(l).type == T_COLON_) {
         lex_next(l);
+        if (is_sql_agg_kw(nm.sval)) {
+            parse_fail("select: '%s' is an aggregate; write %s <expr> without ':'", nm.sval, nm.sval);
+            node_free(parse_expr(l));
+            return;
+        }
         Node *as = node_new(N_ASSIGN);
         Node *ln = node_new(N_NAME);
         ln->sval = strdup(nm.sval);

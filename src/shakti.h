@@ -468,6 +468,9 @@ void shakti_format_date_ms(int64_t utc_midnight_ms, char *buf, size_t cap);
 void shakti_format_time_ms(int64_t ms_in_day, char *buf, size_t cap);
 const char *type_name(int t);
 V *vec_cmp(V *a, V *b, int op);
+/* Per-item compare of two equal-length lists or vectors, or NULL when that does not apply.
+   vec_cmp stays a single bool, for dict keys, joins, `in`, and min/max. */
+V *vec_zip_cmp(V *a, V *b, int op);
 int nums_have_num(V *a, V *b);
 int nums_have_row(V *m, V *a);
 Node *parse(const char *src);

@@ -50,7 +50,12 @@ int is_truthy(V *v) {
     case T_CHAR: return v->j != 0;
     case T_FLOAT:return v->f != 0.0;
     case T_STR:  return v->s[0] != 0;
-    case T_IVEC: case T_FVEC: case T_BVEC: case T_CVEC: case T_LIST: return v->n > 0;
+    case T_BVEC:
+        /* A non-empty list[bool] is true only when every item is. Empty stays false. */
+        if (v->n == 0) return 0;
+        for (int64_t i = 0; i < v->n; i++) if (!v->B[i]) return 0;
+        return 1;
+    case T_IVEC: case T_FVEC: case T_CVEC: case T_LIST: return v->n > 0;
     case T_IMAT: case T_FMAT: case T_BMAT: case T_CMAT: return v->n > 0 && mat_cols(v) > 0;
     case T_DICT: case T_TABLE: return v->n > 0;   /* entries, rows */
     case T_DATETIME: return v->j != 0;
@@ -1000,6 +1005,48 @@ V *vec_cmp(V *a, V *b, int op) {
     if (is_mat_t(a->t) && is_mat_t(b->t))
         return v_errf("cannot compare types %s and %s", type_name(a->t), type_name(b->t));
     return v_errf("cannot compare types %s and %s", type_name(a->t), type_name(b->t));
+}
+/* NULL when a and b are not sequences of the same length: the caller keeps vec_cmp,
+   which matches two values as one bool (and two sequences of different lengths).
+   Same length: one bool per item. Two numeric vectors compare by num_cmp. A list
+   pairs through vec_cmp, so a nested list still matches as one value. Empty `=` / `!=`
+   stay one bool (`[] = []` is true). */
+static int zip_seq_t(int t) {
+    return t == T_LIST || t == T_IVEC || t == T_FVEC || t == T_BVEC || t == T_CVEC;
+}
+static V *zip_item(V *v, int64_t i) {
+    switch (v->t) {
+    case T_IVEC: return v_int(v->J[i]);
+    case T_FVEC: return v_float(v->F[i]);
+    case T_BVEC: return v_bool(v->B[i] != 0);
+    case T_CVEC: return v_char(v->B[i]);
+    default: return v_ref(v->L[i]);
+    }
+}
+V *vec_zip_cmp(V *a, V *b, int op) {
+    if (!a || !b || !zip_seq_t(a->t) || !zip_seq_t(b->t) || a->n != b->n) return NULL;
+    if (a->n == 0 && (op == OP_EQ || op == OP_NE)) return v_bool(op == OP_EQ);
+    V *r = v_bvec(a->n);
+    if (!r || r->t == T_ERR) return r ? r : v_err("out of memory");
+    if (is_vec_t(a->t) && is_vec_t(b->t)) {
+        for (int64_t i = 0; i < a->n; i++)
+            r->B[i] = (unsigned char)(num_cmp(a, i, b, i, op) ? 1 : 0);
+        return r;
+    }
+    for (int64_t i = 0; i < a->n; i++) {
+        V *x = zip_item(a, i), *y = zip_item(b, i);
+        int xt = x ? x->t : T_NIL, yt = y ? y->t : T_NIL;
+        V *c = vec_cmp(x, y, op);
+        v_free(x); v_free(y);
+        if (!c || c->t == T_ERR) { v_free(r); return c ? c : v_err("cannot compare"); }
+        if (c->t != T_BOOL) {
+            v_free(c); v_free(r);
+            return v_errf("cannot compare types %s and %s", type_name(xt), type_name(yt));
+        }
+        r->B[i] = c->j ? 1 : 0;
+        v_free(c);
+    }
+    return r;
 }
 /* Dict keys other than strings match by `=`, as vec_cmp decides it. A string or number key
    (int, float, bool or char) is found by v_dict_hashed_index, through the dict's hash table once

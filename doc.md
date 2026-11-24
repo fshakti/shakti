@@ -198,11 +198,12 @@ inlining is recovered with LTO on the default link (see [README build](README.md
   between two digits (`1_`, `1__0`, `1_.5` are errors)
 - `None`, `False`, zero (including `char(0)` and the zero date, time and datetime), `""`
   and empty containers (list, matrix, dict, table) are false in `if`, `while`,
-  `not`, `and`/`or`, `bool()`, `any()`, `all()` and `filter()`
+  `not`, `and`/`or`, `bool()`, `any()`, `all()` and `filter()`. A non-empty `list[bool]`
+  is true only when every item is true (`if [False]` does not run; `if [True, True]` does)
 - An error value used as a condition, or as a statement whose result is not kept, raises,
   so `try`/`except` can catch it. Storing one (`x : abs("nope")`) keeps the value.
   `assert` raises `AssertionError`, which `try` catches. `bool` of an error is false
-- `=` compares a value with a value. `!=` is the opposite of `=`. Ordering two lists with `<` is an error
+- `=` of a value with a value is one bool. `=` of two equal-length lists or vectors is one bool per item (`[1, 2] = [1, 3]` is `[True, False]`), and so are `!=`, `<`, `>`, `<=` and `>=` when the items compare. `[] = []` is `True`. Lists of different lengths still compare as values (`[1] = [1, 2]` is `False`, `[1] != [1, 2]` is `True`). Ordering two lists of different lengths, or of items that do not compare, is an error
 - A missing dict key reads as `None`. `len` of a string is its length in bytes
 - SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
 - An integer literal that does not fit in a signed 64-bit int is a parse error. `abs` of the minimum int is that positive float
@@ -217,7 +218,7 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - A function with no `return` yields the value of its last statement. A binding's value is `None`
 - `len` of a `str` is its length in bytes. `repr` of a string escapes quotes, backslashes and newlines, and writes enough digits that a float reads back
 - `json_dumps` writes JSON (`null`, `true`, `false`), which `json_loads` reads
-- Ordering two matrices is an error, as ordering two lists is. `None <= None` and `None >= None` are true
+- Ordering two matrices is an error. `None <= None` and `None >= None` are true
 - `b"..."` is `list[char]`. `//=`, `%=` and `**=` (and `//:`, `%:`, `**:`) update in place
 - Integer bitwise helpers: `band(a,b)`, `bor(a,b)`, `bxor(a,b)`, `bnot(a)`,
   `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical shifts on the low 64 bits;
@@ -669,19 +670,28 @@ delete from u where id = 2
 ```
 
 A bool mask in `where` has one item per row of the table; a mask of another length is an error value.
-An error value in `where` is the statement's result (a `from` that isn't a table, or an error value
-on the right of an `update`, comes first), and a raise in it stops the statement: either way
+An error value in `where` of an update on a table is the statement's result, and the assignments
+are not evaluated. A `from` that isn't a table comes first. When `where` is a mask, an error value
+on the right of an update is the statement's result. A raise in `where` stops the statement: either way
 `update` and `delete` change nothing (a `.iefs` file is not rewritten).
 
 A column name in `where`, and in `name: expr` on `select` or `update`, is the whole column.
-A function that takes one row's value is applied with `@`. `=` of two columns is one bool
-(whether the two values are the same). A row mask is `a (lambda x,y: x=y)@ b`.
-`numbers`, `lastname` and `encode` below are functions the caller defines.
+A function that takes one row's value is applied with `@`. `=` of two columns of the same
+length is a `list[bool]`, one item per row, and so are `!=`, `<`, `>`, `<=` and `>=`.
+`where` keeps the rows whose item is true. A column compared with one value is one bool per
+row (`amount > 15`, `name = "ada"`). Columns of different lengths still compare as values
+(`=` is one `false`). `not` of a mask is one bool, so a per-row negation is `!=`.
+`(lambda a,b: a=b)@` still compares a pair per row. `numbers`, `lastname` and `encode`
+below are functions the caller defines.
 
 ```ie
-r : select from cust where (numbers@ phone) (lambda a,b: a=b)@ (encode@ lastname@ name)
+r : select from cust where (numbers@ phone) = (encode@ lastname@ name)
 s : select enc: encode@ lastname@ name, phone from cust
 c2 : update p: numbers@ phone, n: encode@ lastname@ name from cust
+t : table(phone:["9112", "12345"], name:["Bob Jones", "Alice Smith"])
+def lastname(s):
+    return re_split(" ", s)[-1]
+select from t where len@ phone = len@ lastname@ name
 ```
 
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Prefer core `,` / `union` / `outer` table joins (see [Table joins](#table-joins----union--outer)); SQL `t1 join t2 on col` is not yet implemented.
@@ -796,24 +806,33 @@ The result of `select` is a new table with its own columns: replacing a cell of 
 `by col1, col2` groups and sorts ascending. There is no separate `group by` / `order by` clause.
 
 A column name in `where`, and on the right of `name: expr`, is the whole column. A function that
-takes one row's value is applied with `@`. `=` of two columns is one bool (whether the two values
-are the same), so a row mask is `a (lambda x,y: x=y)@ b`. `numbers`, `lastname` and `encode` here
-are functions the caller defines:
+takes one row's value is applied with `@`. `=` of two columns of the same length is a `list[bool]`,
+one item per row, and so are `!=`, `<`, `>`, `<=` and `>=`. `where` keeps the rows whose item is
+true. A column compared with one value is one bool per row (`amount > 15`, `name = "ada"`).
+Columns of different lengths still compare as values (`=` is one `false`). `not` of a mask is one
+bool, so a per-row negation is `!=`. `(lambda a,b: a=b)@` still compares a pair per row.
+`numbers`, `lastname` and `encode` here are functions the caller defines:
 
 ```ie
-r : select from cust where (numbers@ phone) (lambda a,b: a=b)@ (encode@ lastname@ name)
+r : select from cust where (numbers@ phone) = (encode@ lastname@ name)
 s : select enc: encode@ lastname@ name, phone from cust
 c2 : update p: numbers@ phone, n: encode@ lastname@ name from cust
+t : table(phone:["9112", "12345"], name:["Bob Jones", "Alice Smith"])
+def lastname(s):
+    return re_split(" ", s)[-1]
+select from t where len@ phone = len@ lastname@ name
 ```
 
-`name: expr` in a select list is a computed column, evaluated on the source table before `where`
-filters, and the result's columns are the select list in that order. A vector, list or matrix
-must have one item per row (`select: column length mismatch`); anything else is one value repeated
-for every row, each row its own copy. `name: expr` with `by` is `select: computed column with by`.
-A name twice in that list is `select: column 'enc' named more than once`. `where` can name a
-computed column from this select; the expression still runs on every source row, then `where`
-filters. `count: expr` is a computed column named `count`; the aggregate is `count expr`, with no
-colon. An error value from an expression is the select's result, and a raise in it stops the select.
+`name: expr` in a select list is a computed column, and the result's columns are the select list in
+that order. A computed column that `where` names is evaluated on every source row, then `where`
+filters. Any other computed column is evaluated on the rows `where` keeps, so a side effect in it
+does not run for a dropped row (`select n: len(a) from t where a > 1` is the number of rows kept).
+A vector, list or matrix must have one item per row (`select: column length mismatch`); anything
+else is one value repeated for every row, each row its own copy. `name: expr` with `by` is
+`select: computed column with by`. A name twice in that list is `select: column 'enc' named more
+than once`. `select count: expr` is `select: 'count' is an aggregate; write count <expr> without ':'`
+(`sum`, `avg`, `min` and `max` the same way). The aggregate is `count expr`, with no colon. An error
+value from an expression is the select's result, and a raise in it stops the select.
 
 `insert` puts each value in its column as it is, or is an error and inserts nothing: a `list[int]`
 column takes an int or a char, a `list[float]` a float, an int or a char (an int becomes a float,
