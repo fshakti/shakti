@@ -9,8 +9,46 @@
 #endif
 #include <sys/stat.h>
 #ifndef _WIN32
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
+/* The master must stay open until a short-lived child finishes its last write.
+ * Closing it first makes that write return EIO, which the shell prints on the
+ * inherited stderr. A child still running after the bound is closed as before. */
+static void subprocess_reap(int fd, int64_t pid) {
+    if (pid > 1 && fd >= 0) {
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        unsigned char buf[4096];
+        struct timespec t0, now;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        for (;;) {
+            int wstatus;
+            pid_t wr;
+            while ((wr = waitpid((pid_t)pid, &wstatus, WNOHANG)) < 0 && errno == EINTR) {}
+            if (wr > 0 || wr < 0) { pid = 0; break; }
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            long ms = (now.tv_sec - t0.tv_sec) * 1000L + (now.tv_nsec - t0.tv_nsec) / 1000000L;
+            if (ms >= 500) break;
+            ssize_t n = read(fd, buf, sizeof buf);
+            if (n > 0) continue;
+            if (n < 0 && errno == EINTR) continue;
+            struct pollfd pfd;
+            pfd.fd = fd;
+            pfd.events = POLLIN | POLLHUP;
+            pfd.revents = 0;
+            poll(&pfd, 1, 20);
+        }
+    }
+    if (fd >= 0) close(fd);
+    if (pid > 1) {
+        int wstatus;
+        while (waitpid((pid_t)pid, &wstatus, 0) < 0 && errno == EINTR) {}
+    }
+}
 #endif
 
 V *v_alloc(int t) {
@@ -695,11 +733,7 @@ static int v_free_leaf(V *v) {
     case T_BVEC: case T_CVEC: case T_BMAT: case T_CMAT: if (owned) free(v->B); break;
     case T_SUBPROCESS:
 #ifndef _WIN32
-        if (v->j >= 0) close((int)v->j);
-        if (v->n > 1) {
-            int wstatus;
-            waitpid((pid_t)v->n, &wstatus, 0);
-        }
+        subprocess_reap((int)v->j, v->n);
 #endif
         break;
     default: break;
@@ -770,11 +804,7 @@ void v_free(V *v) {
             break;
         case T_SUBPROCESS:
 #ifndef _WIN32
-            if (cur->j >= 0) close((int)cur->j);
-            if (cur->n > 1) {
-                int wstatus;
-                waitpid((pid_t)cur->n, &wstatus, 0);
-            }
+            subprocess_reap((int)cur->j, cur->n);
 #endif
             break;
         default: break;

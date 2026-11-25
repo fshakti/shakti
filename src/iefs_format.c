@@ -2699,10 +2699,18 @@ static int value_has_col(V *v, const char *name) {
 
 /* 1: path is format 3 and *out holds the codecs still present on v (maybe empty).
  * 0: missing or not format 3. -1: a format-3 file that cannot be reread. */
-static int v3_codecs_to_keep(const char *path, V *v, V **out) {
+static int v3_codecs_to_keep(const char *path, V *v, V **out, char *err, size_t err_cap) {
     *out = NULL;
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return 0;
+    {
+        char ferr[512];
+        if (shakti_fs_check_fd(fd, 0, ferr, sizeof ferr) != 0) {
+            close(fd);
+            set_err(err, err_cap, ferr);
+            return -1;
+        }
+    }
     unsigned char hdr[IEFS_HEADER_SIZE];
     if (read(fd, hdr, sizeof hdr) != (ssize_t)sizeof hdr || memcmp(hdr, IEFS_MAGIC, 4) != 0 ||
         get_u16(hdr + 4) != 3) {
@@ -2765,9 +2773,10 @@ static int v3_codecs_to_keep(const char *path, V *v, V **out) {
 
 int iefs_store_write(V *v, const char *path, int io_mode, char *err, size_t err_cap) {
     V *keep = NULL;
-    int v3 = v3_codecs_to_keep(path, v, &keep);
+    int v3 = v3_codecs_to_keep(path, v, &keep, err, err_cap);
     if (v3 < 0) {
-        set_err(err, err_cap, "iefs: cannot read existing format");
+        if (!(err && err[0]))
+            set_err(err, err_cap, "iefs: cannot read existing format");
         return -1;
     }
     if (v3 == 1) {

@@ -1613,13 +1613,8 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
                 if (agg_done[s]) {
                     /* filled above */
                 } else if (colv->t == T_IVEC) {
-                    V *srcb = specs[s].src[0] ? tbl_col(tbl, tbl_col_idx(tbl, specs[s].src)) : NULL;
-                    if (specs[s].kind == COL_SUM && srcb && srcb->t == T_BVEC) {
-                        colv->J[g] = (int64_t)slot->sum[s];
-                    } else {
                     if (specs[s].kind == COL_SUM && slot->icarry[s]) g_isum_ovf = 1;
                     colv->J[g] = specs[s].kind == COL_SUM ? slot->isum[s] : slot->nrows;
-                    }
                 } else if (colv->t == T_FVEC) {
                     if (specs[s].kind == COL_SUM) colv->F[g] = slot->sum[s];
                     else if (specs[s].kind == COL_AVG)

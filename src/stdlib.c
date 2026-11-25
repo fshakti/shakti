@@ -505,7 +505,7 @@ V *bi_mkdir(V **a, in) {
 #endif
     if (rc != 0) return v_errf("mkdir: %s", strerror(errno));
 #if !defined(_WIN32) && !defined(__MINGW32__) && !defined(__MINGW64__)
-    {
+    if (shakti_safe_mode()) {
         int mfd = open(a[0]->s, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         char ferr[512];
         if (mfd < 0 || shakti_fs_check_fd(mfd, 1, ferr, sizeof ferr) != 0) {
