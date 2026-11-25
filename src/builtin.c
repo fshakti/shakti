@@ -1778,19 +1778,6 @@ static V *bi_enumerate(V**a,in){
     }
     return r;
 }
-/* One required parameter and no default: bind it directly. Anything else uses bind_params. */
-static int bind_one_param(Env *ce, V *fn, V *arg) {
-    V *p;
-    const char *s;
-    if (!fn->params || fn->params->t != T_LIST || fn->params->n != 1) return 0;
-    if (fn->defaults && fn->defaults->n > 0 && fn->defaults->L && fn->defaults->L[0]) return 0;
-    p = fn->params->L[0];
-    if (!p || p->t != T_STR || !p->s || p->s[0] == '*') return 0;
-    s = p->s;
-    if (!strcmp(s, "self") && env_get_here(ce, "self")) return 1;
-    env_set(ce, s, arg);
-    return 1;
-}
 static V *bi_map(V**a,in,Env*e){
     P(n<2||a[0]->t!=T_FN,v_err("map(fn,iter)"))
     V*fn=a[0],*iter=a[1];int64_t cnt=seq_n(iter);
