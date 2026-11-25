@@ -68,6 +68,13 @@ static unsigned long csv_max_file_bytes(void) {
 static char *read_all(const char *s, size_t *len, int *bad) {
     FILE *f = fopen(s, "rb");
     P(!f, NULL)
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(f, 0, ferr, sizeof ferr) != 0) {
+            if (bad) *bad = 1;
+            return NULL;
+        }
+    }
     fseek(f, 0, SEEK_END);
     long z = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -1014,6 +1021,11 @@ static V *table_delim_load(const char *path, V *columns_opt, V *schema_opt, char
 
     FILE *f = fopen(path, "rb");
     P(!f, v_errf("%s: cannot read '%s'", fmt, path))
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(f, 0, ferr, sizeof ferr) != 0)
+            return v_errf("%s: %s", fmt, ferr);
+    }
     char *line = NULL;
     size_t line_cap = 0;
     ssize_t got = get_record(&line, &line_cap, f, c, 1);

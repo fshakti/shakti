@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -672,6 +673,12 @@ int env_save(Env *e, const char *path) {
     if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
         int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
         if (fd >= 0) {
+            char ferr[128];
+            if (shakti_fs_check_fd(fd, 1, ferr, sizeof ferr) != 0) {
+                close(fd);
+                free(mem);
+                return 0;
+            }
             size_t off = 0;
             int wok = 1;
             while (off < memlen) {
@@ -723,6 +730,10 @@ int env_save(Env *e, const char *path) {
 int env_load(Env *e, const char *path) {
     FILE *fp = fopen(path, "rb");
     P(!fp,0)
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(fp, 0, ferr, sizeof ferr) != 0) return 0;
+    }
     char hdr[8];
     if (fread(hdr, 1, 8, fp) != 8 || memcmp(hdr, "KAIO_MCP", 8)) { fclose(fp); return 0; }
     int count;
@@ -883,6 +894,50 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
         return -1;
     }
     return 0;
+#endif
+}
+int shakti_fs_keep_file(FILE *fp, int write, char *err, size_t err_cap) {
+    if (!fp) return -1;
+    if (shakti_fs_check_fd(fileno(fp), write, err, err_cap) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    return 0;
+}
+FILE *shakti_fs_create(const char *path, char *err, size_t err_cap) {
+    int safe = shakti_safe_mode();
+#ifdef _WIN32
+    if (safe) {
+        if (err && err_cap)
+            snprintf(err, err_cap, "safe mode: filesystem confinement unavailable on this platform");
+        return NULL;
+    }
+    FILE *fp = fopen(path, "wb");
+    if (!fp && err && err_cap) snprintf(err, err_cap, "%s", strerror(errno));
+    return fp;
+#else
+    int fd = open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC | (safe ? 0 : O_TRUNC), 0666);
+    if (fd < 0) {
+        if (err && err_cap) snprintf(err, err_cap, "%s", strerror(errno));
+        return NULL;
+    }
+    if (safe && shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
+        close(fd);
+        return NULL;
+    }
+    if (safe && ftruncate(fd, 0) != 0) {
+        int e = errno;
+        close(fd);
+        if (err && err_cap) snprintf(err, err_cap, "%s", strerror(e));
+        return NULL;
+    }
+    FILE *fp = fdopen(fd, "wb");
+    if (!fp) {
+        if (err && err_cap) snprintf(err, err_cap, "%s", strerror(errno));
+        close(fd);
+        return NULL;
+    }
+    return fp;
 #endif
 }
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap) {

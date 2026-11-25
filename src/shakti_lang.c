@@ -292,6 +292,14 @@ int shakti_lang_main(int argc, char **argv) {
         }
     } else if(i < argc) {
         if (shakti_require_ie(argv[i])) { env_free(global); return 2; }
+        if (shakti_safe_mode()) {
+            char ferr[512];
+            if (shakti_fs_check(argv[i], 0, ferr, sizeof ferr) != 0) {
+                fprintf(stderr, "%s\n", ferr);
+                env_free(global);
+                return 1;
+            }
+        }
         {
 #ifndef _WIN32
             char *rp = realpath(argv[i], NULL);

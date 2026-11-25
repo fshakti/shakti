@@ -273,9 +273,38 @@ static int select_node_computed(Node *n) {
         if (n->ch[i] && n->ch[i]->type == N_ASSIGN) return 1;
     return 0;
 }
-/* Select list with name: expr. Each computed value is a full-height column. An error value is
- * kept in *errv (the first one) and the rest still run, so a later raise still stops the select. */
-static V *eval_select_computed(Node *n, V *tbl, Env *e, V **errv) {
+static int lambda_binds_name(Node *n, const char *s) {
+    Node *params = n->nch > 0 ? n->ch[0] : NULL;
+    if (!params) return 0;
+    for (int i = 0; i < params->nch; i++) {
+        Node *p = params->ch[i];
+        if (p && p->type == N_NAME && p->sval && !strcmp(p->sval, s)) return 1;
+    }
+    return 0;
+}
+/* A lambda parameter is a binding. Defaults are still outer references. */
+static int node_has_name(Node *n, const char *s) {
+    if (!n || !s) return 0;
+    if (n->type == N_LAMBDA) {
+        if (n->nch > 2 && node_has_name(n->ch[2], s)) return 1;
+        if (lambda_binds_name(n, s)) return 0;
+        return n->nch > 1 && node_has_name(n->ch[1], s);
+    }
+    if (n->type == N_NAME && n->sval && !strcmp(n->sval, s)) return 1;
+    for (int i = 0; i < n->nch; i++)
+        if (node_has_name(n->ch[i], s)) return 1;
+    return 0;
+}
+/* 1 when where names this computed column, so it has to be evaluated on every source row. */
+static int assign_needed_by_where(Node *item, Node *where) {
+    if (!where || where->type == N_NONE) return 0;
+    if (!item || item->type != N_ASSIGN || item->nch < 1 || !item->ch[0] || item->ch[0]->type != N_NAME)
+        return 0;
+    return node_has_name(where, item->ch[0]->sval);
+}
+/* phase 1: only columns where names (nil placeholder otherwise). phase 2: the rest.
+ * An error value is kept in *errv (the first one) and the rest of this phase still run. */
+static V *eval_select_computed(Node *n, V *tbl, Env *e, V **errv, int phase, Node *where_expr) {
     *errv = NULL;
     P(!n || n->type == N_NONE,v_nil())
     Node *one = n;
@@ -290,7 +319,13 @@ static V *eval_select_computed(Node *n, V *tbl, Env *e, V **errv) {
     V *r = v_list(0);
     for (int i = 0; i < nitems; i++) {
         Node *item = items[i];
-        if (item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME) {
+        int is_as = item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME;
+        int need = is_as && assign_needed_by_where(item, where_expr);
+        if ((phase == 1 && !need) || (phase == 2 && need)) {
+            v_list_append_own(r, v_nil());
+            continue;
+        }
+        if (is_as) {
             V *val = eval(item->ch[1], inner);
             if (g_error) {
                 env_leave(inner);
@@ -320,6 +355,31 @@ static V *eval_select_computed(Node *n, V *tbl, Env *e, V **errv) {
         }
     }
     env_leave(inner);
+    return r;
+}
+static V *filter_computed_cols(V *cols, V *mask) {
+    if (!cols || cols->t != T_LIST) return NULL;
+    for (int64_t i = 0; i < cols->n; i++) {
+        V *item = cols->L[i];
+        if (!item || item->t != T_DICT || item->n != 1 || !item->vals) continue;
+        V *f = vec_filter(item->vals->L[0], mask);
+        if (!f || f->t == T_ERR) return f ? f : v_err("select: bad filter");
+        v_free(item->vals->L[0]);
+        item->vals->L[0] = f;
+    }
+    return NULL;
+}
+static V *merge_select_cols(V *a, V *b) {
+    int a_ok = a && a->t == T_LIST;
+    int b_ok = b && b->t == T_LIST;
+    int64_t n = a_ok ? a->n : (b_ok ? b->n : 0);
+    V *r = v_list(n);
+    for (int64_t i = 0; i < n; i++) {
+        V *x = a_ok && i < a->n ? a->L[i] : NULL;
+        V *y = b_ok && i < b->n ? b->L[i] : NULL;
+        V *take = (x && x->t != T_NIL) ? x : y;
+        r->L[i] = v_ref(take);
+    }
     return r;
 }
 static V *eval_with_table_columns(V *tbl, Node *expr, Env *e) {
@@ -1141,27 +1201,105 @@ V *eval(Node *n, Env *e) {
             return v_err("select: computed column with by");
         }
         V *rerr = NULL;
-        V *cols = computed ? eval_select_computed(n->ch[1], from, e, &rerr)
-                           : eval_select_cols(n->ch[1], e);
+        V *cols = computed ? NULL : eval_select_cols(n->ch[1], e);
         if (g_error) {
             v_free(from); v_free(rerr);
             return cols ? cols : v_err("select: value error");
         }
         V *by = eval_select_name(n->ch[2], e);
-        V *where = eval_select_where(from, cols, n->ch[3], e);
+        V *where = computed ? NULL : eval_select_where(from, cols, n->ch[3], e);
         if (g_error) {   /* a raise (in from or where): the select stops */
             v_free(from); v_free(cols); v_free(by); v_free(rerr);
             return where;
         }
+        if (!computed) {
+            V *r = table_sql_select(from, cols, by, where);
+            v_free(from);
+            v_free(cols);
+            v_free(by);
+            v_free(where);
+            return r;
+        }
+        /* where names some computed columns: those run on every source row. The others run
+           only on the rows where keeps, after the mask is known. */
+        Node *wn = n->ch[3];
+        int has_where = wn && wn->type != N_NONE;
+        V *needed = has_where ? eval_select_computed(n->ch[1], from, e, &rerr, 1, wn) : NULL;
+        if (g_error) {
+            v_free(from); v_free(by); v_free(where); v_free(rerr); v_free(needed);
+            return needed ? needed : v_err("select: value error");
+        }
+        v_free(where);
+        where = eval_select_where(from, needed, wn, e);
+        if (g_error) {
+            v_free(from); v_free(by); v_free(rerr); v_free(needed);
+            return where;
+        }
+        if (where && where->t == T_ERR) {
+            v_free(from); v_free(by); v_free(needed);
+            if (rerr) { v_free(where); return rerr; }
+            return where;
+        }
+        V *src = from;
+        V *mask = NULL;
+        int prefiltered = 0;
+        if (has_where) {
+            mask = sql_where_mask(from, where);
+            if (!mask || mask->t == T_ERR) {
+                v_free(from); v_free(by); v_free(needed); v_free(where);
+                if (rerr) { v_free(mask); return rerr; }
+                return mask ? mask : v_err("where: need boolean mask");
+            }
+            int all = 1;
+            for (int64_t i = 0; i < mask->n; i++) if (!mask->B[i]) { all = 0; break; }
+            if (!all) {
+                V *ferr = NULL;
+                src = table_filter(from, mask);
+                if (!src || src->t == T_ERR) {
+                    v_free(from); v_free(by); v_free(needed); v_free(where); v_free(mask); v_free(rerr);
+                    return src ? src : v_err("select: bad filter");
+                }
+                ferr = filter_computed_cols(needed, mask);
+                if (ferr) {
+                    v_free(from); v_free(src); v_free(by); v_free(needed); v_free(where); v_free(mask); v_free(rerr);
+                    return ferr;
+                }
+                prefiltered = 1;
+            }
+        }
+        V *rerr2 = NULL;
         if (rerr) {
-            v_free(from); v_free(cols); v_free(by); v_free(where);
+            v_free(from); if (src != from) v_free(src);
+            v_free(by); v_free(where); v_free(mask); v_free(needed);
             return rerr;
         }
-        V *r = table_sql_select(from, cols, by, where);
-        v_free(from);
+        V *rest = eval_select_computed(n->ch[1], src, e, &rerr2, 2, has_where ? wn : NULL);
+        if (g_error) {
+            v_free(from); if (src != from) v_free(src);
+            v_free(by); v_free(where); v_free(mask); v_free(needed); v_free(rerr); v_free(rerr2);
+            return rest ? rest : v_err("select: value error");
+        }
+        if (!rerr) rerr = rerr2;
+        else v_free(rerr2);
+        if (rerr) {
+            v_free(from); if (src != from) v_free(src);
+            v_free(by); v_free(where); v_free(mask); v_free(needed); v_free(rest);
+            return rerr;
+        }
+        cols = merge_select_cols(needed, rest);
+        v_free(needed);
+        v_free(rest);
+        if (prefiltered) v_ref(src);
+        V *r = table_sql_select(src, cols, by, prefiltered ? NULL : where);
         v_free(cols);
         v_free(by);
         v_free(where);
+        v_free(mask);
+        if (src != from) {
+            v_free(src);
+            if (prefiltered) v_free(src);
+        }
+        v_free(from);
         return r;
     }
     case N_UPDATE: {
@@ -1202,6 +1340,12 @@ V *eval(Node *n, Env *e) {
             }
         }
         V *rerr;   /* an error value on the right */
+        if (where && where->t == T_ERR && from && from->t == T_TABLE) {
+            free(iefs_path);
+            v_free(from);
+            v_free(mask);
+            return where;
+        }
         V *assignments = eval_update_cols(n->ch[1], from, e, &rerr, mask);
         v_free(mask);
         if (g_error || assignments->t == T_ERR) {
@@ -1729,6 +1873,10 @@ V *eval(Node *n, Env *e) {
             v_free(a); v_free(b);
             return v_bool(n->op == OP_IN ? found : !found);
         }
+        /* Equal-length lists and vectors compare per item. A different length, or
+           anything else, stays vec_cmp (one bool, or a column against a scalar). */
+        V *z = vec_zip_cmp(a, b, n->op);
+        if (z) { v_free(a); v_free(b); return z; }
         V *r = vec_cmp(a, b, n->op);
         v_free(a); v_free(b);
         return r;

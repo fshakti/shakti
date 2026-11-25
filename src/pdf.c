@@ -1269,11 +1269,13 @@ V *bi_pdf_save(V **a, int n) {
         goto oom;
 
     size_t total = out.len;
-    FILE *fp = fopen(a[1]->s, "wb");
+    char ferr[512];
+    ferr[0] = 0;
+    FILE *fp = shakti_fs_create(a[1]->s, ferr, sizeof ferr);
     if (!fp) {
         free(offsets);
         buf_free(&out);
-        return v_errf("pdf_save: cannot write '%s'", a[1]->s);
+        return v_errf("pdf_save: %s", ferr[0] ? ferr : "cannot write");
     }
     size_t wr = fwrite(out.data, 1, total, fp);
     fclose(fp);
@@ -1296,6 +1298,11 @@ V *bi_pdf_open(V **a, int n) {
     }
     FILE *fp = fopen(a[0]->s, "rb");
     P(!fp, v_errf("pdf_open: cannot open '%s'", a[0]->s))
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(fp, 0, ferr, sizeof ferr) != 0)
+            return v_errf("pdf_open: %s", ferr);
+    }
     if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return v_err("pdf_open: seek failed"); }
     long sz = ftell(fp);
     if (sz < 0) { fclose(fp); return v_err("pdf_open: tell failed"); }
