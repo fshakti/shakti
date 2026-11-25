@@ -213,11 +213,24 @@ static int64_t *graph_candidate_indices(Graph *g, const char *s, const char *p, 
     int64_t cn = 0, cap = 0;
 
     if (!graph_wildcard(s)) {
-        if (idx_collect(g->subj_idx[graph_hash(s)], s, &cand, &cn, &cap) < 0) return NULL;
+        int irc = idx_collect(g->subj_idx[graph_hash(s)], s, &cand, &cn, &cap);
+        if (irc < 0) {
+            free(cand);
+            *n_out = -1;
+            return NULL;
+        }
     } else if (!graph_wildcard(p)) {
-        if (idx_collect(g->pred_idx[graph_hash(p)], p, &cand, &cn, &cap) < 0) return NULL;
+        if (idx_collect(g->pred_idx[graph_hash(p)], p, &cand, &cn, &cap) < 0) {
+            free(cand);
+            *n_out = -1;
+            return NULL;
+        }
     } else if (!graph_wildcard(o)) {
-        if (idx_collect(g->obj_idx[graph_hash(o)], o, &cand, &cn, &cap) < 0) return NULL;
+        if (idx_collect(g->obj_idx[graph_hash(o)], o, &cand, &cn, &cap) < 0) {
+            free(cand);
+            *n_out = -1;
+            return NULL;
+        }
     } else {
         cand = malloc((size_t)(g->count > 0 ? g->count : 1) * sizeof(int64_t));
         if (!cand) { *n_out = -1; return NULL; }
@@ -226,7 +239,7 @@ static int64_t *graph_candidate_indices(Graph *g, const char *s, const char *p, 
     }
     if (!cand) {
         cand = malloc(sizeof(int64_t));
-        if (!cand) return NULL;
+        if (!cand) { *n_out = -1; return NULL; }
     }
     *n_out = cn;
     return cand;

@@ -25,6 +25,8 @@
 #endif
 #if defined(__aarch64__)
 #include <arm_neon.h>
+#elif defined(__x86_64__)
+#include <emmintrin.h>
 #endif
 
 #ifdef _OPENMP
@@ -134,6 +136,56 @@ static double extremum_f64_neon(const double *d, int64_t n, int want_max) {
 }
 #endif
 
+#if defined(__x86_64__)
+/* Two doubles per step. A NaN mask matches the scalar rule that any NaN wins. */
+static double extremum_f64_sse(const double *d, int64_t n, int want_max) {
+    int64_t i;
+    __m128d acc, nanv;
+    if ((n & 1) == 0) {
+        acc = _mm_loadu_pd(d);
+        nanv = _mm_cmpunord_pd(acc, acc);
+        i = 2;
+    } else {
+        acc = _mm_set1_pd(d[0]);
+        nanv = _mm_cmpunord_pd(acc, acc);
+        i = 1;
+    }
+    for (; i + 8 <= n; i += 8) {
+        __m128d a = _mm_loadu_pd(d + i);
+        __m128d b = _mm_loadu_pd(d + i + 2);
+        __m128d c = _mm_loadu_pd(d + i + 4);
+        __m128d e = _mm_loadu_pd(d + i + 6);
+        nanv = _mm_or_pd(nanv, _mm_cmpunord_pd(a, a));
+        nanv = _mm_or_pd(nanv, _mm_cmpunord_pd(b, b));
+        nanv = _mm_or_pd(nanv, _mm_cmpunord_pd(c, c));
+        nanv = _mm_or_pd(nanv, _mm_cmpunord_pd(e, e));
+        if (want_max) {
+            acc = _mm_max_pd(acc, a); acc = _mm_max_pd(acc, b);
+            acc = _mm_max_pd(acc, c); acc = _mm_max_pd(acc, e);
+        } else {
+            acc = _mm_min_pd(acc, a); acc = _mm_min_pd(acc, b);
+            acc = _mm_min_pd(acc, c); acc = _mm_min_pd(acc, e);
+        }
+    }
+    for (; i + 2 <= n; i += 2) {
+        __m128d a = _mm_loadu_pd(d + i);
+        nanv = _mm_or_pd(nanv, _mm_cmpunord_pd(a, a));
+        acc = want_max ? _mm_max_pd(acc, a) : _mm_min_pd(acc, a);
+    }
+    if (i < n) {
+        if (d[i] != d[i]) return NAN;
+        acc = want_max ? _mm_max_pd(acc, _mm_set1_pd(d[i])) : _mm_min_pd(acc, _mm_set1_pd(d[i]));
+    }
+    if (_mm_movemask_pd(nanv)) return NAN;
+    {
+        double x = _mm_cvtsd_f64(acc);
+        double y = _mm_cvtsd_f64(_mm_unpackhi_pd(acc, acc));
+        if (x != x || y != y) return NAN;
+        return want_max ? (x > y ? x : y) : (x < y ? x : y);
+    }
+}
+#endif
+
 static double extremum_f64(const double *d, int64_t n, int want_max) {
 #if defined(__aarch64__)
 #ifdef _OPENMP
@@ -164,6 +216,8 @@ static double extremum_f64(const double *d, int64_t n, int want_max) {
     }
 #endif
     return extremum_f64_neon(d, n, want_max);
+#elif defined(__x86_64__)
+    return extremum_f64_sse(d, n, want_max);
 #else
     double r = d[0];
     int64_t i;
