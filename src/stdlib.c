@@ -20,6 +20,7 @@
 #endif
 #elif !defined(_WIN32)
 #include <dirent.h>
+#include <fcntl.h>
 #include <regex.h>
 #include <unistd.h>
 #define SHAKTI_HAVE_DIRENT 1
@@ -165,6 +166,13 @@ V *bi_listdir(V **a, in) {
 #if defined(SHAKTI_HAVE_DIRENT)
     DIR *d = opendir(a[0]->s);
     P(!d,v_errf("listdir: %s", strerror(errno)))
+    {
+        char ferr[512];
+        if (shakti_fs_check_fd(dirfd(d), 0, ferr, sizeof ferr) != 0) {
+            closedir(d);
+            return v_errf("listdir: %s", ferr);
+        }
+    }
     int cap = 64, nent = 0;
     char **names = malloc((size_t)cap * sizeof(char*));
     struct dirent *e;
@@ -247,6 +255,13 @@ static void walk_inner_paths_d(const char *base, WalkPaths *wp, int depth) {
     if (depth >= 64) return;
     DIR *d = opendir(base);
     Pv(!d)
+    {
+        char ferr[64];
+        if (shakti_fs_check_fd(dirfd(d), 0, ferr, sizeof ferr) != 0) {
+            closedir(d);
+            return;
+        }
+    }
     size_t bl = strlen(base);
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
@@ -324,9 +339,35 @@ V *bi_walk(V **a, in) {
 }
 V *bi_stat(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("stat(path)"))
-    FS_GUARD("stat", a[0]->s, 0);
+#if !defined(_WIN32)
+    static int safe = -1;
+    if (safe < 0) safe = shakti_safe_mode() ? 1 : 0;
+    struct stat sb;
+    if (!safe) {
+        P(stat(a[0]->s, &sb) != 0, v_errf("stat: %s", strerror(errno)))
+    } else {
+        FS_GUARD("stat", a[0]->s, 0);
+        int sfd = open(a[0]->s, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+        if (sfd < 0) sfd = open(a[0]->s, O_RDONLY | O_CLOEXEC);
+        P(sfd < 0, v_errf("stat: %s", strerror(errno)))
+        {
+            char ferr[512];
+            if (shakti_fs_check_fd(sfd, 0, ferr, sizeof ferr) != 0) {
+                close(sfd);
+                return v_errf("stat: %s", ferr);
+            }
+        }
+        if (fstat(sfd, &sb) != 0) {
+            int e = errno;
+            close(sfd);
+            return v_errf("stat: %s", strerror(e));
+        }
+        close(sfd);
+    }
+#else
     struct stat sb;
     P(stat(a[0]->s, &sb) != 0,v_errf("stat: %s", strerror(errno)))
+#endif
     V *k = v_list(3);
     k->L[0] = v_str("size");
     k->L[1] = v_str("mtime");
@@ -445,7 +486,20 @@ V *bi_mkdir(V **a, in) {
 #else
     int rc = mkdir(a[0]->s, 0755);
 #endif
-    return rc == 0 ? v_nil() : v_errf("mkdir: %s", strerror(errno));
+    if (rc != 0) return v_errf("mkdir: %s", strerror(errno));
+#if !defined(_WIN32) && !defined(__MINGW32__) && !defined(__MINGW64__)
+    {
+        int mfd = open(a[0]->s, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        char ferr[512];
+        if (mfd < 0 || shakti_fs_check_fd(mfd, 1, ferr, sizeof ferr) != 0) {
+            if (mfd >= 0) close(mfd);
+            rmdir(a[0]->s);
+            return v_err(mfd < 0 ? "mkdir: cannot open created directory" : ferr);
+        }
+        close(mfd);
+    }
+#endif
+    return v_nil();
 }
 V *bi_getenv(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("getenv"))
@@ -461,11 +515,30 @@ V *bi_getenv(V **a, in) {
 #include <sys/wait.h>
 extern char **environ;
 /* Shell via posix_spawn of /bin/sh -c (waitpid status). */
+static int sh_env_keep(const char *kv) {
+    static const char *const pfx[] = {
+        "PATH=", "LANG=", "LC_ALL=", "LC_CTYPE=", "TZ=", "HOME=", "SHAKTI_",
+        "XDG_RUNTIME_DIR="
+    };
+    size_t i;
+    for (i = 0; i < sizeof pfx / sizeof pfx[0]; i++)
+        if (!strncmp(kv, pfx[i], strlen(pfx[i]))) return 1;
+    return 0;
+}
 static int shakti_run_shell(const char *cmd) {
     if (!cmd) return -1;
     pid_t pid = 0;
     char *argv[] = {"/bin/sh", "-c", (char *)cmd, NULL};
-    int rc = posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, environ);
+    int envn = 0, ek = 0;
+    char **envp;
+    for (char **e = environ; e && *e; e++) envn++;
+    envp = malloc((size_t)(envn + 1) * sizeof(char *));
+    if (!envp) return -1;
+    for (char **e = environ; e && *e; e++)
+        if (sh_env_keep(*e)) envp[ek++] = *e;
+    envp[ek] = NULL;
+    int rc = posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, envp);
+    free(envp);
     if (rc != 0) return -1;
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) return -1;

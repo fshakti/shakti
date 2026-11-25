@@ -644,13 +644,23 @@ static V *seq_item(V *v, int64_t i) {
     }
 }
 /* Evaluate one positional call argument, expanding `*seq`. reserve keeps room for the remaining arguments. */
+/* 0 ok, -1 not a sequence, -2 an argument raised (g_error is set; do not run the call). */
 static inline int call_arg_eval(Node *a, Env *e, V ***args, int *nargs, int *cap, int reserve) {
     if (a->type != N_UNOP || a->op != OP_SPLAT || a->nch < 1) {
-        (*args)[(*nargs)++] = eval(a, e);
+        V *v = eval(a, e);
+        if (g_error) {
+            if (v) (*args)[(*nargs)++] = v;
+            return -2;
+        }
+        (*args)[(*nargs)++] = v ? v : v_nil();
         return 0;
     }
     V *v = eval(a->ch[0], e);
-    if (v->t != T_LIST && v->t != T_IVEC && v->t != T_FVEC && v->t != T_BVEC && v->t != T_CVEC && !is_mat_t(v->t)) {
+    if (g_error) {
+        if (v) (*args)[(*nargs)++] = v;
+        return -2;
+    }
+    if (!v || (v->t != T_LIST && v->t != T_IVEC && v->t != T_FVEC && v->t != T_BVEC && v->t != T_CVEC && !is_mat_t(v->t))) {
         v_free(v);
         return -1;
     }
@@ -850,6 +860,15 @@ static __attribute__((noinline)) V *eval_augassign_name(Node *n, Env *e) {
     }
     shakti_hold(cur); /* the right side may rebind the name */
     V *delta = eval(n->ch[1], e);
+    if (cur->t == T_ERR) {
+        shakti_unhold(cur);
+        v_free(delta);
+        return v_ref(cur);
+    }
+    if (g_error || !delta || delta->t == T_ERR) {
+        shakti_unhold(cur);
+        return delta ? delta : v_nil();
+    }
     /* in place only while x still names cur: where the right side rebound x, cur + e is
        bound to x below, and cur (a cached int, say) is left as it is */
     if(local && cur->t == T_INT && shakti_count(cur) == 1 && delta->t == T_INT &&
@@ -878,6 +897,16 @@ static V *index_current(V *obj, V *idx) {
         V *found = v_dict_find(obj, idx);
         return found ? v_ref(found) : v_nil();
     }
+    if (obj->t == T_TABLE) {
+        if (idx->t != T_STR)
+            return v_errf("cannot index type table with type %s", type_name(idx->t));
+        for (int i = 0; i < obj->keys->n; i++) {
+            V *k = obj->keys->L[i];
+            if (k && k->t == T_STR && !strcmp(k->s, idx->s))
+                return obj->vals->L[i] ? v_ref(obj->vals->L[i]) : v_nil();
+        }
+        return v_errf("table: no column '%s'", idx->s);
+    }
     if (idx->t != T_INT && idx->t != T_CHAR)
         return v_errf("cannot index type %s with type %s", type_name(obj->t), type_name(idx->t));
     int64_t i = idx->j;
@@ -898,6 +927,28 @@ static V *store_at(V *obj, V *idx, V *val, int *stored, int *in_range) {
     *in_range = 0;
     if (obj->t == T_DICT) {
         v_dict_set_key(obj, idx, val);
+        *stored = 1;
+        return NULL;
+    }
+    if (obj->t == T_TABLE && idx->t == T_STR) {
+        V *bad = table_col_check(obj, val);
+        if (bad) return bad;
+        v_list_unshare(&obj->keys);
+        v_list_unshare(&obj->vals);
+        for (int i = 0; i < obj->keys->n; i++) {
+            V *k = obj->keys->L[i];
+            if (k && k->t == T_STR && !strcmp(k->s, idx->s)) {
+                v_free(obj->vals->L[i]);
+                obj->vals->L[i] = v_ref(val);
+                *stored = 1;
+                return NULL;
+            }
+        }
+        if (obj->keys->n == 0) obj->n = val->n;
+        V *k = v_str(idx->s);
+        v_list_append(obj->keys, k);
+        v_list_append(obj->vals, val);
+        v_free(k);
         *stored = 1;
         return NULL;
     }
@@ -990,6 +1041,10 @@ V *eval(Node *n, Env *e) {
 #ifdef SHAKTI_HAVE_IEFS
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
                 from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                if (from->t == T_ERR && from->s && strstr(from->s, "compressed")) {
+                    v_free(from);
+                    from = iefs_store_read(from0->s);
+                }
             } else
 #endif
             {
@@ -1028,6 +1083,10 @@ V *eval(Node *n, Env *e) {
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
                 iefs_path = strdup(from0->s);
                 from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                if (from->t == T_ERR && from->s && strstr(from->s, "compressed")) {
+                    v_free(from);
+                    from = iefs_store_read(from0->s);
+                }
                 v_free(from0);
                 if (from->t == T_ERR) {
                     free(iefs_path);
@@ -1088,6 +1147,10 @@ V *eval(Node *n, Env *e) {
             if (plen >= 5 && !strcmp(from0->s + plen - 5, ".iefs")) {
                 iefs_path = strdup(from0->s);
                 from = iefs_store_map(from0->s, IEFS_MAP_PAGES_THP);
+                if (from->t == T_ERR && from->s && strstr(from->s, "compressed")) {
+                    v_free(from);
+                    from = iefs_store_read(from0->s);
+                }
                 v_free(from0);
                 if (from->t == T_ERR) {
                     free(iefs_path);
@@ -1627,6 +1690,10 @@ V *eval(Node *n, Env *e) {
         if(target->type == N_INDEX) {
             V *obj = eval(target->ch[0], e);
             if (!obj || obj->t == T_ERR) { v_free(val); return obj ? obj : v_err("bad assignment target"); }
+            if (target->nch > 3 || (target->nch > 2 && !is_mat_t(obj->t))) {
+                v_free(obj); v_free(val);
+                return v_err("too many indices");
+            }
             if (is_mat_t(obj->t) && target->nch >= 3) {
                 V *idx0 = eval(target->ch[1], e);
                 if (!idx0 || idx0->t == T_ERR) {
@@ -1678,7 +1745,10 @@ V *eval(Node *n, Env *e) {
             if (!idx || idx->t == T_ERR) { v_free(obj); v_free(val); return idx ? idx : v_err("bad assignment index"); }
             int stored = 0, in_range = 0;
             V *oom = store_at(obj, idx, val, &stored, &in_range);
-            if (oom) return oom;
+            if (oom) {
+                if (!g_error) { v_free(obj); v_free(idx); v_free(val); }
+                return oom;
+            }
             if (!stored) {
                 V *err = index_fail(obj, idx, val, in_range);
                 v_free(obj); v_free(idx); v_free(val);
@@ -1723,8 +1793,94 @@ V *eval(Node *n, Env *e) {
         EVAL_STACK_GUARD();
         Node *target = n->ch[0];
         if(target->type == N_NAME) return eval_augassign_name(n, e);
+        if(target->type == N_DOT) {
+            V *obj = eval(target->ch[0], e);
+            if (!obj || obj->t == T_ERR) return obj ? obj : v_err("bad augmented assignment target");
+            V *key = v_str(target->sval ? target->sval : "");
+            V *cur = index_current(obj, key);
+            V *delta = eval(n->ch[1], e);
+            if (!cur || cur->t == T_ERR) {
+                v_free(obj); v_free(key); v_free(delta);
+                return cur ? cur : v_err("bad augmented assignment target");
+            }
+            if (g_error || !delta || delta->t == T_ERR) {
+                v_free(obj); v_free(key); v_free(cur);
+                return delta ? delta : v_nil();
+            }
+            V *newval = vec_binop(cur, delta, n->op);
+            v_free(cur);
+            if (!newval || newval->t == T_ERR) {
+                v_free(obj); v_free(key); v_free(delta);
+                return newval ? newval : v_err("bad augmented assignment");
+            }
+            int stored = 0, in_range = 0;
+            V *oom = store_at(obj, key, newval, &stored, &in_range);
+            v_free(delta);
+            if (oom) {
+                if (!g_error) { v_free(obj); v_free(key); v_free(newval); }
+                return oom;
+            }
+            v_free(obj); v_free(key); v_free(newval);
+            return v_nil();
+        }
         if(target->type == N_INDEX) {
             V *obj = eval(target->ch[0], e);
+            if (!obj || obj->t == T_ERR) return obj ? obj : v_err("bad augmented assignment target");
+            if (target->nch > 3 || (target->nch > 2 && !is_mat_t(obj->t))) {
+                v_free(obj);
+                return v_err("too many indices");
+            }
+            if (is_mat_t(obj->t) && target->nch == 3) {
+                V *idx0 = eval(target->ch[1], e);
+                V *idx1 = eval(target->ch[2], e);
+                V *delta = eval(n->ch[1], e);
+                if (g_error || !idx0 || idx0->t == T_ERR || !idx1 || idx1->t == T_ERR || !delta || delta->t == T_ERR) {
+                    v_free(obj); v_free(idx0); v_free(idx1);
+                    return g_error ? (delta && delta->t != T_ERR ? (v_free(delta), v_nil()) : (delta ? delta : v_nil()))
+                                   : (idx0 && idx0->t == T_ERR ? (v_free(idx1), v_free(delta), idx0)
+                                      : (idx1 && idx1->t == T_ERR ? (v_free(delta), idx1) : (delta ? delta : v_nil())));
+                }
+                int ints = (idx0->t == T_INT || idx0->t == T_CHAR) && (idx1->t == T_INT || idx1->t == T_CHAR);
+                int64_t r = 0, c = 0;
+                V *cur = NULL;
+                if (ints) {
+                    r = idx0->j; c = idx1->j;
+                    if (r < 0) r += obj->n;
+                    if (c < 0) c += mat_cols(obj);
+                    if (r >= 0 && r < obj->n && c >= 0 && c < mat_cols(obj)) {
+                        if (obj->t == T_IMAT) cur = v_int(obj->J[mat_idx(obj, r, c)]);
+                        else if (obj->t == T_FMAT) cur = v_float(obj->F[mat_idx(obj, r, c)]);
+                        else if (obj->t == T_BMAT) cur = v_bool(obj->B[mat_idx(obj, r, c)] != 0);
+                        else cur = v_char(obj->B[mat_idx(obj, r, c)]);
+                    }
+                }
+                if (!cur) {
+                    v_free(obj); v_free(idx0); v_free(idx1); v_free(delta);
+                    return v_err(ints ? "index out of range" : "bad augmented assignment index");
+                }
+                V *newval = vec_binop(cur, delta, n->op);
+                v_free(cur);
+                if (!newval || newval->t == T_ERR) {
+                    v_free(obj); v_free(idx0); v_free(idx1); v_free(delta);
+                    return newval ? newval : v_err("bad augmented assignment");
+                }
+                int stored = 0;
+                if (v_ensure_writable(obj) != 0) {
+                    v_free(delta); v_free(newval);
+                    return assign_map_oom(obj, idx0, idx1, NULL);
+                }
+                if (obj->t == T_IMAT && (newval->t == T_INT || newval->t == T_CHAR)) {
+                    obj->J[mat_idx(obj, r, c)] = newval->j; stored = 1;
+                } else if (obj->t == T_FMAT && (newval->t == T_FLOAT || newval->t == T_INT || newval->t == T_CHAR)) {
+                    obj->F[mat_idx(obj, r, c)] = newval->t == T_FLOAT ? newval->f : (double)newval->j; stored = 1;
+                } else if (obj->t == T_BMAT && newval->t == T_BOOL) {
+                    obj->B[mat_idx(obj, r, c)] = newval->j ? 1 : 0; stored = 1;
+                } else if (obj->t == T_CMAT && (newval->t == T_CHAR || newval->t == T_INT)) {
+                    obj->B[mat_idx(obj, r, c)] = (unsigned char)newval->j; stored = 1;
+                }
+                v_free(obj); v_free(idx0); v_free(idx1); v_free(delta); v_free(newval);
+                return stored ? v_nil() : v_err("bad augmented assignment");
+            }
             V *idx = eval(target->ch[1], e);
             V *delta = eval(n->ch[1], e);
             if (!obj || obj->t == T_ERR) { v_free(idx); v_free(delta); return obj ? obj : v_err("bad augmented assignment target"); }
@@ -1743,7 +1899,11 @@ V *eval(Node *n, Env *e) {
             }
             int stored = 0, in_range = 0;
             V *oom = store_at(obj, idx, newval, &stored, &in_range);
-            if (oom) { v_free(delta); return oom; }
+            if (oom) {
+                v_free(delta);
+                if (!g_error) { v_free(obj); v_free(idx); v_free(newval); }
+                return oom;
+            }
             if (!stored) {
                 V *err = index_fail(obj, idx, newval, in_range);
                 v_free(obj); v_free(idx); v_free(delta); v_free(newval);
@@ -1768,6 +1928,10 @@ V *eval(Node *n, Env *e) {
         for(int i=1; i<n->nch; i++) {
             if (obj->t == T_ERR) break;
             V *idx = eval(n->ch[i], e);
+            if (!idx || idx->t == T_ERR) {
+                v_free(obj);
+                return idx ? idx : v_err("bad index");
+            }
             V *next = NULL;
             if(obj->t == T_TABLE && idx->t == T_BVEC) {
                 next = table_filter(obj, idx);
@@ -1940,11 +2104,12 @@ V *eval(Node *n, Env *e) {
             int nargs = 0;
             for(int i=1; i<n->nch; i++) {
                 if(n->ch[i]->type == N_KWARG) continue;
-                if(call_arg_eval(n->ch[i], e, &args, &nargs, &args_cap, n->nch - 1 - i) < 0) {
+                int arc = call_arg_eval(n->ch[i], e, &args, &nargs, &args_cap, n->nch - 1 - i);
+                if(arc < 0) {
                     v_free(obj);
                     for(int j=0;j<nargs;j++) v_free(args[j]);
                     free(args);
-                    return v_err("cannot unpack non-sequence");
+                    return arc == -2 ? v_nil() : v_err("cannot unpack non-sequence");
                 }
             }
             V *attr = NULL;
@@ -1964,6 +2129,13 @@ V *eval(Node *n, Env *e) {
                         kwvals[nkw] = eval(n->ch[i]->ch[0], e);
                         nkw++;
                     }
+                }
+                if (g_error) {
+                    v_free(attr); v_free(obj);
+                    for(int j=0;j<nargs;j++) v_free(args[j]);
+                    for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
+                    free(args); free(kwnames); free(kwvals);
+                    return v_nil();
                 }
                 V *self = NULL;
                 V *lead = obj->keys && obj->keys->n > 0 ? obj->keys->L[0] : NULL;
@@ -2033,12 +2205,21 @@ V *eval(Node *n, Env *e) {
                 kwnames[nkw] = v_str(n->ch[i]->sval);
                 kwvals[nkw] = eval(n->ch[i], e);
                 nkw++;
-            } else if(call_arg_eval(n->ch[i], e, &args, &nargs, &args_cap, n->nch - 1 - i) < 0) {
-                for(int j=0;j<nargs;j++) v_free(args[j]);
-                for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
-                free(args); free(kwnames); free(kwvals);
-                return v_err("cannot unpack non-sequence");
+            } else {
+                int arc = call_arg_eval(n->ch[i], e, &args, &nargs, &args_cap, n->nch - 1 - i);
+                if(arc < 0) {
+                    for(int j=0;j<nargs;j++) v_free(args[j]);
+                    for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
+                    free(args); free(kwnames); free(kwvals);
+                    return arc == -2 ? v_nil() : v_err("cannot unpack non-sequence");
+                }
             }
+        }
+        if (g_error) {
+            for(int j=0;j<nargs;j++) v_free(args[j]);
+            for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
+            free(args); free(kwnames); free(kwvals);
+            return v_nil();
         }
         if(fn_node->type == N_NAME && is_builtin(fn_node->sval)) {
             if ((!strcmp(fn_node->sval, "pop") || !strcmp(fn_node->sval, "append")) &&
@@ -2181,6 +2362,8 @@ V *eval(Node *n, Env *e) {
         EVAL_STACK_GUARD();
         Node *vars = n->ch[0];
         V *iter = eval(n->ch[1], e);
+        if (!iter) return v_err("for: no iterable");
+        if (iter->t == T_ERR) return iter;
         V *r = v_nil();
         if(iter->t == T_IVEC) {
             for(int64_t i=0;i<iter->n;i++) {

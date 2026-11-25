@@ -101,7 +101,22 @@ static V *import_module(const char *name, Env *e) {
             for (int k = 0; k < nd && !f; k++) {
                 if (snprintf(path, sizeof path, "%s/%s.ie", dirs[k], rel) >= (int)sizeof path)
                     continue;
+                /* Script dir and "." stay inside the safe-mode root. Stdlib dirs do not:
+                 * the host modules live outside SHAKTI_FS_ROOT. */
+                if (shakti_safe_mode() && (dirs[k] == g_script_dir || strcmp(dirs[k], ".") == 0)) {
+                    char fs_err[256];
+                    if (shakti_fs_check(path, 0, fs_err, sizeof fs_err) != 0)
+                        continue;
+                }
                 f = fopen_regular(path, NULL, 0);
+                if (f && shakti_safe_mode() && (dirs[k] == g_script_dir || strcmp(dirs[k], ".") == 0)) {
+                    char ferr[256];
+                    int fd = fileno(f);
+                    if (shakti_fs_check_fd(fd, 0, ferr, sizeof ferr) != 0) {
+                        fclose(f);
+                        f = NULL;
+                    }
+                }
             }
         }
     }

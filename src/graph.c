@@ -191,19 +191,20 @@ static int graph_match(const char *val, const char *pat) {
     return graph_wildcard(pat) || (val && pat && !strcmp(val, pat));
 }
 
-static void idx_collect(IdxEntry *head, const char *key, int64_t **out, int64_t *out_n, int64_t *out_cap) {
+static int idx_collect(IdxEntry *head, const char *key, int64_t **out, int64_t *out_n, int64_t *out_cap) {
     IdxEntry *e = idx_find(head, key);
-    if (!e) return;
+    if (!e) return 0;
     for (int64_t i = 0; i < e->n; i++) {
         if (*out_n >= *out_cap) {
             int64_t cap = *out_cap ? *out_cap * 2 : 16;
             int64_t *n = realloc(*out, (size_t)cap * sizeof(int64_t));
-            Pv(!n)
+            if (!n) return -1;
             *out = n;
             *out_cap = cap;
         }
         (*out)[(*out_n)++] = e->idx[i];
     }
+    return 0;
 }
 
 static int64_t *graph_candidate_indices(Graph *g, const char *s, const char *p, const char *o, int64_t *n_out) {
@@ -211,16 +212,20 @@ static int64_t *graph_candidate_indices(Graph *g, const char *s, const char *p, 
     int64_t cn = 0, cap = 0;
 
     if (!graph_wildcard(s)) {
-        idx_collect(g->subj_idx[graph_hash(s)], s, &cand, &cn, &cap);
+        if (idx_collect(g->subj_idx[graph_hash(s)], s, &cand, &cn, &cap) < 0) return NULL;
     } else if (!graph_wildcard(p)) {
-        idx_collect(g->pred_idx[graph_hash(p)], p, &cand, &cn, &cap);
+        if (idx_collect(g->pred_idx[graph_hash(p)], p, &cand, &cn, &cap) < 0) return NULL;
     } else if (!graph_wildcard(o)) {
-        idx_collect(g->obj_idx[graph_hash(o)], o, &cand, &cn, &cap);
+        if (idx_collect(g->obj_idx[graph_hash(o)], o, &cand, &cn, &cap) < 0) return NULL;
     } else {
         cand = malloc((size_t)g->count * sizeof(int64_t));
         P(!cand, NULL)
         for (int64_t i = 0; i < g->count; i++) cand[i] = i;
         cn = g->count;
+    }
+    if (!cand) {
+        cand = malloc(sizeof(int64_t));
+        if (!cand) return NULL;
     }
     *n_out = cn;
     return cand;

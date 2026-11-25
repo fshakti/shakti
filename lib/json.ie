@@ -10,10 +10,10 @@ _table : table
 def load(filename, *pluck, as_table:False):
 	j: json_load(filename)
 	if as_table or len(pluck):
-		return table(j, *pluck)
+		return _rows(j, *pluck)
 	return j
 
-def table(j, *pluck):
+def _rows(j, *pluck):
 	if type(j) = "dict":
 		return _table(j)
 	n:0
@@ -30,5 +30,8 @@ def table(j, *pluck):
 			d[k].append(v)
 		n:n+1
 	return _table(d)
+
+def table(j, *pluck):
+	return _rows(j, *pluck)
 
 save : json_dump

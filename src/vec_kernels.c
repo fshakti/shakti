@@ -74,28 +74,55 @@ double shakti_sum_f64(const double *d, int64_t n) {
 #endif
 #if defined(__aarch64__)
     if (n >= ISL_OMP_VEC_MIN) {
-        double r = 0;
 #ifdef _OPENMP
-        #pragma omp parallel reduction(+:r)
+        int nt = omp_get_max_threads();
+        if (nt < 1) nt = 1;
+        double *parts = calloc((size_t)nt, sizeof(double));
+        if (!parts) return sum_f64_neon(d, n);
+        #pragma omp parallel num_threads(nt)
         {
-            int tid = omp_get_thread_num(), nt = omp_get_num_threads();
-            int64_t chunk = (n + nt - 1) / nt;
+            int tid = omp_get_thread_num(), nth = omp_get_num_threads();
+            int64_t chunk = (n + nth - 1) / nth;
             int64_t start = (int64_t)tid * chunk;
             int64_t len = (start + chunk > n) ? (n - start) : chunk;
-            if (len > 0) r += sum_f64_neon(d + start, len);
+            if (start < n && len > 0) parts[tid] = sum_f64_neon(d + start, len);
         }
-#else
-        r = sum_f64_neon(d, n);
-#endif
+        double r = 0;
+        for (int i = 0; i < nt; i++) r += parts[i];
+        free(parts);
         return r;
+#else
+        return sum_f64_neon(d, n);
+#endif
     }
     return sum_f64_neon(d, n);
 #else
-    double r = 0;
 #ifdef _OPENMP
     int nt = isl_vec_omp_threads(n);
-    #pragma omp parallel for reduction(+:r) if (n >= ISL_OMP_VEC_MIN) num_threads(nt)
+    if (nt > 1 && n >= ISL_OMP_VEC_MIN) {
+        double *parts = calloc((size_t)nt, sizeof(double));
+        if (!parts) {
+            double r = 0;
+            for (int64_t i = 0; i < n; i++) r += d[i];
+            return r;
+        }
+        #pragma omp parallel num_threads(nt)
+        {
+            int tid = omp_get_thread_num(), nth = omp_get_num_threads();
+            int64_t chunk = (n + nth - 1) / nth;
+            int64_t start = (int64_t)tid * chunk;
+            int64_t end = start + chunk > n ? n : start + chunk;
+            double s = 0;
+            for (int64_t i = start; i < end; i++) s += d[i];
+            parts[tid] = s;
+        }
+        double r = 0;
+        for (int i = 0; i < nt; i++) r += parts[i];
+        free(parts);
+        return r;
+    }
 #endif
+    double r = 0;
     for (int64_t i = 0; i < n; i++) r += d[i];
     return r;
 #endif
@@ -104,6 +131,7 @@ double shakti_sum_f64(const double *d, int64_t n) {
 double shakti_min_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
     if (n == 1) return d[0];
+    for (int64_t i = 0; i < n; i++) if (isnan(d[i])) return NAN;
     double r = d[0];
 #ifdef _OPENMP
     int nt = isl_vec_omp_threads(n);
@@ -116,6 +144,7 @@ double shakti_min_f64(const double *d, int64_t n) {
 double shakti_max_f64(const double *d, int64_t n) {
     if (n <= 0) return 0.0;
     if (n == 1) return d[0];
+    for (int64_t i = 0; i < n; i++) if (isnan(d[i])) return NAN;
     double r = d[0];
 #ifdef _OPENMP
     int nt = isl_vec_omp_threads(n);

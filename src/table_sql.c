@@ -429,7 +429,11 @@ static inline int agg_needs_sum(int kind) {
  * sum of a list[int] whose sum doesn't fit gives a float. */
 static int g_isum_ovf, g_isum_off;
 static inline int sum_is_int(int kind, int col_t) {
-    return !g_isum_off && kind == COL_SUM && col_t == T_IVEC;
+    return !g_isum_off && kind == COL_SUM && (col_t == T_IVEC || col_t == T_BVEC);
+}
+static inline int64_t sum_cell_i64(V *col, int64_t row) {
+    if (col->t == T_BVEC) return col->B[row] ? 1 : 0;
+    return col->J[row];
 }
 static inline void int_add(int64_t *sum, int32_t *carry, int64_t b) {
     if (__builtin_add_overflow(*sum, b, sum)) *carry += b < 0 ? -1 : 1;
@@ -477,7 +481,7 @@ static int gh_slot_init_aggs(GhSlot *s, V *tbl, const int *by_idx, int nby,
             last_x = x;
             int kind = specs[sp].kind;
             if (col && sum_is_int(kind, col->t)) {
-                s->isum[sp] = col->J[row];
+                s->isum[sp] = sum_cell_i64(col, row);
                 s->icarry[sp] = 0;
             } else if (agg_needs_sum(kind)) {
                 s->sum[sp] = x;
@@ -516,7 +520,7 @@ static void gh_slot_accum(GhSlot *s, int64_t row,
         last_x = x;
         int kind = specs[sp].kind;
         if (col && sum_is_int(kind, col_t[sp])) {
-            int_add(&s->isum[sp], &s->icarry[sp], col->J[row]);
+            int_add(&s->isum[sp], &s->icarry[sp], sum_cell_i64(col, row));
         } else if (agg_needs_sum(kind)) {
             s->sum[sp] += x;
         } else if (agg_needs_min(kind) && x < s->minv[sp]) {
@@ -776,7 +780,7 @@ static inline void dense_accum_row(int key_val, int64_t row, int64_t *s_nrows, i
         last_x = x;
         int kind = specs[sp].kind;
         if (s_isum[k]) {
-            int_add(&s_isum[k][key_val], &s_icarry[k][key_val], col->J[row]);
+            int_add(&s_isum[k][key_val], &s_icarry[k][key_val], sum_cell_i64(col, row));
         } else if (agg_needs_sum(kind)) {
             s_sum[k][key_val] += x;
         } else if (!s_have_mm[k][key_val]) {
@@ -859,7 +863,7 @@ static int dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *dim
             }
         }
     }
-    return 0;
+    return 1;
 }
 /* LSD radix argsort of indices by uint64 keys (stable). */
 static int radix_argsort_u64(uint64_t *keys, int64_t *idx, int64_t n) {
@@ -928,7 +932,7 @@ static int run_reduce_into_slot(GhSlot *s, V **bcols, int nby, int64_t *idx, int
         if (col && sum_is_int(kind, ct)) {
             int64_t isum = 0;
             int32_t carry = 0;
-            for (int64_t i = 0; i < len; i++) int_add(&isum, &carry, col->J[idx[start + i]]);
+            for (int64_t i = 0; i < len; i++) int_add(&isum, &carry, sum_cell_i64(col, idx[start + i]));
             s->isum[sp] = isum;
             s->icarry[sp] = carry;
             continue;
@@ -1070,7 +1074,7 @@ static int try_dense_ivec_group(V *tbl, V **bcols, int nby, ColSpec *specs, int 
                         s_name_row[key_val] = r;
                         nactive++;
                     }
-                    int_add(&isum[key_val], &carry[key_val], col->J[r]);
+                    int_add(&isum[key_val], &carry[key_val], sum_cell_i64(col, r));
                 }
             } else if (agg_needs_sum(kind)) {
                 double *sum = s_sum[0];

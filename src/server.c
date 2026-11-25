@@ -405,15 +405,6 @@ static V *dispatch_rpc(Env *global, const char *body) {
             v_free(req);
             return http;
         }
-        if (r->t == T_DICT) {
-            char *js = json_dumps_val(r);
-            v_free(r);
-            V *http = http_result(200, "application/json",
-                js ? js : "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"dumps\"},\"id\":null}");
-            free(js);
-            v_free(req);
-            return http;
-        }
         V *http = rpc_ok_http(id, r);
         v_free(r);
         v_free(req);

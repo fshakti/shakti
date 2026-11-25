@@ -671,8 +671,16 @@ static size_t iefs_align_up(size_t x, size_t a) {
     return (x + a - 1) & ~(a - 1);
 }
 
+static int list_is_datetimes(V *v) {
+    if (!v || v->t != T_LIST || v->n <= 0) return 0;
+    for (int64_t i = 0; i < v->n; i++)
+        if (!v->L[i] || v->L[i]->t != T_DATETIME) return 0;
+    return 1;
+}
+
 static int col_is_extent(V *v) {
     if (!v) return 0;
+    if (list_is_datetimes(v)) return 1;
     switch (v->t) {
     case T_DVEC: case T_IVEC: case T_UVEC: case T_FVEC: case T_BVEC: case T_CVEC:
     case T_IMAT: case T_FMAT: case T_BMAT: case T_CMAT: case T_UMAT: case T_DMAT:
@@ -689,6 +697,18 @@ static int col_raw_export(V *v, unsigned char **out, size_t *out_len, uint64_t *
     if (own_out)
         *own_out = 0;
     if (!col_is_extent(v)) return -1;
+    if (list_is_datetimes(v)) {
+        unsigned char *buf = malloc((size_t)v->n * 8u);
+        if (!buf) return -1;
+        for (int64_t i = 0; i < v->n; i++)
+            put_u64(buf + (size_t)i * 8u, (uint64_t)v->L[i]->j);
+        *out = buf;
+        *out_len = (size_t)v->n * 8u;
+        *nelem = (uint64_t)v->n;
+        *bits_out = 64;
+        if (own_out) *own_out = 1;
+        return 0;
+    }
     int bits = (v->t == T_BVEC || v->t == T_BMAT) ? 1 : ((v->t == T_CVEC || v->t == T_CMAT) ? 8 : 64);
     *bits_out = bits;
     const void *src = NULL;
@@ -782,6 +802,13 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
      * allocate one pointer and the old copy wrote the other. */
     if (type == T_UVEC || type == T_DVEC || type == T_GVEC || type == T_UMAT || type == T_DMAT)
         return v_err("iefs: unsupported extent type");
+    if (type == T_DATETIME) {
+        if (nbytes != (size_t)nelem * 8u) return v_err("iefs: extent length mismatch");
+        V *v = v_list((int64_t)nelem);
+        for (uint64_t i = 0; i < nelem; i++)
+            v->L[i] = v_datetime((int64_t)get_u64(p + i * 8u));
+        return v;
+    }
     if (nelem > IEFS_MAX_ELEMS || ncols > IEFS_MAX_ELEMS || ncols >= (1ull << 32))
         return v_err("iefs: extent too large");
     if (iefs_bits_not_64(type, bits))
@@ -801,8 +828,6 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
         return v;
     }
     if (type == T_CMAT) {
-        if (ncols == 0 && nelem > 0)
-            return v_err("iefs: matrix ncols is zero");
         if (ncols != 0 && nelem > IEFS_MAX_ELEMS / ncols)
             return v_err("iefs: extent too large");
         uint64_t cells = nelem * ncols;
@@ -819,8 +844,6 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
         return v;
     }
     if (type == T_IMAT || type == T_FMAT || type == T_BMAT || type == T_UMAT || type == T_DMAT) {
-        if (ncols == 0 && nelem > 0)
-            return v_err("iefs: matrix ncols is zero");
         if (ncols != 0 && nelem > IEFS_MAX_ELEMS / ncols)
             return v_err("iefs: extent too large");
         uint64_t cells = nelem * ncols;
@@ -967,6 +990,10 @@ static int residual_ok_for_extent(int codec, int type, int bits, size_t raw_len)
         return 0;
     if (codec == SHAKTI_CODEC_GORILLA_F64)
         return type == T_FVEC || type == T_FMAT;
+    if (codec == SHAKTI_CODEC_DATETIME)
+        return type == T_IVEC || type == T_IMAT || type == T_DATETIME;
+    if (type == T_DATETIME)
+        return 0;
     return type == T_IVEC || type == T_IMAT;
 }
 
@@ -1062,6 +1089,7 @@ static int iefs_v3_prepare(V *v, int codec, int outer, int level, V *codecs, Ief
         return -1;
     }
 
+    int named_cols = 0;
     if ((v->t == T_TABLE || v->t == T_DICT) && v->keys && v->vals &&
         v->keys->t == T_LIST && v->vals->t == T_LIST && v->keys->n == v->vals->n) {
         int ok = 1;
@@ -1071,13 +1099,14 @@ static int iefs_v3_prepare(V *v, int codec, int outer, int level, V *codecs, Ief
             }
         }
         if (ok && v->keys->n > 0) {
+            named_cols = 1;
             if (v->t == T_DICT)
                 v3_flags = IEFS_FLAG_V3_DICT;
             n_ext = (int)v->keys->n;
             ext = calloc((size_t)n_ext, sizeof(*ext));
             if (!ext) { set_err(err, err_cap, "iefs: out of memory"); return -1; }
             for (int i = 0; i < n_ext; i++) {
-                ext[i].type = v->vals->L[i]->t;
+                ext[i].type = list_is_datetimes(v->vals->L[i]) ? T_DATETIME : v->vals->L[i]->t;
                 ext[i].name = strdup(v->keys->L[i]->s ? v->keys->L[i]->s : "");
                 if (!ext[i].name) {
                     set_err(err, err_cap, "iefs: out of memory");
@@ -1132,6 +1161,11 @@ static int iefs_v3_prepare(V *v, int codec, int outer, int level, V *codecs, Ief
             ext[0].raw = payload.data;
         }
         ext[0].own_raw = 1;
+    }
+    if (!named_cols && codecs && codecs->t == T_DICT && codecs->keys && codecs->keys->t == T_LIST &&
+        codecs->keys->n > 0) {
+        set_err(err, err_cap, "iefs: codecs apply only to named vector or matrix columns");
+        goto fail;
     }
 
     for (int i = 0; i < n_ext; i++) {
@@ -2249,7 +2283,8 @@ V *iefs_decode_max(const unsigned char *buf, size_t len, size_t max_plain) {
     if (len < IEFS_HEADER_SIZE + (size_t)payload_len)
         return v_err("iefs: truncated file");
     const unsigned char *payload = buf + IEFS_HEADER_SIZE;
-    uint32_t got_crc = crc32_iefs_layout(buf, payload, (size_t)payload_len);
+    uint32_t got_crc = ver == 1 ? crc32_update(0, payload, (size_t)payload_len)
+                                : crc32_iefs_layout(buf, payload, (size_t)payload_len);
     if (got_crc != expect_crc)
         return v_err("iefs: checksum mismatch");
 
@@ -2482,8 +2517,9 @@ static V *iefs_decode_mapped_cols_names(const unsigned char *buf, size_t len, Ie
     uint16_t ver = get_u16(buf + 4);
     if (ver != 1 && ver != 2 && ver != 3)
         return v_errf("iefs: unsupported version %u", (unsigned)ver);
-    if (ver == 3)
-        return iefs_decode_v3(buf, len, reg, 0, check_names, colnames, IEFS_MAX_PAYLOAD);
+    if (ver == 3) {
+        return iefs_decode_v3(buf, len, reg, 1, check_names, colnames, shakti_decode_limit());
+    }
     uint16_t flags = get_u16(buf + 6);
     if (flags & IEFS_FLAG_CODEC_MASK)
         return v_err("iefs.map: compressed IEFS requires iefs.load");
@@ -2497,7 +2533,9 @@ static V *iefs_decode_mapped_cols_names(const unsigned char *buf, size_t len, Ie
      * optional: verify the whole-file checksum at open like load does. */
     {
         uint32_t expect_crc = get_u32(buf + 16);
-        if (crc32_iefs_layout(buf, payload, (size_t)payload_len) != expect_crc)
+        uint32_t got_crc = ver == 1 ? crc32_update(0, payload, (size_t)payload_len)
+                                    : crc32_iefs_layout(buf, payload, (size_t)payload_len);
+        if (got_crc != expect_crc)
             return v_err("iefs: checksum mismatch");
     }
     IefsR r = {.p = payload, .n = (size_t)payload_len, .off = 0, .ver = ver, .depth = 0, .err = {0}, .map_reg = reg};
@@ -2589,7 +2627,110 @@ int iefs_store_write_codec(V *v, const char *path, int io_mode, int codec, int l
     return iefs_store_write_ex(v, path, io_mode, codec, level, ver, err, err_cap);
 }
 
+static const char *codec_id_name(int c) {
+    switch (c) {
+    case SHAKTI_CODEC_ZSTD: return "zstd";
+    case SHAKTI_CODEC_SNAPPY: return "snappy";
+    case SHAKTI_CODEC_DELTA_I64: return "delta_i64";
+    case SHAKTI_CODEC_FIRE_I64: return "fire_i64";
+    case SHAKTI_CODEC_GORILLA_F64: return "gorilla_f64";
+    case SHAKTI_CODEC_DATE: return "date";
+    case SHAKTI_CODEC_TIME: return "time";
+    case SHAKTI_CODEC_DATETIME: return "datetime";
+    default: return NULL;
+    }
+}
+
+static int value_has_col(V *v, const char *name) {
+    if (!v || !name || (v->t != T_TABLE && v->t != T_DICT) || !v->keys || v->keys->t != T_LIST)
+        return 0;
+    for (int64_t i = 0; i < v->keys->n; i++) {
+        V *k = v->keys->L[i];
+        if (k && k->t == T_STR && k->s && strcmp(k->s, name) == 0) return 1;
+    }
+    return 0;
+}
+
+/* 1: path is format 3 and *out holds the codecs still present on v (maybe empty).
+ * 0: missing or not format 3. -1: a format-3 file that cannot be reread. */
+static int v3_codecs_to_keep(const char *path, V *v, V **out) {
+    *out = NULL;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return 0;
+    unsigned char hdr[IEFS_HEADER_SIZE];
+    if (read(fd, hdr, sizeof hdr) != (ssize_t)sizeof hdr || memcmp(hdr, IEFS_MAGIC, 4) != 0 ||
+        get_u16(hdr + 4) != 3) {
+        close(fd);
+        return 0;
+    }
+    unsigned char th[8];
+    if (pread(fd, th, 8, IEFS_HEADER_SIZE) != 8) {
+        close(fd);
+        return -1;
+    }
+    uint32_t n_ext = get_u32(th);
+    uint32_t names_len = get_u32(th + 4);
+    if (n_ext > 1000000u || names_len > 64u * 1024u * 1024u) {
+        close(fd);
+        return -1;
+    }
+    size_t erec = (size_t)n_ext * IEFS_V3_EXTENT_SIZE;
+    unsigned char *er = malloc(erec ? erec : 1);
+    unsigned char *names = malloc(names_len ? names_len : 1);
+    if (!er || !names) {
+        free(er);
+        free(names);
+        close(fd);
+        return -1;
+    }
+    int bad = pread(fd, er, erec, IEFS_HEADER_SIZE + 8) != (ssize_t)erec ||
+              pread(fd, names, names_len, (off_t)(IEFS_HEADER_SIZE + 8 + erec)) != (ssize_t)names_len;
+    close(fd);
+    if (bad) {
+        free(er);
+        free(names);
+        return -1;
+    }
+    V *keys = v_list(0), *vals = v_list(0);
+    for (uint32_t i = 0; i < n_ext; i++) {
+        unsigned char *e = er + (size_t)i * IEFS_V3_EXTENT_SIZE;
+        int c = e[2], o = e[3];
+        if (!c && !o) continue;
+        uint32_t no = get_u32(e + 40);
+        if (no == 0xffffffffu || no >= names_len) continue;
+        size_t nl = strnlen((char *)names + no, names_len - no);
+        if (no + nl >= names_len) continue;
+        if (!value_has_col(v, (char *)names + no)) continue;
+        const char *cn = codec_id_name(c);
+        const char *on = codec_id_name(o);
+        char spec[64];
+        if (cn && on) snprintf(spec, sizeof spec, "%s+%s", cn, on);
+        else if (cn) snprintf(spec, sizeof spec, "%s", cn);
+        else if (on) snprintf(spec, sizeof spec, "%s", on);
+        else continue;
+        v_list_append_own(keys, v_str((char *)names + no));
+        v_list_append_own(vals, v_str(spec));
+    }
+    free(er);
+    free(names);
+    *out = v_dict_own(keys, vals);
+    return 1;
+}
+
 int iefs_store_write(V *v, const char *path, int io_mode, char *err, size_t err_cap) {
+    V *keep = NULL;
+    int v3 = v3_codecs_to_keep(path, v, &keep);
+    if (v3 < 0) {
+        set_err(err, err_cap, "iefs: cannot read existing format");
+        return -1;
+    }
+    if (v3 == 1) {
+        int rc = iefs_store_write_full(v, path, io_mode, SHAKTI_CODEC_NONE, SHAKTI_CODEC_NONE, 3, 3,
+                                       keep, err, err_cap);
+        v_free(keep);
+        return rc;
+    }
+    v_free(keep);
     return iefs_store_write_codec(v, path, io_mode, SHAKTI_CODEC_NONE, 0, err, err_cap);
 }
 

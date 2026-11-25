@@ -22,7 +22,7 @@
 
 def save(x, path, direct:-1, codec:"", level:3, format:0, codecs:"", sync:"full"):
     d : direct
-    if d = -1:
+    if type(d) = "int" and d = -1:
         d : "auto"
     c : codec
     fmt : format

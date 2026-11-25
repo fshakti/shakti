@@ -394,11 +394,18 @@ V *v_table(V *cols, V *data) {
     }
     if (data->n > 0) {
         if (!data->L || !data->L[0]) return v_err("table: ragged columns");
-        n = data->L[0]->n;
-        for (int64_t i = 1; i < data->n; i++) {
-            if (!data->L[i] || data->L[i]->n != n)
-                return v_err("table: ragged columns");
+        int seq = 0;
+        for (int64_t i = 0; i < data->n; i++) {
+            V *c = data->L[i];
+            if (!c) return v_err("table: ragged columns");
+            int is_seq = c->t == T_LIST || c->t == T_IVEC || c->t == T_FVEC || c->t == T_BVEC ||
+                         c->t == T_CVEC || c->t == T_IMAT || c->t == T_FMAT || c->t == T_BMAT ||
+                         c->t == T_CMAT;
+            if (!is_seq) continue;
+            if (!seq) { n = c->n; seq = 1; }
+            else if (c->n != n) return v_err("table: ragged columns");
         }
+        if (!seq) n = 1;
     }
     V *v = v_alloc(T_TABLE);
     v->n = n;

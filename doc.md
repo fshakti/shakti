@@ -456,7 +456,8 @@ reverse(m)                    # [[3, 4], [9, 7]]: the rows in reverse order
 | `mmul(a, b)` | matrix multiply (`matrix[bool]` not supported) |
 | `+`, `-`, `*`, `/`, `//`, `%`, `**` | element-wise on numeric matrices; a zero divisor in `/`, `//` or `%` is an error, as for scalars |
 | unary `-` | element-wise negation (int/float matrices) |
-| `=`, `!=`, `<`, `>`, `<=`, `>=` | element-wise compare → `matrix[bool]` |
+| `<`, `>`, `<=`, `>=` | element-wise compare → `matrix[bool]` |
+| `=`, `!=` | whole-matrix compare → `bool` (`True` when every cell matches) |
 
 Expression `@` is each. Leading `@` decorates. `mmul` multiplies matrices.
 
@@ -569,8 +570,9 @@ Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TS
 
 ### CSV / TSV load
 
-- Header required; data rows load as numeric columns (`ivec` or `fvec`). Non-numeric text parses as `0.0`
-  and makes that column an `fvec`.
+- Header required; data rows load as numeric columns (`ivec` or `fvec`). A field that is not an integer
+  makes that column an `fvec`. `strtod` reads a leading number, so `12abc` is `12.0` and `xyz` is `0.0`.
+  An integer outside the int range is an error (`csv: integer out of range`), not the largest int.
   A column loads as an `ivec` when every field is digits with an optional sign, once
   the spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off, inside quotes too:
   `1, 2` and `1," 2 "` are ints; `2.0`, `1e3`, or any text such as `x` make the column float.
@@ -1931,7 +1933,7 @@ print(iefs.direct_available(), iefs.uring_available(), iefs.libaio_available())
 ```
 
 - `iefs.load` / global `load("….iefs")` — full read + CRC + malloc copy.
-- `iefs.map` — `mmap` the file, skip CRC, alias contiguous vector/matrix payloads. Compressed files require `load` / `loads`. When the file of a format-3 dict whose values are all vectors or matrices has a key name missing, not NUL-terminated, or repeated, its header, table of contents and the padding before its first value are checked against its CRC (each value counted by the CRC the table stores for it, so no value is read), so a damaged name is `iefs: checksum mismatch`, as from `load`; damage to a value, or to a name that leaves every name present and distinct, is not checked. Looking for a repeat sorts a dict's key names on each map (about 60 µs for 1000 keys), and a dict that repeats a key is checked on each map (about 0.11 ms, 0.36 ms for 1000 keys). `iefs.map(path, columns: ["b", "a"])` gives only those columns of a table, in the order named, and a name given twice gives the column twice; a format-3 dict whose values are all vectors or matrices takes `columns:` too and keeps each key once. A name not in the file is an error. A `select` from a mapped table held in a variable (`m : iefs.map("….iefs")`, then `select from m`) copies the columns it selects into memory, as a select from any table variable does (see [`sql` module](#sql-module)); `select … from "….iefs"` reads them from the mapping when it keeps every row.
+- `iefs.map` — `mmap` the file, skip CRC, then copy contiguous vector/matrix payloads into the process so a later rewrite or shrink of the file cannot change the value or raise SIGBUS. Compressed files require `load` / `loads`. When the file of a format-3 dict whose values are all vectors or matrices has a key name missing, not NUL-terminated, or repeated, its header, table of contents and the padding before its first value are checked against its CRC (each value counted by the CRC the table stores for it, so no value is read), so a damaged name is `iefs: checksum mismatch`, as from `load`; damage to a value, or to a name that leaves every name present and distinct, is not checked. Looking for a repeat sorts a dict's key names on each map (about 60 µs for 1000 keys), and a dict that repeats a key is checked on each map (about 0.11 ms, 0.36 ms for 1000 keys). `iefs.map(path, columns: ["b", "a"])` gives only those columns of a table, in the order named, and a name given twice gives the column twice; a format-3 dict whose values are all vectors or matrices takes `columns:` too and keeps each key once. A name not in the file is an error. A `select` from a mapped table held in a variable (`m : iefs.map("….iefs")`, then `select from m`) copies the columns it selects into memory, as a select from any table variable does (see [`sql` module](#sql-module)); `select … from "….iefs"` reads them from the mapping when it keeps every row.
 - `iefs.dumps` / `iefs.loads` — in-memory frames as `list[char]`.
 - Host codecs: `zstd`, `snappy`, plus residual `delta_i64` / `fire_i64` / `gorilla_f64` / `date` / `time` / `datetime` (v3 extents; compounds like `fire_i64+zstd`). Also interned as `compress` / `decompress`.
 - SQL `select … from "….iefs"` opens via **map**. `update … from` and `delete from` a `.iefs` path write their result back to the file; a variable holding the path keeps the path.

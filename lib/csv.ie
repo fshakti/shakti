@@ -59,7 +59,7 @@ def save(obj, filename, esc:'""',fs:",",rs:"\n",charset:None):
 		charset:nu
 	def enc(x):
 		x:str(x)
-		if re_match('"', x):
+		if re_match(fs, x) or re_match('"', x) or re_match(rs, x):
 			return '"'+re_sub('"',esc,x)+'"'
 		return x
 	def line(x):

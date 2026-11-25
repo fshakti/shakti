@@ -551,8 +551,19 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
                 const char *cell = cells[cj] ? cells[cj] : "";
                 if (use_float[cj])
                     cols[cj]->F[row] = strtod(cell, NULL);
-                else
-                    cols[cj]->J[row] = (int64_t)strtoll(cell, NULL, 10);
+                else {
+                    errno = 0;
+                    char *end = NULL;
+                    long long iv = strtoll(cell, &end, 10);
+                    if (errno == ERANGE) {
+                        for (int k = 0; k < nh; k++) v_free(cols[k]);
+                        free(cols); free(hdr_cells); free(cells); free(use_float);
+                        free(lines); free(raw);
+                        return v_errf("%s: integer out of range", fmt);
+                    }
+                    (void)end;
+                    cols[cj]->J[row] = (int64_t)iv;
+                }
             }
             row++;
         }
@@ -686,8 +697,21 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
             const char *cell = cells[cj] ? cells[cj] : "";
             if (use_float[cj])
                 cols[cj]->F[row] = strtod(cell, NULL);
-            else
-                cols[cj]->J[row] = (int64_t)strtoll(cell, NULL, 10);
+            else {
+                errno = 0;
+                long long iv = strtoll(cell, NULL, 10);
+                if (errno == ERANGE) {
+                    for (int ci = 0; ci < nh; ci++) {
+                        free(headers[ci]);
+                        v_free(cols[ci]);
+                    }
+                    free(headers); free(cells); free(use_float); free(cols);
+                    fclose(f);
+                    free(line);
+                    return v_errf("%s: integer out of range", fmt);
+                }
+                cols[cj]->J[row] = (int64_t)iv;
+            }
         }
         row++;
     }

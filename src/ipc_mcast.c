@@ -487,6 +487,10 @@ int ipc_mcast_publish_on(IpcHandle *s, int fd, const unsigned char *data, size_t
     }
     size_t max = IPC_UDP_MAX < IPC_MAX_MSG ? IPC_UDP_MAX : IPC_MAX_MSG;
     const char *key = ipc_mcast_key();
+    if (!key) {
+        snprintf(err, err_cap, "ipc: mcast requires SHAKTI_IPC_MCAST_KEY");
+        return -1;
+    }
     if (key) max -= IPC_MCAST_TRAILER;
     if (len > max) {
         snprintf(err, err_cap, "ipc: mcast message too large (%zu)", len);
@@ -517,6 +521,10 @@ int ipc_mcast_recv(IpcHandle *s, int block, char **out, size_t *out_len,
                    char *err, size_t err_cap) {
     size_t max = IPC_UDP_MAX < IPC_MAX_MSG ? IPC_UDP_MAX : IPC_MAX_MSG;
     const char *key = ipc_mcast_key();
+    if (!key) {
+        snprintf(err, err_cap, "ipc: mcast requires SHAKTI_IPC_MCAST_KEY");
+        return -1;
+    }
     unsigned char *raw = malloc(IPC_MCAST_CTX + max + 1);
     if (!raw) {
         snprintf(err, err_cap, "ipc: oom");

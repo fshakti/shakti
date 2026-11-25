@@ -6,6 +6,7 @@
 #endif
 #include "ipc_internal.h"
 #include "shakti_internal.h"
+extern int rest_addr_blocked(const struct sockaddr *sa);
 
 #include <netdb.h>
 #if !defined(_WIN32)
@@ -871,10 +872,17 @@ static int sock_connect_tcp(const char *host, int port, char *err, size_t err_ca
         return -1;
     }
     int s = -1;
+    int blocked = 0;
     for (ai = res; ai; ai = ai->ai_next) {
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s < 0) continue;
         ipc_set_cloexec(s);
+        if (rest_addr_blocked(ai->ai_addr)) {
+            close(s);
+            s = -1;
+            blocked = 1;
+            continue;
+        }
         if (connect(s, ai->ai_addr, ai->ai_addrlen) == 0) break;
         close(s);
         s = -1;
@@ -882,7 +890,10 @@ static int sock_connect_tcp(const char *host, int port, char *err, size_t err_ca
     int saved = errno;
     freeaddrinfo(res);
     if (s < 0) {
-        snprintf(err, err_cap, "ipc: connect: %s", strerror(saved));
+        if (blocked)
+            snprintf(err, err_cap, "ipc: connect: private address blocked");
+        else
+            snprintf(err, err_cap, "ipc: connect: %s", strerror(saved));
         return -1;
     }
     sock_set_tcp_nodelay(s);

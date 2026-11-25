@@ -1581,7 +1581,7 @@ static int tree_too_deep(Node *root, int limit) {
             if (!cur.n->ch[k]) continue;
             if (sn == cap) {
                 DepthItem *grown = stk == local ? malloc(cap * 2 * sizeof *stk) : realloc(stk, cap * 2 * sizeof *stk);
-                if (!grown) { sn = 0; break; }
+                if (!grown) { deep = 1; sn = 0; break; }
                 if (stk == local) memcpy(grown, local, sizeof local);
                 stk = grown;
                 cap *= 2;

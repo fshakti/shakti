@@ -835,13 +835,14 @@ V *vec_cmp(V *a, V *b, int op) {
         P(a->n != b->n,v_bool(op==OP_NE))
         return v_bool(nums_equal(a, b, a->n) == (op==OP_EQ));
     }
-    if(a->t==T_LIST && (b->t==T_LIST||b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC) && (op==OP_EQ||op==OP_NE)) {
+    if(a->t==T_LIST && (b->t==T_LIST||b->t==T_IVEC||b->t==T_FVEC||b->t==T_CVEC||b->t==T_BVEC) && (op==OP_EQ||op==OP_NE)) {
         P(a->n != b->n,v_bool(op==OP_NE))
         for(int64_t i=0;i<a->n;i++) {
             V *belem;
             if(b->t==T_LIST) belem = b->L[i];
             else if(b->t==T_IVEC) belem = v_int(b->J[i]);
             else if(b->t==T_CVEC) belem = v_char(b->B[i]);
+            else if(b->t==T_BVEC) belem = v_bool(b->B[i] != 0);
             else belem = v_float(b->F[i]);
             V *c = vec_cmp(a->L[i], belem, OP_EQ);
             if (c && c->t == T_ERR) { if (b->t != T_LIST) v_free(belem); return c; }
@@ -851,7 +852,7 @@ V *vec_cmp(V *a, V *b, int op) {
         }
         return v_bool(op==OP_EQ);
     }
-    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC) && b->t==T_LIST && (op==OP_EQ||op==OP_NE)) {
+    if((a->t==T_IVEC||a->t==T_FVEC||a->t==T_CVEC||a->t==T_BVEC) && b->t==T_LIST && (op==OP_EQ||op==OP_NE)) {
         return vec_cmp(b, a, op);
     }
     if(a->t==T_LIST && b->t==T_STR) {

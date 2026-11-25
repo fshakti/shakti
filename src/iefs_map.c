@@ -169,6 +169,19 @@ static void *mmap_hugetlb(size_t len, int pages_mode, char *err, size_t err_cap)
 #endif
 }
 
+static int materialize_tree(V *v) {
+    if (!v) return 0;
+    if (v->owner_kind == V_OWNER_MAP_ALIAS)
+        return iefs_v_materialize(v);
+    if (v->t == T_LIST) {
+        for (int64_t i = 0; i < v->n; i++)
+            if (materialize_tree(v->L[i]) != 0) return -1;
+    } else if (v->t == T_DICT || v->t == T_TABLE) {
+        if (materialize_tree(v->keys) != 0 || materialize_tree(v->vals) != 0) return -1;
+    }
+    return 0;
+}
+
 V *iefs_store_map(const char *path, int pages_mode) {
     return iefs_store_map_cols(path, pages_mode, NULL);
 }
@@ -250,7 +263,14 @@ V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames) {
     iefs_map_region_release(reg);
     if (v->t == T_ERR)
         iefs_set_last_error(v->s);
-    else
+    else {
+        /* Own the bytes. A later shrink of the file cannot SIGBUS a reader. */
+        if (materialize_tree(v) != 0) {
+            v_free(v);
+            iefs_set_last_error("iefs.map: out of memory");
+            return v_err("iefs.map: out of memory");
+        }
         iefs_set_last_error(NULL);
+    }
     return v;
 }

@@ -548,19 +548,22 @@ void gfx_core_mouse_move(int wx, int wy, int down) { (void)wx;(void)wy;(void)dow
 #endif
 
 /* ---- Shakti builtins ---- */
+static int g_gfx_range;
 static inline int gfx_arg_int(V **a, int n, int idx, int fb) {
     if (n <= idx) return fb;
     if (a[idx]->t == T_INT) return (int)a[idx]->j;
     if (a[idx]->t == T_FLOAT) {
         int x;
-        if (!float_as_int(a[idx]->f, &x)) return fb;
+        if (!float_as_int(a[idx]->f, &x)) { g_gfx_range = 1; return fb; }
         return x;
     }
+    g_gfx_range = 1;
     return fb;
 }
 static V *gfx_err(char *err) { P(!err[0], v_err("gfx: failed")); return v_err(err); }
 
 V *bi_gfx_open(V **a, int n) {
+    g_gfx_range = 0;
     char err[512];
     const char *title = "Shakti GFX";
     int dw = 960, dh = 540;
@@ -569,6 +572,7 @@ V *bi_gfx_open(V **a, int n) {
     if (n >= 3) {
         dw = gfx_arg_int(a, n, 1, dw);
         dh = gfx_arg_int(a, n, 2, dh);
+        P(g_gfx_range, v_err("gfx: integer out of range"));
         P(gfx_open_ex(title, dw, dh, err, sizeof err) != 0, gfx_err(err));
         return v_nil();
     }
@@ -592,25 +596,33 @@ V *bi_gfx_sync_keys(V **a, int n) {
 }
 V *bi_gfx_clear(V **a, int n) {
     P(n<1,v_err("gfx_clear(color)"));
+    g_gfx_range = 0;
     gfx_clear((uint32_t)gfx_arg_int(a,n,0,0));
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_nil();
 }
 V *bi_gfx_fill_rect(V **a, int n) {
     P(n<5,v_err("gfx_fill_rect(x,y,w,h,color)"));
+    g_gfx_range = 0;
     gfx_fill_rect(gfx_arg_int(a,n,0,0), gfx_arg_int(a,n,1,0), gfx_arg_int(a,n,2,0),
                   gfx_arg_int(a,n,3,0), (uint32_t)gfx_arg_int(a,n,4,0));
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_nil();
 }
 V *bi_gfx_line(V **a, int n) {
     P(n<5,v_err("gfx_line(x0,y0,x1,y1,color)"));
+    g_gfx_range = 0;
     gfx_line(gfx_arg_int(a,n,0,0), gfx_arg_int(a,n,1,0), gfx_arg_int(a,n,2,0),
              gfx_arg_int(a,n,3,0), (uint32_t)gfx_arg_int(a,n,4,0));
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_nil();
 }
 V *bi_gfx_fill_circle(V **a, int n) {
     P(n<4,v_err("gfx_fill_circle(cx,cy,r,color)"));
+    g_gfx_range = 0;
     gfx_fill_circle(gfx_arg_int(a,n,0,0), gfx_arg_int(a,n,1,0), gfx_arg_int(a,n,2,0),
                     (uint32_t)gfx_arg_int(a,n,3,0));
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_nil();
 }
 V *bi_gfx_click_pending(V **a, int n) { (void)a;(void)n; return v_int(gfx_click_pending()); }
@@ -626,21 +638,27 @@ V *bi_gfx_text(V **a, int n) {
     P(n < 4, v_err("gfx_text(x,y,s,color[,scale])"));
     P(a[2]->t != T_STR, v_err("gfx_text: s must be string"));
     s = a[2]->s;
+    g_gfx_range = 0;
     scale = n >= 5 ? gfx_arg_int(a, n, 4, 1) : 1;
     gfx_text(gfx_arg_int(a, n, 0, 0), gfx_arg_int(a, n, 1, 0), s,
              (uint32_t)gfx_arg_int(a, n, 3, 0), scale);
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_nil();
 }
 V *bi_gfx_text_width(V **a, int n) {
     int scale;
     P(n < 1 || a[0]->t != T_STR, v_err("gfx_text_width(s[,scale])"));
+    g_gfx_range = 0;
     scale = n >= 2 ? gfx_arg_int(a, n, 1, 1) : 1;
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_int(gfx_text_width(a[0]->s, scale));
 }
 V *bi_gfx_copy_rect(V **a, int n) {
     P(n < 6, v_err("gfx_copy_rect(sx,sy,w,h,dx,dy)"));
+    g_gfx_range = 0;
     gfx_copy_rect(gfx_arg_int(a, n, 0, 0), gfx_arg_int(a, n, 1, 0),
                   gfx_arg_int(a, n, 2, 0), gfx_arg_int(a, n, 3, 0),
                   gfx_arg_int(a, n, 4, 0), gfx_arg_int(a, n, 5, 0));
+    P(g_gfx_range, v_err("gfx: integer out of range"));
     return v_nil();
 }

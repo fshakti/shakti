@@ -700,7 +700,7 @@ static void midi_platform_poll(void) {
 /* An int, or a float truncated toward zero; a number beyond int's range reads as INT_MIN or INT_MAX,
  * which every caller's range test refuses. A NaN (or any other type) gives -1. */
 static int arg_int(V *v, int *out) {
-    if (v->t == T_INT) { *out = v->j < INT_MIN ? INT_MIN : v->j > INT_MAX ? INT_MAX : (int)v->j; return 0; }
+    if (v->t == T_INT || v->t == T_CHAR) { *out = v->j < INT_MIN ? INT_MIN : v->j > INT_MAX ? INT_MAX : (int)v->j; return 0; }
     if (v->t == T_FLOAT && !isnan(v->f)) {
         *out = float_fits_int(v->f) ? (int)v->f : v->f < 0 ? INT_MIN : INT_MAX;
         return 0;
