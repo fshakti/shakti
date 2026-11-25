@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/shakti_internal.h — private cross-TU helpers (not public API) */
 #ifndef SHAKTI_INTERNAL_H
 #define SHAKTI_INTERNAL_H
@@ -68,6 +69,8 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
 void shakti_oom(const char *where);
 void *x_malloc(size_t sz, const char *where);
 void *x_calloc(size_t nmemb, size_t sz, const char *where);
+void *try_malloc(size_t sz);
+void *try_calloc(size_t nmemb, size_t sz);
 void *x_realloc(void *ptr, size_t sz, const char *where);
 char *x_strdup(const char *s, const char *where);
 size_t x_mul(size_t a, size_t b, const char *where);
@@ -84,6 +87,7 @@ void v_dict_push(V *d, V *k, V *val);
 
 V *v_alloc(int t);
 V *try_promote_matrix(V **elems, int nch);
+void v_specialize(V *v);
 void print_val(V *v, FILE *fp, int repr_mode);
 void v_serialize(V *v, FILE *fp);
 V *v_deserialize(FILE *fp);
@@ -94,6 +98,7 @@ V *vec_logic(V *a, V *b, int is_and);
 V *vec_binop(V *a, V *b, int op);
 V *mat_binop(V *a, V *b, int op);
 V *table_filter(V *tbl, V *mask);
+V *vec_filter(V *v, V *mask);
 
 void lex_fail(Lexer *l, const char *message);
 int lex_peek_is_signed_literal(Lexer *l);
@@ -102,6 +107,8 @@ void parse_fail(const char *fmt, ...);
 
 void node_sprint(Node *n, FILE *fp);
 
+/* Set when a user function is bound over a builtin name. Builtin calls skip the shadow lookup until then. */
+extern int shakti_builtin_fn_shadow;
 Env *env_acquire(Env *parent);
 void env_release(Env *e);
 void env_leave(Env *e);

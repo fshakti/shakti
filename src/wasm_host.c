@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * wasm_host.c — Shakti in the browser: boot site/main.ie, tick, gfx blit, synth PCM, REPL eval.
  */

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # hld — HTTP length-delimited wrapper for Shakti values
 #
 #   import hld

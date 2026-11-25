@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/ast.c — AST nodes */
 #include "shakti_internal.h"
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # gfx — standalone pixel window (cross-platform where built).
 
 def open(title:"Shakti GFX", w:0, h:0):

@@ -19,7 +19,7 @@ SRCS := \
 	$(SRC)/parse.c $(SRC)/vec_ops.c $(SRC)/eval.c $(SRC)/eval_each.c $(SRC)/import.c $(SRC)/repl.c \
 	$(SRC)/shakti_lang.c $(SRC)/builtin.c $(SRC)/table_sql.c $(SRC)/mat_simd.c \
 	$(SRC)/vec_kernels.c $(SRC)/fb_present.c \
-	$(SRC)/methods.c $(SRC)/stdlib.c $(SRC)/json_parse.c $(SRC)/table_io.c \
+	$(SRC)/methods.c $(SRC)/str_ops.c $(SRC)/stdlib.c $(SRC)/json_parse.c $(SRC)/table_io.c \
 	$(SRC)/table_xml.c $(SRC)/input.c \
 	$(SRC)/rest.c $(SRC)/graph.c $(SRC)/machine.c $(SRC)/pcm.c $(SRC)/subprocess.c \
 	$(SRC)/ipc.c $(SRC)/ipc_shm.c $(SRC)/ipc_mcast.c \

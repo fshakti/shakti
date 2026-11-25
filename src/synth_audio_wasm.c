@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* synth_audio_wasm.c — no ALSA; JS pulls synth_core_render. */
 #include "synth_platform.h"
 

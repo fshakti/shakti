@@ -1,4 +1,4 @@
-shakti 0.15.0
+shakti 0.15.1
 Copyright 2026 Shakti / shakti contributors
 
 Licensed under the Apache License, Version 2.0. See LICENSE.
@@ -82,6 +82,51 @@ copyright Daniel Stenberg and contributors (curl license). https://curl.se/
 
 `src/vec_kernels.c` contains SIMD/OpenMP vector reductions under the same
 Apache License 2.0 terms as this project.
+
+## mplsoccer (pitch-dimension and formation data; `lib/mplsoccer.ie`)
+
+Copyright (c) Tom Rowlinson, Anirban Durgapal and mplsoccer contributors.
+
+Licensed under the MIT License:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE. https://github.com/andrewRowlinson/mplsoccer
+
+## Emscripten (WebAssembly builds only)
+
+WASM builds (`make wasm`) are produced with the Emscripten toolchain.
+Emscripten is copyright the Emscripten authors, MIT / University of
+Illinois NCSA Open Source License. https://emscripten.org/
+No Emscripten sources are vendored in this tree; only the host
+toolchain's output runtime is present in WASM build artifacts.
+
+## JNI (Android / JVM embedding only)
+
+`src/shakti_jni.c` compiles against the host JDK's JNI headers
+(`jni.h`), located via `JAVA_HOME` or Homebrew OpenJDK paths in the
+Makefile. No JNI headers are vendored in this tree. JNI is part of the
+Java platform under its respective platform licenses.
+
+## Contributors
+
+Outside contributions by David Laing and Geo Carncross are distributed
+under Apache-2.0 with the project's relicensing permission; see
+`AUTHORS.md`.
 
 ## Platform SDKs
 

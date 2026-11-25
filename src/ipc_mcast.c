@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "ipc_internal.h"
 
 #if defined(SHAKTI_WASM) || defined(_WIN32)

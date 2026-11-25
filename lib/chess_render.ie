@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # chess_render — board draw + click hit-tests
 # Layout fits Shakti default gfx framebuffer 960x540.
 # Pieces: Staunton recipes via gfx.fill_rect / fill_circle.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # chess_core — board, legal moves, make/unmake, check/mate/stalemate
 
 EMPTY : 0

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ws — WebSocket client and server (RFC6455)
 #
 #   import ws

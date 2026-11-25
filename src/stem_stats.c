@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* stem_stats.c — scalar f32 window/OLA/Wiener/SI-SDR for stem. */
 #include "stem_stats.h"
 #include "vec_kernels.h"

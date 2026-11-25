@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Shared software present helpers: nearest-neighbor letterbox and
  * 0x00RRGGBB → RGBA8 conversion (optional Y-flip for Cocoa bitmaps).

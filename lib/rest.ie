@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # rest — HTTP client (curl) and minimal HTTP/1.1 server (TCP)
 #
 # Client requires curl on PATH. Optional bearer token:

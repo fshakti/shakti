@@ -1,4 +1,8 @@
-# Subprocess / sh demo — works without the still-broken lib/subprocess.ie.
-print("cwd:", sh("pwd"))
-print("files:")
-print(sh("ls -la"))
+# subprocess.Popen — same exec gate as sh() (SHAKTI_SAFE=1 / SHAKTI_ALLOW_EXEC=0).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/subprocess_demo.ie
+
+import subprocess
+
+p : subprocess.Popen("ls -al", shell:True)
+print(p.wait())

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # draughts_ai — negamax + alpha-beta, material and man advancement
 
 import draughts_core

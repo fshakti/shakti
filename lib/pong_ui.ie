@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # UI helpers: court-surface dropdown (terminal + gfx).
 
 import pong_skins

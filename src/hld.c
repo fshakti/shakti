@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * HLD1 encode/decode — IEFS payload + optional external codec for HTTP bodies.
  *

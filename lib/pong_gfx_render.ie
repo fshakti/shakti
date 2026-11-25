@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Gfx renderer — pseudo-3D perspective court (960x540 design space).
 # Game x = depth (near→far), game y = lateral across the court.
 

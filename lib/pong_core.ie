@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # pong_core - classic 2D Pong (logic + renderer), no I/O on import.
 
 import pong_skins

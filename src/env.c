@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/env.c — environments, fn_ast, interpreter globals */
 #include "shakti_internal.h"
+#include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -437,13 +440,19 @@ static void env_uncand(Env *e) {
     e->cand = 0;
     env_release(e);
 }
+int shakti_builtin_fn_shadow;
+static void note_builtin_fn(const char *name, V *val) {
+    if (val && val->t == T_FN && name && is_builtin(name)) shakti_builtin_fn_shadow = 1;
+}
 void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
+    if (!e) return;
     uint32_t h = fnv1a(name);
     for(int i=0; i<e->len; i++) {
         if(e->hashes[i] == h && strcmp(e->names[i], name)==0) {
             v_free(e->vals[i]);
             e->vals[i] = v_ref(val);
             e->kinds[i] = (uint8_t)kind;
+            note_builtin_fn(name, val);
             return;
         }
     }
@@ -454,13 +463,26 @@ void env_set_kind(Env *e, const char *name, V *val, unsigned kind) {
         e->hashes = x_realloc(e->hashes, e->cap * sizeof(uint32_t), "env_set");
         e->kinds  = x_realloc(e->kinds,  e->cap * sizeof(uint8_t), "env_set");
     }
+    note_builtin_fn(name, val);
     e->names[e->len]  = x_strdup(name, "env_set");
     e->vals[e->len]   = v_ref(val);
     e->hashes[e->len] = h;
     e->kinds[e->len]  = (uint8_t)kind;
     e->len++;
 }
+static Env *env_root(Env *e) {
+    while (e && e->parent) e = e->parent;
+    return e;
+}
+static int env_marked_global(Env *e, const char *name) {
+    int i = env_index_here(e, name);
+    return i >= 0 && e->kinds && e->kinds[i] == ENV_BIND_GLOBAL;
+}
 void env_set(Env *e, const char *name, V *val) {
+    if (e && e->parent && env_marked_global(e, name)) {
+        env_set_kind(env_root(e), name, val, ENV_BIND_USER);
+        return;
+    }
     env_set_kind(e, name, val, ENV_BIND_USER);
 }
 int env_del(Env *e, const char *name) {
@@ -530,6 +552,7 @@ int env_update(Env *e, const char *name, V *val) {
                     v_free(e->vals[i]);
                     e->vals[i] = v_ref(val);
                 }
+                note_builtin_fn(name, val);
                 return 1;
             }
     return 0;
@@ -552,8 +575,10 @@ V *env_get(Env *e, const char *name) {
     uint32_t h = fnv1a(name);
     for(; e; e=e->parent)
         for(int i=0; i<e->len; i++)
-            if(e->hashes[i] == h && strcmp(e->names[i], name)==0)
+            if(e->hashes[i] == h && strcmp(e->names[i], name)==0) {
+                if (e->kinds && e->kinds[i] == ENV_BIND_GLOBAL) continue;
                 return e->vals[i];
+            }
     return NULL;
 }
 void env_ref(Env *e) { if(e) e->rc++; }
@@ -628,16 +653,10 @@ int env_save(Env *e, const char *path) {
     P(!e || !path,0)
     for (int i = 0; i < e->len; i++)
         if (!ctx_data_ok(e->vals[i])) return 0;
-    char tmp[8192];
-    int nw = snprintf(tmp, sizeof tmp, "%s.ctx.tmp.%d", path, (int)getpid());
-    if (nw < 0 || (size_t)nw >= sizeof tmp) return 0;
-    char ferr[128];
-    ferr[0] = 0;
-    if (shakti_fs_check(tmp, 1, ferr, sizeof ferr) != 0) return 0;
-    int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
-    if (fd < 0) return 0;
-    FILE *fp = fdopen(fd, "wb");
-    if (!fp) { close(fd); unlink(tmp); return 0; }
+    char *mem = NULL;
+    size_t memlen = 0;
+    FILE *fp = open_memstream(&mem, &memlen);
+    if (!fp) return 0;
     int ok = ctx_write(fp, "KAIO_MCP", 8) && ctx_write(fp, &e->len, 4);
     for (int i = 0; ok && i < e->len; i++) {
         int nlen = (int)strlen(e->names[i]);
@@ -647,8 +666,58 @@ int env_save(Env *e, const char *path) {
     }
     if (ok && fflush(fp) != 0) ok = 0;
     if (fclose(fp) != 0) ok = 0;
-    if (!ok) { unlink(tmp); return 0; }
-    if (rename(tmp, path) != 0) { unlink(tmp); return 0; }
+    if (!ok) { free(mem); return 0; }
+    struct stat sb;
+    int placed = 0;
+    if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
+        int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) {
+            size_t off = 0;
+            int wok = 1;
+            while (off < memlen) {
+                ssize_t w = write(fd, mem + off, memlen - off);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    wok = 0;
+                    break;
+                }
+                if (w == 0) { wok = 0; break; }
+                off += (size_t)w;
+            }
+            if (wok && close(fd) == 0) placed = 1;
+            else if (!wok) close(fd);
+        }
+    }
+    if (!placed) {
+        char tmp[8192];
+        int nw = snprintf(tmp, sizeof tmp, "%s.ctx.tmp.%d", path, (int)getpid());
+        if (nw < 0 || (size_t)nw >= sizeof tmp) { free(mem); return 0; }
+        char ferr[128];
+        ferr[0] = 0;
+        if (shakti_fs_check(tmp, 1, ferr, sizeof ferr) != 0) { free(mem); return 0; }
+        int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0) { free(mem); return 0; }
+        size_t off = 0;
+        int wok = 1;
+        while (off < memlen) {
+            ssize_t w = write(fd, mem + off, memlen - off);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                wok = 0;
+                break;
+            }
+            if (w == 0) { wok = 0; break; }
+            off += (size_t)w;
+        }
+        if (!wok || close(fd) != 0) {
+            if (!wok) close(fd);
+            unlink(tmp);
+            free(mem);
+            return 0;
+        }
+        if (rename(tmp, path) != 0) { unlink(tmp); free(mem); return 0; }
+    }
+    free(mem);
     return 1;
 }
 int env_load(Env *e, const char *path) {
@@ -777,7 +846,7 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
     if (err && err_cap) snprintf(err, err_cap, "safe mode: filesystem confinement unavailable on this platform");
     return -1;
 #else
-    char proc[64], full[8192];
+    char full[8192];
     if (fd < 0) {
         if (err && err_cap) snprintf(err, err_cap, "safe mode: bad fd");
         return -1;
@@ -798,6 +867,7 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
         free(rp);
     }
 #else
+    char proc[64];
     snprintf(proc, sizeof proc, "/proc/self/fd/%d", fd);
     char *rp = realpath(proc, NULL);
     if (!rp) {

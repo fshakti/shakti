@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 #include "shakti_internal.h"
 #include "synth.h"
@@ -778,7 +779,7 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     if (!bps) { fclose(f); return -1; }
     frames = (int)(data_bytes / bps);
     if (frames < 1) { fclose(f); return -1; }
-    pcm = (float *)malloc((size_t)frames * sizeof(float));
+    pcm = (float *)calloc((size_t)frames, sizeof(float));
     if (!pcm) {
         fclose(f);
         return -1;
@@ -803,6 +804,7 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     }
     fclose(f);
     n = i;
+    if (n < 1) { free(pcm); return -1; }
     if (fmt_rate != SYNTH_SR) {
         int64_t out64 = (int64_t)n * (int64_t)SYNTH_SR / (int64_t)fmt_rate;
         if (out64 < 0 || out64 > SYNTH_SAMPLE_MAX) { free(pcm); return -1; }

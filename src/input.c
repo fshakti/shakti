@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "input.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,6 +57,8 @@ typedef struct {
     int mouse_buttons;
     int stop_latch;
     unsigned char key_down[65536];
+    unsigned char vt_pending[16];
+    int vt_pn;
 } InputHub;
 
 static InputHub g_in;
@@ -486,8 +489,8 @@ static int tty_drain(int timeout_ms) {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
     if (!g_in.raw && is_tty()) raw_on();
 #endif
-    unsigned char pending[PENDING_MAX];
-    int pn = 0;
+    unsigned char *pending = g_in.vt_pending;
+    int *pn = &g_in.vt_pn;
     double deadline = timeout_ms <= 0 ? now_ms() : now_ms() + (double)timeout_ms;
     int forever = timeout_ms < 0, got = 0;
     for (;;) {
@@ -497,7 +500,7 @@ static int tty_drain(int timeout_ms) {
          * begun is given up to 50 ms for its next byte, as a terminal's escape delay does */
         if (forever) timeout_ms = got ? 0 : -1;
         int wait = timeout_ms < 0 ? -1 : (int)(deadline - now_ms());
-        if (timeout_ms == 0) wait = forever && pn ? 500 : 0;
+        if (timeout_ms == 0) wait = forever && *pn ? 500 : 0;
         if (wait < 0 && timeout_ms >= 0 && timeout_ms != 0 && now_ms() >= deadline) break;
         int rd = read_byte_timed(wait, &c);
         if (rd < 0) return -1;
@@ -511,7 +514,7 @@ static int tty_drain(int timeout_ms) {
         raw_after_first();
 #endif
         int qt = g_in.qt;
-        if (!decode_vt_byte(c, pending, &pn)) {
+        if (!decode_vt_byte(c, pending, pn)) {
             if (c == '\r' || c == '\n') {
                 char u[2] = {(char)c, 0};
                 input_note_stop_key(c == '\r' ? 0xff0d : c, 1, u);
@@ -530,6 +533,26 @@ static int tty_drain(int timeout_ms) {
         if (g_in.qt != qt) got = 1;
     }
     return 0;
+}
+
+/* A timed-out escape that never finished is the raw bytes, not a lost sequence. */
+static void flush_vt_pending(void) {
+    int n = g_in.vt_pn;
+    unsigned char saved[16];
+    int i;
+    if (n <= 0) return;
+    if (n > (int)sizeof saved) n = (int)sizeof saved;
+    memcpy(saved, g_in.vt_pending, (size_t)n);
+    g_in.vt_pn = 0;
+    for (i = 0; i < n; i++) {
+        unsigned char c = saved[i];
+        InputEvent ev;
+        memset(&ev, 0, sizeof ev);
+        ev.kind = EV_CHAR;
+        ev.code = c;
+        if (c >= 32 && c < 127) ev.utf8[0] = (char)c;
+        q_push(&ev);
+    }
 }
 
 void input_hub_pump(int timeout_ms) {
@@ -558,6 +581,7 @@ V *input_poll_ms(int ms) {
     } else {
         tty_drain(ms);
     }
+    flush_vt_pending();
     V *out = v_list(0);
     InputEvent ev;
     while (q_pop(&ev)) {
@@ -734,9 +758,16 @@ char *input_hub_readline_repl(const char *prompt) {
                 } else if (s1 == 'C' && pos < len) {
                     pos++;
                     while (pos < len && ((unsigned char)buf[pos] & 0xc0) == 0x80) pos++;
-                } else if (s1 == 'H') pos = 0;
+                }                 else if (s1 == 'H') pos = 0;
                 else if (s1 == 'F') pos = len;
-                else continue;
+                else if (s1 == '3') {
+                    char s2 = 0;
+                    if (!input_hub_read_char(&s2) || s2 != '~' || pos >= len) continue;
+                    int p = pos + 1;
+                    while (p < len && ((unsigned char)buf[p] & 0xc0) == 0x80) p++;
+                    memmove(buf + pos, buf + p, (size_t)(len - p));
+                    len -= p - pos;
+                } else continue;
             } else continue;
         } else
         if (c == 127 || c == 8) {

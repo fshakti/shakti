@@ -111,7 +111,7 @@ else
 endif
 
 LANG_STANDALONE := src/alloc.c src/value.c src/env.c src/lex.c src/ast.c src/parse.c src/vec_ops.c src/eval.c src/eval_each.c src/import.c src/repl.c src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c src/vec_kernels.c src/fb_present.c
-LIBSRCS_STANDALONE := src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c
+LIBSRCS_STANDALONE := src/methods.c src/str_ops.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c src/cli_main.c src/input.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c
 
 SHAKTI_IPC ?= 1
 SHAKTI_RDMA ?= 1
@@ -455,6 +455,17 @@ all: build
 build: shakti
 
 # PATH-friendly name at repo root (workspace dir on PATH finds ./shakti).
+# LGPL static-link guard (scan M5).
+SHAKTI_STATIC_REQUESTED := $(filter -static -static-pie,$(CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS))
+SHAKTI_LGPL_LIBS := $(filter -lasound -laio,$(LDFLAGS) $(SYNTH_LDFLAGS) $(MIDI_LDFLAGS))
+ifneq ($(SHAKTI_STATIC_REQUESTED),)
+ifneq ($(SHAKTI_LGPL_LIBS),)
+ifneq ($(SHAKTI_ALLOW_LGPL_STATIC),1)
+$(error static build ($(SHAKTI_STATIC_REQUESTED)) would link LGPL libraries ($(SHAKTI_LGPL_LIBS)); rebuild dynamic, disable the optional component, or set SHAKTI_ALLOW_LGPL_STATIC=1 with relink materials)
+endif
+endif
+endif
+
 # The real binary stays under $(BUILD)/; ./shakti is a relative symlink.
 shakti: $(SHAKTI)
 	@if [ -e shakti ] && [ ! -L shakti ]; then \
@@ -498,7 +509,7 @@ IOS_SIM_SRCS := \
 	src/vec_ops.c src/eval.c src/eval_each.c src/import.c src/repl.c \
 	src/shakti_lang.c src/builtin.c src/table_sql.c src/mat_simd.c \
 	src/vec_kernels.c src/fb_present.c \
-	src/methods.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c \
+	src/methods.c src/str_ops.c src/stdlib.c src/json_parse.c src/table_io.c src/table_xml.c \
 	src/input.c src/rest.c src/graph.c src/machine.c src/pcm.c src/subprocess.c \
 	src/shakti_ios.c
 
@@ -562,7 +573,8 @@ test: shakti
 	  src=`printf '%s\n' 'import stem' 'ident : stem.si_sdr([1.0, 0.0, -1.0], [1.0, 0.0, -1.0])' 'assert(ident > 40.0)'`; \
 	  set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
 	  if [ $$rc -ne 0 ]; then echo "FAIL: stem.si_sdr identity" >&2; echo "$$out" >&2; fail=1; else echo "ok: stem.si_sdr identity"; fi; \
-	  src=`printf '%s\n' 'import stem' 'src : [0.0, 0.5, -0.5, 0.25]' 'stem.write_wav("/tmp/shakti_stem_canary_f32.wav", src, 44100, "f32")' 'rf : stem.read_wav("/tmp/shakti_stem_canary_f32.wav")' 'assert(rf["n"] = 4)' 'd : rf["samples"][1] - 0.5' 'if d < 0:' '    d : -d' 'assert(d <= 1e-6)'`; \
+	  wav=`mktemp /tmp/shakti_stem_canary_XXXXXX`; \
+	  src=`printf '%s\n' 'import stem' 'src : [0.0, 0.5, -0.5, 0.25]' "stem.write_wav(\"$$wav\", src, 44100, \"f32\")" "rf : stem.read_wav(\"$$wav\")" 'assert(rf["n"] = 4)' 'd : rf["samples"][1] - 0.5' 'if d < 0:' '    d : -d' 'assert(d <= 1e-6)'`; rm -f "$$wav"; \
 	  set +e; out=`$(SHAKTI) -c "$$src" 2>&1`; rc=$$?; set -e; \
 	  if [ $$rc -ne 0 ]; then echo "FAIL: stem f32 wav round-trip" >&2; echo "$$out" >&2; fail=1; else echo "ok: stem f32 wav round-trip"; fi; \
 	  if [ -e /dev/full ]; then \
@@ -584,6 +596,11 @@ ifneq ($(SHAKTI_TESTS),)
 	done
 	@if [ -x tests/exe_realpath.sh ]; then bash tests/exe_realpath.sh || exit 1; fi
 	@if [ -x tests/build_guards.sh ]; then bash tests/build_guards.sh || exit 1; fi
+	@if [ -f tests/scan_2026_11.ie ]; then SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti tests/scan_2026_11.ie || exit 1; fi
+	@if [ -x tests/rest_headers_argv.sh ]; then SHAKTI=./.build/shakti bash tests/rest_headers_argv.sh || exit 1; fi
+	@if [ -f tests/ipc_secure.ie ]; then SHAKTI_IPC_TOKEN=test-token-123 SHAKTI_LIB=$$PWD/$(SHAKTI_LIB_DIR) ./shakti tests/ipc_secure.ie || exit 1; fi
+	@if [ -x tests/ipc_secure_wrong.sh ]; then bash tests/ipc_secure_wrong.sh || exit 1; fi
+
 	@if [ -x tests/repl_q.sh ]; then bash tests/repl_q.sh || exit 1; fi
 	@if [ -x tests/repl_d.sh ]; then bash tests/repl_d.sh || exit 1; fi
 	@if [ -x tests/repl_lang.sh ]; then bash tests/repl_lang.sh || exit 1; fi

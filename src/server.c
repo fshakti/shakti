@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* HTTP JSON-RPC daemon (POST /rpc). Loopback by default. */
 #include "server.h"
 #include "shakti_internal.h"
@@ -11,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -245,6 +247,7 @@ static int json_encode(JsonBuf *b, V *v) {
     }
     if (v->t == T_FLOAT) {
         char tmp[64];
+        if (!isfinite(v->f)) return jb_cstr(b, "null");
         snprintf(tmp, sizeof tmp, "%.17g", v->f);
         return jb_cstr(b, tmp);
     }
@@ -264,8 +267,12 @@ static int json_encode(JsonBuf *b, V *v) {
                 if (jb_cstr(b, v->B[i] ? "true" : "false") != 0) return -1;
             } else {
                 char tmp[64];
-                snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
-                if (jb_cstr(b, tmp) != 0) return -1;
+                if (!isfinite(v->F[i])) {
+                    if (jb_cstr(b, "null") != 0) return -1;
+                } else {
+                    snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                    if (jb_cstr(b, tmp) != 0) return -1;
+                }
             }
         }
         return jb_cstr(b, "]");
@@ -281,7 +288,10 @@ static int json_encode(JsonBuf *b, V *v) {
                 char tmp[64];
                 int64_t i = mat_idx(v, r, c);
                 if (v->t == T_IMAT) snprintf(tmp, sizeof tmp, "%lld", (long long)v->J[i]);
-                else if (v->t == T_FMAT) snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                else if (v->t == T_FMAT) {
+                    if (!isfinite(v->F[i])) snprintf(tmp, sizeof tmp, "null");
+                    else snprintf(tmp, sizeof tmp, "%.17g", v->F[i]);
+                }
                 else if (v->t == T_BMAT) snprintf(tmp, sizeof tmp, "%s", v->B[i] ? "true" : "false");
                 else snprintf(tmp, sizeof tmp, "%lld", (long long)v->B[i]);
                 if (jb_cstr(b, tmp) != 0) return -1;
@@ -290,12 +300,36 @@ static int json_encode(JsonBuf *b, V *v) {
         }
         return jb_cstr(b, "]");
     }
+    if (v->t == T_TABLE && v->keys && v->vals) {
+        if (jb_cstr(b, "[") != 0) return -1;
+        for (int64_t r = 0; r < v->n; r++) {
+            int first = 1;
+            if (r && jb_cstr(b, ",") != 0) return -1;
+            if (jb_cstr(b, "{") != 0) return -1;
+            for (int64_t c = 0; c < v->keys->n; c++) {
+                V *name = v->keys->L[c];
+                V *cell;
+                int rc;
+                if (!name || name->t != T_STR) continue;
+                if (!first && jb_cstr(b, ",") != 0) return -1;
+                first = 0;
+                if (jb_quoted(b, name->s ? name->s : "") != 0) return -1;
+                if (jb_cstr(b, ":") != 0) return -1;
+                cell = col_get(v->vals->L[c], r);
+                rc = json_encode(b, cell);
+                v_free(cell);
+                if (rc != 0) return -1;
+            }
+            if (jb_cstr(b, "}") != 0) return -1;
+        }
+        return jb_cstr(b, "]");
+    }
     if (v->t == T_DICT) {
         if (jb_cstr(b, "{") != 0) return -1;
         int first = 1;
         for (int64_t i = 0; i < v->keys->n; i++) {
             V *k = v->keys->L[i];
-            if (!k || k->t != T_STR) continue;
+            if (!k || k->t != T_STR) return -1;
             if (!first && jb_cstr(b, ",") != 0) return -1;
             first = 0;
             if (jb_quoted(b, k->s) != 0) return -1;
@@ -489,7 +523,9 @@ static int http_content_length(const char *buf) {
         for (const char *q = p; q < eol; q++) {
             if (*q == ':') { colon = q; break; }
         }
-        if (colon && (size_t)(colon - p) == 14 && !strncasecmp(p, "Content-Length", 14)) {
+        size_t name_len = colon ? (size_t)(colon - p) : 0;
+        while (name_len > 0 && (p[name_len - 1] == ' ' || p[name_len - 1] == '\t')) name_len--;
+        if (colon && name_len == 14 && !strncasecmp(p, "Content-Length", 14)) {
             if (seen) return -2;
             const char *num = colon + 1;
             while (num < eol && (*num == ' ' || *num == '\t')) num++;
@@ -516,7 +552,13 @@ static ssize_t http_read_request(int fd, char *buf, size_t cap, long hdr_deadlin
         ssize_t r = conn_read(fd, buf + nread, cap - 1 - nread);
         if (r < 0) {
             if (errno == EINTR) continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                long remain = deadline - serve_now_ms();
+                if (remain <= 0) return -1;
+                struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
+                if (poll(&pfd, 1, remain > 250 ? 250 : (int)remain) < 0 && errno != EINTR) return -1;
+                continue;
+            }
             return -1;
         }
         if (r == 0) break;
@@ -725,16 +767,15 @@ static void handle_client(int cfd, Env *global) {
     client_done(cfd);
 }
 
-void server_serve(int port, Env *global_env) {
+const char *server_serve(int port, Env *global_env) {
     signal(SIGPIPE, SIG_IGN);
     if (port < 1 || port > 65535) {
-        printf("[serve] invalid port %d (must be 1-65535)\n", port);
-        return;
+        (void)port;
+        return "server_serve: invalid port (must be 1-65535)";
     }
     int srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0) {
-        printf("[serve] socket failed\n");
-        return;
+        return "server_serve: socket failed";
     }
     { int fl = fcntl(srv, F_GETFD); if (fl >= 0) (void)fcntl(srv, F_SETFD, fl | FD_CLOEXEC); }
     int opt = 1;
@@ -761,16 +802,14 @@ void server_serve(int port, Env *global_env) {
     if (tok && tok[0]) {
         size_t tlen = strlen(tok);
         if (tlen >= sizeof g_serve_token) {
-            printf("[serve] SHAKTI_SERVE_TOKEN too long\n");
             close(srv);
-            return;
+            return "server_serve: SHAKTI_SERVE_TOKEN too long";
         }
         memcpy(g_serve_token, tok, tlen + 1);
     }
     if (!g_serve_loopback && !g_serve_token[0]) {
-        printf("[serve] non-loopback bind requires SHAKTI_SERVE_TOKEN\n");
         close(srv);
-        return;
+        return "server_serve: non-loopback bind requires SHAKTI_SERVE_TOKEN";
     }
     int have_tls = 0;
 
@@ -781,9 +820,8 @@ void server_serve(int port, Env *global_env) {
     if (cert && cert[0] && key && key[0]) {
         g_tls_ctx = shakti_tls_server_ctx(cert, key);
         if (!g_tls_ctx) {
-            printf("[serve] TLS cert/key failed\n");
             close(srv);
-            return;
+            return "server_serve: TLS cert/key failed";
         }
         have_tls = 1;
     }
@@ -800,20 +838,20 @@ void server_serve(int port, Env *global_env) {
             }
 #endif
             close(srv);
-            return;
+            return "server_serve: non-loopback bind without TLS requires SHAKTI_TLS_CERT/SHAKTI_TLS_KEY or SHAKTI_SERVE_ALLOW_PLAINTEXT=1";
         }
         fprintf(stderr, "[serve] warning: public plaintext HTTP; bearer token is not encrypted\n");
     }
 
     if (bind(srv, (struct sockaddr *)&addr, sizeof addr) < 0) {
-        printf("[serve] bind failed: %s\n", strerror(errno));
+        static char bind_err[128];
+        snprintf(bind_err, sizeof bind_err, "server_serve: bind failed: %s", strerror(errno));
         close(srv);
-        return;
+        return bind_err;
     }
     if (listen(srv, 16) < 0) {
-        printf("[serve] listen failed\n");
         close(srv);
-        return;
+        return "server_serve: listen failed";
     }
     printf("[serve] listening on %s:%d  POST /rpc\n", host, port);
     fflush(stdout);
@@ -843,6 +881,7 @@ void server_serve(int port, Env *global_env) {
         g_tls_ctx = NULL;
     }
 #endif
+    return NULL;
 }
 
 V *bi_server_serve(V **a, int n, Env *e) {
@@ -856,7 +895,10 @@ V *bi_server_serve(V **a, int n, Env *e) {
         return v_err("server_serve: network disabled (SHAKTI_SAFE=1; set SHAKTI_ALLOW_NET=1)");
     int port = 8080;
     if (n > 0 && a[0]->t == T_INT) port = (int)a[0]->j;
-    server_serve(port, e);
+    {
+        const char *serr = server_serve(port, e);
+        if (serr) return v_err(serr);
+    }
     return v_nil();
 #endif
 }

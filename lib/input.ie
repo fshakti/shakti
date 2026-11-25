@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # input — unified terminal + GUI event hub (see src/input.c)
 #
 #   import input

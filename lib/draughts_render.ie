@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # draughts_render — board, pieces, click hit-tests
 # Layout fits the default gfx framebuffer 960x540.
 # Squares and pieces are drawn with gfx.fill_rect / fill_circle.

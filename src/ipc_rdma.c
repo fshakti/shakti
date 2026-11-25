@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "ipc_rdma.h"
 
 #ifdef SHAKTI_HAVE_RDMA

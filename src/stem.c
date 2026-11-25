@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * stem.c — streaming 4-stem separator for Shakti (drums / bass / vocals / other).
  *

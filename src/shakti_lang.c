@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti_internal.h"
 #if defined __has_include
 #if __has_include("shakti_version.h")
@@ -5,7 +6,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.15.0"
+#define SHAKTI_PKG_VERSION "0.15.1"
 #endif
 #if defined(_WIN32) && defined(_MSC_VER)
 #include <io.h>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef SHAKTI_JSON_PARSE_H
 #define SHAKTI_JSON_PARSE_H
 

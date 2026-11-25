@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* midi — ALSA sequencer (Linux) + CoreMIDI (macOS / Apple Silicon).
  *
  *   import midi

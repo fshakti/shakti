@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/shakti.h — language/runtime public header (generated) */
 #ifndef SHAKTI_H
 #define SHAKTI_H
@@ -94,7 +95,8 @@ struct Node {
 enum {
     ENV_BIND_USER = 0,
     ENV_BIND_IMPORT = 1,
-    ENV_BIND_INTERNAL = 2
+    ENV_BIND_INTERNAL = 2,
+    ENV_BIND_GLOBAL = 3 /* this frame's slot is a `global` mark; the value lives in the root */
 };
 
 struct Env {
@@ -111,7 +113,9 @@ struct Env {
 /* Buffer ownership for vector/matrix payloads (J/F/B). */
 enum {
     V_OWNER_MALLOC = 0,   /* free() buffers in v_free (default) */
-    V_OWNER_MAP_ALIAS     /* buffers alias an IefsMapRegion; munmap via map_reg */
+    V_OWNER_MAP_ALIAS,    /* buffers alias an IefsMapRegion; munmap via map_reg */
+    V_OWNER_TABLE,        /* malloc-owned table column; append and pop cannot change its length */
+    V_OWNER_MODULE        /* dict whose map_reg is the Env* its functions close over */
 };
 
 /* Tagged-union value: common fields on every V; payload exclusive by ->t.
@@ -391,6 +395,7 @@ static inline int timeout_ms_arg(const V *v, int *ms) {
 V *mat_matmul(V *a, V *b);
 V *v_mat_row(V *m, int64_t row);
 V *v_list(int64_t n);
+void v_specialize(V *v);
 void v_list_append(V *v, V *item);
 /* If *p is a shared list, replace it with a shallow clone and drop our ref. */
 void v_list_unshare(V **p);
@@ -440,6 +445,8 @@ extern V *g_error_val;
 int fn_ast_store(Node *n);
 void fn_ast_release(int idx);
 V *col_get(V *col, int64_t row);
+/* A malloc-owned value installed as a table column. append and pop then refuse. */
+void v_mark_table_col(V *c);
 V *col_copy(V *col);
 V *table_copy_cols(V *t);
 V *table_row(V *t, int64_t row);
@@ -472,12 +479,21 @@ V *eval_fn(Node *body, Env *e);
 /* Note the calling thread's C stack for eval_fn's guard; shakti_lang_main calls it first. */
 void shakti_stack_start(void);
 int shakti_lang_main(int argc, char **argv);
-V *table_load(const char *path, V *columns_opt);
+V *table_load(const char *path, V *columns_opt, V *schema_opt);
 int table_save(V *table, const char *path);
 /* Materialize MAP_ALIAS payloads before in-place mutation. 0 ok, -1 OOM. */
 int v_ensure_writable(V *v);
 V *method_call(V *obj, const char *method, V **args, int nargs, Env *e);
 V *builtin_call(const char *name, V **args, int nargs, V **kwn, V **kwv, int nkw, Env *e);
+/* A full-height column from a select or update expression. A vector, list or matrix must have
+ * nrows items (op: column length mismatch otherwise). Anything else is one value repeated
+ * nrows times, each row its own copy. */
+V *sql_column_value(V *val, int64_t nrows, const char *op);
+/* where as a bool mask of tbl's height, or an error value. */
+V *sql_where_mask(V *tbl, V *where);
+/* The column an update stores for this assignment: current is the previous column, or NULL when
+ * the name is new. mask is a list[bool] of that height. */
+V *sql_assign_stored(V *current, V *rhs, V *mask, const char *name, int64_t nrows);
 V *table_sql_select(V *from, V *cols, V *by, V *where);
 V *table_sql_update(V *from, V *cols, V *where);
 V *table_sql_delete(V *from, V *cols, V *where);

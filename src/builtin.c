@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 #include "shakti_internal.h"
 #include "vec_kernels.h"
@@ -5,6 +6,8 @@
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #ifndef _WIN32
@@ -380,7 +383,27 @@ static const char *BUILTINS[] = {
     "exit",
     NULL
 };
-int is_builtin(const char *name){for(int i=0;BUILTINS[i];i++)P(!strcmp(name,BUILTINS[i]),1)return 0;}
+static int bi_name_cmp_ptr(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+int is_builtin(const char *name) {
+    static const char **sorted;
+    static size_t n;
+    if (!name) return 0;
+    if (!sorted) {
+        size_t i;
+        for (i = 0; BUILTINS[i]; i++);
+        n = i;
+        sorted = malloc(n * sizeof *sorted);
+        if (!sorted) {
+            for (i = 0; i < n; i++) if (!strcmp(name, BUILTINS[i])) return 1;
+            return 0;
+        }
+        for (i = 0; i < n; i++) sorted[i] = BUILTINS[i];
+        qsort(sorted, n, sizeof *sorted, bi_name_cmp_ptr);
+    }
+    return bsearch(&name, sorted, n, sizeof *sorted, bi_name_cmp_ptr) != NULL;
+}
 
 static V *kw_get(V**kwn,V**kwv,int nkw,const char*name){
     i(nkw,{P(kwn[i]->t==T_STR&&!strcmp(kwn[i]->s,name),kwv[i])})return NULL;}
@@ -435,6 +458,7 @@ static V *bi_range(V**a,in){
     }
     if(cnt<0)cnt=0;
     V*r=v_ivec(cnt);
+    if(r->t==T_ERR) return r;
     if(step==1 && cnt>0){
         if(start==0)
             for(int64_t i=0;i<cnt;i++)r->J[i]=i;
@@ -486,10 +510,10 @@ static V *bi_str(V**a,in,Env*e){
 static V *bi_list(V**a,in){
     P(n<1,v_list(0))V*v=a[0];
     if(v->t==T_CHAR){V*r=v_list(1);r->L[0]=v_char((unsigned char)v->j);return r;}
-    if(v->t==T_CVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_char(v->B[i]);return r;}
-    if(v->t==T_BVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_bool(v->B[i]!=0);return r;}
-    if(v->t==T_IVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_int(v->J[i]);return r;}
-    if(v->t==T_FVEC){V*r=v_list(v->n);for(int64_t i=0;i<v->n;i++)r->L[i]=v_float(v->F[i]);return r;}
+    if(v->t==T_CVEC){V*r=v_cvec(v->n);if(v->n)memcpy(r->B,v->B,(size_t)v->n);return r;}
+    if(v->t==T_BVEC){V*r=v_bvec(v->n);if(v->n)memcpy(r->B,v->B,(size_t)v->n);return r;}
+    if(v->t==T_IVEC){V*r=v_ivec(v->n);if(v->n)memcpy(r->J,v->J,(size_t)v->n*8);return r;}
+    if(v->t==T_FVEC){V*r=v_fvec(v->n);if(v->n)memcpy(r->F,v->F,(size_t)v->n*8);return r;}
     P(v->t==T_LIST,v_copy(v))
     if(v->t==T_STR){int64_t sl=strlen(v->s);V*r=v_list(sl);for(int64_t i=0;i<sl;i++){char b[2]={v->s[i],0};r->L[i]=v_str(b);}return r;}
     if(v->t==T_DICT){V*r=v_copy(v->keys);return r;}
@@ -616,6 +640,9 @@ static V *bi_extreme(const char *fn, V **a, int64_t n, int op) {
     if (m->t == T_ERR) return v_ref(m);
     for (int64_t i = 1; i < n; i++) {
         if (a[i]->t == T_ERR) return v_ref(a[i]);
+        if ((a[i]->t == T_FLOAT && isnan(a[i]->f)) || (m->t == T_FLOAT && isnan(m->f))) {
+            return v_float(NAN);
+        }
         V *c = vec_cmp(a[i], m, op);
         /* None compares False either way, so it would win or lose by its place: refuse it */
         int win = c->t == T_BOOL && c->j, ok = c->t == T_BOOL && m->t != T_NIL && a[i]->t != T_NIL;
@@ -637,8 +664,10 @@ static V *vec_reduce_min(V *v) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         double m = v->F[0];
         int64_t ne = mat_nelem(v);
-        for (int64_t i = 0; i < ne; i++) if (isnan(v->F[i])) return v_float(NAN);
-        for (int64_t i = 1; i < ne; i++) if (v->F[i] < m) m = v->F[i];
+        for (int64_t i = 1; i < ne; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] < m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_IVEC) {
@@ -654,8 +683,10 @@ static V *vec_reduce_min(V *v) {
         if (v->n >= ISL_OMP_VEC_MIN)
             return v_float(shakti_min_f64(v->F, v->n));
         double m = v->F[0];
-        for (int64_t i = 0; i < v->n; i++) if (isnan(v->F[i])) return v_float(NAN);
-        for (int64_t i = 1; i < v->n; i++) if (v->F[i] < m) m = v->F[i];
+        for (int64_t i = 1; i < v->n; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] < m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_CVEC || v->t == T_CMAT) {
@@ -691,8 +722,10 @@ static V *vec_reduce_max(V *v) {
         P(v->n == 0 || mat_cols(v) == 0,v_nil())
         double m = v->F[0];
         int64_t ne = mat_nelem(v);
-        for (int64_t i = 0; i < ne; i++) if (isnan(v->F[i])) return v_float(NAN);
-        for (int64_t i = 1; i < ne; i++) if (v->F[i] > m) m = v->F[i];
+        for (int64_t i = 1; i < ne; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] > m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_IVEC) {
@@ -708,8 +741,10 @@ static V *vec_reduce_max(V *v) {
         if (v->n >= ISL_OMP_VEC_MIN)
             return v_float(shakti_max_f64(v->F, v->n));
         double m = v->F[0];
-        for (int64_t i = 0; i < v->n; i++) if (isnan(v->F[i])) return v_float(NAN);
-        for (int64_t i = 1; i < v->n; i++) if (v->F[i] > m) m = v->F[i];
+        for (int64_t i = 1; i < v->n; i++) {
+            if (isnan(v->F[i]) || isnan(m)) return v_float(NAN);
+            if (v->F[i] > m) m = v->F[i];
+        }
         return v_float(m);
     }
     if (v->t == T_CVEC || v->t == T_CMAT) {
@@ -826,12 +861,31 @@ static V *bi_sum(V **a, in) {
             const unsigned char *p = a[i]->B;
             int64_t nn = a[i]->t == T_BMAT ? a[i]->n * mat_cols(a[i]) : a[i]->n;
             for (int64_t k = 0; k < nn; k++) sum_add_int(&s, p[k] ? 1 : 0);
-        } else if (a[i]->t == T_FVEC || a[i]->t == T_FMAT || a[i]->t == T_LIST || a[i]->t == T_CVEC || a[i]->t == T_CMAT) {
-            V *p = vec_reduce_sum(a[i]);
-            P(p->t == T_ERR,p)
-            if (p->t == T_FLOAT) sum_add_float(&s, p->f);
-            else sum_add_int(&s, p->j);
-            v_free(p);
+        } else if (a[i]->t == T_FVEC || a[i]->t == T_FMAT) {
+            const double *p = a[i]->F;
+            int64_t nn = a[i]->t == T_FMAT ? a[i]->n * mat_cols(a[i]) : a[i]->n;
+            for (int64_t k = 0; k < nn; k++) sum_add_float(&s, p[k]);
+        } else if (a[i]->t == T_CVEC || a[i]->t == T_CMAT) {
+            const unsigned char *p = a[i]->B;
+            int64_t nn = a[i]->t == T_CMAT ? a[i]->n * mat_cols(a[i]) : a[i]->n;
+            for (int64_t k = 0; k < nn; k++) sum_add_int(&s, p[k]);
+        } else if (a[i]->t == T_LIST) {
+            for (int64_t k = 0; k < a[i]->n; k++) {
+                V *e = a[i]->L[k];
+                if (!e) continue;
+                if (e->t == T_INT || e->t == T_CHAR) sum_add_int(&s, e->j);
+                else if (e->t == T_BOOL) sum_add_int(&s, e->j != 0);
+                else if (e->t == T_FLOAT) sum_add_float(&s, e->f);
+                else {
+                    V *p = vec_reduce_sum(e);
+                    if (!p) return v_err("sum: bad item");
+                    if (p->t == T_ERR) return p;
+                    if (p->t == T_FLOAT) sum_add_float(&s, p->f);
+                    else if (p->t == T_INT) sum_add_int(&s, p->j);
+                    else { v_free(p); return v_err("sum: unsupported item"); }
+                    v_free(p);
+                }
+            }
         } else if (a[i]->t == T_ERR) return v_ref(a[i]);
         else return v_errf("sum: unsupported operand type %s", type_name(a[i]->t));
     }
@@ -1413,9 +1467,9 @@ static int join_is_asof_shape(V *left,V *right){
     V *lk=left->keys->L[0],*rk=right->keys->L[0];
     if(lk->t!=T_STR||rk->t!=T_STR||strcmp(lk->s,rk->s)||!asof_time_key_name(lk->s))return 0;
     V *lt=left->vals->L[0],*rt=right->vals->L[0];
-    /* Docs: asof only for matching *sorted* time/time_ns; otherwise equi. */
-    return lt->t==T_IVEC&&rt->t==T_IVEC
-        &&asof_ascending_i64(lt)&&asof_ascending_i64(rt);
+    /* Matching time/time_ns ivec columns are asof. Unsorted keys are an error
+     * from table_asof_comma_join, not a silent equi join. */
+    return lt->t==T_IVEC&&rt->t==T_IVEC;
 }
 V *table_asof_comma_join(V *left,V *right){
     if(!left||!right||left->t!=T_TABLE||right->t!=T_TABLE)
@@ -1719,9 +1773,23 @@ static V *bi_enumerate(V**a,in){
         V*u=v_list(2);
         u->L[0]=v_int(i);
         u->L[1]=item_at(v,i);
+        v_specialize(u);
         r->L[i]=u;
     }
     return r;
+}
+/* One required parameter and no default: bind it directly. Anything else uses bind_params. */
+static int bind_one_param(Env *ce, V *fn, V *arg) {
+    V *p;
+    const char *s;
+    if (!fn->params || fn->params->t != T_LIST || fn->params->n != 1) return 0;
+    if (fn->defaults && fn->defaults->n > 0 && fn->defaults->L && fn->defaults->L[0]) return 0;
+    p = fn->params->L[0];
+    if (!p || p->t != T_STR || !p->s || p->s[0] == '*') return 0;
+    s = p->s;
+    if (!strcmp(s, "self") && env_get_here(ce, "self")) return 1;
+    env_set(ce, s, arg);
+    return 1;
 }
 static V *bi_map(V**a,in,Env*e){
     P(n<2||a[0]->t!=T_FN,v_err("map(fn,iter)"))
@@ -1748,6 +1816,7 @@ static V *bi_map(V**a,in,Env*e){
             r->L[i]=rv;
         }
     }
+    v_specialize(r);   /* list[int] etc., as a comprehension gives */
     return r;
 }
 static V *bi_filter(V**a,in,Env*e){
@@ -1787,7 +1856,9 @@ static V *bi_filter(V**a,in,Env*e){
             v_free(rv);if(keep)tmp[out++]=item;else v_free(item);
         }
     }
-    V*r=v_list(out);memcpy(r->L,tmp,out*sizeof(V*));free(tmp);return r;
+    V*r=v_list(out);memcpy(r->L,tmp,out*sizeof(V*));free(tmp);
+    v_specialize(r);
+    return r;
 }
 static void ivec_grow(V *v) {
     uint32_t cap;
@@ -1843,6 +1914,8 @@ static void numvec_grow(V *v, size_t el) {
     v->_ht_cap = cap;
 }
 static V *bi_append(V**a,in){
+    if (n >= 1 && a[0] && a[0]->owner_kind == V_OWNER_TABLE)
+        return v_err("append: table column");
     if (n >= 2 && a[0] && a[0]->t == T_IVEC) {
         if (ivec_own(a[0]) != 0) return v_err("append: read-only vector");
         if (a[1] && (a[1]->t == T_INT || a[1]->t == T_CHAR)) {
@@ -1871,9 +1944,11 @@ static V *bi_append(V**a,in){
         a[0]->B[a[0]->n++] = (unsigned char)a[1]->j;
         return v_nil();
     }
-    P(n<2||a[0]->t!=T_LIST,v_err("append(list,val)"))
+    P(n<2||!a[0]||a[0]->t!=T_LIST,v_err("append(list,val)"))
     v_list_append(a[0], a[1]); return v_nil();}
 static V *bi_pop(V**a,in){
+    if (n >= 1 && a[0] && a[0]->owner_kind == V_OWNER_TABLE)
+        return v_err("pop: table column");
     if (n >= 1 && a[0] && a[0]->t == T_IVEC) {
         if (a[0]->n <= 0) return v_err("pop");
         return v_int(a[0]->J[--a[0]->n]);
@@ -1890,10 +1965,64 @@ static V *bi_pop(V**a,in){
         if (a[0]->n <= 0) return v_err("pop");
         return v_char(a[0]->B[--a[0]->n]);
     }
-    P(n<1||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
-    return a[0]->L[--a[0]->n];}
+    P(n<1||!a[0]||a[0]->t!=T_LIST||a[0]->n==0,v_err("pop"))
+    V *popped = a[0]->L[--a[0]->n];
+    a[0]->L[a[0]->n] = NULL;
+    v_specialize(a[0]);
+    return popped;}
 static V *bi_keys(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->keys):v_list(0);}
-static V *bi_values(V**a,in){return n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE)?v_copy(a[0]->vals):v_list(0);}
+static V *values_copy(V *vals) {
+    int64_t i, n;
+    int all_int = 1, all_u8 = 1, all_num = 1, all_bool = 1;
+    if (!vals || vals->t != T_LIST || vals->n <= 0) {
+        V *c = vals ? v_copy(vals) : v_list(0);
+        v_specialize(c);
+        return c;
+    }
+    n = vals->n;
+    for (i = 0; i < n; i++) {
+        V *e = vals->L[i];
+        if (!e) return v_copy(vals);
+        if (e->t != T_INT && e->t != T_CHAR) all_int = 0;
+        if (e->t != T_CHAR) all_u8 = 0;
+        if (e->t != T_INT && e->t != T_FLOAT && e->t != T_CHAR) all_num = 0;
+        if (e->t != T_BOOL) all_bool = 0;
+    }
+    if (all_u8) {
+        V *c = v_cvec(n);
+        for (i = 0; i < n; i++) c->B[i] = (unsigned char)vals->L[i]->j;
+        return c;
+    }
+    if (all_int) {
+        V *c = v_ivec(n);
+        for (i = 0; i < n; i++) c->J[i] = vals->L[i]->j;
+        return c;
+    }
+    if (all_num) {
+        V *c = v_fvec(n);
+        for (i = 0; i < n; i++) {
+            V *e = vals->L[i];
+            c->F[i] = e->t == T_FLOAT ? e->f : (double)e->j;
+        }
+        return c;
+    }
+    if (all_bool) {
+        V *c = v_bvec(n);
+        for (i = 0; i < n; i++) c->B[i] = vals->L[i]->j ? 1 : 0;
+        return c;
+    }
+    {
+        V *c = v_copy(vals);
+        v_specialize(c);
+        return c;
+    }
+}
+static V *bi_values(V**a,in){
+    V *c;
+    if (!(n>0&&(a[0]->t==T_DICT||a[0]->t==T_TABLE))) return v_list(0);
+    c = values_copy(a[0]->vals);
+    return c;
+}
 static V *list_ref_elems(V *src) {
     V *c = v_list(src ? src->n : 0);
     int64_t i;
@@ -1908,7 +2037,9 @@ static V *table_cols(V *k, V *v) {
         if(c->t==T_ERR)return v_ref(c);
         if(!is_vec_t(c->t)&&c->t!=T_LIST&&!is_mat_t(c->t))
             return v_errf("table column must be a vector, list or matrix, not %s",type_name(c->t));}
-    return v_table(k,v);
+    V *data = v_list(v->n);
+    for (int64_t i = 0; i < v->n; i++) data->L[i] = col_copy(v->L[i]);
+    return v_table_own(v_ref(k), data);
 }
 static V *bi_table(V**a,in,V**kwn,V**kwv,int nkw){
     if(n==1&&a[0]->t==T_DICT){
@@ -2928,7 +3059,8 @@ static int bi_kw_known(const char *name, V **kwn, int nkw) {
         const char *s = (kwn && kwn[i] && kwn[i]->t == T_STR) ? kwn[i]->s : "";
         int ok = 0;
         if (!strcmp(name, "print") && (!strcmp(s, "sep") || !strcmp(s, "end"))) ok = 1;
-        if (!strcmp(name, "load") && (!strcmp(s, "exec") || !strcmp(s, "__dir__"))) ok = 1;
+        if (!strcmp(name, "load") && (!strcmp(s, "exec") || !strcmp(s, "__dir__") ||
+                                       !strcmp(s, "schema"))) ok = 1;
         if (!ok) return 0;
     }
     return 1;
@@ -3004,21 +3136,30 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         env_leave(ce);return rv;
     }
     if(!strcmp(name,"load")) {
-        if(nargs < 1 || args[0]->t != T_STR) {
-            return v_err("load(path) or load(path, [column, ...])");
+        if(!args || nargs < 1 || !args[0] || args[0]->t != T_STR) {
+            return v_err("load(path), load(path, [column, ...]) or load(path, schema_dict)");
         }
+        V *schema_kw = kw_get(kwn, kwv, nkw, "schema");
+        if(schema_kw && schema_kw->t != T_DICT)
+            return v_err("load: schema must be a dict of name:prototype");
+        if(schema_kw && nargs > 1 && args[1] && args[1]->t == T_DICT)
+            return v_err("load: schema given twice (positional and schema:)");
+        int has_schema = schema_kw || (nargs > 1 && args[1] && args[1]->t == T_DICT);
 #ifdef SHAKTI_HAVE_IEFS
         {
             const char *path = args[0]->s;
             size_t plen = strlen(path);
-            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs"))
+            if (plen >= 5 && !strcmp(path + plen - 5, ".iefs")) {
+                if (has_schema) return v_err("load: schema only supported for .csv/.tsv");
                 return iefs_store_read(path);
+            }
         }
 #endif
 #ifndef _WIN32
         {
             struct stat sb;
             if (stat(args[0]->s, &sb) == 0 && S_ISDIR(sb.st_mode)) {
+                if (has_schema) return v_err("load: schema only supported for .csv/.tsv");
                 /* A data loader must not run code implicitly: spawning the
                  * directory's ./run helper requires an explicit exec:True. */
                 if (!bi_kw_true(kwn, kwv, nkw, "exec"))
@@ -3046,13 +3187,21 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
         }
 #endif
         V *cols = NULL;
+        V *schema = schema_kw;
+        if(nargs > 2)
+            return v_err("load(path), load(path, [column, ...]) or load(path, schema_dict)");
         if(nargs > 1) {
-            if(args[1]->t != T_LIST) {
-                return v_err("load(path, [columns]): columns must be a list of strings");
+            if(!args[1]) {
+                return v_err("load: second argument must be a list of columns or a schema dict");
+            } else if(args[1]->t == T_LIST) {
+                cols = args[1];
+            } else if(args[1]->t == T_DICT) {
+                schema = args[1];
+            } else {
+                return v_err("load: second argument must be a list of columns or a schema dict");
             }
-            cols = args[1];
         }
-        return table_load(args[0]->s, cols);
+        return table_load(args[0]->s, cols, schema);
     }
     if(!strcmp(name,"save")) {
         if(nargs < 2 || args[1]->t != T_STR)

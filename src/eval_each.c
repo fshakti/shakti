@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* each / adverb application, split out of the tree-walk evaluator. */
 #include "shakti_internal.h"
 
@@ -88,6 +89,10 @@ static V *each_pack_seq(V **items, int64_t n, int prefer_str) {
     }
     V *r = v_list(n);
     for (int64_t i = 0; i < n; i++) r->L[i] = items[i];
+    if (n <= 2147483647) {
+        V *m = try_promote_matrix(r->L, (int)n);
+        if (m) { v_free(r); return m; }
+    }
     return r;
 }
 static V *each_empty_seq_like(V *v) {

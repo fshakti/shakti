@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Lightweight subprocess shim that uses sh(). The full PTY-based Popen was removed
 # because it did not parse cleanly under the current grammar.
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "mat_simd.h"
 #include "i64bin.h"
 #include "a.h"
@@ -137,13 +138,6 @@ static inline float64x2_t fmat_binop_vec_neon(float64x2_t x, float64x2_t y, int 
     }
 }
 
-static inline int64x2_t imat_mul_vec_neon(int64x2_t x, int64x2_t y) {
-    int64x2_t z = vdupq_n_s64(0);
-    z = vsetq_lane_s64(i64_wmul(vgetq_lane_s64(x, 0), vgetq_lane_s64(y, 0)), z, 0);
-    z = vsetq_lane_s64(i64_wmul(vgetq_lane_s64(x, 1), vgetq_lane_s64(y, 1)), z, 1);
-    return z;
-}
-
 static void dot_row_col_fmat_neon(double *cr, const double *ar, const double *B, int64_t k, int64_t n) {
     for (int64_t j = 0; j < n; j++) {
         float64x2_t sum = vdupq_n_f64(0.0);
@@ -159,24 +153,6 @@ static void dot_row_col_fmat_neon(double *cr, const double *ar, const double *B,
         for (; t < k; t++)
             s += ar[t] * B[t * n + j];
         cr[j] = s;
-    }
-}
-
-static void dot_row_col_imat_neon(int64_t *cr, const int64_t *ar, const int64_t *B, int64_t k, int64_t n) {
-    for (int64_t j = 0; j < n; j++) {
-        float64x2_t sum = vdupq_n_f64(0.0);
-        int64_t t = 0;
-        for (; t + 2 <= k; t += 2) {
-            float64x2_t va = load_i64_as_pd_neon(ar + t);
-            int64_t b0 = B[(t + 0) * n + j];
-            int64_t b1 = B[(t + 1) * n + j];
-            float64x2_t vb = vsetq_lane_f64((double)b1, vsetq_lane_f64((double)b0, vdupq_n_f64(0.0), 0), 1);
-            sum = vfmaq_f64(sum, va, vb);
-        }
-        double s = vaddvq_f64(sum);
-        for (; t < k; t++)
-            s += (double)ar[t] * (double)B[t * n + j];
-        cr[j] = (int64_t)s;
     }
 }
 
@@ -315,7 +291,7 @@ static int fmat_binop_mm_scalar(double *r, const double *a, const double *b, int
         case 11: r[i] = x * y; break;
         case 2: zero |= y == 0; r[i] = y != 0 ? x / y : 0; break;
         case 4: zero |= y == 0; r[i] = y != 0 ? floor(x / y) : 0; break;
-        case 10: zero |= y == 0; r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 10: zero |= y == 0; r[i] = y != 0 ? floor_mod(x, y) : 0; break;
         case 17: r[i] = pow(x, y); break;
         default: r[i] = x; break;
         }
@@ -386,7 +362,7 @@ void mat_fmat_binop_scalar(double *r, const double *a, double y, int64_t ne, int
         case 11: r[i] = x * y; break;
         case 2: r[i] = y != 0 ? x / y : 0; break;
         case 4: r[i] = y != 0 ? floor(x / y) : 0; break;
-        case 10: r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 10: r[i] = y != 0 ? floor_mod(x, y) : 0; break;
         case 17: r[i] = pow(x, y); break;
         default: break;
         }
@@ -429,7 +405,7 @@ int mat_fmat_binop_scalar_rev(double *r, double x, const double *b, int64_t ne, 
         case 11: r[i] = x * y; break;
         case 2: zero |= y == 0; r[i] = y != 0 ? x / y : 0; break;
         case 4: zero |= y == 0; r[i] = y != 0 ? floor(x / y) : 0; break;
-        case 10: zero |= y == 0; r[i] = y != 0 ? fmod(x, y) : 0; break;
+        case 10: zero |= y == 0; r[i] = y != 0 ? floor_mod(x, y) : 0; break;
         case 17: r[i] = pow(x, y); break;
         default: break;
         }
@@ -464,6 +440,7 @@ static inline __attribute__((always_inline)) int imat_arith(int64_t *r, const in
 #endif
     if (op == 0) {
         int nt = isl_vec_omp_threads(ne - i);
+        (void)nt;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(|:ovf) if (ne - i >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
@@ -474,6 +451,7 @@ static inline __attribute__((always_inline)) int imat_arith(int64_t *r, const in
         }
     } else if (op == 18) {
         int nt = isl_vec_omp_threads(ne - i);
+        (void)nt;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(|:ovf) if (ne - i >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif
@@ -484,6 +462,7 @@ static inline __attribute__((always_inline)) int imat_arith(int64_t *r, const in
         }
     } else {
         int nt = isl_vec_omp_threads(ne - i);
+        (void)nt;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) reduction(|:ovf) if (ne - i >= ISL_OMP_VEC_MIN) num_threads(nt)
 #endif

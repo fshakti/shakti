@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * pcm.c — minimal raw-PCM audio output for the Shakti language.
  *

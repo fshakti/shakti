@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Court surface skins for Pong (grass, clay, hard/plastic court).
 # Used by terminal renderer (ANSI) and gfx renderer (0xRRGGBB).
 

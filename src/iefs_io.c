@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * IE file store I/O: buffered + optional Linux O_DIRECT + optional io_uring
  * + optional libaio (io_submit) middle tier.
@@ -196,6 +197,7 @@ void *iefs_io_alloc_buf(size_t logical_len) {
 
 void iefs_io_free_buf(void *p) { free(p); }
 
+#if defined(__linux__) && defined(O_DIRECT)
 static void *aligned_alloc_pages(size_t nbytes) {
     void *p = NULL;
 #if defined(_POSIX_C_SOURCE) || defined(__linux__) || defined(__APPLE__)
@@ -206,6 +208,7 @@ static void *aligned_alloc_pages(size_t nbytes) {
     return malloc(nbytes);
 #endif
 }
+#endif
 
 int iefs_io_pread(int fd, void *buf, size_t len, off_t off, char *err, size_t err_cap) {
     if (fd < 0 || (!buf && len) || off < 0) {
@@ -694,9 +697,9 @@ static int read_all_buffered(int fd, size_t n, unsigned char **out, size_t *out_
     return 0;
 }
 
+#if defined(__linux__) && defined(O_DIRECT)
 static int read_all_direct(int fd, size_t n, unsigned char **out, size_t *out_len, char *err,
                            size_t err_cap) {
-#if defined(__linux__) && defined(O_DIRECT)
     /* Returns: 0 ok, -1 hard fail, -2 retry buffered (EINVAL / unsupported). */
     size_t aligned_n = n & ~(size_t)(IEFS_IO_ALIGN - 1);
     size_t alloc_n = round_up_align(n ? n : 1);
@@ -754,15 +757,8 @@ static int read_all_direct(int fd, size_t n, unsigned char **out, size_t *out_le
     *out = buf;
     *out_len = n;
     return 0;
-#else
-    (void)fd;
-    (void)n;
-    (void)out;
-    (void)out_len;
-    set_err(err, err_cap, "iefs: O_DIRECT not available");
-    return -2;
-#endif
 }
+#endif
 
 int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len, int mode,
                           char *err, size_t err_cap) {
@@ -997,6 +993,29 @@ int iefs_io_write_atomic_ex(const char *path, const unsigned char *buf, size_t l
     }
     if (shakti_fs_check(path, 1, err, err_cap) != 0)
         return -1;
+    /* sync none is scratch durability. Rewriting a same-length file in place
+     * skips the temp name and the directory rename, which dominate short saves.
+     * A size change still goes through the atomic temp path below. */
+    if (sync == IEFS_IO_SYNC_NONE && !iefs_io_want_direct(len, mode)) {
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
+            (size_t)st.st_size == len) {
+            int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+            if (fd >= 0) {
+                int rc = write_all_fd(fd, buf ? buf : (const unsigned char *)"", len);
+                if (rc != 0) {
+                    set_errf(err, err_cap, "iefs write", errno);
+                    close(fd);
+                    return -1;
+                }
+                if (close(fd) != 0) {
+                    set_errf(err, err_cap, "iefs close", errno);
+                    return -1;
+                }
+                return 0;
+            }
+        }
+    }
     char tmp[4096];
     if (make_temp_path(path, tmp, sizeof tmp) != 0) {
         set_err(err, err_cap, "iefs: path too long");
@@ -1078,6 +1097,35 @@ int iefs_io_write_atomic_regions(const char *path, uint64_t file_len, const Iefs
         if (regs[i].off > file_len || regs[i].len > file_len - regs[i].off) {
             set_err(err, err_cap, "iefs_io_write_atomic_regions: region past EOF");
             return -1;
+        }
+    }
+
+    if (sync == IEFS_IO_SYNC_NONE) {
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
+            (uint64_t)st.st_size == file_len) {
+            int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+            if (fd >= 0) {
+                int rc = 0;
+                for (uint32_t i = 0; i < n_reg; i++) {
+                    if (regs[i].len == 0)
+                        continue;
+                    if (pwrite_all(fd, regs[i].buf, regs[i].len, (off_t)regs[i].off) != 0) {
+                        rc = -1;
+                        break;
+                    }
+                }
+                if (rc != 0) {
+                    set_errf(err, err_cap, "iefs pwrite", errno);
+                    close(fd);
+                    return -1;
+                }
+                if (close(fd) != 0) {
+                    set_errf(err, err_cap, "iefs close", errno);
+                    return -1;
+                }
+                return 0;
+            }
         }
     }
 

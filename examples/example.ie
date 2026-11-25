@@ -129,6 +129,8 @@ e(list())
 e(list[](10))
 e(list[bool](10))
 e(list[char](10))
+e(0x1234)
+e(0c112233)
 e(list[int](10))
 e(list[float](10))
 
@@ -218,7 +220,8 @@ print("sum(u * v):", sum(u * v))
 # =============================================================================
 # table_csv.ie
 # =============================================================================
-# CSV/TSV table save/load. String columns save as text; load is numeric-only.
+# CSV/TSV table save/load. Columns load as ints, floats, or strings, from
+# the fields they hold; string columns save as text and reload as strings.
 # Normal-sized files use a buffered read; oversized files stream when
 # SHAKTI_CSV_MAX_BYTES is exceeded (default 1 GiB).
 #   ./shakti examples/example.ie   # or copy this section to its own file
@@ -228,22 +231,23 @@ r : save(people, "/tmp/shakti_people.csv")
 print("save returned:", r)
 print("csv bytes:", read("/tmp/shakti_people.csv"))
 
-# Missing fields pad as 0
+# A missing field pads as 0 in a numeric column; a column with no field
+# present at all (val, here) loads as strings
 write("/tmp/shakti_short.csv", "id,val\n1,\n")
 short : load("/tmp/shakti_short.csv")
 print("short-row load:")
 print(short)
 
-# Reload of a string CSV is numeric
+# Reload keeps each column's kind: ids as ints, names as strings
 reloaded : load("/tmp/shakti_people.csv")
-print("reloaded (numeric columns only):")
+print("reloaded:")
 print(reloaded)
 
 # TSV round-trip (same table API; tab delimiter)
 save(people, "/tmp/shakti_people.tsv")
 print("tsv bytes:", read("/tmp/shakti_people.tsv"))
 tsv_reloaded : load("/tmp/shakti_people.tsv")
-print("tsv reloaded (numeric columns only):")
+print("tsv reloaded:")
 print(tsv_reloaded)
 
 # TSV empty leading / trailing fields pad as 0
@@ -352,13 +356,24 @@ print(roster)
 
 import gfx
 
+def pkg_ver():
+    raw : read("src/VERSION")
+    if type(raw) = "str":
+        n : len(raw)
+        if n > 0:
+            if raw[n - 1] = "\n":
+                raw : raw[0:n - 1]
+        if len(raw) > 0:
+            return raw
+    return "0.15.1"
+
 if not gfx.available():
     print("gfx not available")
 else:
     gfx.open("Shakti GFX")
     gfx.clear(0x0a0a12)
     gfx.fill_rect(80, 60, 800, 40, 0x2244aa)
-    gfx.text(100, 68, "Shakti 0.15.0", 0xffffff, 2)
+    gfx.text(100, 68, "Shakti " + pkg_ver(), 0xffffff, 2)
     gfx.fill_rect(120, 160, 200, 200, 0xff6644)
     gfx.fill_circle(640, 300, 90, 0x44dd88)
     gfx.line(40, 500, 920, 40, 0xffffff)
@@ -391,6 +406,16 @@ pong.run()
 
 import chess
 chess.run()
+
+# =============================================================================
+# draughts_demo.ie
+# =============================================================================
+# Draughts gfx demo — copy this section into its own file (gfx loop until window close).
+#   export SHAKTI_LIB=$PWD/lib
+#   ./shakti examples/draughts_demo.ie
+
+import draughts
+draughts.run()
 
 # =============================================================================
 # pyplot_demo.ie
@@ -494,7 +519,10 @@ print("Out:", jupyter.get_out())
 print("execution_count:", jupyter.execution_count(), "cells:", jupyter.ncells())
 
 # Persist a clean notebook BEFORE error / one-shot demos (round-trip should stay green).
-path : "/tmp/shakti_jupyter_demo.ipynb"
+tmpdir : getenv("TMPDIR")
+if tmpdir = None:
+    tmpdir : "/tmp"
+path : tmpdir + "/shakti_jupyter_demo_" + str(int(clock() * 1000000)) + ".ipynb"
 nbytes : jupyter.save(path)
 print("wrote", path, nbytes, "bytes")
 
@@ -555,6 +583,9 @@ print(graph.neighbors("Bob", "out"))
 print("\npath Ada -> Dave:")
 path : graph.path("Ada", "Dave", 6)
 print(path)
+
+print("\nrelated to Ada:")
+print(graph.related("Ada"))
 
 people : table(
     name: ["Eve", "Frank"],
@@ -776,6 +807,8 @@ for row in dsp.perfect7(root):
 
 import stem
 
+TWOPI : 6.283185307179586
+
 info : stem.info()
 assert(type(info) != "error", "stem not available (build with SHAKTI_STEM=1)")
 print("stem info:", info)
@@ -794,24 +827,11 @@ while pos < n:
     take : block_sz
     if pos + take > n:
         take : n - pos
-    blk : []
-    i : 0
-    while i < take:
-        t : (pos + i) / sr
-        x : 0.2 * sin(6.283185307179586 * 110.0 * t)
-        x : x + 0.15 * sin(6.283185307179586 * 440.0 * t)
-        append(blk, x)
-        i : i + 1
+    t : (range(take) + pos) / sr
+    blk : (0.2 * sin(TWOPI * 110.0 * t)) + (0.15 * sin(TWOPI * 440.0 * t))
     out : stem.process(blk)
     for name in ["drums", "bass", "vocals", "other"]:
-        s : out[name]
-        e : 0.0
-        j : 0
-        while j < len(s):
-            v : s[j]
-            e : e + v * v
-            j : j + 1
-        energy[name] : energy[name] + e
+        energy[name] : energy[name] + sum(out[name] * out[name])
     pos : pos + take
 dt : clock() - t0
 
@@ -1041,9 +1061,7 @@ write("/tmp/shakti_rest_ping_server.ie", srv_src)
 
 import subprocess
 subprocess.Popen(["./shakti", "/tmp/shakti_rest_ping_server.ie"])
-t0 : clock()
-while clock() - t0 < 0.5:
-    pass
+wait(500)
 
 print("GET /ping")
 resp : rest.get("http://127.0.0.1:29878/ping")
@@ -1051,11 +1069,6 @@ if rest.ok(resp):
     print("status:", rest.status(resp), "body:", rest.text(resp))
 else:
     print("error status:", rest.status(resp))
-
-subprocess.Popen(["./shakti", "/tmp/shakti_rest_ping_server.ie"])
-t0 : clock()
-while clock() - t0 < 0.5:
-    pass
 
 print("POST /echo")
 resp2 : rest.post_json("http://127.0.0.1:29878/echo", {"msg": "hello"})

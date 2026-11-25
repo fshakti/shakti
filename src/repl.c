@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/repl.c — interactive loop, highlighting, docs */
 #include "ie_card.h"
 #include "shakti_internal.h"
@@ -11,7 +12,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.15.0"
+#define SHAKTI_PKG_VERSION "0.15.1"
 #endif
 
 static int shakti_stmt_silent(Node *s) {
@@ -429,7 +430,10 @@ static void repl_print_hl_doc(const char *name) {
     FILE *f = repl_open_doc(name);
     if (!f) {
         if (name && !strcmp(name, "IE.txt")) {
-            fputs(IE_CARD_TEXT, stdout);
+            /* Rewrite the version header live, as for a card read from disk. */
+            const char *nl = strchr(IE_CARD_TEXT, '\n');
+            if (nl) printf("shakti %s%s", SHAKTI_PKG_VERSION, nl);
+            else fputs(IE_CARD_TEXT, stdout);
             fflush(stdout);
             return;
         }
@@ -556,7 +560,7 @@ int run_repl(Env *e) {
             if (inlen + ll + 1 >= REPL_INPUT_CAP) {
                 fprintf(stderr, "REPL input too long (max %d bytes)\n", REPL_INPUT_CAP - 1);
                 inlen = 0;
-                input[0] = 0;
+                input[inlen] = 0;
                 break;
             }
             memcpy(input + inlen, line, ll);

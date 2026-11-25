@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * HLD1 — HTTP wire wrapper for Shakti values.
  * Payload is an IEFS frame; optional external zstd/snappy via codec.c.

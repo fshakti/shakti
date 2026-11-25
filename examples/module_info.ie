@@ -1,4 +1,0 @@
-print({
-  "directory": __dir__,
-  "filename": __file__
-})

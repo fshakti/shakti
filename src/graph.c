@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "graph.h"
 #include <stdlib.h>
 #include <string.h>
@@ -218,8 +219,8 @@ static int64_t *graph_candidate_indices(Graph *g, const char *s, const char *p, 
     } else if (!graph_wildcard(o)) {
         if (idx_collect(g->obj_idx[graph_hash(o)], o, &cand, &cn, &cap) < 0) return NULL;
     } else {
-        cand = malloc((size_t)g->count * sizeof(int64_t));
-        P(!cand, NULL)
+        cand = malloc((size_t)(g->count > 0 ? g->count : 1) * sizeof(int64_t));
+        if (!cand) { *n_out = -1; return NULL; }
         for (int64_t i = 0; i < g->count; i++) cand[i] = i;
         cn = g->count;
     }
@@ -318,7 +319,8 @@ V *bi_graph_query(V **a, int n) {
 
     int64_t cn = 0;
     int64_t *cand = graph_candidate_indices(g, s, p, o, &cn);
-    P(!cand && g->count > 0, v_err("graph_query: out of memory"))
+    /* cn < 0 is an allocation failure. A name that matches nothing leaves cand NULL and cn 0. */
+    P(cn < 0, v_err("graph_query: out of memory"))
 
     int64_t *hits = NULL;
     int64_t hn = 0, hcap = 0;

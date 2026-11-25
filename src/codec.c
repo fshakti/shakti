@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Host compression: zstd + snappy + residual column codecs (delta/FIRE/Gorilla).
  * Build with SHAKTI_HAVE_ZSTD / SHAKTI_HAVE_SNAPPY when libs are present.
@@ -124,7 +125,7 @@ typedef struct {
 
 static int bitw_ensure(BitW *w, size_t extra_bytes) {
     size_t need = w->byte_i + extra_bytes + 8;
-    if (need <= w->cap)
+    if (w->data && need <= w->cap)
         return 0;
     size_t ncap = w->cap ? w->cap : 64;
     while (ncap < need)
@@ -581,9 +582,6 @@ static int compress_gorilla_f64(const unsigned char *src, size_t src_len, unsign
             tz++;
             t >>= 1;
         }
-        int meaningful = 64 - lz - tz;
-        if (meaningful <= 0)
-            meaningful = 1;
         if (have_window && lz >= prev_lz && tz >= prev_tz) {
             /* reuse window */
             if (bitw_put(&w, 0, 1) != 0) {
@@ -1032,8 +1030,21 @@ static int compress_datetime(const unsigned char *src, size_t src_len, unsigned 
             set_err(err, err_cap, "compress: out of memory");
             return -1;
         }
-        for (size_t i = 0; i < n; i++)
+        int64_t lim = INT64_MAX / MS_PER_DAY;
+        for (size_t i = 0; i < n; i++) {
+            int64_t ms = 0;
             split_ms(x[i], &days[i], &tod[i]);
+            /* The decoder rebuilds the int as days * MS_PER_DAY + time-of-day. Refuse a
+             * value that split would not read back, so a saved file cannot fail to load. */
+            if (days[i] > lim || days[i] < -lim ||
+                __builtin_mul_overflow(days[i], MS_PER_DAY, &ms) ||
+                __builtin_add_overflow(ms, tod[i], &ms)) {
+                free(days);
+                free(tod);
+                set_err(err, err_cap, "codec: datetime overflow");
+                return -1;
+            }
+        }
     }
     BitW w = {0};
     if (bitw_ensure(&w, 24 + n * 9 + (n * TOD_BITS + 7) / 8 + 64) != 0) {
@@ -1114,7 +1125,7 @@ static int decompress_datetime(const unsigned char *src, size_t src_len, unsigne
     int64_t x0 = (int64_t)get_u64_le(src + 16);
     int64_t d0, t0;
     split_ms(x0, &d0, &t0);
-    int64_t *days = malloc(n * sizeof(int64_t));
+    int64_t *days = calloc(n ? n : 1, sizeof(int64_t));
     if (!days) {
         free(buf);
         set_err(err, err_cap, "decompress: out of memory");
@@ -1260,7 +1271,7 @@ size_t shakti_decode_limit(void) {
         if (end && (*end == 'k' || *end == 'K')) { shift = 10; end++; }
         else if (end && (*end == 'm' || *end == 'M')) { shift = 20; end++; }
         else if (end && (*end == 'g' || *end == 'G')) { shift = 30; end++; }
-        if (errno == 0 && end != ev && *end == 0 && v > 0) {
+        if (errno == 0 && end && end != ev && *end == 0 && v > 0) {
             if (v > (SHAKTI_CODEC_MAX_PLAIN >> shift))
                 lim = SHAKTI_CODEC_MAX_PLAIN;
             else

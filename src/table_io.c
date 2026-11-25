@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti_internal.h"
 #include <ctype.h>
 #include <errno.h>
@@ -6,12 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 extern V *table_xml_load(const char *path, V *columns_opt);
 
-static V *table_tsv_load(const char *path, V *columns_opt);
-static V *table_csv_load(const char *path, V *columns_opt);
+static V *table_tsv_load(const char *path, V *columns_opt, V *schema_opt);
+static V *table_csv_load(const char *path, V *columns_opt, V *schema_opt);
 static int table_csv_save(V *table, const char *path);
 static int table_tsv_save(V *table, const char *path);
 
@@ -20,18 +22,21 @@ static int ends_with(const char *s, const char *t) {
     return ls >= lu && strcmp(s + ls - lu, t) == 0;
 }
 
-V *table_load(const char *path, V *columns_opt) {
+V *table_load(const char *path, V *columns_opt, V *schema_opt) {
     P(!path, v_err("load: path"))
     {
         char err[512];
         if (shakti_fs_check(path, 0, err, sizeof err) != 0) return v_errf("load: %s", err);
     }
     if (ends_with(path, ".csv"))
-        return table_csv_load(path, columns_opt);
-    if (ends_with(path, ".xml"))
+        return table_csv_load(path, columns_opt, schema_opt);
+    if (ends_with(path, ".xml")) {
+        if (schema_opt) return v_err("load: schema only supported for .csv/.tsv");
         return table_xml_load(path, columns_opt);
+    }
     if (ends_with(path, ".tsv"))
-        return table_tsv_load(path, columns_opt);
+        return table_tsv_load(path, columns_opt, schema_opt);
+    if (schema_opt) return v_err("load: schema only supported for .csv/.tsv");
     return v_err("load: supported formats are .csv, .xml and .tsv");
 }
 
@@ -121,16 +126,6 @@ static const char *delim_skip_field(const char *p, char c, int *ate_delim) {
     if (*p == c) { p++; *ate_delim = 1; }
     return p;
 }
-/* Trim the padding of a quoted field: spaces, and tabs unless the tab is the delimiter, as strip_pad
-   does, but not a \r or \n at the end: a line break inside the quotes is part of the field. */
-static void strip_quoted_pad(char *s, char delim) {
-    char *a = s;
-    W(*a == ' ' || (*a == '\t' && delim != '\t'), a++)
-    if (a != s)
-        memmove(s, a, strlen(a) + 1);
-    size_t n = strlen(s);
-    W(n && (s[n - 1] == ' ' || (s[n - 1] == '\t' && delim != '\t')), s[--n] = 0)
-}
 static int split_delim_line(char *line, char **out, int max, char c) {
     int n = 0;
     char *p = line;
@@ -150,7 +145,6 @@ static int split_delim_line(char *line, char **out, int max, char c) {
             }
             *w = 0;
             if (*r == c) { r++; ate = 1; }
-            strip_quoted_pad(out[n - 1], c);
             p = r;
         } else {
             char *start = p;
@@ -249,21 +243,43 @@ static ssize_t get_record(char **line, size_t *cap, FILE *f, char c, int bom) {
     return got;
 }
 
+static int edge_pad(const char *s) {
+    size_t n;
+    if (!s || !*s) return 0;
+    n = strlen(s);
+    return s[0] == ' ' || s[0] == '\t' || s[n - 1] == ' ' || s[n - 1] == '\t';
+}
 static int field_needs_quote(const char *s, char delim) {
     if (!s) return 0;
+    if (edge_pad(s)) return 1;
     for (; *s; s++)
         if (*s == delim || *s == '"' || *s == '\n' || *s == '\r') return 1;
     return 0;
 }
-static int fputs_field(FILE *f, const char *s, char delim) {
+static int all_int_span(const char *s, size_t n);
+static int all_float_span(const char *s, size_t n);
+static int csv_parse_i64_span(const char *s, const char *e, int64_t *out);
+static int csv_parse_f64_span(const char *s, const char *e, double *out);
+
+static int fputs_field_quoted(FILE *f, const char *s, char delim, int force_quote) {
     if (!s) s = "";
-    if (!field_needs_quote(s, delim)) return fputs(s, f) == EOF ? -1 : 0;
+    if (!force_quote && !field_needs_quote(s, delim)) return fputs(s, f) == EOF ? -1 : 0;
     if (fputc('"', f) == EOF) return -1;
     for (; *s; s++) {
         if (*s == '"' && fputc('"', f) == EOF) return -1;
         if (fputc(*s, f) == EOF) return -1;
     }
     return fputc('"', f) == EOF ? -1 : 0;
+}
+static int fputs_field(FILE *f, const char *s, char delim) {
+    return fputs_field_quoted(f, s, delim, 0);
+}
+/* Text that reads back as a number is quoted, so a string column stays a string column. */
+static int fputs_string_field(FILE *f, const char *s, char delim) {
+    if (!s) s = "";
+    size_t n = strlen(s);
+    return fputs_field_quoted(f, s, delim,
+                              edge_pad(s) || all_int_span(s, n) || all_float_span(s, n));
 }
 /* A float as saved: rounded to 15 significant digits, or to 16 or 17 when fewer don't read back as
    the same float (a whole float below 1e15 in full), always with a '.' or an exponent so that load
@@ -285,25 +301,15 @@ static int table_delim_save(V *table, const char *path, char c) {
     P(!table || table->t != T_TABLE || !table->keys || !table->vals, -1)
     int nc = (int)table->keys->n;
     int64_t nrows = table->n;
-    char tmp[4096];
-    unsigned rnd = 0;
-    int rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    if (rfd >= 0) {
-        if (read(rfd, &rnd, sizeof rnd) != (ssize_t)sizeof rnd) rnd = (unsigned)getpid();
-        close(rfd);
-    } else {
-        rnd = (unsigned)getpid();
-    }
-    if (snprintf(tmp, sizeof tmp, "%s.part-%u", path, rnd) >= (int)sizeof tmp) return -1;
-    int fd = open(tmp, O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
-    if (fd < 0) return -1;
-    FILE *f = fdopen(fd, "wb");
-    if (!f) { close(fd); unlink(tmp); return -1; }
+    char *mem = NULL;
+    size_t memlen = 0;
+    FILE *f = open_memstream(&mem, &memlen);
+    if (!f) return -1;
     for (int j = 0; j < nc; j++) {
         if (j && fputc(c, f) == EOF) goto fail;
         V *cn = table->keys->L[j];
         const char *nm = (cn && cn->t == T_STR) ? cn->s : "col";
-        if (fputs_field(f, nm, c) != 0) goto fail;
+        if (fputs_string_field(f, nm, c) != 0) goto fail;
     }
     if (fputc('\n', f) == EOF) goto fail;
     for (int64_t r = 0; r < nrows; r++) {
@@ -312,6 +318,7 @@ static int table_delim_save(V *table, const char *path, char c) {
             V *col = table->vals->L[j];
             char buf[128];
             const char *out = "";
+            int string_cell = 0;
             if (!col || r >= col->n) goto fail;
             if (col->t == T_FVEC) {
                 save_float_format(col->F[r], buf, sizeof buf);
@@ -326,7 +333,7 @@ static int table_delim_save(V *table, const char *path, char c) {
                 out = buf;
             } else if (col->t == T_LIST) {
                 V *cell = col->L[r];
-                if (cell && cell->t == T_STR) out = cell->s ? cell->s : "";
+                if (cell && cell->t == T_STR) { out = cell->s ? cell->s : ""; string_cell = 1; }
                 else if (cell && cell->t == T_INT) {
                     snprintf(buf, sizeof buf, "%lld", (long long)cell->j);
                     out = buf;
@@ -335,16 +342,76 @@ static int table_delim_save(V *table, const char *path, char c) {
                     out = buf;
                 }
             } else goto fail;
-            if (fputs_field(f, out, c) != 0) goto fail;
+            if ((string_cell ? fputs_string_field(f, out, c) : fputs_field(f, out, c)) != 0) goto fail;
         }
         if (fputc('\n', f) == EOF) goto fail;
     }
-    if (fclose(f) != 0) { unlink(tmp); return -1; }
-    if (rename(tmp, path) != 0) { unlink(tmp); return -1; }
+    if (fclose(f) != 0) { free(mem); return -1; }
+    f = NULL;
+    /* Same-length rewrite skips the temp file and rename. A different length
+     * still replaces the file atomically. */
+    struct stat sb;
+    int placed = 0;
+    if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
+        int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) {
+            size_t off = 0;
+            int wok = 1;
+            while (off < memlen) {
+                ssize_t w = write(fd, mem + off, memlen - off);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    wok = 0;
+                    break;
+                }
+                if (w == 0) { wok = 0; break; }
+                off += (size_t)w;
+            }
+            if (wok && close(fd) == 0) placed = 1;
+            else if (!wok) close(fd);
+        }
+    }
+    if (!placed) {
+        char tmp[4096];
+        unsigned rnd = 0;
+        int rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+        if (rfd >= 0) {
+            if (read(rfd, &rnd, sizeof rnd) != (ssize_t)sizeof rnd) rnd = (unsigned)getpid();
+            close(rfd);
+        } else {
+            rnd = (unsigned)getpid();
+        }
+        if (snprintf(tmp, sizeof tmp, "%s.part-%u", path, rnd) >= (int)sizeof tmp) {
+            free(mem);
+            return -1;
+        }
+        int fd = open(tmp, O_CREAT | O_EXCL | O_NOFOLLOW | O_WRONLY | O_CLOEXEC, 0600);
+        if (fd < 0) { free(mem); return -1; }
+        size_t off = 0;
+        int wok = 1;
+        while (off < memlen) {
+            ssize_t w = write(fd, mem + off, memlen - off);
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                wok = 0;
+                break;
+            }
+            if (w == 0) { wok = 0; break; }
+            off += (size_t)w;
+        }
+        if (!wok || close(fd) != 0) {
+            if (!wok) close(fd);
+            unlink(tmp);
+            free(mem);
+            return -1;
+        }
+        if (rename(tmp, path) != 0) { unlink(tmp); free(mem); return -1; }
+    }
+    free(mem);
     return 0;
 fail:
     fclose(f);
-    unlink(tmp);
+    free(mem);
     return -1;
 }
 
@@ -369,62 +436,444 @@ static int count_delim_fields(const char *line, char c) {
     return n;
 }
 
-static V *table_keep_columns(V *t, V *columns_opt) {
-    V *kl, *dl;
-    int64_t i, n;
-    if (!columns_opt || columns_opt->t == T_NIL) return t;
-    if (columns_opt->t != T_LIST) { v_free(t); return v_err("load: columns must be a list of names"); }
-    n = columns_opt->n;
-    kl = v_list(n);
-    dl = v_list(n);
-    for (i = 0; i < n; i++) {
-        V *name = columns_opt->L[i];
-        int found = 0;
-        int64_t c;
-        if (!name || name->t != T_STR) {
-            v_free(kl); v_free(dl); v_free(t);
-            return v_err("load: column name must be a string");
+/* Column kinds inferred from the fields of a delimited file. */
+enum { KIND_INT = 0, KIND_FLOAT = 1, KIND_STR = 2 };
+
+/* A parsed header plus, per output column, where it comes from in the file and what kind it
+ * inferred. Output columns are the file's columns, or the ones `columns_opt` asks for. */
+typedef struct {
+    int nh;
+    int n_out;
+    char **hdr;
+    int *src;
+    int *out_of;
+    int *kind;
+    int *seen;
+    int *schemed;
+    /* Set when scan_record_kinds returns -2: the schemed column/cell that failed. */
+    const char *bad_col;
+    int bad_kind;
+    char bad_cell[96];
+} DelimPlan;
+
+static void delim_plan_free(DelimPlan *p) {
+    if (!p) return;
+    if (p->hdr) {
+        for (int i = 0; i < p->nh; i++) free(p->hdr[i]);
+        free(p->hdr);
+    }
+    free(p->src);
+    free(p->out_of);
+    free(p->kind);
+    free(p->seen);
+    free(p->schemed);
+    memset(p, 0, sizeof *p);
+}
+
+/* Build the plan from a header record (split in place; the names are copied). On failure
+ * returns an error value and leaves the plan freed. */
+static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt, V *schema_opt,
+                          const char *fmt) {
+    memset(p, 0, sizeof *p);
+    if (columns_opt && columns_opt->t != T_LIST)
+        return v_err("load: columns must be a list of names");
+    if (schema_opt && schema_opt->t != T_DICT)
+        return v_err("load: schema must be a dict of name:prototype");
+    int nh = count_delim_fields(header, delim);
+    if (nh <= 0 || nh > 1000000) return v_errf("%s: bad header", fmt);
+    char **hdr_cells = calloc((size_t)nh, sizeof(char *));
+    if (!hdr_cells) return v_errf("%s: out of memory", fmt);
+    int got = split_delim_line(header, hdr_cells, nh, delim);
+    if (got <= 0) {
+        free(hdr_cells);
+        return v_errf("%s: bad header", fmt);
+    }
+    nh = got;
+    p->nh = nh;
+    p->hdr = calloc((size_t)nh, sizeof(char *));
+    p->out_of = malloc((size_t)nh * sizeof(int));
+    if (!p->hdr || !p->out_of) {
+        free(hdr_cells);
+        delim_plan_free(p);
+        return v_errf("%s: out of memory", fmt);
+    }
+    for (int i = 0; i < nh; i++) {
+        p->out_of[i] = -1;
+        p->hdr[i] = strdup(hdr_cells[i] ? hdr_cells[i] : "");
+        if (!p->hdr[i]) {
+            free(hdr_cells);
+            delim_plan_free(p);
+            return v_errf("%s: out of memory", fmt);
         }
-        for (c = 0; c < t->keys->n; c++) {
-            if (t->keys->L[c] && t->keys->L[c]->t == T_STR && !strcmp(t->keys->L[c]->s, name->s)) {
-                kl->L[i] = v_ref(t->keys->L[c]);
-                dl->L[i] = v_ref(t->vals->L[c]);
-                found = 1;
+    }
+    free(hdr_cells);
+    int n_out = columns_opt ? (int)columns_opt->n : nh;
+    p->n_out = n_out;
+    p->src = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    p->kind = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    p->seen = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    p->schemed = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    if (!p->src || !p->kind || !p->seen || !p->schemed) {
+        delim_plan_free(p);
+        return v_errf("%s: out of memory", fmt);
+    }
+    if (columns_opt) {
+        for (int i = 0; i < n_out; i++) {
+            V *name = columns_opt->L[i];
+            if (!name || name->t != T_STR) {
+                delim_plan_free(p);
+                return v_err("load: column name must be a string");
+            }
+            int found = -1;
+            for (int j = 0; j < nh; j++)
+                if (!strcmp(p->hdr[j], name->s)) { found = j; break; }
+            if (found < 0) {
+                delim_plan_free(p);
+                return v_errf("load: unknown column '%s'", name->s);
+            }
+            p->src[i] = found;
+            p->out_of[found] = i;
+        }
+    } else {
+        for (int i = 0; i < n_out; i++) {
+            p->src[i] = i;
+            p->out_of[i] = i;
+        }
+    }
+    if (schema_opt) {
+        for (int64_t i = 0; i < schema_opt->n; i++) {
+            V *name = schema_opt->keys ? schema_opt->keys->L[i] : NULL;
+            V *proto = schema_opt->vals ? schema_opt->vals->L[i] : NULL;
+            if (!name || name->t != T_STR || !name->s) {
+                delim_plan_free(p);
+                return v_err("load: schema column name must be a string");
+            }
+            int kind;
+            if (proto && proto->t == T_INT) kind = KIND_INT;
+            else if (proto && proto->t == T_FLOAT) kind = KIND_FLOAT;
+            else if (proto && proto->t == T_STR) kind = KIND_STR;
+            else {
+                delim_plan_free(p);
+                return v_errf("load: schema column '%s': prototype must be 0, 0.0 or \"\"",
+                              name->s);
+            }
+            int found = -1;
+            for (int j = 0; j < nh; j++)
+                if (!strcmp(p->hdr[j], name->s)) { found = j; break; }
+            if (found < 0) {
+                delim_plan_free(p);
+                return v_errf("load: schema column '%s' not in file", name->s);
+            }
+            int oi = p->out_of[found];
+            if (oi < 0) {
+                delim_plan_free(p);
+                return v_errf("load: schema column '%s' not in projected columns", name->s);
+            }
+            p->kind[oi] = kind;
+            p->schemed[oi] = 1;
+        }
+    }
+    return NULL;
+}
+
+/* Missing-value spellings: no text at all, or NA, NAN, NR or NULL in any case. */
+static int is_na_token(const char *s, size_t n) {
+    if (!s || n == 0) return 1;
+    if (n > 4) return 0;
+    unsigned char c0 = (unsigned char)s[0];
+    if (c0 != 'N' && c0 != 'n') return 0;
+    char buf[8];
+    for (size_t i = 0; i < n; i++) buf[i] = (char)toupper((unsigned char)s[i]);
+    buf[n] = 0;
+    return !strcmp(buf, "NA") || !strcmp(buf, "NAN") || !strcmp(buf, "NR") ||
+           !strcmp(buf, "NULL");
+}
+
+static int all_int_span(const char *s, size_t n) {
+    size_t i = 0;
+    if (i < n && (s[i] == '-' || s[i] == '+')) i++;
+    if (i >= n) return 0;
+    for (; i < n; i++)
+        if (!isdigit((unsigned char)s[i])) return 0;
+    return 1;
+}
+
+static int all_float_span(const char *s, size_t n) {
+    if (!s || n == 0 || n >= 128) return 0;
+    char buf[128];
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    if (n >= 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) return 0;
+    char *end = NULL;
+    double x = strtod(buf, &end);
+    return end && end != buf && *end == 0 && isfinite(x);
+}
+
+static int cell_kind_span(const char *s, size_t n, int was_quoted) {
+    if (was_quoted) return KIND_STR;
+    if (is_na_token(s, n)) return KIND_INT; /* missing: does not promote; the scan skips it */
+    if (all_int_span(s, n)) {
+        /* A value strtoll would clamp to the max int is a float column, not that max. */
+        size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
+        while (i < n && s[i] == '0') i++;
+        size_t sig = n - i;
+        if (sig > 19) return KIND_STR;
+        if (sig == 19) { /* fewer digits always fit; more never do */
+            char buf[32];
+            size_t lead = (s[0] == '-' || s[0] == '+') ? 1 : 0;
+            size_t total = lead + sig;
+            memcpy(buf, s, lead);
+            memcpy(buf + lead, s + i, sig);
+            buf[total] = 0;
+            errno = 0;
+            (void)strtoll(buf, NULL, 10);
+            if (errno == ERANGE) return KIND_STR;
+        }
+        return KIND_INT;
+    }
+    if (all_float_span(s, n)) return KIND_FLOAT;
+    return KIND_STR;
+}
+
+/* Advance past one field without copying: start/len give its text (padding off, as
+ * strip_pad takes it), quoted whether it was quoted, ate_delim whether a delimiter
+ * followed it. The text is not NUL-terminated at start + len. */
+static void next_field_view(const char **pp, char delim, const char **start, size_t *len,
+                            int *quoted, int *ate_delim) {
+    const char *p = *pp;
+    *quoted = 0;
+    *ate_delim = 0;
+    if (*p == '"') {
+        *quoted = 1;
+        p++;
+        *start = p;
+        *len = 0;
+        while (*p) {
+            if (*p == '"') {
+                if (p[1] == '"') { p += 2; continue; }
+                *len = (size_t)(p - *start);
+                p++;
                 break;
             }
+            p++;
         }
-        if (!found) {
-            v_free(kl); v_free(dl); v_free(t);
-            return v_errf("load: unknown column '%s'", name->s);
-        }
+        if (!*p && p > *start && p[-1] != '"') *len = (size_t)(p - *start);
+        while (*p && *p != delim) p++;
+        if (*p == delim) { p++; *ate_delim = 1; }
+        *pp = p;
+        return;
     }
-    {
-        V *out = v_table(kl, dl);
-        v_free(kl); v_free(dl); v_free(t);
-        return out;
-    }
+    const char *s = p;
+    while (*p && *p != delim && *p != '\n') p++;
+    const char *e = p;
+    while (s < e && is_pad(*s, delim)) s++;
+    while (e > s && is_end_pad(e[-1], delim)) e--;
+    *start = s;
+    *len = (size_t)(e - s);
+    if (*p == delim) { p++; *ate_delim = 1; }
+    *pp = p;
 }
-/* Whether a field reads as an int once the padding strip_pad takes off is gone. */
-static int field_is_int(const char *line, int field, char delim) {
+
+/* Strict check for a schemed numeric cell: the whole span must parse as the declared kind. */
+static int schemed_span_ok(int kind, const char *s, size_t n) {
+    if (kind == KIND_INT) {
+        int64_t v = 0;
+        return csv_parse_i64_span(s, s + n, &v);
+    }
+    double x = 0.0;
+    if (csv_parse_f64_span(s, s + n, &x)) return 1;
+    if (n == 0 || n >= 256) return 0;
+    char buf[256];
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    if (n >= 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) return 0;
+    char *end = NULL;
+    x = strtod(buf, &end);
+    return end && end != buf && *end == 0 && isfinite(x);
+}
+
+/* Fold one record into the plan's inferred kinds. Returns the field count, or -2 when a
+ * schemed cell fails its declared kind (plan->bad_* describe it). Schemed columns keep
+ * their declared kind: no promotion, and quoted cells are validated from their text
+ * instead of forcing a string column. */
+static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
     const char *p = line ? line : "";
-    int f;
-    for (f = 0; f < field && *p; f++) {
-        int ate = 0;
-        p = delim_skip_field(p, delim, &ate);
-        if (!ate) return 0;
+    int nf = 0;
+    for (;;) {
+        const char *s = NULL;
+        size_t n = 0;
+        int quoted = 0, ate = 0;
+        next_field_view(&p, delim, &s, &n, &quoted, &ate);
+        int oi = nf < plan->nh ? plan->out_of[nf] : -1;
+        if (oi >= 0) {
+            if (plan->schemed[oi]) {
+                if (n && !is_na_token(s, n)) {
+                    if (plan->kind[oi] != KIND_STR &&
+                        !schemed_span_ok(plan->kind[oi], s, n)) {
+                        plan->bad_col = plan->hdr[plan->src[oi]];
+                        plan->bad_kind = plan->kind[oi];
+                        size_t cpy = n < sizeof plan->bad_cell - 1 ? n
+                                                                   : sizeof plan->bad_cell - 1;
+                        memcpy(plan->bad_cell, s, cpy);
+                        plan->bad_cell[cpy] = 0;
+                        return -2;
+                    }
+                    plan->seen[oi]++;
+                }
+            } else if (quoted) {
+                plan->kind[oi] = KIND_STR;
+                plan->seen[oi]++;
+            } else if (!is_na_token(s, n)) {
+                int k = cell_kind_span(s, n, 0);
+                if (k > plan->kind[oi]) plan->kind[oi] = k;
+                plan->seen[oi]++;
+            }
+        }
+        nf++;
+        if (!ate) break;
     }
-    int quoted = *p == '"';
-    if (quoted) p++;
-    W(is_pad(*p, delim), p++)
-    if (*p == '-' || *p == '+') p++;
-    if (!isdigit((unsigned char)*p)) return 0;
-    W(isdigit((unsigned char)*p), p++)
-    W(is_end_pad(*p, delim), p++)
-    /* The field ends at the end of the text, or at its closing quote if it is quoted (a "" or a
-       delimiter inside the quotes is part of it), or at the delimiter if not. */
-    return !*p || (quoted ? *p == '"' && p[1] != '"' : *p == delim);
+    return nf;
 }
-static V *table_delim_load(const char *path, V *columns_opt, char c, const char *fmt) {
+
+/* Columns nothing real was ever seen in are string columns, not zero-filled ints.
+ * Schemed columns keep their declared kind even when nothing was ever seen. */
+static void delim_plan_finish_kinds(DelimPlan *plan) {
+    for (int i = 0; i < plan->n_out; i++)
+        if (!plan->schemed[i] && plan->kind[i] == KIND_INT && plan->seen[i] == 0)
+            plan->kind[i] = KIND_STR;
+}
+
+static void csv_trim_span(const char **a, const char **b) {
+    const char *s = *a, *e = *b;
+    while (s < e && (*s == ' ' || *s == '\t')) s++;
+    while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r')) e--;
+    *a = s;
+    *b = e;
+}
+
+static int csv_parse_i64_span(const char *s, const char *e, int64_t *out) {
+    csv_trim_span(&s, &e);
+    if (s == e || is_na_token(s, (size_t)(e - s))) { *out = 0; return 1; }
+    int neg = 0;
+    if (*s == '+' || *s == '-') { neg = *s == '-'; s++; }
+    if (s == e) return 0;
+    uint64_t v = 0;
+    for (; s < e; s++) {
+        unsigned d = (unsigned)((unsigned char)*s - '0');
+        if (d > 9) return 0;
+        if (v > (UINT64_MAX - d) / 10u) return 0;
+        v = v * 10u + d;
+    }
+    if (neg) {
+        if (v > (uint64_t)INT64_MAX + 1u) return 0;
+        *out = v == (uint64_t)INT64_MAX + 1u ? INT64_MIN : -(int64_t)v;
+    } else {
+        if (v > (uint64_t)INT64_MAX) return 0;
+        *out = (int64_t)v;
+    }
+    return 1;
+}
+
+static const double csv_p10[] = {1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0,
+                                 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+                                 1e17, 1e18};
+
+/* Fast path for plain decimal text of at most 18 digits and no exponent. Returns 0 when
+ * the text is not of that shape (the caller falls back to strtod, which also covers
+ * exponents, long digit strings and subnormals exactly). */
+static int csv_parse_f64_span(const char *s, const char *e, double *out) {
+    csv_trim_span(&s, &e);
+    if (s == e || is_na_token(s, (size_t)(e - s))) { *out = 0.0; return 1; }
+    int neg = 0;
+    if (*s == '+' || *s == '-') { neg = *s == '-'; s++; }
+    if (s == e) return 0;
+    const char *p = s;
+    uint64_t mant = 0;
+    int ndig = 0, int_digits = 0;
+    while (p < e && isdigit((unsigned char)*p)) {
+        if (ndig < 18) mant = mant * 10u + (unsigned)(*p - '0');
+        ndig++;
+        p++;
+    }
+    int_digits = ndig;
+    int frac_digits = 0;
+    if (p < e && *p == '.') {
+        p++;
+        while (p < e && isdigit((unsigned char)*p)) {
+            if (ndig < 18) mant = mant * 10u + (unsigned)(*p - '0');
+            ndig++;
+            p++;
+        }
+        frac_digits = ndig - int_digits;
+    }
+    if (p != e || ndig == 0 || ndig > 18) return 0;
+    if (mant > 9007199254740991ULL) return 0; /* mantissa must be exact in a double */
+    if (frac_digits >= (int)(sizeof csv_p10 / sizeof csv_p10[0])) return 0;
+    double v = (double)mant;
+    if (frac_digits > 0) v /= csv_p10[frac_digits];
+    if (v != 0.0 && fabs(v) < DBL_MIN) return 0;
+    *out = neg ? -v : v;
+    return 1;
+}
+
+static V **delim_alloc_cols(DelimPlan *plan, int64_t rows, const char *fmt) {
+    V **cols = calloc((size_t)(plan->n_out > 0 ? plan->n_out : 1), sizeof(V *));
+    if (!cols) return NULL;
+    for (int i = 0; i < plan->n_out; i++) {
+        cols[i] = plan->kind[i] == KIND_STR    ? v_list(rows)
+                  : plan->kind[i] == KIND_FLOAT ? v_fvec(rows)
+                                                : v_ivec(rows);
+        if (!cols[i] || cols[i]->t == T_ERR) {
+            for (int k = 0; k <= i; k++) v_free(cols[k]);
+            free(cols);
+            return NULL;
+        }
+        (void)fmt;
+    }
+    return cols;
+}
+
+static void delim_free_cols(V **cols, int n) {
+    if (!cols) return;
+    for (int i = 0; i < n; i++) v_free(cols[i]);
+    free(cols);
+}
+
+/* Fill one output row from a record already split by split_delim_line. */
+static void delim_fill_row(DelimPlan *plan, V **cols, char **cells, int64_t row) {
+    for (int i = 0; i < plan->n_out; i++) {
+        const char *cell = cells[plan->src[i]] ? cells[plan->src[i]] : "";
+        if (plan->kind[i] == KIND_STR) {
+            cols[i]->L[row] = v_str(cell);
+        } else if (plan->kind[i] == KIND_FLOAT) {
+            double x = 0.0;
+            if (!csv_parse_f64_span(cell, cell + strlen(cell), &x)) x = strtod(cell, NULL);
+            cols[i]->F[row] = x;
+        } else {
+            int64_t v = 0;
+            if (!csv_parse_i64_span(cell, cell + strlen(cell), &v))
+                v = (int64_t)strtoll(cell, NULL, 10);
+            cols[i]->J[row] = v;
+        }
+    }
+}
+
+static V *delim_finish_table(DelimPlan *plan, V **cols, int64_t row) {
+    V *kl = v_list(plan->n_out);
+    V *dl = v_list(plan->n_out);
+    for (int i = 0; i < plan->n_out; i++) {
+        kl->L[i] = v_str(plan->hdr[plan->src[i]]);
+        dl->L[i] = cols[i];
+        if (cols[i]) cols[i]->n = row;
+    }
+    V *t = v_table(kl, dl);
+    v_free(kl);
+    v_free(dl);
+    t->n = row;
+    return t;
+}
+static V *table_delim_load(const char *path, V *columns_opt, V *schema_opt, char c,
+                           const char *fmt) {
     /* Prefer a single buffered read for normal-sized files (fast path / benches).
      * Fall back to two-pass getline streaming when the file exceeds
      * SHAKTI_CSV_MAX_BYTES (default 1 GiB) or cannot be mapped that way. */
@@ -484,108 +933,83 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
             return v_errf("%s: need header + rows", fmt);
         }
         strip_pad(lines[0], c);
-        int nh_count = count_delim_fields(lines[0], c);
-        if (nh_count <= 0 || nh_count > 1000000) {
+        DelimPlan plan;
+        V *perr = delim_plan_init(&plan, lines[0], c, columns_opt, schema_opt, fmt);
+        if (perr) {
             free(lines);
             free(raw);
-            return v_errf("%s: bad header", fmt);
+            return perr;
         }
-        char **hdr_cells = calloc((size_t)nh_count, sizeof(char *));
-        char **cells = calloc((size_t)nh_count, sizeof(char *));
-        int *use_float = calloc((size_t)nh_count, sizeof(int));
-        if (!hdr_cells || !cells || !use_float) {
-            free(hdr_cells); free(cells); free(use_float); free(lines); free(raw);
+        int *rowmap = malloc((size_t)(nl > 1 ? nl : 1) * sizeof(int));
+        if (!rowmap) {
+            delim_plan_free(&plan);
+            free(lines);
+            free(raw);
             return v_errf("%s: out of memory", fmt);
-        }
-        int nh = split_delim_line(lines[0], hdr_cells, nh_count, c);
-        if (nh <= 0) {
-            free(hdr_cells); free(cells); free(use_float);
-            free(lines);
-            free(raw);
-            return v_errf("%s: bad header", fmt);
         }
         int data_rows = 0;
         for (int li = 1; li < nl; li++) {
             strip_pad(lines[li], c);
             if (!lines[li][0])
                 continue;
-            data_rows++;
-            if (count_delim_fields(lines[li], c) != nh) {
-                free(hdr_cells); free(cells); free(use_float);
+            int scanned = scan_record_kinds(&plan, lines[li], c);
+            if (scanned == -2) {
+                V *err = v_errf("%s: column '%s' row %d: value '%s' is not a valid %s", fmt,
+                                plan.bad_col, data_rows + 1, plan.bad_cell,
+                                plan.bad_kind == KIND_INT ? "int" : "float");
+                free(rowmap);
+                delim_plan_free(&plan);
+                free(lines);
+                free(raw);
+                return err;
+            }
+            if (scanned != plan.nh) {
+                free(rowmap);
+                delim_plan_free(&plan);
                 free(lines);
                 free(raw);
                 return v_errf("%s: column count mismatch", fmt);
             }
-            for (int cj = 0; cj < nh; cj++) {
-                if (!field_is_int(lines[li], cj, c))
-                    use_float[cj] = 1;
-            }
+            rowmap[data_rows++] = li;
         }
         if (data_rows <= 0) {
-            free(hdr_cells); free(cells); free(use_float);
+            free(rowmap);
+            delim_plan_free(&plan);
             free(lines);
             free(raw);
             return v_errf("%s: need header + rows", fmt);
         }
-        V **cols = calloc((size_t)nh, sizeof(V *));
+        delim_plan_finish_kinds(&plan);
+        V **cols = delim_alloc_cols(&plan, data_rows, fmt);
         if (!cols) {
-            free(hdr_cells); free(cells); free(use_float);
+            free(rowmap);
+            delim_plan_free(&plan);
             free(lines);
             free(raw);
             return v_errf("%s: out of memory", fmt);
         }
-        for (int cj = 0; cj < nh; cj++)
-            cols[cj] = use_float[cj] ? v_fvec(data_rows) : v_ivec(data_rows);
-        for (int cj = 0; cj < nh; cj++)
-            if (!use_float[cj])
-                memset(cols[cj]->J, 0, (size_t)data_rows * sizeof(int64_t));
-        int row = 0;
-        for (int li = 1; li < nl; li++) {
-            strip_pad(lines[li], c);
-            if (!lines[li][0])
-                continue;
-            for (int cj = 0; cj < nh; cj++)
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) if (data_rows > 1024)
+#endif
+        for (int r = 0; r < data_rows; r++) {
+            int li = rowmap[r];
+            char *cellbuf[64];
+            char **cells = plan.nh <= 64 ? cellbuf
+                                         : malloc((size_t)plan.nh * sizeof(char *));
+            if (!cells) continue;
+            for (int cj = 0; cj < plan.nh; cj++)
                 cells[cj] = NULL;
-            split_delim_line(lines[li], cells, nh, c);
-            for (int cj = 0; cj < nh; cj++) {
-                const char *cell = cells[cj] ? cells[cj] : "";
-                if (use_float[cj])
-                    cols[cj]->F[row] = strtod(cell, NULL);
-                else {
-                    errno = 0;
-                    char *end = NULL;
-                    long long iv = strtoll(cell, &end, 10);
-                    if (errno == ERANGE) {
-                        for (int k = 0; k < nh; k++) v_free(cols[k]);
-                        free(cols); free(hdr_cells); free(cells); free(use_float);
-                        free(lines); free(raw);
-                        return v_errf("%s: integer out of range", fmt);
-                    }
-                    (void)end;
-                    cols[cj]->J[row] = (int64_t)iv;
-                }
-            }
-            row++;
+            split_delim_line(lines[li], cells, plan.nh, c);
+            delim_fill_row(&plan, cols, cells, r);
+            if (cells != cellbuf) free(cells);
         }
-        V *kl = v_list(nh);
-        V *dl = v_list(nh);
-        for (int ci = 0; ci < nh; ci++) {
-            kl->L[ci] = v_str(hdr_cells[ci]);
-            dl->L[ci] = cols[ci];
-        }
+        free(rowmap);
+        V *t = delim_finish_table(&plan, cols, data_rows);
         free(cols);
-        free(hdr_cells);
-        free(cells);
-        free(use_float);
+        delim_plan_free(&plan);
         free(lines);
         free(raw);
-        V *t = v_table(kl, dl);
-        v_free(kl);
-        v_free(dl);
-        t->n = row;
-        for (int ci = 0; ci < nh; ci++)
-            t->vals->L[ci]->n = row;
-        return table_keep_columns(t, columns_opt);
+        return t;
     }
 
     FILE *f = fopen(path, "rb");
@@ -603,81 +1027,61 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
         (unsigned char)header[1] == 0xbb && (unsigned char)header[2] == 0xbf)
         header += 3;
     strip_pad(header, c);
-    int nh = count_delim_fields(header, c);
-    if (nh <= 0 || nh > 1000000) {
+    DelimPlan plan;
+    V *perr = delim_plan_init(&plan, header, c, columns_opt, schema_opt, fmt);
+    if (perr) {
         fclose(f);
         free(line);
-        return v_errf("%s: bad header", fmt);
+        return perr;
     }
-    char **hdr_cells = calloc((size_t)nh, sizeof(char *));
-    char **headers = calloc((size_t)nh, sizeof(char *));
-    char **cells = calloc((size_t)nh, sizeof(char *));
-    int *use_float = calloc((size_t)nh, sizeof(int));
-    if (!hdr_cells || !headers || !cells || !use_float) {
-        free(hdr_cells); free(headers); free(cells); free(use_float);
+    char **cells = calloc((size_t)plan.nh, sizeof(char *));
+    if (!cells) {
+        delim_plan_free(&plan);
         fclose(f);
         free(line);
         return v_errf("%s: out of memory", fmt);
     }
-    if (split_delim_line(header, hdr_cells, nh, c) != nh) {
-        free(hdr_cells); free(headers); free(cells); free(use_float);
-        fclose(f);
-        free(line);
-        return v_errf("%s: bad header", fmt);
-    }
-    for (int ci = 0; ci < nh; ci++) {
-        headers[ci] = strdup(hdr_cells[ci]);
-        if (!headers[ci]) {
-            for (int j = 0; j < ci; j++)
-                free(headers[j]);
-            free(hdr_cells); free(headers); free(cells); free(use_float);
-            fclose(f);
-            free(line);
-            return v_errf("%s: out of memory", fmt);
-        }
-    }
-    free(hdr_cells);
     int64_t data_rows = 0;
     while ((got = get_record(&line, &line_cap, f, c, 0)) >= 0) {
         strip_pad(line, c);
         if (!line[0])
             continue;
         data_rows++;
-        if (count_delim_fields(line, c) != nh) {
-            for (int ci = 0; ci < nh; ci++)
-                free(headers[ci]);
-            free(headers); free(cells); free(use_float);
+        int scanned = scan_record_kinds(&plan, line, c);
+        if (scanned == -2) {
+            V *err = v_errf("%s: column '%s' row %lld: value '%s' is not a valid %s", fmt,
+                            plan.bad_col, (long long)data_rows, plan.bad_cell,
+                            plan.bad_kind == KIND_INT ? "int" : "float");
+            free(cells);
+            delim_plan_free(&plan);
+            fclose(f);
+            free(line);
+            return err;
+        }
+        if (scanned != plan.nh) {
+            free(cells);
+            delim_plan_free(&plan);
             fclose(f);
             free(line);
             return v_errf("%s: column count mismatch", fmt);
         }
-        for (int cj = 0; cj < nh; cj++) {
-            if (!field_is_int(line, cj, c))
-                use_float[cj] = 1;
-        }
     }
     if (got < REC_EOF || data_rows <= 0) {
-        for (int ci = 0; ci < nh; ci++)
-            free(headers[ci]);
-        free(headers); free(cells); free(use_float);
+        free(cells);
+        delim_plan_free(&plan);
         fclose(f);
         free(line);
         return record_error(got, fmt, path);
     }
-    V **cols = calloc((size_t)nh, sizeof(V *));
+    delim_plan_finish_kinds(&plan);
+    V **cols = delim_alloc_cols(&plan, data_rows, fmt);
     if (!cols) {
-        for (int ci = 0; ci < nh; ci++)
-            free(headers[ci]);
-        free(headers); free(cells); free(use_float);
+        free(cells);
+        delim_plan_free(&plan);
         fclose(f);
         free(line);
         return v_errf("%s: out of memory", fmt);
     }
-    for (int cj = 0; cj < nh; cj++)
-        cols[cj] = use_float[cj] ? v_fvec(data_rows) : v_ivec(data_rows);
-    for (int cj = 0; cj < nh; cj++)
-        if (!use_float[cj])
-            memset(cols[cj]->J, 0, (size_t)data_rows * sizeof(int64_t));
 
     /* Pass 2 reads the file again from the start: it is a read error if it can't go back there (a
        pipe), or if the file now ends before the rows pass 1 counted (it shrank), or "quoted field
@@ -690,68 +1094,34 @@ static V *table_delim_load(const char *path, V *columns_opt, char c, const char 
             continue;
         if (row >= data_rows)
             break;
-        for (int cj = 0; cj < nh; cj++)
+        for (int cj = 0; cj < plan.nh; cj++)
             cells[cj] = NULL;
-        split_delim_line(line, cells, nh, c);
-        for (int cj = 0; cj < nh; cj++) {
-            const char *cell = cells[cj] ? cells[cj] : "";
-            if (use_float[cj])
-                cols[cj]->F[row] = strtod(cell, NULL);
-            else {
-                errno = 0;
-                long long iv = strtoll(cell, NULL, 10);
-                if (errno == ERANGE) {
-                    for (int ci = 0; ci < nh; ci++) {
-                        free(headers[ci]);
-                        v_free(cols[ci]);
-                    }
-                    free(headers); free(cells); free(use_float); free(cols);
-                    fclose(f);
-                    free(line);
-                    return v_errf("%s: integer out of range", fmt);
-                }
-                cols[cj]->J[row] = (int64_t)iv;
-            }
-        }
+        split_delim_line(line, cells, plan.nh, c);
+        delim_fill_row(&plan, cols, cells, row);
         row++;
     }
     if (got < REC_EOF || row < data_rows) {
         if (got >= REC_EOF) got = REC_READ_ERR;
-        for (int ci = 0; ci < nh; ci++) {
-            free(headers[ci]);
-            v_free(cols[ci]);
-        }
-        free(headers); free(cells); free(use_float); free(cols);
+        delim_free_cols(cols, plan.n_out);
+        free(cells);
+        delim_plan_free(&plan);
         fclose(f);
         free(line);
         return record_error(got, fmt, path);
     }
-    V *kl = v_list(nh);
-    V *dl = v_list(nh);
-    for (int ci = 0; ci < nh; ci++) {
-        kl->L[ci] = v_str(headers[ci]);
-        dl->L[ci] = cols[ci];
-        free(headers[ci]);
-    }
-    free(headers);
     free(cells);
-    free(use_float);
-    free(cols);
     fclose(f);
     free(line);
-    V *t = v_table(kl, dl);
-    v_free(kl);
-    v_free(dl);
-    t->n = row;
-    for (int ci = 0; ci < nh; ci++)
-        t->vals->L[ci]->n = row;
-    return table_keep_columns(t, columns_opt);
+    V *t = delim_finish_table(&plan, cols, row);
+    free(cols);
+    delim_plan_free(&plan);
+    return t;
 }
 
-static V *table_csv_load(const char *path, V *columns_opt) {
-    return table_delim_load(path, columns_opt, ',', "csv");
+static V *table_csv_load(const char *path, V *columns_opt, V *schema_opt) {
+    return table_delim_load(path, columns_opt, schema_opt, ',', "csv");
 }
 
-static V *table_tsv_load(const char *path, V *columns_opt) {
-    return table_delim_load(path, columns_opt, '\t', "tsv");
+static V *table_tsv_load(const char *path, V *columns_opt, V *schema_opt) {
+    return table_delim_load(path, columns_opt, schema_opt, '\t', "tsv");
 }

@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti_internal.h"
 #include "json_parse.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -117,14 +119,29 @@ V *bi_fread(V **a, in) {
 V *bi_fwrite(V **a, in) {
     P(n < 2 || a[0]->t != T_STR || a[1]->t != T_STR,v_err("write(path, data)"))
     FS_GUARD("write", a[0]->s, 1);
-    FILE *f = fopen(a[0]->s, "wb");
-    P(!f,v_errf("write: %s", strerror(errno)))
-    {
+    /* L-a: in safe mode, open without O_TRUNC (and without following
+     * symlinks), check the fd, and only then truncate — a symlink swapped in
+     * after FS_GUARD cannot cause a file outside the root to be truncated.
+     * Otherwise O_TRUNC on that O_NOFOLLOW open is the same file. */
+    int safe_write = shakti_safe_mode();
+    int wfd = open(a[0]->s, O_WRONLY | O_CREAT | O_NOFOLLOW | (safe_write ? 0 : O_TRUNC), 0666);
+    P(wfd < 0, v_errf("write: %s", strerror(errno)))
+    if (safe_write) {
         char ferr[512];
-        if (shakti_fs_check_fd(fileno(f), 1, ferr, sizeof ferr) != 0) {
-            fclose(f);
+        if (shakti_fs_check_fd(wfd, 1, ferr, sizeof ferr) != 0) {
+            close(wfd);
             return v_errf("write: %s", ferr);
         }
+        if (ftruncate(wfd, 0) != 0) {
+            int e = errno;
+            close(wfd);
+            return v_errf("write: %s", strerror(e));
+        }
+    }
+    FILE *f = fdopen(wfd, "wb");
+    if (!f) {
+        close(wfd);
+        return v_errf("write: %s", strerror(errno));
     }
     size_t w = fwrite(a[1]->s, 1, strlen(a[1]->s), f);
     fclose(f);
@@ -695,12 +712,120 @@ V *bi_json_loads(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("json_loads(s)"))
     return shakti_json_parse(a[0]->s, NULL);
 }
+static int json_putc(char **b, size_t *n, size_t *cap, char c) {
+    if (*n + 2 >= *cap) {
+        size_t nc = *cap ? *cap * 2 : 64;
+        char *p = realloc(*b, nc);
+        if (!p) return -1;
+        *b = p;
+        *cap = nc;
+    }
+    (*b)[(*n)++] = c;
+    (*b)[*n] = 0;
+    return 0;
+}
+static int json_puts(char **b, size_t *n, size_t *cap, const char *s) {
+    while (*s) if (json_putc(b, n, cap, *s++) < 0) return -1;
+    return 0;
+}
+static int json_emit(V *v, char **b, size_t *n, size_t *cap, int depth) {
+    char tmp[64];
+    if (!v || depth > 64) return json_puts(b, n, cap, "null");
+    switch (v->t) {
+    case T_NIL: return json_puts(b, n, cap, "null");
+    case T_BOOL: return json_puts(b, n, cap, v->j ? "true" : "false");
+    case T_INT: case T_CHAR:
+        snprintf(tmp, sizeof tmp, "%lld", (long long)v->j);
+        return json_puts(b, n, cap, tmp);
+    case T_FLOAT:
+        if (!isfinite(v->f)) return json_puts(b, n, cap, "null");
+        snprintf(tmp, sizeof tmp, "%.17g", v->f);
+        return json_puts(b, n, cap, tmp);
+    case T_STR: {
+        const unsigned char *p;
+        if (json_putc(b, n, cap, '"') < 0) return -1;
+        for (p = (const unsigned char *)(v->s ? v->s : ""); *p; p++) {
+            if (*p == '"' || *p == '\\') {
+                if (json_putc(b, n, cap, '\\') < 0 || json_putc(b, n, cap, (char)*p) < 0) return -1;
+            } else if (*p == '\n') {
+                if (json_puts(b, n, cap, "\\n") < 0) return -1;
+            } else if (*p == '\r') {
+                if (json_puts(b, n, cap, "\\r") < 0) return -1;
+            } else if (*p == '\t') {
+                if (json_puts(b, n, cap, "\\t") < 0) return -1;
+            } else if (json_putc(b, n, cap, (char)*p) < 0) return -1;
+        }
+        return json_putc(b, n, cap, '"');
+    }
+    case T_LIST: case T_IVEC: case T_FVEC: case T_BVEC: case T_CVEC: {
+        int64_t i;
+        if (json_putc(b, n, cap, '[') < 0) return -1;
+        for (i = 0; i < v->n; i++) {
+            V *el = v->t == T_LIST ? v->L[i] : v->t == T_IVEC ? v_int(v->J[i]) :
+                    v->t == T_FVEC ? v_float(v->F[i]) : v->t == T_BVEC ? v_bool(v->B[i] != 0) : v_char(v->B[i]);
+            int own = v->t != T_LIST;
+            if (i && json_putc(b, n, cap, ',') < 0) { if (own) v_free(el); return -1; }
+            if (json_emit(el, b, n, cap, depth + 1) < 0) { if (own) v_free(el); return -1; }
+            if (own) v_free(el);
+        }
+        return json_putc(b, n, cap, ']');
+    }
+    case T_DICT: {
+        int64_t i, first = 1;
+        if (json_putc(b, n, cap, '{') < 0) return -1;
+        for (i = 0; i < v->n; i++) {
+            V *k = v->keys ? v->keys->L[i] : NULL;
+            V *val = v->vals ? v->vals->L[i] : NULL;
+            if (!k || k->t != T_STR) return -2;
+            if (!first && json_putc(b, n, cap, ',') < 0) return -1;
+            first = 0;
+            if (json_emit(k, b, n, cap, depth + 1) < 0) return -1;
+            if (json_putc(b, n, cap, ':') < 0) return -1;
+            if (json_emit(val, b, n, cap, depth + 1) < 0) return -1;
+        }
+        return json_putc(b, n, cap, '}');
+    }
+    case T_TABLE: {
+        int64_t r, c;
+        if (!v->keys || !v->vals) return json_puts(b, n, cap, "[]");
+        if (json_putc(b, n, cap, '[') < 0) return -1;
+        for (r = 0; r < v->n; r++) {
+            int first = 1;
+            if (r && json_putc(b, n, cap, ',') < 0) return -1;
+            if (json_putc(b, n, cap, '{') < 0) return -1;
+            for (c = 0; c < v->keys->n; c++) {
+                V *name = v->keys->L[c];
+                V *cell;
+                if (!name || name->t != T_STR) continue;
+                if (!first && json_putc(b, n, cap, ',') < 0) return -1;
+                first = 0;
+                if (json_emit(name, b, n, cap, depth + 1) < 0) return -1;
+                if (json_putc(b, n, cap, ':') < 0) return -1;
+                cell = col_get(v->vals->L[c], r);
+                if (json_emit(cell, b, n, cap, depth + 1) < 0) { v_free(cell); return -1; }
+                v_free(cell);
+            }
+            if (json_putc(b, n, cap, '}') < 0) return -1;
+        }
+        return json_putc(b, n, cap, ']');
+    }
+    default:
+        return json_puts(b, n, cap, "null");
+    }
+}
 V *bi_json_dumps(V **a, in) {
+    char *buf = NULL;
+    size_t nch = 0, cap = 0;
     P(n < 1,v_str(""))
-    char *r = v_repr(a[0]);
-    V *o = v_str(r);
-    free(r);
-    return o;
+    {
+        int rc = json_emit(a[0], &buf, &nch, &cap, 0);
+        if (rc < 0) {
+            free(buf);
+            return v_err(rc == -2 ? "json_dumps: key must be str" : "json_dumps: out of memory");
+        }
+    }
+    if (!buf) return v_str("");
+    return v_str_take(buf);
 }
 V *bi_json_load(V **a, in) {
     V*x=bi_fread(a, n);

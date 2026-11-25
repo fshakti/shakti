@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # graph — in-memory knowledge graph (subject–predicate–object triples)
 #
 #   import graph

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Shakti HDB: partitioned IEFS v3 tables with prune/scan.
  */
@@ -422,15 +423,45 @@ static V *hdb_table_concat(V *left, V *right) {
     return v_table_own(keys, data);
 }
 
-static int hdb_schema_ok(V *schema, V *table) {
-    if (!schema || schema->t != T_DICT) return 0;
-    if (!table || table->t != T_TABLE) return 0;
-    if (schema->n != table->keys->n) return 0;
-    for (int64_t i = 0; i < table->keys->n; i++) {
-        if (table->keys->L[i]->t != T_STR) return 0;
-        if (!v_dict_get(schema, table->keys->L[i]->s)) return 0;
+static int hdb_schema_kind(V *def) {
+    if (!def) return -1;
+    switch (def->t) {
+    case T_INT: case T_CHAR: case T_IVEC: return T_IVEC;
+    case T_FLOAT: case T_FVEC: return T_FVEC;
+    case T_BOOL: case T_BVEC: return T_BVEC;
+    case T_STR: case T_LIST: return T_LIST;
+    case T_IMAT: return T_IMAT;
+    case T_FMAT: return T_FMAT;
+    case T_BMAT: return T_BMAT;
+    case T_CMAT: return T_CMAT;
+    default: return def->t;
     }
-    return 1;
+}
+/* 0 when the table's columns match the schema's names, in that order, and each column's
+ * kind is the kind of the schema default (0 is an int column, 0.0 a float, "" a list).
+ * Otherwise an error that names the column. */
+static V *hdb_schema_check(V *schema, V *table) {
+    if (!schema || schema->t != T_DICT) return v_err("hdb_write: bad schema");
+    if (!table || table->t != T_TABLE) return v_err("hdb_write: table schema mismatch");
+    if (!schema->keys || schema->n != table->keys->n)
+        return v_err("hdb_write: table schema mismatch");
+    for (int64_t i = 0; i < schema->n; i++) {
+        V *sk = schema->keys->L[i];
+        V *tk = table->keys->L[i];
+        if (!sk || sk->t != T_STR || !tk || tk->t != T_STR)
+            return v_err("hdb_write: table schema mismatch");
+        if (strcmp(sk->s, tk->s) != 0)
+            return v_errf("hdb_write: column %lld is '%s', schema wants '%s'",
+                          (long long)i, tk->s, sk->s);
+        V *def = schema->vals->L[i];
+        V *col = table->vals->L[i];
+        if (!def) return v_errf("hdb_write: column '%s' has no schema default", sk->s);
+        int want = hdb_schema_kind(def);
+        if (!col || col->t != want)
+            return v_errf("hdb_write: column '%s' is %s, schema wants %s",
+                          sk->s, col ? type_name(col->t) : "none", type_name(want));
+    }
+    return NULL;
 }
 
 V *bi_hdb_open(V **a, int n) {
@@ -484,7 +515,7 @@ V *bi_hdb_create(V **a, int n) {
     /* hdb_create(h, name, schema[, part_key]) */
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_DICT)
         return v_err("hdb_create(h, name, schema[, part])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_create", &root);
         if (e) return e;
@@ -534,7 +565,7 @@ V *bi_hdb_write(V **a, int n) {
     if (n < 4 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR || !a[3] ||
         a[3]->t != T_TABLE)
         return v_err("hdb_write(h, name, part, table[, codecs])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_write", &root);
         if (e) return e;
@@ -549,7 +580,10 @@ V *bi_hdb_write(V **a, int n) {
     V *entry = v_dict_get(tables, a[1]->s);
     if (!entry || entry->t != T_DICT) return v_err("hdb_write: table not created");
     V *schema = v_dict_get(entry, "schema");
-    if (!hdb_schema_ok(schema, a[3])) return v_err("hdb_write: table schema mismatch");
+    {
+        V *bad = hdb_schema_check(schema, a[3]);
+        if (bad) return bad;
+    }
 
     char pdir[HDB_PATH_MAX], pfile[HDB_PATH_MAX];
     if (hdb_join3(pdir, sizeof pdir, root, a[1]->s, a[2]->s) != 0 ||
@@ -587,7 +621,7 @@ V *bi_hdb_write(V **a, int n) {
 V *bi_hdb_parts(V **a, int n) {
     /* hdb_parts(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_parts(h, name[, from[, to[, eq]]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_parts", &root);
         if (e) return e;
@@ -605,7 +639,7 @@ V *bi_hdb_map(V **a, int n) {
     /* hdb_map(h, name, part[, pages[, device]]) */
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR)
         return v_err("hdb_map(h, name, part[, pages[, device]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_map", &root);
         if (e) return e;
@@ -640,7 +674,7 @@ V *bi_hdb_map(V **a, int n) {
 V *bi_hdb_load_part(V **a, int n) {
     if (n < 3 || !a[1] || a[1]->t != T_STR || !a[2] || a[2]->t != T_STR)
         return v_err("hdb_load_part(h, name, part)");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_load_part", &root);
         if (e) return e;
@@ -657,7 +691,7 @@ V *bi_hdb_load_part(V **a, int n) {
 V *bi_hdb_load(V **a, int n) {
     /* hdb_load(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_load(h, name[, from[, to[, eq]]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_load", &root);
         if (e) return e;
@@ -716,7 +750,7 @@ V *bi_hdb_load(V **a, int n) {
 V *bi_hdb_scan(V **a, int n) {
     /* hdb_scan(h, name[, from[, to[, eq]]]) */
     if (n < 2 || !a[1] || a[1]->t != T_STR) return v_err("hdb_scan(h, name[, from[, to[, eq]]])");
-    const char *root;
+    const char *root = NULL;
     {
         V *e = hdb_root_or_err(a[0], "hdb_scan", &root);
         if (e) return e;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shakti.h"
 #include "mat_simd.h"
 #include "vec_kernels.h"
@@ -77,6 +78,55 @@ static V*where_mask(V*tbl,V*where){
  if(where->t==T_INT){V*all=v_bvec(tbl->n);for(int64_t i=0;i<tbl->n;i++)all->B[i]=where->j?1:0;return all;}
  if(where->t==T_ERR)return v_ref(where); /* an error value in where is the statement's result */
  return v_err("where: need boolean mask");}
+V *sql_where_mask(V *tbl, V *where) { return where_mask(tbl, where); }
+static int mask_all(V *mask) {
+    for (int64_t i = 0; i < mask->n; i++) if (!mask->B[i]) return 0;
+    return 1;
+}
+/* One value in every row, each row its own copy. An int, float, bool or char is a vector of that kind. */
+static V *column_repeat(V *v, int64_t n) {
+    if (v->t == T_INT) {
+        V *c = v_ivec(n);
+        if (c->t == T_ERR) return c;
+        for (int64_t i = 0; i < n; i++) c->J[i] = v->j;
+        return c;
+    }
+    if (v->t == T_FLOAT) {
+        V *c = v_fvec(n);
+        if (c->t == T_ERR) return c;
+        for (int64_t i = 0; i < n; i++) c->F[i] = v->f;
+        return c;
+    }
+    if (v->t == T_BOOL) {
+        V *c = v_bvec(n);
+        if (c->t == T_ERR) return c;
+        unsigned char b = v->j ? 1 : 0;
+        for (int64_t i = 0; i < n; i++) c->B[i] = b;
+        return c;
+    }
+    if (v->t == T_CHAR) {
+        V *c = v_cvec(n);
+        if (c->t == T_ERR) return c;
+        unsigned char b = (unsigned char)v->j;
+        for (int64_t i = 0; i < n; i++) c->B[i] = b;
+        return c;
+    }
+    V *c = v_list(n);
+    for (int64_t i = 0; i < n; i++) c->L[i] = v_copy(v);
+    return c;
+}
+static int is_column_shaped(V *v) {
+    return v && (v->t == T_LIST || is_vec_t(v->t) || is_mat_t(v->t));
+}
+V *sql_column_value(V *val, int64_t nrows, const char *op) {
+    if (!val) return v_errf("%s: column length mismatch", op ? op : "select");
+    if (val->t == T_ERR) return v_ref(val);
+    if (is_column_shaped(val)) {
+        if (val->n != nrows) return v_errf("%s: column length mismatch", op ? op : "select");
+        return col_copy(val);
+    }
+    return column_repeat(val, nrows);
+}
 static V*tbl_filter_mask(V*tbl,V*mask){
  P(tbl->t!=T_TABLE||mask->t!=T_BVEC,v_err("bad filter"))
     int64_t nr = tbl->n, count = 0;
@@ -98,24 +148,24 @@ static V*tbl_filter_mask(V*tbl,V*mask){
     for (int c0 = 0; c0 < nc; c0++) {
         if (tbl->vals->L[c0] && tbl->vals->L[c0]->t == T_LIST) has_list = 1;
     }
+    (void)has_list;
 #ifdef _OPENMP
     #pragma omp parallel for if(nr >= 1000000 && !has_list)
 #endif
     for (int c = 0; c < nc; c++) {
         V *col = tbl->vals->L[c];
+        if (!col) { new_data->L[c] = v_list(count); continue; }
         if (col->t == T_IVEC) {
             V *nc2 = v_ivec(count);
-            int64_t j = 0;
             const int64_t *src = col->J;
             int64_t *dst = nc2->J;
-            j = mat_compress_i64_masked(dst, j, src, B, nr);
+            mat_compress_i64_masked(dst, 0, src, B, nr);
             new_data->L[c] = nc2;
         } else if (col->t == T_FVEC) {
             V *nc2 = v_fvec(count);
-            int64_t j = 0;
             const double *src = col->F;
             double *dst = nc2->F;
-            j = mat_compress_f64_masked(dst, j, src, B, nr);
+            mat_compress_f64_masked(dst, 0, src, B, nr);
             new_data->L[c] = nc2;
         } else if (col->t == T_BVEC || col->t == T_CVEC) {
             V *nc2 = col->t == T_CVEC ? v_cvec(count) : v_bvec(count);
@@ -223,7 +273,7 @@ static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
             specs[n].src[0] = 0;
             if (i + 1 < cols->n && cols->L[i + 1]->t == T_STR && !is_agg_kw(cols->L[i + 1]->s)) {
                 snprintf(specs[n].src, sizeof specs[n].src, "%s", cols->L[i + 1]->s);
-                snprintf(specs[n].name, sizeof specs[n].name, "%s", cols->L[i + 1]->s);
+                snprintf(specs[n].name, sizeof specs[n].name, "count_%s", cols->L[i + 1]->s);
                 i += 2;
             } else {
                 i += 1;
@@ -239,7 +289,12 @@ static int parse_col_specs(V *cols, ColSpec *specs, int max_specs) {
                              !strcmp(s, "avg") ? COL_AVG :
                              !strcmp(s, "min") ? COL_MIN : COL_MAX;
             snprintf(specs[n].src, sizeof specs[n].src, "%s", cols->L[i + 1]->s);
-            snprintf(specs[n].name, sizeof specs[n].name, "%s", cols->L[i + 1]->s);
+            {
+                const char *pfx = specs[n].kind == COL_SUM ? "sum" :
+                                  specs[n].kind == COL_AVG ? "avg" :
+                                  specs[n].kind == COL_MIN ? "min" : "max";
+                snprintf(specs[n].name, sizeof specs[n].name, "%s_%s", pfx, cols->L[i + 1]->s);
+            }
             i += 2;
             n++;
             continue;
@@ -863,7 +918,7 @@ static int dense_to_slots(GhTab *tab, int slots_cap, int nby, const int64_t *dim
             }
         }
     }
-    return 1;
+    return 1; /* slots are filled; 0 means this path did not handle the group */
 }
 /* LSD radix argsort of indices by uint64 keys (stable). */
 static int radix_argsort_u64(uint64_t *keys, int64_t *idx, int64_t n) {
@@ -1449,6 +1504,7 @@ static int group_rows(GroupRows *gr, const int64_t *gid, int64_t nr, int64_t ng)
    folded here, exactly, as the builtins fold one; any other is gathered by group and given to the
    builtin. */
 static V *group_agg_col(V *col, const int64_t *gid, int64_t nr, int64_t ng, int kind, GroupRows *gr) {
+    if (!col) return NULL;
     int is_min = kind == COL_MIN;
     if (col->t == T_IVEC && (kind == COL_MIN || kind == COL_MAX)) {
         V *r = v_ivec(ng);
@@ -1512,7 +1568,8 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
         for (int s = 0; s < nspecs; s++) {
             keys->L[c] = v_str(specs[s].kind == COL_COUNT && specs[s].src[0] == 0 ? "count" : specs[s].name);
             V *src = specs[s].src[0] ? tbl_col(tbl, tbl_col_idx(tbl, specs[s].src)) : NULL;
-            if (specs[s].kind == COL_COUNT || (src && sum_is_int(specs[s].kind, src->t))) {
+            if (specs[s].kind == COL_COUNT || (src && sum_is_int(specs[s].kind, src->t)) ||
+                (specs[s].kind == COL_SUM && src && src->t == T_BVEC)) {
                 data->L[c] = v_ivec(tab->nslots);
             } else if (specs[s].kind == COL_NAME) {
                 data->L[c] = v_list(tab->nslots);
@@ -1556,8 +1613,13 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
                 if (agg_done[s]) {
                     /* filled above */
                 } else if (colv->t == T_IVEC) {
+                    V *srcb = specs[s].src[0] ? tbl_col(tbl, tbl_col_idx(tbl, specs[s].src)) : NULL;
+                    if (specs[s].kind == COL_SUM && srcb && srcb->t == T_BVEC) {
+                        colv->J[g] = (int64_t)slot->sum[s];
+                    } else {
                     if (specs[s].kind == COL_SUM && slot->icarry[s]) g_isum_ovf = 1;
                     colv->J[g] = specs[s].kind == COL_SUM ? slot->isum[s] : slot->nrows;
+                    }
                 } else if (colv->t == T_FVEC) {
                     if (specs[s].kind == COL_SUM) colv->F[g] = slot->sum[s];
                     else if (specs[s].kind == COL_AVG)
@@ -1693,6 +1755,73 @@ static V *tbl_group_select(V *tbl, ColSpec *specs, int nspecs, V *by, V *row_mas
     g_isum_off = 0;
     return r;
 }
+static int cols_has_computed(V *cols) {
+    if (!cols || cols->t != T_LIST) return 0;
+    for (int64_t i = 0; i < cols->n; i++)
+        if (cols->L[i] && cols->L[i]->t == T_DICT) return 1;
+    return 0;
+}
+static int key_list_has(V *keys, const char *name) {
+    for (int64_t i = 0; i < keys->n; i++)
+        if (keys->L[i] && keys->L[i]->t == T_STR && !strcmp(keys->L[i]->s, name)) return 1;
+    return 0;
+}
+/* cols is names plus one-key dicts (computed columns, already full height). An aggregate in
+ * that list is still `select: aggregates require by`. */
+static V *select_computed_project(V *from, V *cols, V *mask, int from_shared) {
+    V *keys = v_list(0);
+    V *data = v_list(0);
+    for (int64_t i = 0; i < cols->n; i++) {
+        V *item = cols->L[i];
+        const char *name = NULL;
+        V *col = NULL;
+        if (item->t == T_DICT) {
+            if (item->n != 1 || !item->keys || !item->keys->L[0] || item->keys->L[0]->t != T_STR ||
+                !item->vals || !item->vals->L[0]) {
+                v_free(keys); v_free(data);
+                return v_err("select: bad column list");
+            }
+            name = item->keys->L[0]->s;
+            col = item->vals->L[0];
+        } else if (item->t == T_STR) {
+            if (is_agg_kw(item->s)) {
+                v_free(keys); v_free(data);
+                return v_err("select: aggregates require by");
+            }
+            int idx = tbl_col_idx(from, item->s);
+            if (idx < 0) {
+                v_free(keys); v_free(data);
+                return v_errf("select: unknown column '%s'", item->s);
+            }
+            name = item->s;
+            col = from->vals->L[idx];
+        } else {
+            v_free(keys); v_free(data);
+            return v_err("select: bad column list");
+        }
+        if (key_list_has(keys, name)) {
+            V *err = v_errf("select: column '%s' named more than once", name);
+            v_free(keys); v_free(data);
+            return err;
+        }
+        v_list_append_own(keys, v_str(name));
+        v_list_append(data, col);
+    }
+    V *wide = v_table_own(keys, data);
+    if (wide->t == T_ERR) return wide;
+    V *result = wide;
+    if (mask) {
+        result = tbl_filter_mask(wide, mask);
+        v_free(wide);
+        if (result->t == T_ERR) return result;
+    }
+    if ((!mask || mask_all(mask)) && from_shared && result->t == T_TABLE) {
+        V *own = table_copy_cols(result);
+        v_free(result);
+        result = own;
+    }
+    return result;
+}
 V *table_sql_select(V *from, V *cols, V *by, V *where) {
     if (!from || from->t == T_ERR) {
         return from ? v_ref(from) : v_err("select: missing table");
@@ -1705,6 +1834,17 @@ V *table_sql_select(V *from, V *cols, V *by, V *where) {
     int nby = parse_by_names(by, by_names, 32);
     if (nby < 0) {
         return v_err("select: bad by column list");
+    }
+    if (cols_has_computed(cols)) {
+        if (nby > 0) return v_err("select: computed column with by");
+        V *mask = NULL;
+        if (where && where->t != T_NIL) {
+            mask = where_mask(from, where);
+            if (mask->t == T_ERR) return mask;
+        }
+        V *result = select_computed_project(from, cols, mask, from_shared);
+        if (mask) v_free(mask);
+        return result;
     }
     ColSpec specs[64];
     int nspecs = parse_col_specs(cols, specs, 64);
@@ -2100,6 +2240,47 @@ static V *merge_update_col(V *col, V *v, V *mask, const char *name) {
     }
     return out;
 }
+/* A column this update is adding. Unselected rows are the zero of a typed vector, or None in a list.
+ * A mask that keeps every row stores a copy of the expression. */
+static V *blank_update_column(V *rhs, int64_t n) {
+    if (rhs->t == T_IVEC || rhs->t == T_INT) {
+        V *c = v_ivec(n);
+        if (c->t == T_ERR) return c;
+        if (n > 0) memset(c->J, 0, (size_t)n * sizeof(int64_t));
+        return c;
+    }
+    if (rhs->t == T_FVEC || rhs->t == T_FLOAT) return v_fvec(n);
+    if (rhs->t == T_BVEC || rhs->t == T_BOOL) return v_bvec(n);
+    if (rhs->t == T_CVEC || rhs->t == T_CHAR) return v_cvec(n);
+    if (rhs->t == T_IMAT) return v_imat(n, mat_cols(rhs));
+    if (rhs->t == T_FMAT) return v_fmat(n, mat_cols(rhs));
+    if (rhs->t == T_BMAT) return v_bmat(n, mat_cols(rhs));
+    if (rhs->t == T_CMAT) return v_cmat(n, mat_cols(rhs));
+    V *c = v_list(n);
+    for (int64_t i = 0; i < n; i++) c->L[i] = v_nil();
+    return c;
+}
+static V *update_new_column(V *rhs, V *mask, const char *name) {
+    int64_t n = mask->n;
+    int whole = is_column_shaped(rhs);
+    if (whole && rhs->n != n) return v_err("update: column length mismatch");
+    if (mask_all(mask)) {
+        if (whole) return col_copy(rhs);
+        return column_repeat(rhs, n);
+    }
+    V *blank = blank_update_column(rhs, n);
+    if (!blank || blank->t == T_ERR) return blank ? blank : v_err("update: column length mismatch");
+    V *merged = merge_update_col(blank, rhs, mask, name);
+    v_free(blank);
+    return merged;
+}
+V *sql_assign_stored(V *current, V *rhs, V *mask, const char *name, int64_t nrows) {
+    if (mask && mask->t == T_BVEC) {
+        if (!current) return update_new_column(rhs, mask, name);
+        return merge_update_col(current, rhs, mask, name);
+    }
+    return sql_column_value(rhs, nrows, "update");
+}
 V *table_sql_update(V *from, V *cols, V *where) {
     if (!from || from->t == T_ERR) {
         return from ? v_ref(from) : v_err("update: missing table");
@@ -2114,6 +2295,7 @@ V *table_sql_update(V *from, V *cols, V *where) {
     if (mask->t == T_ERR) {
         return mask;
     }
+    V *keys = v_copy(from->keys);
     V *new_data = v_list(from->keys->n);
     for (int64_t c = 0; c < from->keys->n; c++) {
         new_data->L[c] = v_ref(from->vals->L[c]);
@@ -2121,15 +2303,29 @@ V *table_sql_update(V *from, V *cols, V *where) {
     for (int64_t u = 0; u < cols->keys->n; u++) {
         const char *name = cols->keys->L[u]->s;
         V *new_col = cols->vals->L[u];
-        int idx = tbl_col_idx(from, name);
-        if (idx < 0) {
-            v_free(mask);
-            v_free(new_data);
-            return v_errf("update: unknown column '%s'", name);
+        int idx = -1;
+        for (int64_t k = 0; k < keys->n; k++) {
+            if (keys->L[k] && keys->L[k]->t == T_STR && !strcmp(keys->L[k]->s, name)) {
+                idx = (int)k;
+                break;
+            }
         }
-        V *merged = merge_update_col(from->vals->L[idx], new_col, mask, name);
+        if (idx < 0) {
+            V *created = update_new_column(new_col, mask, name);
+            if (!created || created->t == T_ERR) {
+                v_free(mask);
+                v_free(keys);
+                v_free(new_data);
+                return created ? created : v_err("update: column length mismatch");
+            }
+            v_list_append_own(keys, v_str(name));
+            v_list_append_own(new_data, created);
+            continue;
+        }
+        V *merged = merge_update_col(new_data->L[idx], new_col, mask, name);
         if (merged->t == T_ERR) {
             v_free(mask);
+            v_free(keys);
             v_free(new_data);
             return merged;
         }
@@ -2137,7 +2333,7 @@ V *table_sql_update(V *from, V *cols, V *where) {
         new_data->L[idx] = merged;
     }
     v_free(mask);
-    return v_table_own(v_copy(from->keys), new_data);
+    return v_table_own(keys, new_data);
 }
 static void col_truncate(V *col, int64_t n0) {
     if (!col || col->n <= n0) return;
@@ -2272,7 +2468,7 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
     }
     V *new_data = v_list(table->keys->n);
     for (int64_t c = 0; c < table->keys->n; c++) {
-        new_data->L[c] = v_ref(table->vals->L[c]);
+        new_data->L[c] = (table->vals && c < table->vals->n) ? v_ref(table->vals->L[c]) : NULL;
     }
     for (int64_t i = 0; i < ncols; i++) {
         const char *name = use_all_cols ? table->keys->L[i]->s : cols->L[i]->s;
@@ -2292,6 +2488,32 @@ V *table_sql_insert(V *table, V *cols, V *vals) {
         if (next != col) {
             v_free(new_data->L[idx]);
             new_data->L[idx] = next;
+        }
+    }
+    /* A column the insert did not name keeps its old length. Fill it so the
+     * table stays rectangular: 0, 0.0, False, or None, matching the column. */
+    int64_t want = 0;
+    for (int64_t c = 0; c < new_data->n; c++)
+        if (new_data->L[c] && new_data->L[c]->n > want) want = new_data->L[c]->n;
+    for (int64_t c = 0; c < new_data->n; c++) {
+        V *col = new_data->L[c];
+        while (col && col->n < want) {
+            V *fill = v_nil();
+            if (col->t == T_IVEC || col->t == T_CVEC) fill = v_int(0);
+            else if (col->t == T_FVEC) fill = v_float(0);
+            else if (col->t == T_BVEC) fill = v_bool(0);
+            V *next = append_cell(col, fill);
+            v_free(fill);
+            if (next && next->t == T_ERR) {
+                v_free(new_data);
+                if (free_vals_list) v_free(vals_list);
+                return next;
+            }
+            if (next != col) {
+                v_free(new_data->L[c]);
+                new_data->L[c] = next;
+                col = next;
+            }
         }
     }
     if (free_vals_list) v_free(vals_list);

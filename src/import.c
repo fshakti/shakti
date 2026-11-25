@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/import.c — .ie module loader */
 #include "shakti_internal.h"
 #include <sys/stat.h>
@@ -128,19 +129,28 @@ static V *import_module(const char *name, Env *e) {
     size_t got = fread(buf, 1, (size_t)sz, f);
     buf[got]='\n'; buf[got+1]=0;
     fclose(f);
-    Env *mod_env = env_new(e);
+    /* A module's free names are its own. The importer's names are not visible. */
+    Env *mod_env = env_new(NULL);
     shakti_set_file_vars(mod_env, path);
     Node *prog = parse(buf);
+    if (g_error) {
+        node_free(prog);
+        free(buf);
+        env_leave(mod_env);
+        return v_nil();
+    }
     V *r = eval(prog, mod_env);
     {
         int stray = g_returning;
         shakti_clear_flow();
         v_free(r);
-        if (stray) {
+        if (stray || g_error) {
             node_free(prog);
             free(buf);
             env_leave(mod_env);
-            return v_err("import: return at module top level");
+            if (stray && !g_error)
+                return v_err("import: return at module top level");
+            return v_nil();
         }
     }
     node_free(prog);
@@ -152,6 +162,10 @@ static V *import_module(const char *name, Env *e) {
     })
     V *mod_dict = v_dict(mk, mv);
     v_free(mk); v_free(mv);
+    /* Attribute writes update the environment the module's functions close over. */
+    mod_dict->owner_kind = V_OWNER_MODULE;
+    mod_dict->map_reg = mod_env;
+    env_ref(mod_env);
     const char *dot = strchr(name, '.');
     if(dot) {
         char parent[256];

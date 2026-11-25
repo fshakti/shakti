@@ -1,6 +1,6 @@
 # Shakti documentation
 
-Version **0.15.0**.
+Version **0.15.1**.
 
 Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]` … `list`), dict/table/function/datetime/time/input/subprocess, then matrices through `matrix[bool]`. IEFS writes that layout in header word 20 and rejects layout 0 (tag 4 was `str`); re-save those files.
 
@@ -89,8 +89,8 @@ Copy a section into its own file if you need to run it alone (for example IPC se
 | `import talk` | `talk_demo.ie` | Speech-to-text (macOS) |
 | `import ipc` | `ipc_echo.ie` | UDS echo server |
 | `import ipc` | `ipc_echo_client.ie` | Client for `ipc_echo.ie` |
-| `import ipc` | `ipc_sync.ie` | UDS req/rep server (`recv_req` + `reply`) |
-| `import ipc` | `ipc_sync_client.ie` | Client for `ipc_sync.ie` (`send_sync`) |
+| `import ipc` | `ipc_sync.ie` | UDS req/rep server (`recv_req` + `reply`) ([`examples/ipc_sync.ie`](examples/ipc_sync.ie)) |
+| `import ipc` | `ipc_sync_client.ie` | Client for `ipc_sync.ie` (`send_sync`) ([`examples/ipc_sync_client.ie`](examples/ipc_sync_client.ie)) |
 | `import ipc` | `ipc_rdma.ie` | RDMA/RoCE server (Linux + NIC) |
 | `import ipc` | `ipc_rdma_client.ie` | Client for `ipc_rdma.ie` |
 | `import rest` | `rest_demo.ie` | HTTP GET/POST client + local server |
@@ -205,12 +205,25 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - `=` compares a value with a value. `!=` is the opposite of `=`. Ordering two lists with `<` is an error
 - A missing dict key reads as `None`. `len` of a string is its length in bytes
 - SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
-- An integer literal that does not fit in a signed 64-bit int is a float. `abs` of the minimum int is that positive float
+- An integer literal that does not fit in a signed 64-bit int is a parse error. `abs` of the minimum int is that positive float
+- `//` and `%` are floor division: `x = (x // y) * y + (x % y)`, for ints and for floats
+- A float `sum` adds in one order on a given build, so one vector sums to the same bits every run. Accelerate, NEON and a plain loop can still disagree with each other, and a sum is not promised bit-identical across platforms or thread counts
+- A bool is not a number: `True + 1` is an error
+- A list is indexed by one int. Indexing a list by a mask or by a list of indices is an error
+- Storing an int into a `list[char]` wraps modulo 256
+- `union` and `outer` join tables. They are not arithmetic
+- A string escape is `\n`, `\t`, `\\`, `\'` or `\"`. Any other backslash keeps the character that follows it
+- `global name` inside a function assigns that name in the root environment
+- A function with no `return` yields the value of its last statement. A binding's value is `None`
+- `len` of a `str` is its length in bytes. `repr` of a string escapes quotes, backslashes and newlines, and writes enough digits that a float reads back
+- `json_dumps` writes JSON (`null`, `true`, `false`), which `json_loads` reads
+- Ordering two matrices is an error, as ordering two lists is. `None <= None` and `None >= None` are true
 - `b"..."` is `list[char]`. `//=`, `%=` and `**=` (and `//:`, `%:`, `**:`) update in place
 - Integer bitwise helpers: `band(a,b)`, `bor(a,b)`, `bxor(a,b)`, `bnot(a)`,
   `shl(a,b)`, `shr(a,b)` — `shl`/`shr` are logical shifts on the low 64 bits;
   shift counts must be in `0..63`
 - `0xHH` (exactly two hex digits) is `char`; `0x1234` (even length except 6/8) is `list[char]`; `0c…` is always `list[char]`; 6/8-digit or odd `0x` is `int`
+- Adding, subtracting, or multiplying a `list[char]` stays `list[char]` while every result fits in a byte. A result outside 0..255 makes the whole value `list[int]` (or `list[float]` if it does not fit in an int), the same number `char` arithmetic returns.
 - `char(n)` builds a `char` from an int (distinct from `chr`, which returns a
   one-character `str`)
 - `int(x)` of a float truncates toward zero; a NaN, an infinity or a float outside the int range
@@ -295,7 +308,8 @@ Leading `@` decorates. Expression `@` is each. Matrix multiply is `mmul(a, b)`.
 ## Each (`@`)
 
 `@` applies a callable over finite containers. The callable may be a name,
-dotted path, lambda, or call result. `+@` is invalid.
+dotted path, lambda, or call result. `+@` is invalid. An empty input keeps its
+type: `str @ range(0)` is `list[int]`.
 
 ### Unary each
 
@@ -396,7 +410,7 @@ A zero divisor in `/`, `//` or `%` on a vector or matrix, whether an item or the
 | Builtin | Meaning |
 |---------|---------|
 | `dot(a, b)` | Inner product (fused; no intermediate vector) |
-| `sum(v)` | Sum of elements (of an empty `list[float]` or `matrix[float]`: `0.0`; of any other empty vector or matrix: `0`); of a `list[char]` or `matrix[char]`, the sum of the codes; a bool counts as 0 or 1, so of a `list[bool]` or `matrix[bool]` it is the number of `True`s; of a `list`, its items added in order: ints exactly (a char as its code, a bool as 0 or 1), giving an int if the total fits, else a float, and in float from the first float item on; `sum(a, b, ...)` adds its arguments the same way, a vector, matrix or `list` argument summed first, so one whose own sum overflows is a float before it is added; an error operand passes through; of anything else but a number, bool, char, vector or matrix (`sum("x")`), an error |
+| `sum(v)` | Sum of elements (of an empty `list[float]` or `matrix[float]`: `0.0`; of any other empty vector or matrix: `0`); of a `list[char]` or `matrix[char]`, the sum of the codes; a bool counts as 0 or 1, so of a `list[bool]` or `matrix[bool]` it is the number of `True`s; of a `list`, its items added in order: ints exactly (a char as its code, a bool as 0 or 1), giving an int if the total fits, else a float, and in float from the first float item on; `sum(a, b, ...)` adds its arguments the same way, walking a vector or `list` argument item by item so a later int can bring an overflowing prefix back into an int (`sum([M, M], m)` with `M` the maximum int and `m` one below the minimum is the exact int `9223372036854775806`); a matrix argument is still summed on its own first; an error operand passes through; of anything else but a number, bool, char, vector or matrix (`sum("x")`), an error |
 | `min(v)`, `max(v)` | Least and greatest element (`None` of an empty vector or matrix); of a `list[char]` or `matrix[char]`, `min`/`max` are chars, ordered by code; of a `list[bool]` or `matrix[bool]`, `min`/`max` are bools; of a `str`, its least and greatest character (a `char`); a scalar is its own `min` and `max` (`max(5)` is `5`) |
 | `min(a, b, ...)`, `max(a, b, ...)` | Compare the arguments with `<` and `>`, as in Python: `max(3, 9, 4)` is `9`; arguments, or items of a list, that don't compare (`1` and `"a"`, or a `None`) are an error |
 | `avg(v)` | Mean of elements (`nan` of an empty vector or matrix); of a `list[char]` or `matrix[char]`, the mean of the codes; of a `list[bool]` or `matrix[bool]`, the fraction of `True`s; of anything but a vector or matrix (`avg(5)`), an error |
@@ -549,11 +563,23 @@ and `reverse(d)` is the dict with its entries in reverse order.
 t : load("file.csv")
 t : load("file.tsv")
 t : load("file.xml")
+t : load("file.csv", ["id", "score"])                            # projection, in asked order
+t : load("file.csv", dict(id:0, score:0.0, name:""))             # typed schema (prototype dict)
+t : load("file.csv", ["id", "score"], schema: dict(score:0.0))   # schema + projection
 save(t, "out.csv")
 save(t, "out.tsv")
 ```
 
 Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TSV** only.
+
+A schema dict (CSV/TSV only, also accepted as `schema:` with a projection list) fixes column
+kinds *before* parsing instead of inferring them: the prototype's type declares the kind —
+`0` → int, `0.0` → float, `""` → string; any other prototype is an error. Columns the schema
+does not name still infer. A schema name missing from the file (or from the projection) is an
+error, and a non-empty, non-missing cell that does not parse as its declared kind (e.g. `1.5`
+or an int64-overflowing literal in an int column) fails the load, naming the column and row.
+Missing cells keep the usual padding (`0` / `0.0` / `""`). Prefer a schema over loading
+untyped and casting afterwards: it parses each field once, directly into the typed column.
 
 ### CSV / TSV save
 
@@ -564,20 +590,28 @@ Supported formats: **CSV**, **TSV**, and **XML**. `save` writes **CSV** and **TS
   for value. A whole float below 10^15 is written with all its digits and `.0` (`2.0`,
   `100000000000000.0`); infinities and NaN as `inf`, `-inf` and `nan`.
 - String columns: list-of-string columns write each cell as text; `None` / unsupported cell types emit an empty field.
+  A string cell that would read back as a number (such as `007` or `1e3`) is written in double quotes, so
+  the column reloads as strings, not as numbers.
 - Matrix columns are not supported (save fails).
 - Delimiter is `,` for `.csv` and tab for `.tsv`. A field holding the delimiter, a `"` or a line break is
   written in double quotes, with each `"` in it doubled.
 
 ### CSV / TSV load
 
-- Header required; data rows load as numeric columns (`ivec` or `fvec`). A field that is not an integer
-  makes that column an `fvec`. `strtod` reads a leading number, so `12abc` is `12.0` and `xyz` is `0.0`.
-  An integer outside the int range is an error (`csv: integer out of range`), not the largest int.
-  A column loads as an `ivec` when every field is digits with an optional sign, once
-  the spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off, inside quotes too:
-  `1, 2` and `1," 2 "` are ints; `2.0`, `1e3`, or any text such as `x` make the column float.
-- Empty fields (e.g. CSV `1,` or TSV `1\t`) pad as `0`. Leading/trailing empty fields are preserved.
-- String columns written by `save` do **not** round-trip as strings — reload yields numerics (often `0` for labels).
+- Header required. Each column loads as an `ivec`, an `fvec`, or a list of strings, from the fields
+  it holds: an `ivec` when every field that is present is digits with an optional sign, once the
+  spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off (`1, 2` are ints); an
+  `fvec` when the fields present are numeric but some are not whole (`2.0`, `1e3`); a list of strings
+  when any field is other text (such as `x`), or is written in double quotes — `1," 2 "` is a string
+  column (`"2"`), while `1, 2` is an `ivec`. An integer too large for an `ivec` makes its column an
+  `fvec` holding that value as a float, rather than the largest int.
+- A field that is empty, or reads `NA`, `NAN`, `NR` or `NULL` in any letter case, is missing: it does
+  not decide the column's kind. In a numeric column it pads as `0`; in a string column the text is
+  kept as written. A column in which every field is missing loads as a list of those strings.
+  So a float written as `nan` by `save` reloads as the missing pad `0.0`, not as a NaN.
+  Empty fields (e.g. CSV `1,` or TSV `1\t`) are preserved, leading and trailing included.
+- String columns written by `save` round-trip as strings: labels reload as the same text, and a
+  string that looks numeric is quoted on save (above) so it reloads as a string too.
 - A field in double quotes may hold the delimiter, line breaks (anywhere in it, at its end too) and `""`
   (one `"`), as `save` writes them; a quoted field still open at the end of the file is an error. A
   field is quoted only when `"` is its first character (for a record's first field, its first after
@@ -640,6 +674,17 @@ An error value in `where` is the statement's result (a `from` that isn't a table
 on the right of an `update`, comes first), and a raise in it stops the statement: either way
 `update` and `delete` change nothing (a `.iefs` file is not rewritten).
 
+A column name in `where`, and in `name: expr` on `select` or `update`, is the whole column.
+A function that takes one row's value is applied with `@`. `=` of two columns is one bool
+(whether the two values are the same). A row mask is `a (lambda x,y: x=y)@ b`.
+`numbers`, `lastname` and `encode` below are functions the caller defines.
+
+```ie
+r : select from cust where (numbers@ phone) (lambda a,b: a=b)@ (encode@ lastname@ name)
+s : select enc: encode@ lastname@ name, phone from cust
+c2 : update p: numbers@ phone, n: encode@ lastname@ name from cust
+```
+
 `by col1, col2` groups and sorts ascending. No separate `group by` / `order by`. Prefer core `,` / `union` / `outer` table joins (see [Table joins](#table-joins----union--outer)); SQL `t1 join t2 on col` is not yet implemented.
 
 ## Modules
@@ -673,6 +718,7 @@ Dyadic `,` joins two tables on the **first column** when names and types match:
 | Shape | Behavior |
 |-------|----------|
 | First cols are matching sorted `time` / `time_ns` `ivec` | Asof (left-preserving; miss → `None`) |
+| First cols are matching `time` / `time_ns` `ivec`, either not sorted ascending | Error |
 | Right first-column values are unique | Left equi-join |
 | Right first-column has duplicates | Inner equi-join (1:N expands) |
 
@@ -735,9 +781,9 @@ j : t join u on id
 
 | Statement | Example |
 |-----------|---------|
-| Select | `select col by group from t where expr` |
+| Select | `select col, name: expr from t where expr` |
 | Aggregate | `select sum amount by dept from t` |
-| Update | `update col : expr from t where expr` |
+| Update | `update col: expr, new: expr from t where expr` |
 | Delete | `delete from t where expr` (no column list; `delete from t` deletes every row) |
 | Create | `create table name (col: default, ...)` |
 | Insert | `insert into name (cols...) values (...)` |
@@ -749,6 +795,26 @@ j : t join u on id
 The result of `select` is a new table with its own columns: replacing a cell of it (`r.a[0] : 9`) doesn't change the source table, nor the other way round. `update` and `delete` store their result in the variable they name (after `r : update … from t`, `r` and `t` are the same table), but another name that held the old table (`u : t` beforehand) keeps the old columns: a cell write through `u` doesn't reach `t`, nor the other way round. The items of a list column are still shared, as for a filtered select, so a write inside one (`r.l[2][0] : 9`) reaches the source. A column of a table built in the statement itself stays shared with the value it was built from: after `r : select from table(a: x)`, `r.a[0] : 9` changes `x`. Joins give new tables too ([Table joins](#table-joins)).
 
 `by col1, col2` groups and sorts ascending. There is no separate `group by` / `order by` clause.
+
+A column name in `where`, and on the right of `name: expr`, is the whole column. A function that
+takes one row's value is applied with `@`. `=` of two columns is one bool (whether the two values
+are the same), so a row mask is `a (lambda x,y: x=y)@ b`. `numbers`, `lastname` and `encode` here
+are functions the caller defines:
+
+```ie
+r : select from cust where (numbers@ phone) (lambda a,b: a=b)@ (encode@ lastname@ name)
+s : select enc: encode@ lastname@ name, phone from cust
+c2 : update p: numbers@ phone, n: encode@ lastname@ name from cust
+```
+
+`name: expr` in a select list is a computed column, evaluated on the source table before `where`
+filters, and the result's columns are the select list in that order. A vector, list or matrix
+must have one item per row (`select: column length mismatch`); anything else is one value repeated
+for every row, each row its own copy. `name: expr` with `by` is `select: computed column with by`.
+A name twice in that list is `select: column 'enc' named more than once`. `where` can name a
+computed column from this select; the expression still runs on every source row, then `where`
+filters. `count: expr` is a computed column named `count`; the aggregate is `count expr`, with no
+colon. An error value from an expression is the select's result, and a raise in it stops the select.
 
 `insert` puts each value in its column as it is, or is an error and inserts nothing: a `list[int]`
 column takes an int or a char, a `list[float]` a float, an int or a char (an int becomes a float,
@@ -768,6 +834,12 @@ column is not shared by the rows, or with the variable it came from). A column o
 height is `update: column length mismatch`, and an error value is the update's result (a raise in
 `where` still stops it).
 
+`update new: expr` appends `new` when the table has no such column. Rows `where` does not write are
+the zero of a typed vector (`0`, `0.0`, `false`, `char(0)`) or `None` in a list column. With no
+`where`, or a `where` that keeps every row, the new column is a copy of the expression. Assignments
+run left to right, so a later expression sees a column this statement already added as stored,
+including the rows `where` did not write, and a repeated name writes that column again. A vector, list or matrix still has to match the table's height.
+
 A group's `sum` of an int column is an int, added as `sum` adds a `list[int]`: exact past 2^53,
 and, if any group's int sum in the select doesn't fit in an int, every int sum in it is a
 float column. Of a float or `list[bool]` column it is a float. `avg` of an int, float or
@@ -782,9 +854,11 @@ for a group whose items don't compare, as `min([1, None])` is). Of a matrix colu
 items: rows `[1, 10]` and `[2, 20]` have `sum` 33 and `avg` 8.25.
 
 The aggregates are `count`, `sum`, `avg`, `min` and `max`; any other word in a select is a column's
-name. A column the table doesn't have is an error value, with or without `by`:
+name. A grouped aggregate is named from the aggregate and the column, `min_i` for `select min i`,
+and the same when it is the only aggregate. A bare `count` stays `count`; `count i` is `count_i`.
+A bare column under `by` is a grouping key, not an aggregate. A column the table doesn't have is an error value, with or without `by`:
 `select sum nosuch by k from t` and `select last n by k from t` are `select: unknown column 'nosuch'`
-and `select: unknown column 'last'`, and `update nosuch : 1 from t` is `update: unknown column 'nosuch'`.
+and `select: unknown column 'last'`. `update` with a new name adds that column, as above.
 
 `update` and `delete` return the changed table. From a table variable they also rebind it; from a str naming a `.iefs` file (`update … from path`) they write the file and leave the variable as it was (see [iefs module](#iefs-module)).
 
@@ -822,7 +896,7 @@ print(graph.path("Ada", "Carol", 4))
 
 Each fact is a **triple** `(subject, predicate, object)` — the same RDF-style pattern used in enterprise knowledge graphs (e.g. Cambridge Semantics Anzo). Triples live in memory with indexes on subject, predicate, and object for fast pattern lookup.
 
-Use `"*"` (or `""`) as a wildcard in queries.
+Use `"*"` (or `""`) as a wildcard in queries. A query of a name that is not in the graph is an empty table.
 
 ## API
 
@@ -1007,7 +1081,7 @@ Colors: short names (`"b"`, `"r"`, …), cycle ids (`"C0"`…`"C9"`), `#RRGGBB` 
 
 # `mplsoccer` module
 
-Football **pitch charts** on [`gfx`](#gfx-module). Same shape as the common mplsoccer pitch calls: a pitch frame, scatter, lines, arrows, a rectangular heatmap, formations, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
+Football **pitch charts** on [`gfx`](#gfx-module). Data fetched by the StatsBomb event helpers comes from [StatsBomb Open Data](https://github.com/statsbomb/open-data); if you publish results produced with it, credit StatsBomb as its terms require ("StatsBomb" attribution with their logo/link where applicable). Same shape as the common mplsoccer pitch calls: a pitch frame, scatter, lines, arrows, a rectangular heatmap, formations, and a StatsBomb event table. Not a Matplotlib port. Arcs are polylines. There is no alpha, image blit, rotated text, or framebuffer save. `gfx.text` is ASCII.
 
 Build from the repo root (`make prod`; see [README](README.md)), then:
 
@@ -1356,8 +1430,8 @@ See [examples index](#examples-index). IPC-specific:
 |------|-------------|
 | `ipc_echo.ie` | UDS echo server (raw send/recv) |
 | `ipc_echo_client.ie` | UDS client |
-| `ipc_sync.ie` | UDS req/rep server |
-| `ipc_sync_client.ie` | UDS `send_sync` client |
+| [`examples/ipc_sync.ie`](examples/ipc_sync.ie) | UDS req/rep server (standalone; not a section of `example.ie`) |
+| [`examples/ipc_sync_client.ie`](examples/ipc_sync_client.ie) | UDS `send_sync` client |
 | `ipc_rdma.ie` | RDMA server (raw send/recv) |
 | `ipc_rdma_client.ie` | RDMA client |
 
@@ -1538,7 +1612,7 @@ Blocking HTTP daemon: `server_serve(port)` (default 8080). Loopback bind unless 
 
 Routes:
 
-- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**)
+- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**). A batch (a JSON array of requests) is not accepted. A successful result is always a JSON-RPC object, including when `handle_rpc` returns a dict.
   - `handle_rpc(method, params, id)` if defined in the calling environment
   - else built-in `ping` → `"pong"`
 - other methods/paths — `handle_request(method, path, body, content_type)` if defined (must return a dict with `status` / `content_type` / `body`)
@@ -1965,6 +2039,8 @@ while hdb.next(c):
     part : hdb.current(c)
 ```
 
+Assigning a scan cursor aliases it: `d : c` then `hdb.next(c)` advances `d` as well. `hdb.write` requires the table's columns in the schema's order, and each column's kind must match the schema default (`0` an int column, `0.0` a float, `""` a list of strings). A mismatch is an error that names the column, and the partition is not stored.
+
 Range prune uses inclusive `lo`/`hi` (`strcmp`); `eq` selects one partition. Vertical concat on `list[int]` / `list[float]` / `list[char]` / string lists / matrices.
 
 `codecs:` (on `write`) is a dict from column name to [IEFS](#iefs-module) codec, as in `codecs:{"px": "zstd"}`; each key names a column of the table (a key that names none is `hdb_write: codecs names no column '…'`); `""` (the default), `[]` or an empty vector (`list[int]`, `list[float]`, `list[bool]` or `list[char]`) means no codecs; an error value given as `codecs:` is returned as it is; anything else (`codecs:"zstd"`, a table, a matrix) is an error value. Each error value writes nothing.
@@ -2096,6 +2172,7 @@ Also: parser nesting is capped at 40 (deeper input is a parse error, "nesting to
 | `SHAKTI_IPC_MCAST_KEY` | unset | Authenticates multicast datagrams (HMAC-SHA256 trailer with timestamp ±60 s and replay cache; payload limit shrinks by 48 bytes). All group members must share it. Needs a TLS build. |
 | `SHAKTI_IPC_MCAST_REPLY_RATE` | `100` | Max `ipc.reply` per second to one reply-to address (global cap 10×); `0` disables. |
 
+- With `SHAKTI_IPC_TOKEN` set, every socket frame after the handshake carries a sequence number and HMAC-SHA256 trailer (session key derived from the handshake nonces): injected, tampered, replayed, or reordered frames are rejected and the connection is dropped. Non-loopback TCP binds also require TLS (`SHAKTI_TLS_CERT` / `SHAKTI_TLS_KEY`) unless `SHAKTI_IPC_ALLOW_PLAINTEXT=1`; clients wrap TLS for non-loopback connects (skip verification only with `SHAKTI_IPC_TLS_INSECURE=1`). Without a token, IPC has no peer authentication — loopback/UDS or trusted networks only. Correlation IDs are drawn fresh from the OS RNG per request.
 - `ipc.join` accepts only datagrams addressed to the joined group (on Linux the socket binds to the group); unicast to the port is dropped. A full reply-to table evicts the oldest entry; `ipc.reply` refuses multicast, broadcast, unspecified and port-0 destinations.
 - Shared memory: on Linux segments are named `shakti_ipc_<euid>_<name>`; attach refuses segments owned by another user, group/world-accessible, or smaller than the header. Sharing a channel between users is not supported.
 - `/tmp/shakti-<uid>` (the Unix-socket directory when neither `SHAKTI_IPC_DIR` nor `XDG_RUNTIME_DIR` is set, and always the directory of shared-memory lock files) must be a real directory owned by the user with no group/other permissions. A socket directory named by `SHAKTI_IPC_DIR` or `XDG_RUNTIME_DIR` must be the user's and not writable by group or others.

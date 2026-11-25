@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Shakti partitioned HDB over IEFS v3 (no SQLite / kdb).
  * Layout: <root>/meta.iefs + <root>/<table>/<part>/data.iefs

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* shakti/src/alloc.c — checked allocators */
 #include "shakti_internal.h"
 #include <fcntl.h>
@@ -53,6 +54,13 @@ void *x_calloc(size_t nmemb, size_t sz, const char *where) {
     void *p = calloc(nmemb ? nmemb : 1, sz ? sz : 1);
     if (!p) shakti_oom(where);
     return p;
+}
+/* Non-fatal variants for user-sized allocations (L-f). */
+void *try_malloc(size_t sz) { return malloc(sz ? sz : 1); }
+void *try_calloc(size_t nmemb, size_t sz) {
+    size_t total;
+    if (__builtin_mul_overflow(nmemb ? nmemb : 1, sz ? sz : 1, &total)) return NULL;
+    return calloc(nmemb ? nmemb : 1, sz ? sz : 1);
 }
 void *x_realloc(void *ptr, size_t sz, const char *where) {
     void *p = realloc(ptr, sz ? sz : 1);

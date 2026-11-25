@@ -1,9 +1,9 @@
 # shakti
 
 [Website](https://shakti.com) · [Try shakti in your browser](https://shakti.com/?try)
-[Discord](https://discord.gg/csWTFekpN) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
+[Discord](https://shakti.com/discord) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
 
-Small interpreted language (0.15.0) with vectors, matrices, tables, decorators,
+Small interpreted language (0.15.1) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), asof helpers, and optional SQL,
 graph, IPC, REST, gfx, pyplot, mplsoccer, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.
@@ -110,3 +110,12 @@ See `examples/pong_bench.ie` for throughput.
 ## license
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+
+Contributions: see [CONTRIBUTING](CONTRIBUTING.md) (DCO sign-off required) and
+[AUTHORS](AUTHORS.md). Naming: see [TRADEMARK](TRADEMARK.md). Security: see
+[SECURITY](SECURITY.md).
+
+Export note: Shakti links OpenSSL for TLS and may therefore be subject to
+export-control rules for cryptographic software in some jurisdictions;
+distributors are responsible for compliance where they distribute binaries.

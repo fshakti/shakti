@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # iefs — IE file store (durable Shakti values on disk + in RAM)
 # Requires shakti built with SHAKTI_IEFS=1 (default).
 #

@@ -1,4 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
 # chess_ai — negamax + alpha-beta + material / PST eval
+#
+# Piece-square tables follow the widely used simplified evaluation
+# values by Tomasz Michniewski, as popularised by the Chess Programming
+# Wiki (chessprogramming.org/Simplified_Evaluation_Function).
 
 import chess_core
 import gfx

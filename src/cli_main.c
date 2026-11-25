@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #if defined(__APPLE__)
 #include <libproc.h>
 #include <mach-o/dyld.h>
@@ -14,13 +15,13 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.15.0"
+#define SHAKTI_PKG_VERSION "0.15.1"
 #endif
 extern int shakti_lang_main(int argc, char **argv);
 static void shakti_print_banner(void) {
     char t0[80], t1[80], t2[80];
     snprintf(t0, sizeof t0, "   shakti engine v%s", SHAKTI_PKG_VERSION);
-    snprintf(t1, sizeof t1, "   (c) shakti.com - %s", SHAKTI_PKG_VERSION);
+    snprintf(t1, sizeof t1, "   (c) Shakti / shakti contributors - %s", SHAKTI_PKG_VERSION);
     snprintf(t2, sizeof t2, "   \\d docs  \\v vars  \\w names  \\q [N]  quit|exit");
     fprintf(stderr, "%s\n%s\n%s\n", t0, t1, t2);
 }

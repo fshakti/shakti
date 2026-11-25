@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # ipc — sync/async inter-process messaging (TCP, Unix domain sockets, optional RDMA)
 #
 #   import ipc
