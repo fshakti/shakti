@@ -273,8 +273,23 @@ static int select_node_computed(Node *n) {
         if (n->ch[i] && n->ch[i]->type == N_ASSIGN) return 1;
     return 0;
 }
+static int lambda_binds_name(Node *n, const char *s) {
+    Node *params = n->nch > 0 ? n->ch[0] : NULL;
+    if (!params) return 0;
+    for (int i = 0; i < params->nch; i++) {
+        Node *p = params->ch[i];
+        if (p && p->type == N_NAME && p->sval && !strcmp(p->sval, s)) return 1;
+    }
+    return 0;
+}
+/* A lambda parameter is a binding. Defaults are still outer references. */
 static int node_has_name(Node *n, const char *s) {
     if (!n || !s) return 0;
+    if (n->type == N_LAMBDA) {
+        if (n->nch > 2 && node_has_name(n->ch[2], s)) return 1;
+        if (lambda_binds_name(n, s)) return 0;
+        return n->nch > 1 && node_has_name(n->ch[1], s);
+    }
     if (n->type == N_NAME && n->sval && !strcmp(n->sval, s)) return 1;
     for (int i = 0; i < n->nch; i++)
         if (node_has_name(n->ch[i], s)) return 1;
@@ -1206,6 +1221,11 @@ V *eval(Node *n, Env *e) {
             }
         }
         V *rerr2 = NULL;
+        if (rerr) {
+            v_free(from); if (src != from) v_free(src);
+            v_free(by); v_free(where); v_free(mask); v_free(needed);
+            return rerr;
+        }
         V *rest = eval_select_computed(n->ch[1], src, e, &rerr2, 2, has_where ? wn : NULL);
         if (g_error) {
             v_free(from); if (src != from) v_free(src);

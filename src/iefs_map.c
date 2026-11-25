@@ -191,6 +191,14 @@ V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames) {
         iefs_set_last_error(err);
         return v_err(err);
     }
+    {
+        char ferr[512];
+        if (shakti_fs_check_fd(fd, 0, ferr, sizeof ferr) != 0) {
+            close(fd);
+            iefs_set_last_error(ferr);
+            return v_err(ferr);
+        }
+    }
     struct stat st_buf;
     if (fstat(fd, &st_buf) < 0 || !S_ISREG(st_buf.st_mode) || st_buf.st_size < 0) {
         close(fd);

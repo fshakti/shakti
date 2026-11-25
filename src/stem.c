@@ -455,6 +455,10 @@ static int stem_read_wav(const char *path, float **out, int *n_out, int *sr_out)
     int16_t *pcm;
     *out = NULL;
     if (!fp) return -1;
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(fp, 0, ferr, sizeof ferr) != 0) return -1;
+    }
     if (fread(riff, 1, 12, fp) != 12) { fclose(fp); return -1; }
     if (memcmp(riff, "RIFF", 4) || memcmp(riff + 8, "WAVE", 4)) { fclose(fp); return -1; }
     if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return -1; }
@@ -669,8 +673,11 @@ static int stem_write_wav(const char *path, const float *x, int n, int sr, int w
     if ((unsigned)sr > UINT_MAX / align) return -1;
     data_bytes = (unsigned int)n * align;
     br = (unsigned int)sr * align;
-    fp = fopen(path, "wb");
-    if (!fp) { stem_write_wav_errno = errno; return -1; }
+    {
+        char ferr[512];
+        fp = shakti_fs_create(path, ferr, sizeof ferr);
+    }
+    if (!fp) { stem_write_wav_errno = errno ? errno : EACCES; return -1; }
     riff_payload = 36u + data_bytes + (data_bytes & 1u);
     memset(hdr, 0, 44);
     memcpy(hdr, "RIFF", 4);
@@ -1295,6 +1302,11 @@ static V *stem_ml_load_path(const char *path) {
 
     fp = fopen(path, "rb");
     if (!fp) return v_err("stem_load_ml: cannot open file");
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(fp, 0, ferr, sizeof ferr) != 0)
+            return v_errf("stem_load_ml: %s", ferr);
+    }
     if (fread(magic, 1, 8, fp) != 8 || memcmp(magic, STEM_ML_MAGIC, 8) != 0) {
         fclose(fp);
         return v_err("stem_load_ml: bad magic (want SHAKST01)");
@@ -1414,10 +1426,14 @@ V *bi_stem_write_ml_synth(V **a, int n) {
     buf = (float *)malloc((nW1 > nW3 ? nW1 : nW3) * sizeof(float));
     if (!buf) return v_err("stem_write_ml_synth: oom");
 
-    fp = fopen(path, "wb");
-    if (!fp) {
-        free(buf);
-        return v_err("stem_write_ml_synth: cannot write");
+    {
+        char ferr[512];
+        ferr[0] = 0;
+        fp = shakti_fs_create(path, ferr, sizeof ferr);
+        if (!fp) {
+            free(buf);
+            return v_errf("stem_write_ml_synth: %s", ferr[0] ? ferr : "cannot write");
+        }
     }
     fwrite(STEM_ML_MAGIC, 1, 8, fp);
     hdr[0] = B; hdr[1] = H; hdr[2] = S; hdr[3] = STEM_ML_FLAG_LOG1P;

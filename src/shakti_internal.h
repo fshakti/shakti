@@ -65,6 +65,11 @@ int shakti_exec_allowed(void);
 int shakti_net_allowed(void);
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap);
 int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
+/* Close fp and return -1 when the opened file is outside the safe-mode root. */
+int shakti_fs_keep_file(FILE *fp, int write, char *err, size_t err_cap);
+/* Create or replace a file without following a symlink. In safe mode the
+ * descriptor is checked before the file is truncated. */
+FILE *shakti_fs_create(const char *path, char *err, size_t err_cap);
 
 void shakti_oom(const char *where);
 void *x_malloc(size_t sz, const char *where);

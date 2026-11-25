@@ -11,6 +11,7 @@
 #include "iefs_io.h"
 /* Safe-mode path confinement (src/env.c). */
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap);
+int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
 
 #include <errno.h>
 #include <fcntl.h>
@@ -777,6 +778,10 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
         set_errf(err, err_cap, "iefs open", errno);
         return -1;
     }
+    if (shakti_fs_check_fd(fd, 0, err, err_cap) != 0) {
+        close(fd);
+        return -1;
+    }
 #if defined(__linux__) && defined(O_DIRECT)
     {
         struct stat st0;
@@ -821,6 +826,11 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
         /* Header was read on a buffered fd. O_DIRECT refuses a short pread
          * into an unaligned buffer, so the bulk read uses its own fd. */
         int dfd = open(path, O_RDONLY | O_DIRECT);
+        if (dfd >= 0 && shakti_fs_check_fd(dfd, 0, err, err_cap) != 0) {
+            close(dfd);
+            close(fd);
+            return -1;
+        }
         if (dfd < 0) {
             rc = read_all_buffered(fd, n, out, out_len, err, err_cap);
         } else {
@@ -832,6 +842,10 @@ int iefs_io_read_all_mode(const char *path, unsigned char **out, size_t *out_len
                 fd = open(path, O_RDONLY);
                 if (fd < 0) {
                     set_errf(err, err_cap, "iefs open", errno);
+                    return -1;
+                }
+                if (shakti_fs_check_fd(fd, 0, err, err_cap) != 0) {
+                    close(fd);
                     return -1;
                 }
                 rc = read_all_buffered(fd, n, out, out_len, err, err_cap);
@@ -1002,6 +1016,10 @@ int iefs_io_write_atomic_ex(const char *path, const unsigned char *buf, size_t l
             (size_t)st.st_size == len) {
             int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
             if (fd >= 0) {
+                if (shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
+                    close(fd);
+                    return -1;
+                }
                 int rc = write_all_fd(fd, buf ? buf : (const unsigned char *)"", len);
                 if (rc != 0) {
                     set_errf(err, err_cap, "iefs write", errno);
@@ -1106,6 +1124,10 @@ int iefs_io_write_atomic_regions(const char *path, uint64_t file_len, const Iefs
             (uint64_t)st.st_size == file_len) {
             int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
             if (fd >= 0) {
+                if (shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
+                    close(fd);
+                    return -1;
+                }
                 int rc = 0;
                 for (uint32_t i = 0; i < n_reg; i++) {
                     if (regs[i].len == 0)

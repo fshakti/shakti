@@ -721,6 +721,10 @@ static int synth_wav_load(const char *path, float *dst, int dst_cap, int *out_n)
     size_t bps;
     f = fopen(path, "rb");
     if (!f) return -1;
+    {
+        char ferr[512];
+        if (shakti_fs_keep_file(f, 0, ferr, sizeof ferr) != 0) return -1;
+    }
     if (fread(hdr, 1, 12, f) != 12 || memcmp(hdr, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4)) {
         fclose(f);
         return -1;

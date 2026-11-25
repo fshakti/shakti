@@ -60,6 +60,7 @@ V*table_xml_load(const char*path,V*columns_opt){
  {char fe[512];if(shakti_fs_check(path,0,fe,sizeof fe)!=0)return v_errf("xml: %s",fe);}
  FILE*f=fopen(path,"rb");
  P(!f,v_errf("xml: open '%s'",path))
+ {char ferr[512];if(shakti_fs_keep_file(f,0,ferr,sizeof ferr)!=0)return v_errf("xml: %s",ferr);}
  fseek(f,0,SEEK_END);
  long z=ftell(f);
  fseek(f,0,SEEK_SET);

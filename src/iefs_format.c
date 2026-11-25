@@ -18,6 +18,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
+int shakti_fs_keep_file(FILE *fp, int write, char *err, size_t err_cap);
+
 #if defined(SHAKTI_HAVE_ZSTD)
 #include <zstd.h>
 #endif
@@ -2668,6 +2671,8 @@ int iefs_store_replace(V *v, const char *path, char *err, size_t err_cap) {
         set_err(err, err_cap, "iefs: cannot open file");
         return -1;
     }
+    if (shakti_fs_keep_file(f, 0, err, err_cap) != 0)
+        return -1;
     if (fread(hdr, 1, IEFS_HEADER_SIZE, f) != IEFS_HEADER_SIZE) {
         fclose(f);
         set_err(err, err_cap, "iefs: truncated header");
@@ -2769,6 +2774,10 @@ V *iefs_store_read(const char *path) {
 
     /* v3: one open — parse TOC, validate extents, assemble via pread on same fd. */
     int fd = open(path, O_RDONLY);
+    if (fd >= 0 && shakti_fs_check_fd(fd, 0, err, sizeof err) != 0) {
+        close(fd);
+        fd = -1;
+    }
     if (fd >= 0) {
         struct stat st_buf;
         unsigned char hdr[IEFS_HEADER_SIZE];
