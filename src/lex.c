@@ -2,6 +2,7 @@
 /* shakti/src/lex.c — tokenizer */
 #include "shakti_internal.h"
 #include <errno.h>
+#include <stdio.h>
 
 static int is_id_start(char c) { return isalpha(c) || c=='_'; }
 static int is_id_char(char c)  { return isalnum(c) || c=='_'; }
@@ -501,7 +502,7 @@ static Token lex_raw(Lexer *l) {
                 return t;
             }
             if((c=='b'||c=='B') && p+1<l->len && (s[p+1]=='"'||s[p+1]=='\'')) {
-                /* There is no bytes type: b"abc" is the str "abc" (#121). */
+                /* b"..." is list[char]: the decoded bytes, hex-encoded for N_CVECS. */
                 p++;
                 char q = s[p];
                 p++;
@@ -516,8 +517,28 @@ static Token lex_raw(Lexer *l) {
                 }
                 lex_finish_text(l, &bt, qi);
                 if (p < l->len) p++;
-                l->pos = p;
-                return bt;
+                {
+                    const char *bytes = bt.sval ? bt.sval : "";
+                    size_t nb = strlen(bytes);
+                    char *hex = malloc(nb * 2 + 1);
+                    static const char *hd = "0123456789abcdef";
+                    size_t i;
+                    Token ct;
+                    if (!hex) { lex_fail(l, "out of memory"); return make_tok(T_EOF_); }
+                    for (i = 0; i < nb; i++) {
+                        unsigned char by = (unsigned char)bytes[i];
+                        hex[i * 2] = hd[by >> 4];
+                        hex[i * 2 + 1] = hd[by & 0xf];
+                    }
+                    hex[nb * 2] = 0;
+                    ct = (Token){.type = T_CVECZ_};
+                    ct.sval = lex_intern(l, hex, nb * 2);
+                    ct.ival = (int64_t)nb;
+                    ct.line = l->line;
+                    free(hex);
+                    l->pos = p;
+                    return ct;
+                }
             }
             Token t = {.type = T_NAME_};
             size_t start = p;

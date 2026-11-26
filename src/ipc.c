@@ -11,6 +11,8 @@
 extern int rest_addr_blocked(const struct sockaddr *sa);
 
 #include <netdb.h>
+#include <stdio.h>
+#include <time.h>
 #if !defined(_WIN32)
 #include <sys/file.h>
 #endif

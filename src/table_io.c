@@ -617,7 +617,8 @@ static int all_float_span(const char *s, size_t n) {
 }
 
 static int cell_kind_span(const char *s, size_t n, int was_quoted) {
-    if (was_quoted) return KIND_STR;
+    while (n && (s[0] == ' ' || s[0] == '\t')) { s++; n--; }
+    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
     if (is_na_token(s, n)) return KIND_INT; /* missing: does not promote; the scan skips it */
     if (all_int_span(s, n)) {
         /* A value strtoll would clamp to the max int is a float column, not that max. */
@@ -639,7 +640,10 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
         return KIND_INT;
     }
     if (all_float_span(s, n)) return KIND_FLOAT;
-    return KIND_STR;
+    /* Quoted text stays text. An unquoted cell that is not a number is 0.0, so one
+     * bad cell does not turn the rest of a numeric column into strings. */
+    if (was_quoted) return KIND_STR;
+    return KIND_FLOAT;
 }
 
 /* Advance past one field without copying: start/len give its text (padding off, as
@@ -728,7 +732,8 @@ static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
                     plan->seen[oi]++;
                 }
             } else if (quoted) {
-                plan->kind[oi] = KIND_STR;
+                int k = cell_kind_span(s, n, 1);
+                if (k > plan->kind[oi]) plan->kind[oi] = k;
                 plan->seen[oi]++;
             } else if (!is_na_token(s, n)) {
                 int k = cell_kind_span(s, n, 0);

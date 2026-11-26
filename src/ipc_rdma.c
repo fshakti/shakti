@@ -106,8 +106,12 @@ static int ipc_rdma_setup_conn(IpcRdmaConn *c, char *err, size_t err_cap) {
     attr.cap.max_inline_data = 64;
     attr.sq_sig_all = 1;
     if (c->id->qp) {
+        struct ibv_qp_attr qattr;
         struct ibv_qp_init_attr init_attr;
-        if (ibv_query_qp(c->id->qp, NULL, IBV_QP_CAP, &init_attr) == 0 &&
+        memset(&qattr, 0, sizeof qattr);
+        memset(&init_attr, 0, sizeof init_attr);
+        /* attr must be a real buffer: mlx5 writes the command reply through it. */
+        if (ibv_query_qp(c->id->qp, &qattr, IBV_QP_CAP, &init_attr) == 0 &&
             init_attr.cap.max_inline_data >= 64)
             c->send_flags = IBV_SEND_INLINE;
     }

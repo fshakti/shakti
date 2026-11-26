@@ -20,7 +20,6 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
-#include <time.h>
 #include <unistd.h>
 #include <sys/time.h>
 
@@ -376,6 +375,13 @@ static V *rpc_error_http(int code, const char *msg, V *id) {
 }
 
 static V *rpc_ok_http(V *id, V *result) {
+    /* A dict result is the HTTP body itself. Scalars and lists stay in the envelope. */
+    if (result && result->t == T_DICT) {
+        char *raw = json_dumps_val(result);
+        V *raw_http = http_result(200, "application/json", raw ? raw : "{}");
+        free(raw);
+        return raw_http;
+    }
     V *env = v_dict_empty();
     v_dict_put(env, "jsonrpc", v_str("2.0"));
     if (id) v_dict_set(env, "id", id);

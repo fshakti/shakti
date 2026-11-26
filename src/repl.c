@@ -12,7 +12,7 @@
 #endif
 #endif
 #ifndef SHAKTI_PKG_VERSION
-#define SHAKTI_PKG_VERSION "0.15.1"
+#define SHAKTI_PKG_VERSION "0.16.0"
 #endif
 
 static int shakti_stmt_silent(Node *s) {

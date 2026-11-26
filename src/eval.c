@@ -654,9 +654,63 @@ static void pop_list_vals(int pushed) {
     if (pushed > g_list_arg_n) pushed = g_list_arg_n;
     g_list_arg_n -= pushed;
 }
-/* Append and pop change the list in place, including through another name. */
+static V *store_at(V *obj, V *idx, V *val, int *stored, int *in_range);
+static V *index_fail(V *obj, V *idx, V *val, int in_range);
+/* Set around the eval of an append/pop receiver or first argument that is an index.
+ * N_INDEX records the container and index it actually used, so the copy-on-write
+ * store does not evaluate that index again. */
+static int g_cap_on;
+static V *g_cap_base;
+static V *g_cap_idx;
+static V *g_cow_err;
+static void cap_clear(void) {
+    v_free(g_cap_base); g_cap_base = NULL;
+    v_free(g_cap_idx); g_cap_idx = NULL;
+    g_cap_on = 0;
+}
+/* Append and pop change the list in place. A list that also lives under another
+ * name is copied first, unless this call received that list as an argument. */
 static int cow_list_arg(Env *e, Node *slot, V **objp) {
-    (void)e; (void)slot; (void)objp;
+    V *obj = objp ? *objp : NULL;
+    int i, on_stack = 0;
+    V *c;
+    if (!obj || obj->t != T_LIST || shakti_count(obj) <= 1) return 0;
+    for (i = 0; i < g_list_arg_n; i++)
+        if (g_list_arg_stack[i] == obj) { on_stack = 1; break; }
+    if (on_stack) return 0;
+    c = v_list(obj->n);
+    if (!c || c->t == T_ERR) return -1;
+    for (i = 0; i < obj->n; i++) c->L[i] = obj->L[i] ? v_ref(obj->L[i]) : NULL;
+    if (slot && slot->type == N_NAME) {
+        /* The name may live in an enclosing env. env_set would shadow it. */
+        if (!env_update(e, slot->sval, c))
+            env_set(e, slot->sval, c);
+    } else if (slot && slot->type == N_INDEX && slot->nch >= 2) {
+        V *base = g_cap_base ? v_ref(g_cap_base) : eval(slot->ch[0], e);
+        V *idx = g_cap_idx ? v_ref(g_cap_idx) : eval(slot->ch[1], e);
+        int stored = 0, in_range = 0;
+        V *oom;
+        if (!base || base->t == T_ERR || !idx || idx->t == T_ERR) {
+            v_free(base); v_free(idx); v_free(c);
+            return -1;
+        }
+        oom = store_at(base, idx, c, &stored, &in_range);
+        if (oom || !stored) {
+            if (oom) g_cow_err = oom;
+            else g_cow_err = index_fail(base, idx, c, in_range);
+            v_free(base);
+            v_free(idx);
+            v_free(c);
+            return -2;
+        }
+        v_free(base);
+        v_free(idx);
+    } else {
+        v_free(c);
+        return 0;
+    }
+    v_free(*objp);
+    *objp = c;
     return 0;
 }
 static int shakti_call_depth_limit(void) {
@@ -2267,6 +2321,8 @@ V *eval(Node *n, Env *e) {
     }
     case N_INDEX: {
         EVAL_STACK_GUARD();
+        int capture = (g_cap_on == 1);
+        if (capture) g_cap_on = 2;
         V *obj = eval(n->ch[0], e);
         P(n->nch < 2, obj)
         if (obj->t == T_ERR) return obj;
@@ -2313,7 +2369,7 @@ V *eval(Node *n, Env *e) {
                 } else next = v_err("index out of range");
             } else if(obj->t==T_DICT) {
                 V *found = v_dict_find(obj, idx);
-                next = found ? v_ref(found) : v_err("key");
+                next = found ? v_ref(found) : v_nil();
             } else if(obj->t==T_STR && (idx->t==T_INT||idx->t==T_CHAR)) {
                 int64_t j = idx->j;
                 int64_t slen = strlen(obj->s);
@@ -2324,6 +2380,11 @@ V *eval(Node *n, Env *e) {
                 } else next = v_err("string index out of range");
             } else {
                 next = v_errf("cannot index type %s with type %s", type_name(obj->t), type_name(idx->t));
+            }
+            if (capture && next && next->t == T_LIST) {
+                v_free(g_cap_base); v_free(g_cap_idx);
+                g_cap_base = v_ref(obj);
+                g_cap_idx = v_ref(idx);
             }
             v_free(obj); v_free(idx);
             obj = next ? next : v_nil();
@@ -2468,9 +2529,13 @@ V *eval(Node *n, Env *e) {
             return v_err("too many dimensions");
         }
         if(fn_node->type == N_DOT) {
-            V *obj = eval(fn_node->ch[0], e);
-            P(obj->t == T_ERR,obj)
             const char *method = fn_node->sval;
+            int want_cap = method && (!strcmp(method, "pop") || !strcmp(method, "append"))
+                && fn_node->ch[0] && fn_node->ch[0]->type == N_INDEX;
+            if (want_cap) { cap_clear(); g_cap_on = 1; }
+            V *obj = eval(fn_node->ch[0], e);
+            g_cap_on = 0;
+            if (!obj || obj->t == T_ERR) { cap_clear(); return obj ? obj : v_err("bad call"); }
             int nargs_total = n->nch - 1;
             int args_cap = nargs_total + 1;
             V **args = calloc(args_cap, sizeof(V*));
@@ -2479,6 +2544,7 @@ V *eval(Node *n, Env *e) {
                 if(n->ch[i]->type == N_KWARG) continue;
                 int arc = call_arg_eval(n->ch[i], e, &args, &nargs, &args_cap, n->nch - 1 - i);
                 if(arc < 0) {
+                    cap_clear();
                     v_free(obj);
                     for(int j=0;j<nargs;j++) v_free(args[j]);
                     free(args);
@@ -2504,6 +2570,7 @@ V *eval(Node *n, Env *e) {
                     }
                 }
                 if (g_error) {
+                    cap_clear();
                     v_free(attr); v_free(obj);
                     for(int j=0;j<nargs;j++) v_free(args[j]);
                     for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
@@ -2527,6 +2594,7 @@ V *eval(Node *n, Env *e) {
                 for(int i=0;i<nargs;i++) v_free(args[i]);
                 for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
                 free(args); free(kwnames); free(kwvals);
+                cap_clear();
                 return result;
             }
             if(obj->t == T_SUBPROCESS) {
@@ -2539,15 +2607,20 @@ V *eval(Node *n, Env *e) {
                 v_free(obj);
                 for(int i=0;i<nargs;i++) v_free(args[i]);
                 free(args);
+                cap_clear();
                 return r;
             }
             if ((!strcmp(method, "pop") || !strcmp(method, "append")) &&
                 cow_list_arg(e, fn_node->ch[0], &obj) < 0) {
+                V *err = g_cow_err ? g_cow_err : v_err("shared list");
+                g_cow_err = NULL;
+                cap_clear();
                 v_free(obj);
                 for(int i=0;i<nargs;i++) v_free(args[i]);
                 free(args);
-                return v_err("shared list");
+                return err;
             }
+            cap_clear();
             V *r = method_call(obj, method, args, nargs, e);
             v_free(obj);
             for(int i=0;i<nargs;i++) v_free(args[i]);
@@ -2579,8 +2652,13 @@ V *eval(Node *n, Env *e) {
                 kwvals[nkw] = eval(n->ch[i], e);
                 nkw++;
             } else {
+                int capture_arg = i == 1 && n->ch[i]->type == N_INDEX && fn_node->type == N_NAME
+                    && fn_node->sval && (!strcmp(fn_node->sval, "pop") || !strcmp(fn_node->sval, "append"));
+                if (capture_arg) { cap_clear(); g_cap_on = 1; }
                 int arc = call_arg_eval(n->ch[i], e, &args, &nargs, &args_cap, n->nch - 1 - i);
+                g_cap_on = 0;
                 if(arc < 0) {
+                    cap_clear();
                     for(int j=0;j<nargs;j++) v_free(args[j]);
                     for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
                     free(args); free(kwnames); free(kwvals);
@@ -2588,6 +2666,7 @@ V *eval(Node *n, Env *e) {
                 }
             }
             if (g_error) {
+                cap_clear();
                 for(int j=0;j<nargs;j++) v_free(args[j]);
                 for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
                 free(args); free(kwnames); free(kwvals);
@@ -2595,6 +2674,7 @@ V *eval(Node *n, Env *e) {
             }
         }
         if (g_error) {
+            cap_clear();
             for(int j=0;j<nargs;j++) v_free(args[j]);
             for(int j=0;j<nkw;j++) { v_free(kwnames[j]); v_free(kwvals[j]); }
             free(args); free(kwnames); free(kwvals);
@@ -2608,11 +2688,15 @@ V *eval(Node *n, Env *e) {
             if ((!strcmp(fn_node->sval, "pop") || !strcmp(fn_node->sval, "append")) &&
                 nargs >= 1 && n->nch > 1 && n->ch[1]->type != N_KWARG &&
                 cow_list_arg(e, n->ch[1], &args[0]) < 0) {
+                V *err = g_cow_err ? g_cow_err : v_err("shared list");
+                g_cow_err = NULL;
+                cap_clear();
                 for(int i=0;i<nargs;i++) v_free(args[i]);
                 for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }
                 free(args); free(kwnames); free(kwvals);
-                return v_err("shared list");
+                return err;
             }
+            cap_clear();
             V *r = builtin_call(fn_node->sval, args, nargs, kwnames, kwvals, nkw, e);
             for(int i=0;i<nargs;i++) v_free(args[i]);
             for(int i=0;i<nkw;i++) { v_free(kwnames[i]); v_free(kwvals[i]); }

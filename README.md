@@ -3,7 +3,7 @@
 [Website](https://shakti.com) · [Try shakti in your browser](https://shakti.com/?try)
 [Discord](https://shakti.com/discord) · [tree-sitter grammar](https://github.com/avillega/tree-sitter-shakti) (unofficial)
 
-Small interpreted language (0.15.1) with vectors, matrices, tables, decorators,
+Small interpreted language (0.16.0) with vectors, matrices, tables, decorators,
 each (`f@`), table joins (`,` / `union` / `outer`), asof helpers, and optional SQL,
 graph, IPC, REST, gfx, pyplot, mplsoccer, jupyter, synth, input, MIDI, PDF, DSP, Sonic Pi,
 and IEFS modules.

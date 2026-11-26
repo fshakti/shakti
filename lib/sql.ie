@@ -3,6 +3,9 @@
 #
 # After `import sql`, use:
 #   select col by group from table where expr
+# A lone sum, avg, min, or max keeps the source column name (select max v is v).
+# A second aggregate on that name is prefixed (min v, max v is min_v, max_v).
+# A bare count stays count; count i is count_i.
 #   update col : expr from table where expr
 #   delete from table where expr
 #   create table name (col: default, ...)

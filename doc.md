@@ -1,6 +1,6 @@
 # Shakti documentation
 
-Version **0.15.1**.
+Version **0.16.0**.
 
 Value type tags are layout 1: `char` is 4, `str` is 5, then vectors (`list[int]` … `list`), dict/table/function/datetime/time/input/subprocess, then matrices through `matrix[bool]`. IEFS writes that layout in header word 20 and rejects layout 0 (tag 4 was `str`); re-save those files.
 
@@ -361,8 +361,8 @@ Leading `@` decorates. `mmul(a, b)` multiplies matrices.
 
 | Method | Types |
 |--------|-------|
-| `append(x)` | `list` |
-| `pop()` | `list` |
+| `append(x)` | `list`, `list[int]`, `list[float]`, `list[bool]`, `list[char]`. A table column is an error (`append: table column`) |
+| `pop()` | `list`, `list[int]`, `list[float]`, `list[bool]`, `list[char]`, including a table column |
 | `keys()`, `values()` | `dict`, `table` |
 | `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `list[char]`, `matrix[int]`, `matrix[float]`, `matrix[bool]`, `matrix[char]` |
 | `find(substr)` | `str` — byte index of first match, or `-1` |
@@ -600,11 +600,12 @@ untyped and casting afterwards: it parses each field once, directly into the typ
 ### CSV / TSV load
 
 - Header required. Each column loads as an `ivec`, an `fvec`, or a list of strings, from the fields
-  it holds: an `ivec` when every field that is present is digits with an optional sign, once the
-  spaces around it (and tabs, in CSV, and a `\r` at its end) are taken off (`1, 2` are ints); an
-  `fvec` when the fields present are numeric but some are not whole (`2.0`, `1e3`); a list of strings
-  when any field is other text (such as `x`), or is written in double quotes — `1," 2 "` is a string
-  column (`"2"`), while `1, 2` is an `ivec`. An integer too large for an `ivec` makes its column an
+  it holds, after leading spaces and tabs and trailing spaces, tabs, and line breaks are taken off.
+  An `ivec` when every field that is present is digits with an optional sign (`1, 2` and `1," 2 "`
+  are ints); an `fvec` when the fields present are numeric but some are not whole (`2.0`, `1e3`).
+  Quoted text that is not a number stays text and makes the column a list of strings. An unquoted
+  cell that is not a number is the float `0.0`, so one bad cell does not turn the rest of a numeric
+  column into strings. An integer too large for an `ivec` makes its column an
   `fvec` holding that value as a float, rather than the largest int.
 - A field that is empty, or reads `NA`, `NAN`, `NR` or `NULL` in any letter case, is missing: it does
   not decide the column's kind. In a numeric column it pads as `0`; in a string column the text is
@@ -873,8 +874,9 @@ for a group whose items don't compare, as `min([1, None])` is). Of a matrix colu
 items: rows `[1, 10]` and `[2, 20]` have `sum` 33 and `avg` 8.25.
 
 The aggregates are `count`, `sum`, `avg`, `min` and `max`; any other word in a select is a column's
-name. A grouped aggregate is named from the aggregate and the column, `min_i` for `select min i`,
-and the same when it is the only aggregate. A bare `count` stays `count`; `count i` is `count_i`.
+name. A lone `sum`, `avg`, `min` or `max` keeps the source column name (`select max v` is `v`).
+A second aggregate that would share that name is prefixed (`min v, max v` is `min_v`, `max_v`).
+A bare `count` stays `count`; `count i` is `count_i`.
 A bare column under `by` is a grouping key, not an aggregate. A column the table doesn't have is an error value, with or without `by`:
 `select sum nosuch by k from t` and `select last n by k from t` are `select: unknown column 'nosuch'`
 and `select: unknown column 'last'`. `update` with a new name adds that column, as above.
@@ -1631,7 +1633,7 @@ Blocking HTTP daemon: `server_serve(port)` (default 8080). Loopback bind unless 
 
 Routes:
 
-- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**). A batch (a JSON array of requests) is not accepted. A successful result is always a JSON-RPC object, including when `handle_rpc` returns a dict.
+- `POST /rpc` and `POST /jsonrpc` — JSON-RPC 2.0 (`Content-Type: application/iefs` and `application/x-hld` return **415**). A batch (a JSON array of requests) is not accepted. A dict from `handle_rpc` is the HTTP body. A scalar or a list stays in the JSON-RPC envelope (`jsonrpc`, `id`, `result`).
   - `handle_rpc(method, params, id)` if defined in the calling environment
   - else built-in `ping` → `"pong"`
 - other methods/paths — `handle_request(method, path, body, content_type)` if defined (must return a dict with `status` / `content_type` / `body`)
