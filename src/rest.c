@@ -1066,6 +1066,14 @@ static V *rest_http_request(const char *method, const char *url, const unsigned 
     argv[ac++] = (char *)url;
     argv[ac] = NULL;
 
+    /* curl usually truncates -D/-o, but a failed start must not leave the previous response. */
+    {
+        int tfd = open(g_rest_hdr_path, O_WRONLY | O_TRUNC | O_NOFOLLOW);
+        if (tfd >= 0) close(tfd);
+        tfd = open(g_rest_body_path, O_WRONLY | O_TRUNC | O_NOFOLLOW);
+        if (tfd >= 0) close(tfd);
+    }
+
     int rc = rest_run_curl(argv, g_rest_code_path);
 
     for (int j = 0; j < nh; j++) free(hdr_lines[j]);

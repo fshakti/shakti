@@ -57,7 +57,7 @@ typedef struct {
     int mouse_buttons;
     int stop_latch;
     unsigned char key_down[65536];
-    unsigned char vt_pending[16];
+    unsigned char vt_pending[256];
     int vt_pn;
 } InputHub;
 
@@ -403,7 +403,7 @@ static int vt_nav_code(unsigned char final) {
 }
 
 /* the size of the buffer each caller of decode_vt_byte keeps a partly read escape sequence in */
-enum { PENDING_MAX = 16 };
+enum { PENDING_MAX = 256 };
 
 static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
     if (*pn == 0 && c == 27) {
@@ -444,7 +444,22 @@ static int decode_vt_byte(unsigned char c, unsigned char *pending, int *pn) {
                 pending[(*pn)++] = c;
                 return 2;
             }
-            *pn = 0;
+            /* The sequence did not fit. Keep the bytes already read, then handle this one. */
+            {
+                unsigned char saved[PENDING_MAX];
+                int nsave = *pn;
+                if (nsave > PENDING_MAX) nsave = PENDING_MAX;
+                if (nsave > 0) memcpy(saved, pending, (size_t)nsave);
+                *pn = 0;
+                for (int i = 0; i < nsave; i++) {
+                    InputEvent ev;
+                    memset(&ev, 0, sizeof ev);
+                    ev.kind = EV_CHAR;
+                    ev.code = saved[i];
+                    if (saved[i] >= 32 && saved[i] < 127) ev.utf8[0] = (char)saved[i];
+                    q_push(&ev);
+                }
+            }
             return decode_vt_byte(c, pending, pn);
         }
         *pn = 0;
@@ -538,10 +553,10 @@ static int tty_drain(int timeout_ms) {
 /* A timed-out escape that never finished is the raw bytes, not a lost sequence. */
 static void flush_vt_pending(void) {
     int n = g_in.vt_pn;
-    unsigned char saved[16];
+    unsigned char saved[PENDING_MAX];
     int i;
     if (n <= 0) return;
-    if (n > (int)sizeof saved) n = (int)sizeof saved;
+    if (n > PENDING_MAX) n = PENDING_MAX;
     memcpy(saved, g_in.vt_pending, (size_t)n);
     g_in.vt_pn = 0;
     for (i = 0; i < n; i++) {

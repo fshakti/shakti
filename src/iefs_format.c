@@ -823,7 +823,8 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
         uint64_t need = 0;
         if (__builtin_mul_overflow(nelem, (uint64_t)8, &need) || need != (uint64_t)nbytes)
             return v_err("iefs: extent length mismatch");
-        V *v = v_list((int64_t)nelem);
+        V *v = v_list_try((int64_t)nelem);
+        if (!v) return v_err("iefs: extent too large");
         for (uint64_t i = 0; i < nelem; i++)
             v->L[i] = v_datetime((int64_t)get_u64(p + i * 8u));
         return v;
@@ -1824,9 +1825,15 @@ static V *decode_value_inner(IefsR *r) {
             return v_err(r->err);
         uint64_t n = get_u64(r->p + r->off);
         r->off += 8;
-        if (n > IEFS_MAX_ELEMS || n > r->n - r->off)
-            return v_err("iefs: list too large");
-        V *v = v_list((int64_t)n);
+        {
+            size_t ptrs = 0;
+            if (n > IEFS_MAX_ELEMS || r->off > r->n || n > r->n - r->off ||
+                __builtin_mul_overflow((size_t)n, sizeof(V *), &ptrs) ||
+                ptrs > shakti_decode_limit())
+                return v_err("iefs: list too large");
+        }
+        V *v = v_list_try((int64_t)n);
+        if (!v) return v_err("iefs: list too large");
         for (uint64_t i = 0; i < n; i++) {
             V *item = decode_value(r);
             if (item->t == T_ERR) {

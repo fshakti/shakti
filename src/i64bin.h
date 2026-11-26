@@ -29,6 +29,11 @@ static inline int64_t i64_mod(int64_t x, int64_t y) {
 static inline double floor_mod(double x, double y) {
     double q;
     if (y == 0.0) return 0.0;
+    /* x % ±inf is x when x is finite and non-negative, and +inf when x is finite and negative. */
+    if (isinf(y)) {
+        if (!isfinite(x)) return (double)NAN;
+        return x < 0.0 ? (double)INFINITY : x;
+    }
     q = floor(x / y);
     return x - q * y;
 }

@@ -84,6 +84,12 @@ static void lex_finish_text(Lexer *l, Token *t, int len) {
 }
 /* The character after a backslash in a quoted string (single or triple quotes): \n \t \r \0 \\
    \' \" are decoded; any other keeps its backslash. */
+static int lex_hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
 static int lex_append_escape(Lexer *l, Token *t, int *len, char ch) {
     switch(ch) {
     case 'n': return lex_append(l, t, len, '\n');
@@ -510,16 +516,25 @@ static Token lex_raw(Lexer *l) {
                 int qi = 0;
                 while (p < l->len && s[p] != q) {
                     if (s[p] == '\\' && p + 1 < l->len) {
+                        int hv, lv;
                         p++;
-                        if (!lex_append_escape(l, &bt, &qi, s[p])) return make_tok(T_EOF_);
+                        /* \xHH and \0 are bytes. A normal string still rejects \0. */
+                        if (s[p] == 'x' && p + 2 < l->len &&
+                            (hv = lex_hex_val(s[p + 1])) >= 0 && (lv = lex_hex_val(s[p + 2])) >= 0) {
+                            if (!lex_append(l, &bt, &qi, (char)((hv << 4) | lv))) return make_tok(T_EOF_);
+                            p += 3;
+                            continue;
+                        }
+                        if (s[p] == '0') {
+                            if (!lex_append(l, &bt, &qi, 0)) return make_tok(T_EOF_);
+                        } else if (!lex_append_escape(l, &bt, &qi, s[p])) return make_tok(T_EOF_);
                     } else if (!lex_append(l, &bt, &qi, s[p])) return make_tok(T_EOF_);
                     p++;
                 }
-                lex_finish_text(l, &bt, qi);
                 if (p < l->len) p++;
                 {
-                    const char *bytes = bt.sval ? bt.sval : "";
-                    size_t nb = strlen(bytes);
+                    const unsigned char *bytes = l->text ? (const unsigned char *)l->text : (const unsigned char *)"";
+                    size_t nb = (size_t)qi;
                     char *hex = malloc(nb * 2 + 1);
                     static const char *hd = "0123456789abcdef";
                     size_t i;

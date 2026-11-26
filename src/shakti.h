@@ -395,6 +395,8 @@ static inline int timeout_ms_arg(const V *v, int *ms) {
 V *mat_matmul(V *a, V *b);
 V *v_mat_row(V *m, int64_t row);
 V *v_list(int64_t n);
+/* NULL when n is out of range or the pointer array cannot be allocated. */
+V *v_list_try(int64_t n);
 void v_specialize(V *v);
 void v_list_append(V *v, V *item);
 /* If *p is a shared list, replace it with a shallow clone and drop our ref. */

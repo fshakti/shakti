@@ -610,13 +610,14 @@ static int ipc_hmac_bytes(const unsigned char *key, size_t klen, const unsigned 
 }
 
 static void ipc_session_derive(IpcHandle *s, const char *token,
-                               const unsigned char *ns, const unsigned char *nc) {
+                               const unsigned char *ns, const unsigned char *nc, int is_server) {
     unsigned char buf[8 + 2 * IPC_AUTH_NONCE];
     memcpy(buf, "SHKSESS1", 8);
     memcpy(buf + 8, ns, IPC_AUTH_NONCE);
     memcpy(buf + 8 + IPC_AUTH_NONCE, nc, IPC_AUTH_NONCE);
     if (ipc_hmac(token, buf, sizeof buf, s->session_key) == 0) {
         s->session_set = 1;
+        s->session_server = is_server;
         s->tx_seq = 0;
         s->rx_seq = 0;
     }
@@ -647,7 +648,7 @@ static int ipc_auth_server(IpcHandle *s, const char *token, char *err, size_t er
         return -1;
     }
     if (ipc_auth_send(s, mac, sizeof mac, NULL, 0, err, err_cap) != 0) return -1;
-    ipc_session_derive(s, token, ns, nc);
+    ipc_session_derive(s, token, ns, nc, 1);
     return 0;
 }
 
@@ -672,7 +673,7 @@ static int ipc_auth_client(IpcHandle *s, const char *token, char *err, size_t er
         snprintf(err, err_cap, "ipc_connect: server failed auth (SHAKTI_IPC_TOKEN mismatch)");
         return -1;
     }
-    ipc_session_derive(s, token, ns, nc);
+    ipc_session_derive(s, token, ns, nc, 0);
     return 0;
 }
 
@@ -1049,13 +1050,16 @@ static int ipc_frame_seal(IpcHandle *s, const void *data, size_t len,
     if (len) memcpy(buf, data, len);
     uint64_t seq = ++s->tx_seq;
     unsigned char seqbe[8];
+    unsigned char dir = s->session_server ? 's' : 'c';
     for (int i = 0; i < 8; i++) seqbe[i] = (unsigned char)(seq >> (56 - 8 * i));
     memcpy(buf + len, seqbe, 8);
-    unsigned char *cov = malloc(8 + len);
+    /* Direction is not on the wire. A frame reflected to its sender was sealed with the other role. */
+    unsigned char *cov = malloc(9 + len);
     if (!cov) { free(buf); return -1; }
-    memcpy(cov, seqbe, 8);
-    if (len) memcpy(cov + 8, data, len);
-    int rc = ipc_hmac_bytes(s->session_key, IPC_MAC_LEN, cov, 8 + len, buf + len + 8);
+    cov[0] = dir;
+    memcpy(cov + 1, seqbe, 8);
+    if (len) memcpy(cov + 9, data, len);
+    int rc = ipc_hmac_bytes(s->session_key, IPC_MAC_LEN, cov, 9 + len, buf + len + 8);
     free(cov);
     if (rc != 0) { free(buf); return -1; }
     *out = buf;
@@ -1070,12 +1074,14 @@ static int ipc_frame_open(IpcHandle *s, char *msg, size_t *len_io) {
     const unsigned char *tr = (const unsigned char *)msg + body;
     uint64_t seq = 0;
     for (int i = 0; i < 8; i++) seq = (seq << 8) | tr[i];
-    unsigned char *cov = malloc(8 + body);
+    unsigned char dir = s->session_server ? 'c' : 's';
+    unsigned char *cov = malloc(9 + body);
     if (!cov) return -1;
-    memcpy(cov, tr, 8);
-    if (body) memcpy(cov + 8, msg, body);
+    cov[0] = dir;
+    memcpy(cov + 1, tr, 8);
+    if (body) memcpy(cov + 9, msg, body);
     unsigned char mac[IPC_MAC_LEN];
-    int rc = ipc_hmac_bytes(s->session_key, IPC_MAC_LEN, cov, 8 + body, mac);
+    int rc = ipc_hmac_bytes(s->session_key, IPC_MAC_LEN, cov, 9 + body, mac);
     free(cov);
     if (rc != 0 || seq != s->rx_seq + 1 || !ipc_mac_equal(mac, tr + 8, IPC_MAC_LEN))
         return -1;
@@ -1323,6 +1329,21 @@ static V *ipc_str_take(unsigned char *p, size_t n) {
     s[n] = 0;
     free(p);
     return v_str_take(s);
+}
+
+/* A payload with an interior zero is list[char]. A C string would drop everything after it. */
+static V *ipc_payload_value(unsigned char *p, size_t n) {
+    if (p && n && memchr(p, 0, n)) {
+        V *v = v_cvec((int64_t)n);
+        if (!v || v->t == T_ERR) {
+            free(p);
+            return v ? v : v_err("ipc: out of memory");
+        }
+        if (v->B) memcpy(v->B, p, n);
+        free(p);
+        return v;
+    }
+    return ipc_str_take(p, n);
 }
 
 int ipc_payload_bytes(V *v, const unsigned char **out, size_t *out_len) {
@@ -1717,6 +1738,26 @@ V *bi_ipc_accept(V **a, int n) {
     return v_int(h);
 }
 
+#ifdef SHAKTI_HAVE_RDMA
+/* Safe mode: RDMA has no per-address filter of its own. Refuse when any resolved address is private. */
+static int ipc_safe_host_blocked(const char *host, int port) {
+    char port_s[16];
+    struct addrinfo hints, *res = NULL, *ai;
+    int blocked = 0;
+    snprintf(port_s, sizeof port_s, "%d", port);
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host && host[0] ? host : "127.0.0.1", port_s, &hints, &res) != 0)
+        return 0;
+    for (ai = res; ai; ai = ai->ai_next) {
+        if (rest_addr_blocked(ai->ai_addr)) blocked = 1;
+    }
+    freeaddrinfo(res);
+    return blocked;
+}
+#endif
+
 static V *ipc_do_connect(const char *host, int port, IpcTransport req) {
     char err[512];
     err[0] = 0;
@@ -1733,7 +1774,11 @@ static V *ipc_do_connect(const char *host, int port, IpcTransport req) {
 #ifdef SHAKTI_HAVE_RDMA
     if (tr == IPC_TR_RDMA) {
         IpcRdmaConn *rdma = NULL;
-        if (ipc_rdma_connect(host, port, &rdma, err, sizeof err) != 0) {
+        if (shakti_safe_mode() && ipc_safe_host_blocked(host, port)) {
+            if (req == IPC_TR_RDMA)
+                return v_err("ipc: connect: private address blocked in safe mode");
+            tr = ipc_is_localhost(host) ? IPC_TR_UDS : IPC_TR_TCP;
+        } else if (ipc_rdma_connect(host, port, &rdma, err, sizeof err) != 0) {
             if (req == IPC_TR_RDMA)
                 return v_err(err[0] ? err : "ipc_connect: rdma failed");
             fprintf(stderr, "[ipc] rdma connect failed (%s), falling back\n",
@@ -1940,7 +1985,7 @@ V *bi_ipc_send_sync(V **a, int n) {
     int rc = ipc_env_recv(s, 1, timeout_ms, 1, corr, &kind, &got_corr, &rep, &rep_len, err, sizeof err);
     if (rc == -2) return v_err("ipc_send_sync: timeout");
     if (rc != 0) return v_err(err[0] ? err : "ipc_send_sync: recv failed");
-    return ipc_str_take(rep, rep_len);
+    return ipc_payload_value(rep, rep_len);
 }
 
 V *bi_ipc_reply(V **a, int n) {
@@ -2055,7 +2100,7 @@ static V *ipc_do_recv_req(IpcHandle *s, int block) {
                 box->n--;
                 V *lst = v_list(2);
                 lst->L[0] = v_int((int64_t)corr);
-                lst->L[1] = ipc_str_take(data, len);
+                lst->L[1] = ipc_payload_value(data, len);
                 return lst;
             }
         }
@@ -2069,7 +2114,7 @@ static V *ipc_do_recv_req(IpcHandle *s, int block) {
         if (kind == IPC_ENV_REQ) {
             V *lst = v_list(2);
             lst->L[0] = v_int((int64_t)corr);
-            lst->L[1] = ipc_str_take(data, len);
+            lst->L[1] = ipc_payload_value(data, len);
             return lst;
         }
         if (kind == IPC_ENV_ASYNC) {

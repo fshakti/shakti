@@ -901,6 +901,14 @@ int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap) {
             snprintf(err, err_cap, "safe mode: %s outside SHAKTI_FS_ROOT", write ? "write" : "read");
         return -1;
     }
+    {
+        struct stat sb;
+        /* A second name for this inode can live outside the root. F_GETPATH only reports the name we opened. */
+        if (fstat(fd, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_nlink > 1) {
+            if (err && err_cap) snprintf(err, err_cap, "safe mode: hard link");
+            return -1;
+        }
+    }
     return 0;
 #endif
 }

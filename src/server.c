@@ -375,13 +375,6 @@ static V *rpc_error_http(int code, const char *msg, V *id) {
 }
 
 static V *rpc_ok_http(V *id, V *result) {
-    /* A dict result is the HTTP body itself. Scalars and lists stay in the envelope. */
-    if (result && result->t == T_DICT) {
-        char *raw = json_dumps_val(result);
-        V *raw_http = http_result(200, "application/json", raw ? raw : "{}");
-        free(raw);
-        return raw_http;
-    }
     V *env = v_dict_empty();
     v_dict_put(env, "jsonrpc", v_str("2.0"));
     if (id) v_dict_set(env, "id", id);
@@ -549,6 +542,24 @@ static int http_content_length(const char *buf) {
     return seen ? val : -1;
 }
 
+static int http_transfer_encoding(const char *buf) {
+    const char *p = buf;
+    while (p && *p) {
+        const char *eol = strstr(p, "\r\n");
+        const char *colon = NULL;
+        size_t name_len;
+        if (!eol || eol == p) break;
+        for (const char *q = p; q < eol; q++) {
+            if (*q == ':') { colon = q; break; }
+        }
+        name_len = colon ? (size_t)(colon - p) : 0;
+        while (name_len > 0 && (p[name_len - 1] == ' ' || p[name_len - 1] == '\t')) name_len--;
+        if (colon && name_len == 17 && !strncasecmp(p, "Transfer-Encoding", 17)) return 1;
+        p = eol + 2;
+    }
+    return 0;
+}
+
 static ssize_t http_read_request(int fd, char *buf, size_t cap, long hdr_deadline, long deadline) {
     size_t nread = 0;
     while (nread + 1 < cap) {
@@ -572,6 +583,7 @@ static ssize_t http_read_request(int fd, char *buf, size_t cap, long hdr_deadlin
         buf[nread] = 0;
         char *body = http_body(buf);
         if (!body) continue;
+        if (http_transfer_encoding(buf)) return -1;
         int cl = http_content_length(buf);
         if (cl == -2) return -1;
         if (cl < 0) break;
@@ -584,6 +596,7 @@ static ssize_t http_read_request(int fd, char *buf, size_t cap, long hdr_deadlin
     if (nread > 0) buf[nread] = 0;
     if (nread > 0) {
         char *body = http_body(buf);
+        if (http_transfer_encoding(buf)) return -1;
         int cl = body ? http_content_length(buf) : -1;
         if (cl == -2) return -1;
         if (cl >= 0 && body) {

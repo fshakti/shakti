@@ -531,6 +531,21 @@ static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt
         }
     }
     free(hdr_cells);
+    {
+        int dup_at = -1;
+        for (int i = 0; i < nh && dup_at < 0; i++)
+            for (int j = 0; j < i; j++)
+                if (p->hdr[i] && p->hdr[j] && !strcmp(p->hdr[i], p->hdr[j])) {
+                    dup_at = i;
+                    break;
+                }
+        if (dup_at >= 0) {
+            char name[128];
+            snprintf(name, sizeof name, "%s", p->hdr[dup_at] ? p->hdr[dup_at] : "");
+            delim_plan_free(p);
+            return v_errf("%s: duplicate column '%s'", fmt, name);
+        }
+    }
     int n_out = columns_opt ? (int)columns_opt->n : nh;
     p->n_out = n_out;
     p->src = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
@@ -611,8 +626,7 @@ static int is_na_token(const char *s, size_t n) {
     char buf[8];
     for (size_t i = 0; i < n; i++) buf[i] = (char)toupper((unsigned char)s[i]);
     buf[n] = 0;
-    return !strcmp(buf, "NA") || !strcmp(buf, "NAN") || !strcmp(buf, "NR") ||
-           !strcmp(buf, "NULL");
+    return !strcmp(buf, "NA") || !strcmp(buf, "NR") || !strcmp(buf, "NULL");
 }
 
 static int all_int_span(const char *s, size_t n) {
@@ -650,6 +664,12 @@ static int is_inf_span(const char *s, size_t n) {
     return span_ieq(s, n, "inf") || span_ieq(s, n, "infinity");
 }
 
+/* nan, optional sign, any letter case. A numeric NaN, not a missing cell. */
+static int is_nan_span(const char *s, size_t n) {
+    if (n && (s[0] == '+' || s[0] == '-')) { s++; n--; }
+    return span_ieq(s, n, "nan");
+}
+
 /* KIND_INT / KIND_FLOAT when the cell counts as a number, KIND_STR when it is text,
  * -1 when it is missing and does not count. A quoted cell is text, digits included. */
 static int cell_kind_span(const char *s, size_t n, int was_quoted) {
@@ -657,6 +677,7 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
     while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
     if (is_na_token(s, n)) return -1;
     if (was_quoted) return KIND_STR;
+    if (is_nan_span(s, n)) return KIND_FLOAT;
     if (all_int_span(s, n)) {
         /* A value strtoll would clamp to the max int is not an int cell. */
         size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
@@ -726,6 +747,7 @@ static int schemed_span_ok(int kind, const char *s, size_t n) {
         return csv_parse_i64_span(s, s + n, &v);
     }
     double x = 0.0;
+    if (is_nan_span(s, n) || is_inf_span(s, n)) return 1;
     if (csv_parse_f64_span(s, s + n, &x)) return 1;
     if (n == 0 || n >= 256) return 0;
     char buf[256];
@@ -839,6 +861,11 @@ static const double csv_p10[] = {1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 10
 static int csv_parse_f64_span(const char *s, const char *e, double *out) {
     csv_trim_span(&s, &e);
     if (s == e || is_na_token(s, (size_t)(e - s))) { *out = 0.0; return 1; }
+    if (is_nan_span(s, (size_t)(e - s))) { *out = (double)NAN; return 1; }
+    if (is_inf_span(s, (size_t)(e - s))) {
+        *out = (s < e && *s == '-') ? (double)-INFINITY : (double)INFINITY;
+        return 1;
+    }
     int neg = 0;
     if (*s == '+' || *s == '-') { neg = *s == '-'; s++; }
     if (s == e) return 0;

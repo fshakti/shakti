@@ -447,11 +447,25 @@ V *mat_matmul(V *a, V *b) {
     }
     return r;
 }
-V *v_list(int64_t n) {
-    if (n < 0 || n > (int64_t)UINT32_MAX) shakti_oom("v_list");
-    V *v = x_calloc(1, sizeof(V), "v_list"); v->t = T_LIST; v->rc = 1; v->n = n;
+V *v_list_try(int64_t n) {
+    V *v;
+    if (n < 0 || n > (int64_t)UINT32_MAX) return NULL;
+    v = try_calloc(1, sizeof(V));
+    if (!v) return NULL;
+    v->t = T_LIST;
+    v->rc = 1;
+    v->n = n;
     v->_ht_cap = n > 0 ? (uint32_t)n : 0;
-    v->L = x_calloc(n > 0 ? (size_t)n : 1, sizeof(V*), "v_list");
+    v->L = try_calloc(n > 0 ? (size_t)n : 1, sizeof(V *));
+    if (!v->L) {
+        free(v);
+        return NULL;
+    }
+    return v;
+}
+V *v_list(int64_t n) {
+    V *v = v_list_try(n);
+    if (!v) shakti_oom("v_list");
     return v;
 }
 void v_list_unshare(V **p) {

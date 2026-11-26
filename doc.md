@@ -209,13 +209,13 @@ inlining is recovered with LTO on the default link (see [README build](README.md
 - A missing dict key reads as `None`. `len` of a string is its length in bytes
 - SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
 - An integer literal that does not fit in a signed 64-bit int is a parse error. `abs` of the minimum int is that positive float
-- `//` and `%` are floor division: `x = (x // y) * y + (x % y)`, for ints and for floats
+- `//` and `%` are floor division: `x = (x // y) * y + (x % y)`, for ints and for finite floats. `x % inf` is `x` when `x` is finite and at least 0, and `inf` when `x` is finite and negative
 - A float `sum` adds in one order on a given build, so one vector sums to the same bits every run. Accelerate, NEON and a plain loop can still disagree with each other, and a sum is not promised bit-identical across platforms or thread counts
 - A bool is not a number: `True + 1` is an error
 - A list is indexed by one int. Indexing a list by a mask or by a list of indices is an error
 - Storing an int into a `list[char]` wraps modulo 256
 - `union` and `outer` join tables. They are not arithmetic
-- A string escape is `\n`, `\t`, `\\`, `\'` or `\"`. Any other backslash keeps the character that follows it
+- A string escape is `\n`, `\t`, `\\`, `\'` or `\"`. Any other backslash keeps the character that follows it. `\0` in a normal string is a parse error. In `b"..."`, `\0` is a zero byte and `\xHH` is the byte for two hex digits; `len(b"a\x00bc")` is 4
 - `global name` inside a function assigns that name in the root environment
 - A function with no `return` yields the value of its last statement. A binding's value is `None`
 - `len` of a `str` is its length in bytes. `repr` of a string escapes quotes, backslashes and newlines, and writes enough digits that a float reads back
@@ -538,7 +538,7 @@ and `reverse(d)` is the dict with its entries in reverse order.
 
 - `read(path)`, `write(path, text)`, `readlines(path)`
 - `listdir(path)`, `walk(path)`
-- `getcwd()`, `mkdir(path)`, `getenv(name)` — `getenv` returns `None` if unset
+- `getcwd()`, `mkdir(path)`, `getenv(name)` — `getenv` returns `None` if unset. In safe mode only `SHAKTI_*` names are readable, and a name containing `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `_KEY` is blocked
 - `path_join`, `path_exists`, `path_isdir`, `path_isfile`, `path_basename`,
   `path_dirname`, `path_splitext`
 - `json_loads(s)`, `json_dumps(x)` — JSON subset (no comments or trailing commas)
@@ -594,7 +594,7 @@ untyped and casting afterwards: it parses each field once, directly into the typ
   the same float (from one digit below the smallest normal float: `5e-324`), as `123456789.125`,
   `0.1`, `1e+300`, always with a `.` or an exponent, so a float column loads back as floats, value
   for value. A whole float below 10^15 is written with all its digits and `.0` (`2.0`,
-  `100000000000000.0`); infinities and NaN as `inf`, `-inf` and `nan`.
+  `100000000000000.0`); infinities and NaN as `inf`, `-inf` and `nan` (a numeric `nan` reloads as NaN).
 - String columns: list-of-string columns write each cell as text; `None` / unsupported cell types emit an empty field.
   A string cell that would read back as a number (such as `007` or `1e3`) is written in double quotes, so
   the column reloads as strings, not as numbers.
@@ -613,11 +613,13 @@ untyped and casting afterwards: it parses each field once, directly into the typ
   name stays text, and so does a column that is mostly text. A quoted cell is text even when the
   characters are digits (`"007"` reloads as `007`, not `7`), and it counts against the 95%. An
   integer too large for an `ivec` counts as text. A schema (`load(path, schema)`) still forces each
-  named column to the prototype (`0`, `0.0`, or `""`).
-- A field that is empty, or reads `NA`, `NAN`, `NR` or `NULL` in any letter case, is missing: it does
+  named column to the prototype (`0`, `0.0`, or `""`), and a schemed float column accepts `inf`, `-inf` and `nan`.
+  A repeated header name is an error.
+- A field that is empty, or reads `NA`, `NR` or `NULL` in any letter case, is missing: it does
   not decide the column's kind. In a numeric column it pads as `0`; in a string column the text is
   kept as written. A column in which every field is missing loads as a list of those strings.
-  So a float written as `nan` by `save` reloads as the missing pad `0.0`, not as a NaN.
+  `nan` (any letter case, optional sign) is a float NaN, not a missing cell, so a float column saved as `nan` reloads as `nan`.
+  A float written as `nan` by `save` reloads as NaN. `NA`, `NR`, `NULL` and an empty field stay the missing pad.
   Empty fields (e.g. CSV `1,` or TSV `1\t`) are preserved, leading and trailing included.
 - String columns written by `save` round-trip as strings: labels reload as the same text, and a
   string that looks numeric is quoted on save (above) so it reloads as a string too.
@@ -1308,7 +1310,7 @@ Environment:
 - `SHAKTI_IPC_DIR` — the socket directory, for Unix sockets and their `.lock` files (default `$XDG_RUNTIME_DIR`, else `/tmp/shakti-<uid>`, made 0700). It must be a directory of the user's own that others can't write to (so not `/tmp` itself); otherwise `ipc.listen` and `ipc.connect` over a Unix socket are an error (`ipc: uds path too long or socket dir unsafe`). Shared memory doesn't use it (see Shared memory).
 - `SHAKTI_IPC_TRANSPORT` — default transport: `auto`, `tcp`, `uds` (or `unix`), `rdma`; any other name is an error when it is used (above)
 - `SHAKTI_IPC_ALLOW_PUBLIC=1` — allow `ipc.listen` on a non-loopback address (default: loopback/UDS only)
-- In safe mode, `ipc.connect` over TCP refuses a private, link-local, CGNAT or otherwise non-routable address (`ipc: connect: private address blocked in safe mode`), the same set the REST client refuses. Loopback still uses a Unix socket unless `transport="tcp"`. `SHAKTI_NET_ALLOW_PRIVATE=1` allows those addresses in safe mode. Outside safe mode, `ipc.connect` does not apply that block. REST and `ws.connect` still do, in or out of safe mode.
+- In safe mode, `ipc.connect` over TCP or RDMA refuses a private, link-local, CGNAT or otherwise non-routable address (`ipc: connect: private address blocked in safe mode`), the same set the REST client refuses. Loopback still uses a Unix socket unless `transport="tcp"`. `SHAKTI_NET_ALLOW_PRIVATE=1` allows those addresses in safe mode. Outside safe mode, `ipc.connect` does not apply that block. REST and `ws.connect` still do, in or out of safe mode. A payload that contains a zero byte is `list[char]`; a `str` send ends at the first zero.
 
 A second `ipc.listen` on a port whose Unix listener is alive is an error (`ipc: uds bind: Address already in use`), as over TCP. A Unix listener keeps `shakti-<port>.lock` beside its socket; `ipc.close` removes both while that `.lock` is still its own; a process that ends without `ipc.close` leaves both, and the next listen reuses the lock file and replaces the socket. A non-socket at the socket path is an error (`ipc: <path> exists and is not a socket`). A socket whose listener holds no `.lock` (another program's, an older shakti's, or one whose `.lock` a cleaner of the socket directory removed) is connected to once: refused means it is replaced; otherwise the port is in use, and that listener sees one closed connection; a listener that sends on it may be ended by SIGPIPE. On macOS a full queue is refused too, and each of these connections stays queued until the listener accepts, so one that is not accepting is taken over once they fill its queue (16 for a shakti listener).
 
@@ -2143,7 +2145,7 @@ Shakti trusts the `.ie` programs it runs: a script can read and write files, use
 | Setting | Effect |
 |---------|--------|
 | `SHAKTI_SAFE=1` | No process execution (`sh`, `subprocess`, `load(dir, exec:True)`); no network (`rest`, `ws`, `server_serve`, TCP/RDMA/multicast `ipc`, `sonicpi`); file access confined to `SHAKTI_FS_ROOT`. Unix-socket and shared-memory IPC still work. |
-| `SHAKTI_FS_ROOT=<dir>` | Root for safe-mode file access (default: working directory at first use). Paths are resolved with `realpath`, so symlinks pointing outside are rejected. `path_exists` / `path_isdir` / `path_isfile` return `False` outside the root. |
+| `SHAKTI_FS_ROOT=<dir>` | Root for safe-mode file access (default: working directory at first use). Paths are resolved with `realpath`, so symlinks pointing outside are rejected. A regular file with more than one hard link is rejected. `path_exists` / `path_isdir` / `path_isfile` return `False` outside the root, and in safe mode they open the path instead of following a swapped symlink. |
 | `SHAKTI_ALLOW_NET=1` | Re-enable network in safe mode. |
 | `SHAKTI_ALLOW_EXEC=0` | Disable process execution only (files and network unaffected). |
 
@@ -2202,7 +2204,7 @@ Also: parser nesting is capped at 40 (deeper input is a parse error, "nesting to
 | `SHAKTI_IPC_MCAST_KEY` | unset | Authenticates multicast datagrams (HMAC-SHA256 trailer with timestamp ±60 s and replay cache; payload limit shrinks by 48 bytes). All group members must share it. Needs a TLS build. |
 | `SHAKTI_IPC_MCAST_REPLY_RATE` | `100` | Max `ipc.reply` per second to one reply-to address (global cap 10×); `0` disables. |
 
-- With `SHAKTI_IPC_TOKEN` set, every socket frame after the handshake carries a sequence number and HMAC-SHA256 trailer (session key derived from the handshake nonces): injected, tampered, replayed, or reordered frames are rejected and the connection is dropped. Non-loopback TCP binds also require TLS (`SHAKTI_TLS_CERT` / `SHAKTI_TLS_KEY`) unless `SHAKTI_IPC_ALLOW_PLAINTEXT=1`; clients wrap TLS for non-loopback connects (skip verification only with `SHAKTI_IPC_TLS_INSECURE=1`). Without a token, IPC has no peer authentication — loopback/UDS or trusted networks only. Correlation IDs are drawn fresh from the OS RNG per request.
+- With `SHAKTI_IPC_TOKEN` set, every socket frame after the handshake carries a sequence number and HMAC-SHA256 trailer (session key derived from the handshake nonces, with the sender's role in the MAC): injected, tampered, replayed, reordered, or reflected frames are rejected and the connection is dropped. Non-loopback TCP binds also require TLS (`SHAKTI_TLS_CERT` / `SHAKTI_TLS_KEY`) unless `SHAKTI_IPC_ALLOW_PLAINTEXT=1`; clients wrap TLS for non-loopback connects (skip verification only with `SHAKTI_IPC_TLS_INSECURE=1`). Without a token, IPC has no peer authentication — loopback/UDS or trusted networks only. Correlation IDs are drawn fresh from the OS RNG per request.
 - `ipc.join` accepts only datagrams addressed to the joined group (on Linux the socket binds to the group); unicast to the port is dropped. A full reply-to table evicts the oldest entry; `ipc.reply` refuses multicast, broadcast, unspecified and port-0 destinations.
 - Shared memory: on Linux segments are named `shakti_ipc_<euid>_<name>`; attach refuses segments owned by another user, group/world-accessible, or smaller than the header. Sharing a channel between users is not supported.
 - `/tmp/shakti-<uid>` (the Unix-socket directory when neither `SHAKTI_IPC_DIR` nor `XDG_RUNTIME_DIR` is set, and always the directory of shared-memory lock files) must be a real directory owned by the user with no group/other permissions. A socket directory named by `SHAKTI_IPC_DIR` or `XDG_RUNTIME_DIR` must be the user's and not writable by group or others.

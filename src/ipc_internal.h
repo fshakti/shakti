@@ -187,6 +187,7 @@ typedef struct {
     int require_tls;
     unsigned char session_key[IPC_MAC_LEN];
     int session_set;
+    int session_server; /* 1 on the accept side; MAC direction is the opposite of the peer */
     uint64_t tx_seq;
     uint64_t rx_seq;
 #ifdef SHAKTI_HAVE_RDMA

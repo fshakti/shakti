@@ -419,23 +419,48 @@ V *bi_path_join(V **a, in) {
     free(o);
     return r;
 }
+/* In safe mode, open the path and check the descriptor. stat() after the name check can describe an object swapped in outside the root. */
+static int path_probe(const char *path, struct stat *sb) {
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+    return stat(path, sb);
+#else
+    int fd;
+    char ferr[512];
+    if (!shakti_safe_mode()) return stat(path, sb);
+    fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) {
+        if (errno == ELOOP) return lstat(path, sb);
+        return -1;
+    }
+    if (shakti_fs_check_fd(fd, 0, ferr, sizeof ferr) != 0) {
+        close(fd);
+        return -1;
+    }
+    if (fstat(fd, sb) != 0) {
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    return 0;
+#endif
+}
 V *bi_path_exists(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("path_exists"))
     FS_GUARD_BOOL(a[0]->s);
     struct stat sb;
-    return v_bool(stat(a[0]->s, &sb) == 0);
+    return v_bool(path_probe(a[0]->s, &sb) == 0);
 }
 V *bi_path_isdir(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("path_isdir"))
     FS_GUARD_BOOL(a[0]->s);
     struct stat sb;
-    return v_bool(stat(a[0]->s, &sb) == 0 && S_ISDIR(sb.st_mode));
+    return v_bool(path_probe(a[0]->s, &sb) == 0 && S_ISDIR(sb.st_mode));
 }
 V *bi_path_isfile(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("path_isfile"))
     FS_GUARD_BOOL(a[0]->s);
     struct stat sb;
-    return v_bool(stat(a[0]->s, &sb) == 0 && S_ISREG(sb.st_mode));
+    return v_bool(path_probe(a[0]->s, &sb) == 0 && S_ISREG(sb.st_mode));
 }
 V *bi_path_basename(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("path_basename"))
@@ -518,11 +543,16 @@ V *bi_mkdir(V **a, in) {
 #endif
     return v_nil();
 }
+static int env_name_secret(const char *s) {
+    return strstr(s, "TOKEN") || strstr(s, "SECRET") || strstr(s, "PASSWORD") ||
+           strstr(s, "PASSWD") || strstr(s, "_KEY");
+}
 V *bi_getenv(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("getenv"))
     /* Safe mode: the host environment carries secrets (tokens, keys).
-     * Only Shakti's own configuration variables stay readable. */
-    if (shakti_safe_mode() && strncmp(a[0]->s, "SHAKTI_", 7) != 0)
+     * Shakti's own configuration stays readable, except names that hold a secret. */
+    if (shakti_safe_mode() &&
+        (strncmp(a[0]->s, "SHAKTI_", 7) != 0 || env_name_secret(a[0]->s)))
         return v_err("getenv: blocked in safe mode (only SHAKTI_* variables)");
     const char *v = getenv(a[0]->s);
     return v ? v_str(v) : v_nil();
