@@ -1565,8 +1565,7 @@ static V *build_group_result(V *tbl, GhTab *tab, ColSpec *specs, int nspecs,
         for (int s = 0; s < nspecs; s++) {
             keys->L[c] = v_str(specs[s].kind == COL_COUNT && specs[s].src[0] == 0 ? "count" : specs[s].name);
             V *src = specs[s].src[0] ? tbl_col(tbl, tbl_col_idx(tbl, specs[s].src)) : NULL;
-            if (specs[s].kind == COL_COUNT || (src && sum_is_int(specs[s].kind, src->t)) ||
-                (specs[s].kind == COL_SUM && src && src->t == T_BVEC)) {
+            if (specs[s].kind == COL_COUNT || (src && sum_is_int(specs[s].kind, src->t))) {
                 data->L[c] = v_ivec(tab->nslots);
             } else if (specs[s].kind == COL_NAME) {
                 data->L[c] = v_list(tab->nslots);

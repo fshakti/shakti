@@ -364,7 +364,7 @@ Leading `@` decorates. `mmul(a, b)` multiplies matrices.
 | Method | Types |
 |--------|-------|
 | `append(x)` | `list`, `list[int]`, `list[float]`, `list[bool]`, `list[char]`. A table column is an error (`append: table column`) |
-| `pop()` | `list`, `list[int]`, `list[float]`, `list[bool]`, `list[char]`, including a table column |
+| `pop()` | `list`, `list[int]`, `list[float]`, `list[bool]`, `list[char]`. A table column is an error (`pop: table column`) |
 | `keys()`, `values()` | `dict`, `table` |
 | `len()` | `list`, `str`, `ivec`, `fvec`, `bvec`, `list[char]`, `matrix[int]`, `matrix[float]`, `matrix[bool]`, `matrix[char]` |
 | `find(substr)` | `str` — byte index of first match, or `-1` |

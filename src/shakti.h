@@ -114,7 +114,7 @@ struct Env {
 enum {
     V_OWNER_MALLOC = 0,   /* free() buffers in v_free (default) */
     V_OWNER_MAP_ALIAS,    /* buffers alias an IefsMapRegion; munmap via map_reg */
-    V_OWNER_TABLE,        /* malloc-owned table column; append cannot grow it; pop shortens this column only */
+    V_OWNER_TABLE,        /* malloc-owned table column; append and pop refuse */
     V_OWNER_MODULE        /* dict whose map_reg is the Env* its functions close over */
 };
 

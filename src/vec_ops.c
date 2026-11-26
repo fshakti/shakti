@@ -4,6 +4,12 @@
 #include "mat_simd.h"
 #include "i64bin.h"
 
+/* v_ivec / v_fvec / v_cvec return an error value when the allocation fails.
+ * Its data pointer aliases the error string, so a write has to stop first. */
+#define RETURN_UNLESS_VEC(vec, want) do { \
+    if (!(vec) || (vec)->t != (want)) return (vec) ? (vec) : v_err("out of memory"); \
+} while (0)
+
 /* A byte result that does not fit 0..255 becomes list[int]. A result that
  * does not fit in an int becomes list[float], matching char + int. */
 static int c_bin(int64_t x, int64_t y, int op, int64_t *z) {
@@ -28,7 +34,7 @@ static V *cvec_arith(const unsigned char *a, const unsigned char *b, int64_t n,
         if (kind == 2) break;
     }
     V *r = kind == 2 ? v_fvec(n) : kind == 1 ? v_ivec(n) : v_cvec(n);
-    if (!r) return v_err("out of memory");
+    if (!r || r->t == T_ERR) return r ? r : v_err("out of memory");
     for (int64_t i = 0; i < n; i++) {
         int64_t x = has_scalar && scalar_left ? scalar : (int64_t)a[i];
         int64_t y = has_scalar && !scalar_left ? scalar : (int64_t)b[i];
@@ -157,10 +163,12 @@ static V *i64_pow_items(V *like, const int64_t *xs, int64_t x, const int64_t *ys
     int mat = is_mat_t(like->t);
     int64_t ne = mat ? like->n * mat_cols(like) : like->n, i = 0, z;
     V *r = mat ? v_imat(like->n, mat_cols(like)) : v_ivec(like->n);
+    if (!r || r->t == T_ERR) return r ? r : v_err("out of memory");
     while (i < ne && i64_pow(xs ? xs[i] : x, ys ? ys[i] : y, &r->J[i])) i++;
     if (i == ne) return r;
     v_free(r);
     r = mat ? v_fmat(like->n, mat_cols(like)) : v_fvec(like->n);
+    if (!r || r->t == T_ERR) return r ? r : v_err("out of memory");
     for (i = 0; i < ne; i++) {
         int64_t a = xs ? xs[i] : x, b = ys ? ys[i] : y;
         r->F[i] = i64_pow(a, b, &z) ? (double)z : pow((double)a, (double)b);
@@ -338,10 +346,12 @@ V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_IVEC && b->t == T_IVEC && op != OP_DIV && op != OP_POW) {
         int64_t n = a->n;
         V *r = v_ivec(n);
+        if (!r || r->t != T_IVEC) return r ? r : v_err("out of memory");
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
             if (mat_imat_binop_mm(r->J, a->J, b->J, n, op)) {
                 v_free(r);
                 r = v_fvec(n);
+                RETURN_UNLESS_VEC(r, T_FVEC);
                 i64_arith_f(r->F, a->J, 0, b->J, 0, n, op);
             }
             return r;
@@ -353,6 +363,7 @@ V *vec_binop(V *a, V *b, int op) {
         case OP_FLOORDIV:
             if (i64_span_promotes(aj, bj, n, 0, 0, 0, 0)) {
                 V *fr = v_fvec(n);
+                RETURN_UNLESS_VEC(fr, T_FVEC);
                 for (int64_t i = 0; i < n; i++) { zero |= bj[i] == 0; fr->F[i] = i64_floordiv_f(aj[i], bj[i]); }
                 v_free(r);
                 return div_result(fr, zero, op);
@@ -371,6 +382,7 @@ V *vec_binop(V *a, V *b, int op) {
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL)
             return cvec_arith(a->B, b->B, n, 0, 0, 0, op);
         V *r = v_cvec(n);
+        RETURN_UNLESS_VEC(r, T_CVEC);
         const unsigned char *ac = a->B, *bc = b->B;
         unsigned char *rc = r->B;
         int zero = 0;
@@ -385,10 +397,12 @@ V *vec_binop(V *a, V *b, int op) {
         int64_t n = a->n, y = b->j;
         if (!y && is_div_op(op)) return div_by_zero(op);
         V *r = v_ivec(n);
+        RETURN_UNLESS_VEC(r, T_IVEC);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
             if (mat_imat_binop_scalar(r->J, a->J, y, n, op)) {
                 v_free(r);
                 r = v_fvec(n);
+                RETURN_UNLESS_VEC(r, T_FVEC);
                 i64_arith_f(r->F, a->J, 0, NULL, y, n, op);
             }
             return r;
@@ -399,6 +413,7 @@ V *vec_binop(V *a, V *b, int op) {
         case OP_FLOORDIV:
             if (i64_span_promotes(aj, NULL, n, 0, 0, 1, y)) {
                 V *fr = v_fvec(n);
+                RETURN_UNLESS_VEC(fr, T_FVEC);
                 for (int64_t i = 0; i < n; i++) fr->F[i] = i64_floordiv_f(aj[i], y);
                 v_free(r);
                 return fr;
@@ -418,6 +433,7 @@ V *vec_binop(V *a, V *b, int op) {
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL)
             return cvec_arith(a->B, NULL, n, y, 1, 0, op);
         V *r = v_cvec(n);
+        RETURN_UNLESS_VEC(r, T_CVEC);
         const unsigned char *ac = a->B;
         unsigned char *rc = r->B;
         switch (op) {
@@ -430,10 +446,12 @@ V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_INT && b->t == T_IVEC && op != OP_DIV && op != OP_POW) {
         int64_t n = b->n, x = a->j;
         V *r = v_ivec(n);
+        RETURN_UNLESS_VEC(r, T_IVEC);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
             if (mat_imat_binop_scalar_rev(r->J, x, b->J, n, op)) {
                 v_free(r);
                 r = v_fvec(n);
+                RETURN_UNLESS_VEC(r, T_FVEC);
                 i64_arith_f(r->F, NULL, x, b->J, 0, n, op);
             }
             return r;
@@ -445,6 +463,7 @@ V *vec_binop(V *a, V *b, int op) {
         case OP_FLOORDIV:
             if (i64_span_promotes(NULL, bj, n, 1, x, 0, 0)) {
                 V *fr = v_fvec(n);
+                RETURN_UNLESS_VEC(fr, T_FVEC);
                 for (int64_t i = 0; i < n; i++) { zero |= bj[i] == 0; fr->F[i] = i64_floordiv_f(x, bj[i]); }
                 v_free(r);
                 return div_result(fr, zero, op);
@@ -463,6 +482,7 @@ V *vec_binop(V *a, V *b, int op) {
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL)
             return cvec_arith(NULL, b->B, n, x, 1, 1, op);
         V *r = v_cvec(n);
+        RETURN_UNLESS_VEC(r, T_CVEC);
         const unsigned char *bc = b->B;
         unsigned char *rc = r->B;
         int zero = 0;
@@ -551,6 +571,7 @@ V *vec_binop(V *a, V *b, int op) {
     if (a->t == T_FVEC && b->t == T_FVEC) {
         int64_t n = a->n;
         V *r = v_fvec(n);
+        RETURN_UNLESS_VEC(r, T_FVEC);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
             op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
             int zero = mat_fmat_binop_mm(r->F, a->F, b->F, n, op);
@@ -562,6 +583,7 @@ V *vec_binop(V *a, V *b, int op) {
         double y = to_float(b);
         if (y == 0 && is_div_op(op)) return div_by_zero(op);
         V *r = v_fvec(n);
+        RETURN_UNLESS_VEC(r, T_FVEC);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
             op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
             mat_fmat_binop_scalar(r->F, a->F, y, n, op);
@@ -572,6 +594,7 @@ V *vec_binop(V *a, V *b, int op) {
         int64_t n = b->n;
         double x = to_float(a);
         V *r = v_fvec(n);
+        RETURN_UNLESS_VEC(r, T_FVEC);
         if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
             op == OP_FLOORDIV || op == OP_MOD || op == OP_POW) {
             int zero = mat_fmat_binop_scalar_rev(r->F, x, b->F, n, op);
@@ -582,11 +605,11 @@ V *vec_binop(V *a, V *b, int op) {
     if(a->t==AT && b->t==BT) { \
         int64_t n=a->n; \
         int ui=(AT==T_IVEC&&BT==T_IVEC&&op!=OP_DIV&&op!=OP_POW), zero=0; \
-        if(ui){ V*r=v_ivec(n); for(int64_t i=0;i<n;i++){int64_t x=AJ[i],y=BJ[i]; \
+        if(ui){ V*r=v_ivec(n); if(!r||r->t!=T_IVEC) return r?r:v_err("out of memory"); for(int64_t i=0;i<n;i++){int64_t x=AJ[i],y=BJ[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
             case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:zero|=!y;r->J[i]=i64_floordiv(x,y);break; \
             case OP_MOD:zero|=!y;r->J[i]=i64_mod(x,y);break;default:break;}} return div_result(r,zero,op); } \
-        V*r=v_fvec(n); for(int64_t i=0;i<n;i++){double x=AT==T_IVEC?(double)a->J[i]:a->F[i], \
+        V*r=v_fvec(n); if(!r||r->t!=T_FVEC) return r?r:v_err("out of memory"); for(int64_t i=0;i<n;i++){double x=AT==T_IVEC?(double)a->J[i]:a->F[i], \
             y=BT==T_IVEC?(double)b->J[i]:b->F[i]; \
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break; \
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:zero|=y==0;r->F[i]=y!=0?x/y:0;break; \
@@ -598,11 +621,11 @@ V *vec_binop(V *a, V *b, int op) {
     if((a->t==T_INT||a->t==T_FLOAT) && (b->t==T_IVEC||b->t==T_FVEC)) {
         int64_t n=b->n;
         int ui=(a->t==T_INT&&b->t==T_IVEC&&op!=OP_DIV&&op!=OP_POW), zero=0;
-        if(ui){ V*r=v_ivec(n); int64_t x=a->j; for(int64_t i=0;i<n;i++){int64_t y=b->J[i]; \
+        if(ui){ V*r=v_ivec(n); if(!r||r->t!=T_IVEC) return r?r:v_err("out of memory"); int64_t x=a->j; for(int64_t i=0;i<n;i++){int64_t y=b->J[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
             case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:zero|=!y;r->J[i]=i64_floordiv(x,y);break; \
             case OP_MOD:zero|=!y;r->J[i]=i64_mod(x,y);break;default:break;}} return div_result(r,zero,op); }
-        V*r=v_fvec(n); double x=to_float(a);
+        V*r=v_fvec(n); if(!r||r->t!=T_FVEC) return r?r:v_err("out of memory"); double x=to_float(a);
         for(int64_t i=0;i<n;i++){double y=b->t==T_IVEC?(double)b->J[i]:b->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:zero|=y==0;r->F[i]=y!=0?x/y:0;break;
@@ -613,11 +636,11 @@ V *vec_binop(V *a, V *b, int op) {
         int64_t n=a->n;
         if(is_div_op(op) && is_zero_num(b)) return div_by_zero(op);
         int ui=(a->t==T_IVEC&&b->t==T_INT&&op!=OP_DIV&&op!=OP_POW);
-        if(ui){ V*r=v_ivec(n); int64_t y=b->j; for(int64_t i=0;i<n;i++){int64_t x=a->J[i]; \
+        if(ui){ V*r=v_ivec(n); if(!r||r->t!=T_IVEC) return r?r:v_err("out of memory"); int64_t y=b->j; for(int64_t i=0;i<n;i++){int64_t x=a->J[i]; \
             switch(op){case OP_ADD:r->J[i]=x+y;break;case OP_SUB:r->J[i]=x-y;break; \
             case OP_MUL:r->J[i]=x*y;break;case OP_FLOORDIV:r->J[i]=i64_floordiv(x,y);break; \
             case OP_MOD:r->J[i]=i64_mod(x,y);break;default:break;}} return r; }
-        V*r=v_fvec(n); double y=to_float(b);
+        V*r=v_fvec(n); if(!r||r->t!=T_FVEC) return r?r:v_err("out of memory"); double y=to_float(b);
         for(int64_t i=0;i<n;i++){double x=a->t==T_IVEC?(double)a->J[i]:a->F[i];
             switch(op){case OP_ADD:r->F[i]=x+y;break;case OP_SUB:r->F[i]=x-y;break;
             case OP_MUL:r->F[i]=x*y;break;case OP_DIV:r->F[i]=y!=0?x/y:0;break;
@@ -1092,18 +1115,22 @@ V *table_filter(V *tbl, V *mask) {
         V *col = tbl->vals->L[c];
         if(col->t == T_IVEC) {
             V *nc2 = v_ivec(count); int64_t j=0;
+            if (!nc2 || nc2->t == T_ERR) return nc2 ? nc2 : v_err("out of memory");
             for(int64_t i=0;i<nr;i++) if(mask->B[i]) nc2->J[j++]=col->J[i];
             new_data->L[c] = nc2;
         } else if(col->t == T_CVEC) {
             V *nc2 = v_cvec(count); int64_t j=0;
+            if (!nc2 || nc2->t == T_ERR) return nc2 ? nc2 : v_err("out of memory");
             for(int64_t i=0;i<nr;i++) if(mask->B[i]) nc2->B[j++]=col->B[i];
             new_data->L[c] = nc2;
         } else if(col->t == T_FVEC) {
             V *nc2 = v_fvec(count); int64_t j=0;
+            if (!nc2 || nc2->t == T_ERR) return nc2 ? nc2 : v_err("out of memory");
             for(int64_t i=0;i<nr;i++) if(mask->B[i]) nc2->F[j++]=col->F[i];
             new_data->L[c] = nc2;
         } else if(col->t == T_BVEC) {
             V *nc2 = v_bvec(count); int64_t j=0;
+            if (!nc2 || nc2->t == T_ERR) return nc2 ? nc2 : v_err("out of memory");
             for(int64_t i=0;i<nr;i++) if(mask->B[i]) nc2->B[j++]=col->B[i];
             new_data->L[c] = nc2;
         } else if(col->t == T_LIST) {

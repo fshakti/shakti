@@ -712,6 +712,12 @@ int env_save(Env *e, const char *path) {
         if (shakti_fs_check(tmp, 1, ferr, sizeof ferr) != 0) { free(mem); return 0; }
         int fd = open(tmp, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
         if (fd < 0) { free(mem); return 0; }
+        if (shakti_fs_check_fd(fd, 1, ferr, sizeof ferr) != 0) {
+            close(fd);
+            unlink(tmp);
+            free(mem);
+            return 0;
+        }
         size_t off = 0;
         int wok = 1;
         while (off < memlen) {
@@ -932,18 +938,29 @@ FILE *shakti_fs_create(const char *path, char *err, size_t err_cap) {
     if (!fp && err && err_cap) snprintf(err, err_cap, "%s", strerror(errno));
     return fp;
 #else
-    int fd = open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC | (safe ? 0 : O_TRUNC), 0666);
+    int created = 0;
+    int fd;
+    if (safe) {
+        fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+        if (fd >= 0) created = 1;
+        else if (errno == EEXIST)
+            fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+    } else {
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0666);
+    }
     if (fd < 0) {
         if (err && err_cap) snprintf(err, err_cap, "%s", strerror(errno));
         return NULL;
     }
     if (safe && shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
         close(fd);
+        if (created) unlink(path);
         return NULL;
     }
     if (safe && ftruncate(fd, 0) != 0) {
         int e = errno;
         close(fd);
+        if (created) unlink(path);
         if (err && err_cap) snprintf(err, err_cap, "%s", strerror(e));
         return NULL;
     }
@@ -951,6 +968,7 @@ FILE *shakti_fs_create(const char *path, char *err, size_t err_cap) {
     if (!fp) {
         if (err && err_cap) snprintf(err, err_cap, "%s", strerror(errno));
         close(fd);
+        if (created) unlink(path);
         return NULL;
     }
     return fp;

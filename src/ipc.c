@@ -1386,8 +1386,19 @@ V *ipc_msg_dict(uint8_t kind, uint32_t corr, const unsigned char *data, size_t l
 
 int ipc_raw_send(IpcHandle *s, const unsigned char *data, size_t len, char *err, size_t err_cap) {
 #ifdef SHAKTI_HAVE_RDMA
-    if (s->kind == IPC_KIND_RDMA_CONN)
-        return ipc_rdma_send(s->rdma, data, len, err, err_cap);
+    if (s->kind == IPC_KIND_RDMA_CONN) {
+        if (!s->session_set)
+            return ipc_rdma_send(s->rdma, data, len, err, err_cap);
+        unsigned char *sealed = NULL;
+        size_t sealed_len = 0;
+        if (ipc_frame_seal(s, data, len, &sealed, &sealed_len) != 0) {
+            snprintf(err, err_cap, "ipc: hmac failed");
+            return -1;
+        }
+        int rc = ipc_rdma_send(s->rdma, sealed, sealed_len, err, err_cap);
+        free(sealed);
+        return rc;
+    }
 #endif
     if (s->kind == IPC_KIND_SOCK_CONN)
         return ipc_sock_send(s, (const char *)data, len, err, err_cap);
@@ -1402,8 +1413,18 @@ int ipc_raw_send(IpcHandle *s, const unsigned char *data, size_t len, char *err,
 int ipc_raw_recv(IpcHandle *s, int block, int timeout_ms,
                  char **out, size_t *out_len, char *err, size_t err_cap) {
 #ifdef SHAKTI_HAVE_RDMA
-    if (s->kind == IPC_KIND_RDMA_CONN)
-        return ipc_rdma_recv(s->rdma, block, out, out_len, err, err_cap);
+    if (s->kind == IPC_KIND_RDMA_CONN) {
+        int rc = ipc_rdma_recv(s->rdma, block, out, out_len, err, err_cap);
+        if (rc != 0 || !s->session_set) return rc;
+        if (ipc_frame_open(s, *out, out_len) != 0) {
+            free(*out);
+            *out = NULL;
+            *out_len = 0;
+            snprintf(err, err_cap, "ipc: hmac failed");
+            return -1;
+        }
+        return 0;
+    }
 #endif
     if (s->kind == IPC_KIND_SOCK_CONN) {
         if (timeout_ms < 0 || s->fd < 0)

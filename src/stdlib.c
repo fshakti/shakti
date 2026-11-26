@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -543,9 +544,20 @@ V *bi_mkdir(V **a, in) {
 #endif
     return v_nil();
 }
+static int env_has_token(const char *s, const char *tok) {
+    size_t n = strlen(tok);
+    for (const char *p = s; *p; p++) {
+        size_t i = 0;
+        while (i < n && p[i] && tolower((unsigned char)p[i]) == tok[i]) i++;
+        if (i == n) return 1;
+    }
+    return 0;
+}
 static int env_name_secret(const char *s) {
-    return strstr(s, "TOKEN") || strstr(s, "SECRET") || strstr(s, "PASSWORD") ||
-           strstr(s, "PASSWD") || strstr(s, "_KEY");
+    return env_has_token(s, "token") || env_has_token(s, "secret") ||
+           env_has_token(s, "password") || env_has_token(s, "passwd") ||
+           env_has_token(s, "_key") || env_has_token(s, "apikey") ||
+           env_has_token(s, "auth");
 }
 V *bi_getenv(V **a, in) {
     P(n < 1 || a[0]->t != T_STR,v_err("getenv"))
