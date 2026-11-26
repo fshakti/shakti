@@ -918,7 +918,7 @@ static int sock_connect_tcp(const char *host, int port, char *err, size_t err_ca
         s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (s < 0) continue;
         ipc_set_cloexec(s);
-        if (rest_addr_blocked(ai->ai_addr)) {
+        if (shakti_safe_mode() && rest_addr_blocked(ai->ai_addr)) {
             close(s);
             s = -1;
             blocked = 1;
@@ -932,7 +932,7 @@ static int sock_connect_tcp(const char *host, int port, char *err, size_t err_ca
     freeaddrinfo(res);
     if (s < 0) {
         if (blocked)
-            snprintf(err, err_cap, "ipc: connect: private address blocked");
+            snprintf(err, err_cap, "ipc: connect: private address blocked in safe mode");
         else
             snprintf(err, err_cap, "ipc: connect: %s", strerror(saved));
         return -1;

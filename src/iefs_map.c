@@ -184,10 +184,10 @@ static int materialize_tree(V *v) {
 }
 
 V *iefs_store_map(const char *path, int pages_mode) {
-    return iefs_store_map_cols(path, pages_mode, NULL);
+    return iefs_store_map_cols(path, pages_mode, NULL, 0);
 }
 
-V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames) {
+V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames, int copy_out) {
     if (!path || !path[0])
         return v_err("iefs.map: path");
     {
@@ -272,13 +272,15 @@ V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames) {
     iefs_map_region_release(reg);
     if (v->t == T_ERR)
         iefs_set_last_error(v->s);
-    else {
+    else if (copy_out) {
         /* Own the bytes. A later shrink of the file cannot SIGBUS a reader. */
         if (materialize_tree(v) != 0) {
             v_free(v);
             iefs_set_last_error("iefs.map: out of memory");
             return v_err("iefs.map: out of memory");
         }
+        iefs_set_last_error(NULL);
+    } else {
         iefs_set_last_error(NULL);
     }
     return v;

@@ -355,27 +355,40 @@ static int table_delim_save(V *table, const char *path, char c) {
     }
     if (fclose(f) != 0) { free(mem); return -1; }
     f = NULL;
-    /* Same-length rewrite skips the temp file and rename. A different length
-     * still replaces the file atomically. */
-    struct stat sb;
+    /* Same-length rewrite skips the temp file and rename only for a regular
+     * file with one link, and only outside safe mode. A hard link or safe mode
+     * still replaces the name by rename. */
     int placed = 0;
-    if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
+    if (!shakti_safe_mode()) {
         int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
         if (fd >= 0) {
-            size_t off = 0;
-            int wok = 1;
-            while (off < memlen) {
-                ssize_t w = write(fd, mem + off, memlen - off);
-                if (w < 0) {
-                    if (errno == EINTR) continue;
-                    wok = 0;
-                    break;
+            struct stat sb;
+            int inplace = fstat(fd, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_nlink == 1 &&
+                          sb.st_size == (off_t)memlen;
+            if (!inplace) {
+                close(fd);
+            } else {
+                char ferr[256];
+                if (shakti_fs_check_fd(fd, 1, ferr, sizeof ferr) != 0) {
+                    close(fd);
+                    free(mem);
+                    return -1;
                 }
-                if (w == 0) { wok = 0; break; }
-                off += (size_t)w;
+                size_t off = 0;
+                int wok = 1;
+                while (off < memlen) {
+                    ssize_t w = write(fd, mem + off, memlen - off);
+                    if (w < 0) {
+                        if (errno == EINTR) continue;
+                        wok = 0;
+                        break;
+                    }
+                    if (w == 0) { wok = 0; break; }
+                    off += (size_t)w;
+                }
+                if (wok && close(fd) == 0) placed = 1;
+                else if (!wok) close(fd);
             }
-            if (wok && close(fd) == 0) placed = 1;
-            else if (!wok) close(fd);
         }
     }
     if (!placed) {
@@ -456,6 +469,8 @@ typedef struct {
     int *out_of;
     int *kind;
     int *seen;
+    int *n_num;     /* unschemed: cells that parsed as a number */
+    int *saw_float; /* unschemed: a numeric cell was a float or inf */
     int *schemed;
     /* Set when scan_record_kinds returns -2: the schemed column/cell that failed. */
     const char *bad_col;
@@ -473,6 +488,8 @@ static void delim_plan_free(DelimPlan *p) {
     free(p->out_of);
     free(p->kind);
     free(p->seen);
+    free(p->n_num);
+    free(p->saw_float);
     free(p->schemed);
     memset(p, 0, sizeof *p);
 }
@@ -519,8 +536,10 @@ static V *delim_plan_init(DelimPlan *p, char *header, char delim, V *columns_opt
     p->src = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
     p->kind = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
     p->seen = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    p->n_num = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
+    p->saw_float = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
     p->schemed = calloc((size_t)(n_out > 0 ? n_out : 1), sizeof(int));
-    if (!p->src || !p->kind || !p->seen || !p->schemed) {
+    if (!p->src || !p->kind || !p->seen || !p->n_num || !p->saw_float || !p->schemed) {
         delim_plan_free(p);
         return v_errf("%s: out of memory", fmt);
     }
@@ -616,12 +635,30 @@ static int all_float_span(const char *s, size_t n) {
     return end && end != buf && *end == 0 && isfinite(x);
 }
 
+static int span_ieq(const char *s, size_t n, const char *lit) {
+    size_t i;
+    for (i = 0; lit[i]; i++) {
+        if (i >= n) return 0;
+        if (tolower((unsigned char)s[i]) != (unsigned char)lit[i]) return 0;
+    }
+    return i == n;
+}
+
+/* inf / infinity, optional sign, any letter case. strtod reads these as non-finite. */
+static int is_inf_span(const char *s, size_t n) {
+    if (n && (s[0] == '+' || s[0] == '-')) { s++; n--; }
+    return span_ieq(s, n, "inf") || span_ieq(s, n, "infinity");
+}
+
+/* KIND_INT / KIND_FLOAT when the cell counts as a number, KIND_STR when it is text,
+ * -1 when it is missing and does not count. A quoted cell is text, digits included. */
 static int cell_kind_span(const char *s, size_t n, int was_quoted) {
     while (n && (s[0] == ' ' || s[0] == '\t')) { s++; n--; }
     while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '\n' || s[n - 1] == '\r')) n--;
-    if (is_na_token(s, n)) return KIND_INT; /* missing: does not promote; the scan skips it */
+    if (is_na_token(s, n)) return -1;
+    if (was_quoted) return KIND_STR;
     if (all_int_span(s, n)) {
-        /* A value strtoll would clamp to the max int is a float column, not that max. */
+        /* A value strtoll would clamp to the max int is not an int cell. */
         size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
         while (i < n && s[i] == '0') i++;
         size_t sig = n - i;
@@ -639,11 +676,8 @@ static int cell_kind_span(const char *s, size_t n, int was_quoted) {
         }
         return KIND_INT;
     }
-    if (all_float_span(s, n)) return KIND_FLOAT;
-    /* Quoted text stays text. An unquoted cell that is not a number is 0.0, so one
-     * bad cell does not turn the rest of a numeric column into strings. */
-    if (was_quoted) return KIND_STR;
-    return KIND_FLOAT;
+    if (all_float_span(s, n) || is_inf_span(s, n)) return KIND_FLOAT;
+    return KIND_STR;
 }
 
 /* Advance past one field without copying: start/len give its text (padding off, as
@@ -705,8 +739,8 @@ static int schemed_span_ok(int kind, const char *s, size_t n) {
 
 /* Fold one record into the plan's inferred kinds. Returns the field count, or -2 when a
  * schemed cell fails its declared kind (plan->bad_* describe it). Schemed columns keep
- * their declared kind: no promotion, and quoted cells are validated from their text
- * instead of forcing a string column. */
+ * their declared kind. Unschemed columns count numeric cells here; delim_plan_finish_kinds
+ * decides the kind. A quoted cell counts as text. */
 static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
     const char *p = line ? line : "";
     int nf = 0;
@@ -731,14 +765,15 @@ static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
                     }
                     plan->seen[oi]++;
                 }
-            } else if (quoted) {
-                int k = cell_kind_span(s, n, 1);
-                if (k > plan->kind[oi]) plan->kind[oi] = k;
-                plan->seen[oi]++;
-            } else if (!is_na_token(s, n)) {
-                int k = cell_kind_span(s, n, 0);
-                if (k > plan->kind[oi]) plan->kind[oi] = k;
-                plan->seen[oi]++;
+            } else {
+                int k = cell_kind_span(s, n, quoted);
+                if (k >= 0) {
+                    plan->seen[oi]++;
+                    if (k == KIND_INT || k == KIND_FLOAT) {
+                        plan->n_num[oi]++;
+                        if (k == KIND_FLOAT) plan->saw_float[oi] = 1;
+                    }
+                }
             }
         }
         nf++;
@@ -747,12 +782,20 @@ static int scan_record_kinds(DelimPlan *plan, const char *line, char delim) {
     return nf;
 }
 
-/* Columns nothing real was ever seen in are string columns, not zero-filled ints.
- * Schemed columns keep their declared kind even when nothing was ever seen. */
+/* An unschemed column is numeric only when at least 95% of the cells that count
+ * parsed as a number. Anything else, including a column of only missing cells, is
+ * text. Schemed columns keep their declared kind. */
 static void delim_plan_finish_kinds(DelimPlan *plan) {
-    for (int i = 0; i < plan->n_out; i++)
-        if (!plan->schemed[i] && plan->kind[i] == KIND_INT && plan->seen[i] == 0)
+    for (int i = 0; i < plan->n_out; i++) {
+        if (plan->schemed[i]) continue;
+        int seen = plan->seen[i];
+        int num = plan->n_num[i];
+        if (seen > 0 && num > 0 &&
+            (uint64_t)num * 100u >= (uint64_t)seen * 95u)
+            plan->kind[i] = plan->saw_float[i] ? KIND_FLOAT : KIND_INT;
+        else
             plan->kind[i] = KIND_STR;
+    }
 }
 
 static void csv_trim_span(const char **a, const char **b) {

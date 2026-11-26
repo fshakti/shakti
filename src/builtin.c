@@ -3082,6 +3082,7 @@ V *builtin_call(const char *name,V **args,int nargs,V **kwn,V **kwv,int nkw,Env 
     if(!strcmp(name,"assert")){
         P(nargs<1,v_err("assert(condition[, message])"))
         if(args[0] && args[0]->t==T_ERR) return v_ref(args[0]);
+        if(args[0] && args[0]->t==T_BVEC) return v_err("assert: condition is list[bool]");
         int ok=is_truthy(args[0]);   /* the truth `if` uses */
         if(!ok){
             const char *msg=nargs>1&&args[1]->t==T_STR?args[1]->s:"assertion failed";

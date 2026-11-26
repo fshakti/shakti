@@ -9,7 +9,8 @@
 #   iefs.save(x, "data.iefs", sync:"none")  # skip fsync (scratch); "data" = fdatasync
 #   iefs.save(x, "data.iefs", format:3, codecs:{"t":"datetime+zstd", "d":"date", "px":"gorilla_f64"})
 #   y : iefs.load("data.iefs")
-#   z : iefs.map("data.iefs")
+#   z : iefs.map("data.iefs")               # mmap; a shrink of the file can SIGBUS
+#   z : iefs.map("data.iefs", copy:True)    # copy payloads so a shrink cannot SIGBUS
 #   z : iefs.map("data.iefs", pages:"1g")
 #   blob : iefs.dumps(x, codec:"snappy")
 #   blob : iefs.dumps(x, format:3)
@@ -45,12 +46,12 @@ def save(x, path, direct:-1, codec:"", level:3, format:0, codecs:"", sync:"full"
 def load(path):
     return iefs_load(path)
 
-def map(path, pages:"thp", device:"", columns:[]):
+def map(path, pages:"thp", device:"", columns:[], copy:False):
     if device = "gpu":
         return iefs_map(path, pages, device)
     if type(columns) = "list" and len(columns) > 0:
-        return iefs_map(path, pages, device, columns)
-    return iefs_map(path, pages, device)
+        return iefs_map(path, pages, device, columns, copy)
+    return iefs_map(path, pages, device, copy)
 
 def dumps(x, codec:"", level:3, format:0, codecs:""):
     fmt : format

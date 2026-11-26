@@ -817,15 +817,17 @@ static V *col_raw_import(int type, int bits, uint64_t nelem, uint64_t ncols,
      * allocate one pointer and the old copy wrote the other. */
     if (type == T_UVEC || type == T_DVEC || type == T_GVEC || type == T_UMAT || type == T_DMAT)
         return v_err("iefs: unsupported extent type");
+    if (nelem > IEFS_MAX_ELEMS || ncols > IEFS_MAX_ELEMS || ncols >= (1ull << 32))
+        return v_err("iefs: extent too large");
     if (type == T_DATETIME) {
-        if (nbytes != (size_t)nelem * 8u) return v_err("iefs: extent length mismatch");
+        uint64_t need = 0;
+        if (__builtin_mul_overflow(nelem, (uint64_t)8, &need) || need != (uint64_t)nbytes)
+            return v_err("iefs: extent length mismatch");
         V *v = v_list((int64_t)nelem);
         for (uint64_t i = 0; i < nelem; i++)
             v->L[i] = v_datetime((int64_t)get_u64(p + i * 8u));
         return v;
     }
-    if (nelem > IEFS_MAX_ELEMS || ncols > IEFS_MAX_ELEMS || ncols >= (1ull << 32))
-        return v_err("iefs: extent too large");
     if (iefs_bits_not_64(type, bits))
         return v_err("iefs: bits must be 64");
     int aligned8 = (((uintptr_t)p) & 7u) == 0;
@@ -1863,10 +1865,12 @@ static V *decode_value_inner(IefsR *r) {
             for (int64_t i = 0; i < vals->n; i++) {
                 V *c = vals->L[i];
                 if (!c || (!is_vec_t(c->t) && c->t != T_LIST && !is_mat_t(c->t))) {
+                    char bad[64];
+                    snprintf(bad, sizeof bad, "%s", c ? type_name(c->t) : "none");
                     v_free(keys);
                     v_free(vals);
                     return v_errf("iefs: table column must be a vector, list or matrix, not %s",
-                                  c ? type_name(c->t) : "none");
+                                  bad);
                 }
             }
         }
@@ -3179,9 +3183,10 @@ V *bi_iefs_load(V **a, int n) {
 
 V *bi_iefs_map(V **a, int n) {
     if (n < 1 || !a[0] || a[0]->t != T_STR)
-        return v_err("iefs_map(path[, pages[, device[, columns]]])");
+        return v_err("iefs_map(path[, pages[, device[, columns[, copy]]]])");
     int pages = IEFS_MAP_PAGES_THP;
     int gpu_warm = 0;
+    int copy_out = 0;
     V *colnames = NULL;
     int argi = 1;
     if (n > argi && a[argi] && a[argi]->t == T_LIST) {
@@ -3204,11 +3209,19 @@ V *bi_iefs_map(V **a, int n) {
                 return v_err("iefs_map: device must be \"\" or \"gpu\"");
             argi++;
         }
-        if (n > argi && a[argi] && a[argi]->t == T_LIST)
+        if (n > argi && a[argi] && a[argi]->t == T_LIST) {
             colnames = a[argi];
-    } else if (n > argi && a[argi]) {
-        return v_err("iefs_map(path[, pages[, device[, columns]]])");
+            argi++;
+        }
+    } else if (n > argi && a[argi] && a[argi]->t != T_BOOL && a[argi]->t != T_INT) {
+        return v_err("iefs_map(path[, pages[, device[, columns[, copy]]]])");
     }
+    if (n > argi && a[argi] && (a[argi]->t == T_BOOL || a[argi]->t == T_INT)) {
+        copy_out = a[argi]->j ? 1 : 0;
+        argi++;
+    }
+    if (n > argi)
+        return v_err("iefs_map(path[, pages[, device[, columns[, copy]]]])");
     if (colnames) {
         if (colnames->t != T_LIST)
             return v_err("iefs_map: columns must be a list of strings");
@@ -3219,7 +3232,7 @@ V *bi_iefs_map(V **a, int n) {
         }
     }
     if (gpu_warm) return v_err("iefs_map: device gpu not supported");
-    return iefs_store_map_cols(a[0]->s, pages, colnames);
+    return iefs_store_map_cols(a[0]->s, pages, colnames, copy_out);
 }
 
 V *bi_iefs_direct_available(V **a, int n) {

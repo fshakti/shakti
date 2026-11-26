@@ -546,16 +546,23 @@ static int shakti_run_shell(const char *cmd) {
     if (!cmd) return -1;
     pid_t pid = 0;
     char *argv[] = {"/bin/sh", "-c", (char *)cmd, NULL};
-    int envn = 0, ek = 0;
-    char **envp;
-    for (char **e = environ; e && *e; e++) envn++;
-    envp = malloc((size_t)(envn + 1) * sizeof(char *));
-    if (!envp) return -1;
-    for (char **e = environ; e && *e; e++)
-        if (sh_env_keep(*e)) envp[ek++] = *e;
-    envp[ek] = NULL;
+    /* Outside safe mode the child inherits the parent environment, so git, make
+     * and cloud CLIs still see USER, TERM and SSH_AUTH_SOCK. Safe mode keeps
+     * the allowlist below. */
+    char **envp = environ;
+    char **owned = NULL;
+    if (shakti_safe_mode()) {
+        int envn = 0, ek = 0;
+        for (char **e = environ; e && *e; e++) envn++;
+        owned = malloc((size_t)(envn + 1) * sizeof(char *));
+        if (!owned) return -1;
+        for (char **e = environ; e && *e; e++)
+            if (sh_env_keep(*e)) owned[ek++] = *e;
+        owned[ek] = NULL;
+        envp = owned;
+    }
     int rc = posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, envp);
-    free(envp);
+    free(owned);
     if (rc != 0) return -1;
     int status = 0;
     if (waitpid(pid, &status, 0) < 0) return -1;

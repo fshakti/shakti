@@ -37,8 +37,9 @@ int iefs_v_materialize(V *v);
 
 /* Open path as mmap-backed value. pages: IEFS_MAP_PAGES_*. */
 V *iefs_store_map(const char *path, int pages_mode);
-/* colnames: list[str] to materialize; NULL/empty = all columns. */
-V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames);
+/* colnames: list[str] to project; NULL/empty = all columns.
+ * copy_out: 1 copies payloads into malloc so a later shrink cannot SIGBUS. */
+V *iefs_store_map_cols(const char *path, int pages_mode, V *colnames, int copy_out);
 
 #ifdef __cplusplus
 }

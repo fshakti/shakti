@@ -10,6 +10,7 @@
  */
 #include "iefs_io.h"
 /* Safe-mode path confinement (src/env.c). */
+int shakti_safe_mode(void);
 int shakti_fs_check(const char *path, int write, char *err, size_t err_cap);
 int shakti_fs_check_fd(int fd, int write, char *err, size_t err_cap);
 
@@ -1007,19 +1008,22 @@ int iefs_io_write_atomic_ex(const char *path, const unsigned char *buf, size_t l
     }
     if (shakti_fs_check(path, 1, err, err_cap) != 0)
         return -1;
-    /* sync none is scratch durability. Rewriting a same-length file in place
-     * skips the temp name and the directory rename, which dominate short saves.
-     * A size change still goes through the atomic temp path below. */
-    if (sync == IEFS_IO_SYNC_NONE && !iefs_io_want_direct(len, mode)) {
-        struct stat st;
-        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
-            (size_t)st.st_size == len) {
-            int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
-            if (fd >= 0) {
-                if (shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
-                    close(fd);
-                    return -1;
-                }
+    /* sync none may rewrite a same-length file in place, which skips the temp
+     * name and the directory rename. Only a regular file with one link, and
+     * only outside safe mode: a hard link would write the other name's inode,
+     * and safe mode stays on the temp path. A size change still renames. */
+    if (sync == IEFS_IO_SYNC_NONE && !iefs_io_want_direct(len, mode) && !shakti_safe_mode()) {
+        int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) {
+            struct stat st;
+            int inplace = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
+                          st.st_size >= 0 && (size_t)st.st_size == len;
+            if (!inplace) {
+                close(fd);
+            } else if (shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
+                close(fd);
+                return -1;
+            } else {
                 int rc = write_all_fd(fd, buf ? buf : (const unsigned char *)"", len);
                 if (rc != 0) {
                     set_errf(err, err_cap, "iefs write", errno);
@@ -1118,16 +1122,19 @@ int iefs_io_write_atomic_regions(const char *path, uint64_t file_len, const Iefs
         }
     }
 
-    if (sync == IEFS_IO_SYNC_NONE) {
-        struct stat st;
-        if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 &&
-            (uint64_t)st.st_size == file_len) {
-            int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
-            if (fd >= 0) {
-                if (shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
-                    close(fd);
-                    return -1;
-                }
+    /* Same in-place rule as iefs_io_write_atomic_ex: one link, safe mode off. */
+    if (sync == IEFS_IO_SYNC_NONE && !shakti_safe_mode()) {
+        int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (fd >= 0) {
+            struct stat st;
+            int inplace = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
+                          st.st_size >= 0 && (uint64_t)st.st_size == file_len;
+            if (!inplace) {
+                close(fd);
+            } else if (shakti_fs_check_fd(fd, 1, err, err_cap) != 0) {
+                close(fd);
+                return -1;
+            } else {
                 int rc = 0;
                 for (uint32_t i = 0; i < n_reg; i++) {
                     if (regs[i].len == 0)

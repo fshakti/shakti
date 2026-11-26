@@ -198,12 +198,14 @@ inlining is recovered with LTO on the default link (see [README build](README.md
   between two digits (`1_`, `1__0`, `1_.5` are errors)
 - `None`, `False`, zero (including `char(0)` and the zero date, time and datetime), `""`
   and empty containers (list, matrix, dict, table) are false in `if`, `while`,
-  `not`, `and`/`or`, `bool()`, `any()`, `all()` and `filter()`. A non-empty `list[bool]`
-  is true only when every item is true (`if [False]` does not run; `if [True, True]` does)
+  `not`, `and`/`or`, `bool()`, `any()`, `all()` and `filter()`. A `list[bool]`
+  used as an `if`, `while`, `not` or `assert` condition is an error. `bool()`,
+  `any()`, `all()` and `filter()` still read a non-empty `list[bool]` as true only
+  when every item is true, so `if all(mask):` folds a mask on purpose
 - An error value used as a condition, or as a statement whose result is not kept, raises,
   so `try`/`except` can catch it. Storing one (`x : abs("nope")`) keeps the value.
   `assert` raises `AssertionError`, which `try` catches. `bool` of an error is false
-- `=` of a value with a value is one bool. `=` of two equal-length lists or vectors is one bool per item (`[1, 2] = [1, 3]` is `[True, False]`), and so are `!=`, `<`, `>`, `<=` and `>=` when the items compare. `[] = []` is `True`. Lists of different lengths still compare as values (`[1] = [1, 2]` is `False`, `[1] != [1, 2]` is `True`). Ordering two lists of different lengths, or of items that do not compare, is an error
+- `=` of a value with a value is one bool, and so is `=` or `!=` of two lists or two vectors (`[1, 2] != [1, 3]` is `True`). `[] = []` is `True`. Lists of different lengths still compare as values (`[1] = [1, 2]` is `False`, `[1] != [1, 2]` is `True`). Ordering two lists, or two vectors, outside SQL is an error. Inside SQL `where`, `select`, `update` and `delete`, `=` of two equal-length columns is one bool per row (`[True, False]`), and so are `!=`, `<`, `>`, `<=` and `>=` when the items compare. A column compared with a scalar is one bool per row there and elsewhere; using that `list[bool]` as an `if` condition is an error (`if all(xs > 0):` folds it)
 - A missing dict key reads as `None`. `len` of a string is its length in bytes
 - SQL words (`select`, `from`, `where`, `update`, `delete`, and the rest of that list) are reserved
 - An integer literal that does not fit in a signed 64-bit int is a parse error. `abs` of the minimum int is that positive float
@@ -548,6 +550,9 @@ and `reverse(d)` is the dict with its entries in reverse order.
   integer (`0` = success; any non-zero value means failure). This is the
   `waitpid` status, not a bash 0–255 exit code — test with
   `rc = 0` / `rc != 0`. Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`.
+  Outside safe mode the child inherits the parent environment. With
+  `SHAKTI_SAFE=1` and `SHAKTI_ALLOW_EXEC=1`, the child keeps only `PATH`,
+  `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `HOME`, `SHAKTI_*` and `XDG_RUNTIME_DIR`.
   Not available on Windows or WASM builds.
 - `subprocess()` / `load(dir_with_run, …, exec:True)` — spawn a directory `run` helper (PTY). `load` on a directory runs nothing unless `exec:True` is passed; `__dir__:` is passed only to the child's environment. Disabled when `SHAKTI_SAFE=1` or `SHAKTI_ALLOW_EXEC=0`. Untrusted `.ie` input is otherwise equivalent to an untrusted shell script; see [Security](#security).
 - Parser nesting is capped at 40; interpreter call depth defaults to 3000 (`SHAKTI_CALL_MAX_DEPTH`), and a call made when less than 128 KB plus a sixteenth of the C stack (at most 1 MB) is left is refused too ("recursion limit exceeded", on macOS and Linux, but not on stacks under 256 KB or, on Linux, with no stack limit); an expression too deep for the stack that is left raises the same error.
@@ -601,12 +606,14 @@ untyped and casting afterwards: it parses each field once, directly into the typ
 
 - Header required. Each column loads as an `ivec`, an `fvec`, or a list of strings, from the fields
   it holds, after leading spaces and tabs and trailing spaces, tabs, and line breaks are taken off.
-  An `ivec` when every field that is present is digits with an optional sign (`1, 2` and `1," 2 "`
-  are ints); an `fvec` when the fields present are numeric but some are not whole (`2.0`, `1e3`).
-  Quoted text that is not a number stays text and makes the column a list of strings. An unquoted
-  cell that is not a number is the float `0.0`, so one bad cell does not turn the rest of a numeric
-  column into strings. An integer too large for an `ivec` makes its column an
-  `fvec` holding that value as a float, rather than the largest int.
+  A column with no schema is numeric only when at least 95% of the cells that count parse as a
+  number. Those cells are an `ivec` when every one of them is a whole number (`1`, `2`, `1` next to
+  a padded `2`), and an `fvec` when any is a float or `inf` / `-inf` (`2.0`, `1e3`). The other cells
+  in a numeric column pad as `0` or `0.0`. Otherwise the column is a list of strings, so an unquoted
+  name stays text, and so does a column that is mostly text. A quoted cell is text even when the
+  characters are digits (`"007"` reloads as `007`, not `7`), and it counts against the 95%. An
+  integer too large for an `ivec` counts as text. A schema (`load(path, schema)`) still forces each
+  named column to the prototype (`0`, `0.0`, or `""`).
 - A field that is empty, or reads `NA`, `NAN`, `NR` or `NULL` in any letter case, is missing: it does
   not decide the column's kind. In a numeric column it pads as `0`; in a string column the text is
   kept as written. A column in which every field is missing loads as a list of those strings.
@@ -811,8 +818,8 @@ A column name in `where`, and on the right of `name: expr`, is the whole column.
 takes one row's value is applied with `@`. `=` of two columns of the same length is a `list[bool]`,
 one item per row, and so are `!=`, `<`, `>`, `<=` and `>=`. `where` keeps the rows whose item is
 true. A column compared with one value is one bool per row (`amount > 15`, `name = "ada"`).
-Columns of different lengths still compare as values (`=` is one `false`). `not` of a mask is one
-bool, so a per-row negation is `!=`. `(lambda a,b: a=b)@` still compares a pair per row.
+Columns of different lengths still compare as values (`=` is one `false`). `not` of a
+`list[bool]` is an error, so a per-row negation is `!=`. `(lambda a,b: a=b)@` still compares a pair per row.
 `numbers`, `lastname` and `encode` here are functions the caller defines:
 
 ```ie
@@ -1301,6 +1308,7 @@ Environment:
 - `SHAKTI_IPC_DIR` — the socket directory, for Unix sockets and their `.lock` files (default `$XDG_RUNTIME_DIR`, else `/tmp/shakti-<uid>`, made 0700). It must be a directory of the user's own that others can't write to (so not `/tmp` itself); otherwise `ipc.listen` and `ipc.connect` over a Unix socket are an error (`ipc: uds path too long or socket dir unsafe`). Shared memory doesn't use it (see Shared memory).
 - `SHAKTI_IPC_TRANSPORT` — default transport: `auto`, `tcp`, `uds` (or `unix`), `rdma`; any other name is an error when it is used (above)
 - `SHAKTI_IPC_ALLOW_PUBLIC=1` — allow `ipc.listen` on a non-loopback address (default: loopback/UDS only)
+- In safe mode, `ipc.connect` over TCP refuses a private, link-local, CGNAT or otherwise non-routable address (`ipc: connect: private address blocked in safe mode`), the same set the REST client refuses. Loopback still uses a Unix socket unless `transport="tcp"`. `SHAKTI_NET_ALLOW_PRIVATE=1` allows those addresses in safe mode. Outside safe mode, `ipc.connect` does not apply that block. REST and `ws.connect` still do, in or out of safe mode.
 
 A second `ipc.listen` on a port whose Unix listener is alive is an error (`ipc: uds bind: Address already in use`), as over TCP. A Unix listener keeps `shakti-<port>.lock` beside its socket; `ipc.close` removes both while that `.lock` is still its own; a process that ends without `ipc.close` leaves both, and the next listen reuses the lock file and replaces the socket. A non-socket at the socket path is an error (`ipc: <path> exists and is not a socket`). A socket whose listener holds no `.lock` (another program's, an older shakti's, or one whose `.lock` a cleaner of the socket directory removed) is connected to once: refused means it is replaced; otherwise the port is in use, and that listener sees one closed connection; a listener that sends on it may be ended by SIGPIPE. On macOS a full queue is refused too, and each of these connections stays queued until the listener accepts, so one that is not accepting is taken over once they fill its queue (16 for a shakti listener).
 
@@ -2021,14 +2029,15 @@ iefs.save(x, "data.iefs", format:3)
 iefs.save(x, "data.iefs", sync:"none")   # "full" (default), "data", or "none"
 iefs.save(x, "data.iefs", format:3, codecs:{"t":"datetime+zstd", "px":"gorilla_f64"})
 x2 : iefs.load("data.iefs")
-x3 : iefs.map("data.iefs", pages:"thp")  # or "2m" / "1g"
+x3 : iefs.map("data.iefs", pages:"thp")  # or "2m" / "1g"; copy:True owns the bytes
 blob : iefs.dumps(x, codec:"snappy")    # list[char]
 y : iefs.loads(blob)
 print(iefs.direct_available(), iefs.uring_available(), iefs.libaio_available())
 ```
 
+- `iefs.save` with `sync:"none"` may overwrite a same-length file in place when that file has one link and safe mode is off. Any other save writes a temp file and renames it.
 - `iefs.load` / global `load("….iefs")` — full read + CRC + malloc copy.
-- `iefs.map` — `mmap` the file, skip CRC, then copy contiguous vector/matrix payloads into the process so a later rewrite or shrink of the file cannot change the value or raise SIGBUS. Compressed files require `load` / `loads`. When the file of a format-3 dict whose values are all vectors or matrices has a key name missing, not NUL-terminated, or repeated, its header, table of contents and the padding before its first value are checked against its CRC (each value counted by the CRC the table stores for it, so no value is read), so a damaged name is `iefs: checksum mismatch`, as from `load`; damage to a value, or to a name that leaves every name present and distinct, is not checked. Looking for a repeat sorts a dict's key names on each map (about 60 µs for 1000 keys), and a dict that repeats a key is checked on each map (about 0.11 ms, 0.36 ms for 1000 keys). `iefs.map(path, columns: ["b", "a"])` gives only those columns of a table, in the order named, and a name given twice gives the column twice; a format-3 dict whose values are all vectors or matrices takes `columns:` too and keeps each key once. A name not in the file is an error. A `select` from a mapped table held in a variable (`m : iefs.map("….iefs")`, then `select from m`) copies the columns it selects into memory, as a select from any table variable does (see [`sql` module](#sql-module)); `select … from "….iefs"` reads them from the mapping when it keeps every row.
+- `iefs.map` — `mmap` the file and skip CRC. Payloads stay aliases of that mapping, so a later shrink of the file can raise SIGBUS in the reader. `copy:True` copies those payloads into the process so a shrink cannot. `pages:"1g"` and `pages:"2m"` still copy the file into a huge-page arena. Compressed files require `load` / `loads`. When the file of a format-3 dict whose values are all vectors or matrices has a key name missing, not NUL-terminated, or repeated, its header, table of contents and the padding before its first value are checked against its CRC (each value counted by the CRC the table stores for it, so no value is read), so a damaged name is `iefs: checksum mismatch`, as from `load`; damage to a value, or to a name that leaves every name present and distinct, is not checked. Looking for a repeat sorts a dict's key names on each map (about 60 µs for 1000 keys), and a dict that repeats a key is checked on each map (about 0.11 ms, 0.36 ms for 1000 keys). `iefs.map(path, columns: ["b", "a"])` gives only those columns of a table, in the order named, and a name given twice gives the column twice; a format-3 dict whose values are all vectors or matrices takes `columns:` too and keeps each key once. A name not in the file is an error. A `select` from a mapped table held in a variable (`m : iefs.map("….iefs")`, then `select from m`) copies the columns it selects into memory, as a select from any table variable does (see [`sql` module](#sql-module)); `select … from "….iefs"` reads them from the mapping when it keeps every row.
 - `iefs.dumps` / `iefs.loads` — in-memory frames as `list[char]`.
 - Host codecs: `zstd`, `snappy`, plus residual `delta_i64` / `fire_i64` / `gorilla_f64` / `date` / `time` / `datetime` (v3 extents; compounds like `fire_i64+zstd`). Also interned as `compress` / `decompress`.
 - SQL `select … from "….iefs"` opens via **map**. `update … from` and `delete from` a `.iefs` path write their result back to the file; a variable holding the path keeps the path.
@@ -2170,7 +2179,7 @@ Also: parser nesting is capped at 40 (deeper input is a parse error, "nesting to
 | `SHAKTI_REST_ALLOWED_ORIGINS` | unset | Exact Origins accepted by loopback listeners for state-changing requests and by `ws.accept`; `*` allows any. |
 | `SHAKTI_REST_READ_TIMEOUT_MS` | `10000` | Total time for `rest.read` (request line, headers and body). |
 | `SHAKTI_REST_TLS_TIMEOUT_MS` | `5000` | TLS handshake budget in `rest.accept`. |
-| `SHAKTI_NET_ALLOW_PRIVATE` | unset | `1` lets the REST client and `ws.connect` reach private / link-local / CGNAT addresses (loopback is always allowed). |
+| `SHAKTI_NET_ALLOW_PRIVATE` | unset | `1` lets the REST client and `ws.connect` reach private / link-local / CGNAT addresses (loopback is always allowed). In safe mode the same variable lets `ipc.connect` over TCP reach those addresses. Outside safe mode `ipc.connect` does not block them. |
 | `SHAKTI_CURL` | unset | Absolute path to `curl`. |
 
 - Loopback `rest.listen` servers reject non-local `Host` headers (400, blocks DNS rebinding) and non-local `Origin` on non-GET/HEAD/OPTIONS requests (403, blocks CSRF). Requests without `Origin` (curl, scripts) are unaffected.

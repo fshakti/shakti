@@ -1,0 +1,27 @@
+name: Version
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  prebuilt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prebuilt binaries match src/VERSION
+        run: |
+          set -eu
+          want=$(tr -d '[:space:]' < src/VERSION)
+          fail=0
+          for b in build/linux-x86_64/shakti build/darwin-arm64/shakti; do
+            if ! strings "$b" | grep -qx "$want"; then
+              echo "::error::$b does not contain version $want"
+              fail=1
+            fi
+          done
+          exit "$fail"

@@ -668,31 +668,39 @@ int env_save(Env *e, const char *path) {
     if (ok && fflush(fp) != 0) ok = 0;
     if (fclose(fp) != 0) ok = 0;
     if (!ok) { free(mem); return 0; }
-    struct stat sb;
+    /* In place only when the opened file has one link and safe mode is off.
+     * Otherwise write a temp file and rename it over the path. */
     int placed = 0;
-    if (stat(path, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_size == (off_t)memlen) {
+    if (!shakti_safe_mode()) {
         int fd = open(path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
         if (fd >= 0) {
-            char ferr[128];
-            if (shakti_fs_check_fd(fd, 1, ferr, sizeof ferr) != 0) {
+            struct stat sb;
+            int inplace = fstat(fd, &sb) == 0 && S_ISREG(sb.st_mode) && sb.st_nlink == 1 &&
+                          sb.st_size == (off_t)memlen;
+            if (!inplace) {
                 close(fd);
-                free(mem);
-                return 0;
-            }
-            size_t off = 0;
-            int wok = 1;
-            while (off < memlen) {
-                ssize_t w = write(fd, mem + off, memlen - off);
-                if (w < 0) {
-                    if (errno == EINTR) continue;
-                    wok = 0;
-                    break;
+            } else {
+                char ferr[128];
+                if (shakti_fs_check_fd(fd, 1, ferr, sizeof ferr) != 0) {
+                    close(fd);
+                    free(mem);
+                    return 0;
                 }
-                if (w == 0) { wok = 0; break; }
-                off += (size_t)w;
+                size_t off = 0;
+                int wok = 1;
+                while (off < memlen) {
+                    ssize_t w = write(fd, mem + off, memlen - off);
+                    if (w < 0) {
+                        if (errno == EINTR) continue;
+                        wok = 0;
+                        break;
+                    }
+                    if (w == 0) { wok = 0; break; }
+                    off += (size_t)w;
+                }
+                if (wok && close(fd) == 0) placed = 1;
+                else if (!wok) close(fd);
             }
-            if (wok && close(fd) == 0) placed = 1;
-            else if (!wok) close(fd);
         }
     }
     if (!placed) {

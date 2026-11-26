@@ -2,7 +2,7 @@
 # mplsoccer — football pitch charts on gfx.
 #
 # Pitch-dimension and formation tables are compatible with, and derived
-# from, mplsoccer by Tom Rowlinson and Anirban Durgapal (MIT License,
+# from, mplsoccer by Andrew Rowlinson and Anmol Durgapal (MIT License,
 # Copyright (c) mplsoccer contributors) — full notice in NOTICE.
 # This module is not affiliated with the mplsoccer project (see TRADEMARK.md).
 # Pitch frames, rectangular heatmaps, arrows, formations, and a StatsBomb event table.

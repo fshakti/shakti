@@ -29,6 +29,8 @@ void shakti_clear_flow(void) {
 }
 static int g_call_depth;
 static int g_call_depth_limit = -1;
+/* Item-by-item comparison while SQL where / select / update / delete is evaluating. */
+static int g_sql_zip;
 static uintptr_t g_stack_floor;   /* eval_fn refuses a call whose frame is below this address; 0: none */
 static uintptr_t g_stack_limit;   /* eval raises an error once its frame is below this address; 0: none */
 
@@ -326,7 +328,9 @@ static V *eval_select_computed(Node *n, V *tbl, Env *e, V **errv, int phase, Nod
             continue;
         }
         if (is_as) {
+            g_sql_zip++;
             V *val = eval(item->ch[1], inner);
+            g_sql_zip--;
             if (g_error) {
                 env_leave(inner);
                 v_free(r);
@@ -390,7 +394,9 @@ static V *eval_with_table_columns(V *tbl, Node *expr, Env *e) {
         for(int64_t i = 0; i < cn->n; i++)
             env_set(inner, cn->L[i]->s, dv->L[i]);
     }
+    g_sql_zip++;
     V *r = eval(expr, inner);
+    g_sql_zip--;
     env_leave(inner);
     return r;
 }
@@ -411,7 +417,9 @@ static V *eval_select_where(V *tbl, V *cols, Node *expr, Env *e) {
             if (k && k->t == T_STR && val) env_set(inner, k->s, val);
         }
     }
+    g_sql_zip++;
     V *r = eval(expr, inner);
+    g_sql_zip--;
     env_leave(inner);
     return r;
 }
@@ -467,7 +475,9 @@ static V *eval_update_cols(Node *n, V *tbl, Env *e, V **errv, V *mask) {
     i(nitems,{
         Node *item = items[i];
         if(item->type == N_ASSIGN && item->nch >= 2 && item->ch[0]->type == N_NAME) {
+            g_sql_zip++;
             V *val = eval(item->ch[1], inner);
+            g_sql_zip--;
             if (g_error) {   /* a raise on the right: the update stops and changes nothing */
                 env_leave(inner);
                 v_free(keys); v_free(vals); v_free(wk); v_free(wv);
@@ -1927,10 +1937,12 @@ V *eval(Node *n, Env *e) {
             v_free(a); v_free(b);
             return v_bool(n->op == OP_IN ? found : !found);
         }
-        /* Equal-length lists and vectors compare per item. A different length, or
-           anything else, stays vec_cmp (one bool, or a column against a scalar). */
-        V *z = vec_zip_cmp(a, b, n->op);
-        if (z) { v_free(a); v_free(b); return z; }
+        /* Item-by-item only while SQL where, select, update or delete is evaluating.
+           Everywhere else, two values compare as one bool. */
+        if (g_sql_zip) {
+            V *z = vec_zip_cmp(a, b, n->op);
+            if (z) { v_free(a); v_free(b); return z; }
+        }
         V *r = vec_cmp(a, b, n->op);
         v_free(a); v_free(b);
         return r;
@@ -1970,6 +1982,7 @@ V *eval(Node *n, Env *e) {
         }
         if(n->op == OP_NOT) {
             if (a && a->t == T_ERR) return a;
+            if (a && a->t == T_BVEC) { v_free(a); return v_err("not: condition is list[bool]"); }
             int r = !is_truthy(a); v_free(a); return v_bool(r);
         }
         v_free(a);
@@ -2783,10 +2796,10 @@ V *eval(Node *n, Env *e) {
         EVAL_STACK_GUARD();
         for(int i=0; i<n->nch; i+=2) {
             V *cond = eval(n->ch[i], e);
-            if (cond && cond->t == T_ERR) {
+            if (cond && (cond->t == T_ERR || cond->t == T_BVEC)) {
                 g_error = 1;
                 if (g_error_val) v_free(g_error_val);
-                g_error_val = v_ref(cond);
+                g_error_val = cond->t == T_BVEC ? v_err("if: condition is list[bool]") : v_ref(cond);
                 v_free(cond);
                 return v_nil();
             }
@@ -2809,10 +2822,10 @@ V *eval(Node *n, Env *e) {
                 return v_nil();
             }
             V *cond = eval(n->ch[0], e);
-            if (cond && cond->t == T_ERR) {
+            if (cond && (cond->t == T_ERR || cond->t == T_BVEC)) {
                 g_error = 1;
                 if (g_error_val) v_free(g_error_val);
-                g_error_val = v_ref(cond);
+                g_error_val = cond->t == T_BVEC ? v_err("while: condition is list[bool]") : v_ref(cond);
                 v_free(cond); v_free(r);
                 return v_nil();
             }

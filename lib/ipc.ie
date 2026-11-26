@@ -18,6 +18,8 @@
 # TCP/RDMA: set SHAKTI_IPC_TOKEN on both ends for an HMAC challenge-response
 # handshake (required for non-loopback listen). SHAKTI_IPC_MCAST_KEY
 # authenticates multicast datagrams.
+# In safe mode, TCP connect refuses a private or non-routable address unless
+# SHAKTI_NET_ALLOW_PRIVATE=1. Outside safe mode that block is not applied.
 
 # transport "" (none named): ipc_listen and ipc_connect take SHAKTI_IPC_TRANSPORT's, else auto
 def listen(port, host:"127.0.0.1", transport:""):
